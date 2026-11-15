@@ -161,6 +161,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **Patterns repeat in 256 km.** Anything read at `p.xz + uDrift` repeats a
   whole number of times in `WEATHER_KM` (see
   [design.md](design.md#conventions)).
+- **Spheres at the eye's height: `eyeSphere`.** `raySphere` takes
+  `dot(o, o) - r * r`, and at 6372 km a float steps by 4 km² there. For a
+  sphere at or near the eye's own height, the crossing next to the eye
+  then lands a hair ahead or behind it, ray by ray: from the base of the
+  cirrus, rings and a disc of rays saw the whole sheet down to the sea.
+  `eyeSphere` (in `#if AIRCRAFT`) takes `c` from the heights and the near
+  crossing from the far one. `highCloud` uses it.
 - **Facts kept twice are changed together.**
   - The density profile, written out five times: `density()` in `fs`, and
     in the JS `buildDepths`, `buildMultiScatter`, `skyLuminance` and the
