@@ -382,7 +382,7 @@ all dimmed and reddened by the air:
   plane, brighter towards its centre.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
-  `tools/make-stars.py`, the source is named in `NOTICE`). About a hundred
+  `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
   stars that Wikidata gives no V magnitude have one estimated from their
   other bands.
   `buildStars` puts them into a `GRID` by `GRID` (128) octahedral map of the

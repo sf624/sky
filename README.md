@@ -73,7 +73,7 @@ The page is a single HTML file. It loads nothing else.
 ## Licence
 
 MIT licence ([LICENSE](LICENSE)).
-The whole repository is under these terms. The star data embedded in the page comes from Wikidata (CC0); [NOTICE](NOTICE) says where from.
+A few small pieces of code and data by others are under their own terms (MIT, BSD and others); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists them, with the star data from Wikidata (CC0).
 
 ## For developers
 

@@ -68,7 +68,7 @@ English: [README.md](README.md)
 ## ライセンス
 
 MIT ライセンスです([LICENSE](LICENSE))。
-リポジトリ全体がこの条件です。ページに埋め込んだ星のデータは Wikidata(CC0)のものです。出どころは [NOTICE](NOTICE) にあります。
+ほかの人による小さなコードとデータがいくつかあり、それぞれの条件(MIT、BSD など)に従います。一覧は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) にあり、Wikidata(CC0)の星のデータもそこに載っています。
 
 ## 開発する方へ
 

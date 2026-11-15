@@ -219,10 +219,17 @@ and `docs/` are on the site too.
   Write the code yourself from published ideas (papers, talks, articles),
   and name the source in a comment, as the code does (for example
   "after Hillaire (2020)").
+- A piece of code or data by others may come in only under such terms.
+  List it in `THIRD_PARTY_NOTICES.md`: a row of its table (the source, its
+  version, its licence, where it sits) and its licence text with the
+  copyright line, or the attribution or citation its terms ask for. Put a
+  one-line comment at the code that names the source and points there.
+  A formula or an idea from a paper or a talk needs only the comment.
 - Reference photographs are for looking at only: nothing from them goes
   into the page.
-- The star data embedded in `index.html` comes from Wikidata (CC0).
-  `NOTICE` names the source. Nothing in the repository is under other terms.
+- `THIRD_PARTY_NOTICES.md` lists the code and data by others in the
+  repository, the star data from Wikidata (CC0) among them. Everything else
+  is under the MIT licence.
 
 ### The star catalogue
 
