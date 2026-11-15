@@ -47,6 +47,8 @@ The panel at the bottom changes the time and the weather.
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
+- **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
+- **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
 - **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
 A view can also be given in the address, for example
@@ -74,7 +76,8 @@ All the parameters are listed in [docs/development.md](docs/development.md).
   When frames are slow, the page draws fewer pixels while the view moves.
   Setting the speed to 0, or the resolution to Full HD, makes it lighter.
 
-The page is a single HTML file. It loads nothing else.
+The page is a single HTML file. It loads nothing else: the sound is made in
+the browser too.
 
 ## Licence
 

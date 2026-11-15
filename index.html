@@ -224,6 +224,19 @@
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
     </label>
     <label>
+      <span class="row"><span data-t="sound">音</span><output id="soundOut"></output></span>
+      <select id="sound">
+        <option value="off" data-t="soundOff">なし</option>
+        <option value="airliner" data-t="soundAirliner">旅客機</option>
+        <option value="airliner-whine" data-t="soundWhine">エンジン近く</option>
+        <option value="wind" data-t="soundWind">風</option>
+      </select>
+    </label>
+    <label>
+      <span class="row"><span data-t="volume">音量</span><output id="volumeOut"></output></span>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.5">
+    </label>
+    <label>
       <span class="row"><span data-t="pixels">解像度</span></span>
       <select id="pixels">
         <option value="fhd" data-t="fhd">フルHD</option>
@@ -256,6 +269,8 @@ const TEXT = {
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
     alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     lang: '言語 / Language',
+    sound: '音', soundOff: 'なし', soundAirliner: '旅客機', soundWhine: 'エンジン近く', soundWind: '風',
+    volume: '音量', soundWait: 'クリックで再生',
     // The light of the hour, by the sun's elevation (see showLabels).
     night: '夜', astronomical: '天文薄明', nautical: '航海薄明', civil: '市民薄明',
     morning: '朝', evening: '夕方', day: '昼',
@@ -277,6 +292,8 @@ const TEXT = {
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
     alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     lang: 'Language / 言語',
+    sound: 'Sound', soundOff: 'Off', soundAirliner: 'Airliner', soundWhine: 'Near engines', soundWind: 'Wind',
+    volume: 'Volume', soundWait: 'click to play',
     night: 'night', astronomical: 'astronomical twilight', nautical: 'nautical twilight', civil: 'civil twilight',
     morning: 'morning', evening: 'evening', day: 'day',
     dateText: (month, day) => day + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1],
@@ -1966,6 +1983,461 @@ void main() {
 </script>
 
 <script>
+// Background sound, made in the browser with the Web Audio API: no files, no
+// samples. Every part is noise or a tone, shaped by filters to stand for one
+// source of the real sound. SkySound.engine(ctx) builds the graph on any
+// BaseAudioContext (the tests render it offline); SkySound.attach(...) runs
+// it in the page. It never asks for a frame: the page may stop drawing while
+// the sound goes on.
+const SkySound = (() => {
+  'use strict';
+  const KINDS = ['off', 'airliner', 'airliner-whine', 'wind'];
+  // Strength of the engines' high tones in the airliner with engine whine
+  // (1: soft, the level chosen by ear; 2: 6 dB stronger).
+  const WHINE = 1;
+  // The engines run at cruise thrust whatever the sliders say: the speed
+  // slider is how fast the view goes by, not a throttle, and an airliner's
+  // engines hold a steady speed in cruise. N1, the fan's speed as a fraction
+  // of full, is 0.9; the fan shaft turns at 56 Hz.
+  const N1 = 0.9, SHAFT = 62 * N1;
+  const FADE = 0.15;          // time constant of fades and crossfades, s
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+  const between = (lo, hi) => lo + (hi - lo) * Math.random();
+  // Moves an AudioParam to a value: at once (tau 0), or gliding towards it.
+  function to(param, value, when, tau) {
+    if (tau > 0) param.setTargetAtTime(value, when, tau); else param.setValueAtTime(value, when);
+  }
+
+  // What the sound needs to know of the flight, from the altitude (km) and the
+  // speed (km/h). Density falls with a scale height of 8 km.
+  function flight(alt, speed) {
+    const sigma = Math.exp(-alt / 8), ref = Math.exp(-11 / 8);
+    // Dynamic pressure, relative to the cruise (11 km, 900 km/h), with a light
+    // wind that is there even when the aircraft stands still.
+    const q = sigma / ref * ((speed / 900) ** 2 + 0.004);
+    // The rush of air grows with the dynamic pressure, compressed (0.7 of its
+    // level in dB) and softly held below +9 dB, so that low and fast stays
+    // bearable: -17 dB standing still, -3 dB low and slow, +5 dB at 2400 km/h.
+    const db = 7 * Math.log10(q);
+    return {
+      sigma,
+      rush: 10 ** ((db > 0 ? 9 * Math.tanh(db / 9) : db) / 20),
+      // A faster flow is brighter: the frequencies of the turbulence scale
+      // with the speed.
+      bright: Math.sqrt((speed + 60) / 960),
+      // Thin air carries less of the low end: a shelf under 250 Hz, 0 dB at
+      // 11 km, up to +7 dB near the ground.
+      body: Math.min(7, Math.max(-3, 4 * Math.log2(sigma / ref))),
+    };
+  }
+
+  // Builds the sound on ctx, into ctx.destination. Returns:
+  //   play(kind, when): crossfade to a variation ('off' fades out);
+  //   fly(alt, speed, when, glide): follow the flight (glide false: at once);
+  //   volume(v, when, glide): 0 to 1;
+  //   hush(quiet, when): fade the whole output out (true) or back in;
+  //   tick(until): schedule the slow random movement (gusts, the beat of the
+  //   engines) up to the time until. In the page, a timer calls it.
+  function engine(ctx) {
+    const sr = ctx.sampleRate;
+
+    // The noise bed. Gaussian noise in a stereo buffer of 11 s (right 0.6
+    // correlated with left: some width, and safe in mono), times random signs
+    // from a mono buffer of 10.3 s. The product is Gaussian noise again, but
+    // it repeats only when both loops line up again, which is never in
+    // practice; one looped buffer alone would repeat every 11 s.
+    const bed = ctx.createGain();
+    {
+      const n = Math.round(11 * sr), m = Math.round(10.3 * sr);
+      const a = ctx.createBuffer(2, n, sr), b = ctx.createBuffer(1, m, sr);
+      const l = a.getChannelData(0), r = a.getChannelData(1), s = b.getChannelData(0);
+      for (let i = 0; i < n; i++) {
+        const u = Math.sqrt(-2 * Math.log(1 - Math.random())), w = 2 * Math.PI * Math.random();
+        l[i] = u * Math.cos(w);
+        r[i] = 0.6 * l[i] + 0.8 * u * Math.sin(w);
+      }
+      for (let i = 0; i < m; i++) s[i] = Math.random() < 0.5 ? -1 : 1;
+      const na = ctx.createBufferSource(), nb = ctx.createBufferSource();
+      na.buffer = a; nb.buffer = b; na.loop = nb.loop = true;
+      bed.gain.value = 0;
+      na.connect(bed);
+      nb.connect(bed.gain);
+      na.start();
+      nb.start();
+    }
+    // The same noise 0.1 s later: uncorrelated with the bed, for a branch that
+    // overlaps others in frequency and would otherwise add to or cancel them,
+    // as their filters shift the phase.
+    const late = ctx.createDelay(0.1);
+    late.delayTime.value = 0.1;
+    bed.connect(late);
+
+    // Output: the voices -> mix, which puts the cruise near -27 dBFS, below
+    // the compressor's knee -> a high-pass at 25 Hz (nothing below is heard,
+    // and it would only work the compressor) -> a compressor with a short
+    // look-ahead, which holds the loud states (low and fast) down -> trim ->
+    // a soft ceiling, which keeps every sample below -1.4 dBFS whatever comes
+    // in -> volume -> hush.
+    const mix = ctx.createGain(), comp = ctx.createDynamicsCompressor();
+    mix.gain.value = 0.4;
+    comp.threshold.value = -24;
+    comp.knee.value = 12;
+    comp.ratio.value = 4;
+    comp.attack.value = 0.005;
+    comp.release.value = 0.4;
+    // The compressor adds a fixed makeup gain of (1 / its gain at 0 dBFS)^0.6
+    // (Web Audio's definition): 8.2 dB for these settings, measured. With the
+    // trim, the gain below the knee is +6.7 dB, which brings the cruise to
+    // about -20 dBFS at full volume. The trim also halves the signal for the
+    // ceiling's input range.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.5 * 10 ** (-1.5 / 20);
+    // tanh with unit slope at 0, tending to 0.85: the input range -2..2 is
+    // mapped onto -1..1 by the trim's half.
+    const ceiling = ctx.createWaveShaper(), curve = new Float32Array(2049);
+    for (let i = 0; i < curve.length; i++) curve[i] = 0.85 * Math.tanh((i / 1024 - 1) * 2 / 0.85);
+    ceiling.curve = curve;
+    const level = ctx.createGain(), hushed = ctx.createGain();
+    const subsonic = ctx.createBiquadFilter();
+    subsonic.type = 'highpass';
+    subsonic.frequency.value = 25;
+    mix.connect(subsonic).connect(comp).connect(trim).connect(ceiling).connect(level).connect(hushed).connect(ctx.destination);
+
+    // A kit for one voice: its nodes, the taps it takes on the noise bed, its
+    // tones, and a release that undoes them all.
+    function kit() {
+      const out = ctx.createGain(), taps = [], tones = [];
+      out.gain.value = 0;
+      out.connect(mix);
+      const chain = (...nodes) => { for (let i = 1; i < nodes.length; i++) nodes[i - 1].connect(nodes[i]); return nodes[nodes.length - 1]; };
+      return {
+        out, chain,
+        filter(type, frequency, Q = 0.7071, gain = 0) {
+          const f = ctx.createBiquadFilter();
+          f.type = type;
+          f.frequency.value = frequency;
+          f.Q.value = Q;
+          f.gain.value = gain;
+          return f;
+        },
+        gain(v = 0) { const g = ctx.createGain(); g.gain.value = v; return g; },
+        pan(p) { const s = ctx.createStereoPanner(); s.pan.value = p; return s; },
+        // A tap on the later noise bed, undone when the voice ends.
+        late(node) { late.connect(node); taps.push([late, node]); return node; },
+        // A branch of noise through the given nodes, into the voice.
+        noise(...nodes) { bed.connect(nodes[0]); taps.push([bed, nodes[0]]); chain(...nodes, out); },
+        // A tone with the given harmonics (amplitudes, from the fundamental;
+        // none: a sine) at the given frequency.
+        tone(harmonics, frequency) {
+          const o = ctx.createOscillator();
+          o.frequency.value = frequency;
+          if (harmonics) o.setPeriodicWave(ctx.createPeriodicWave(new Float32Array([0, ...harmonics.map(() => 0)]),
+            new Float32Array([0, ...harmonics])));
+          o.start();
+          tones.push(o);
+          return o;
+        },
+        release(when) {
+          for (const o of tones) o.stop(when);
+          // A silent timer, ended when the fade is over: then the voice leaves
+          // the graph and its filters stop running.
+          const timer = ctx.createConstantSource();
+          timer.offset.value = 0;
+          timer.connect(out.gain);
+          timer.onended = () => { for (const [src, dst] of taps) src.disconnect(dst); out.disconnect(); };
+          timer.start(when);
+          timer.stop(when + 0.01);
+        },
+      };
+    }
+
+    // The high tones of two turbofans heard through the cabin wall, for the
+    // airliner with engine whine; strength scales their level. Per engine,
+    // panned as the low drone:
+    //   - the fan's blade-passing tone (24 blades: 1340 Hz) with its second
+    //     and third harmonics;
+    //   - "buzz-saw": at high power the fan's tips pass the speed of sound and
+    //     their shocks, a little unequal from blade to blade, give tones at
+    //     every multiple of the shaft's speed; here orders 8 to 40, of
+    //     irregular height, at half strength (they come in from N1 0.8 and
+    //     are full at 1);
+    //   - the high-pressure compressor's whine, on the second shaft (N2 0.96):
+    //     3.5 kHz;
+    // and, shared, a narrow band of noise around the fan tone and around the
+    // whine. The wall's mass law takes off the top: all of it is low-passed
+    // at 3.5 kHz. Each line wanders a few cents, slowly, both engines
+    // together; the second runs 0.2 to 1 cent faster, so that the fan's line
+    // beats once in 1.3 to 6.5 s (the whine at 3.5 kHz, 0.4 to 2 times a
+    // second).
+    function highTones(k, strength) {
+      const bus = k.gain(strength * N1 ** 3), wall = k.filter('lowpass', 3500, 0.5);
+      k.chain(bus, wall, k.out);
+      const whine = 3600 * (0.6 + 0.4 * N1);
+      const engines = [-0.35, 0.35].map(p => {
+        const pan = k.pan(p);
+        pan.connect(bus);
+        const fan = k.tone([1, 0.45, 0.25], 24 * SHAFT);
+        k.chain(fan, k.gain(0.02), pan);
+        const orders = Array.from({ length: 40 }, (_, i) => i < 7 ? 0 : 0.2 + 0.8 * Math.random() ** 2);
+        const buzz = k.tone(orders, SHAFT);
+        k.chain(buzz, k.filter('bandpass', 1100, 0.6), k.gain(0.015), pan);
+        const comp = k.tone(null, whine);
+        k.chain(comp, k.gain(0.004), pan);
+        return [fan, buzz, comp];
+      });
+      k.chain(k.late(k.filter('bandpass', 24 * SHAFT, 18)), k.gain(0.05), bus);
+      k.chain(k.late(k.filter('bandpass', whine, 25)), k.gain(0.05), bus);
+      return [{ every: [3, 8], at: (t, tau) => {
+        const c = 4 * gauss(), apart = between(0.2, 1);
+        engines.forEach((tones, i) => { for (const o of tones) o.detune.setTargetAtTime(c + i * apart, t, tau); });
+      } }];
+    }
+
+    // The variations. Each returns its kit, set(f, when, glide) to follow the
+    // flight, and tracks: the slow random movement, as { every: [lo, hi]
+    // seconds between knots, at(t, tau): schedule one knot }.
+    const voices = {
+      // The cabin of an airliner at cruise. whine > 0 adds the engines' high
+      // tones at that strength.
+      airliner(whine = 0) {
+        const k = kit();
+        // The rush of the boundary layer through the fuselage: most of the
+        // noise in a cabin. The wall passes the low frequencies and stops the
+        // high ones, so the noise is low-passed twice; it brightens with speed.
+        const rushLp = k.filter('lowpass', 450, 0.55), rushLp2 = k.filter('lowpass', 1500, 0.6);
+        const shelf = k.filter('lowshelf', 250), rush = k.gain(), drift = k.gain(1);
+        k.noise(k.filter('highpass', 40), rushLp, rushLp2, shelf, rush, drift);
+        // Low rumble: the airframe shaking in light turbulence, under 100 Hz,
+        // in slow swells.
+        const rumble = k.gain(), bump = k.gain(1);
+        k.noise(k.filter('lowpass', 85, 0.8), rumble, bump);
+        // The engines, under the wings behind: the fan shaft's tone and its
+        // harmonics, one per engine, panned a little to each side. They run
+        // at nearly the same speed, so they beat slowly; the beat wanders.
+        const engines = [-0.35, 0.35].map(p => {
+          const o = k.tone([1, 0.6, 0.45, 0.3, 0.2, 0.14, 0.1, 0.07, 0.05], SHAFT);
+          k.chain(o, k.filter('lowpass', 600), k.gain(0.09 * N1 ** 3), k.pan(p), k.out);
+          return o;
+        });
+        // The fans' whirr: a narrow band of noise at the blade-passing
+        // frequency (24 blades), faint through the wall.
+        k.noise(k.filter('bandpass', 24 * SHAFT, 8), k.gain(0.025 * N1 ** 4));
+        // Air conditioning: a steady hiss from the vents, 2 to 7 kHz.
+        k.noise(k.filter('highpass', 1800), k.filter('lowpass', 7000), k.gain(0.0035));
+        return {
+          k,
+          // Only the air follows the flight; the engines keep their cruise.
+          set(f, when, glide) {
+            to(rush.gain, 0.6 * f.rush, when, glide && 0.4);
+            to(rushLp.frequency, 450 * f.bright, when, glide && 0.4);
+            to(rushLp2.frequency, 1500 * f.bright, when, glide && 0.4);
+            to(shelf.gain, f.body, when, glide && 0.4);
+            to(rumble.gain, 0.9 * f.rush * Math.sqrt(f.sigma / 0.25), when, glide && 0.4);
+          },
+          tracks: [
+            // The second engine runs 8 to 22 cents faster: a beat of 0.3 to
+            // 0.8 Hz on the shaft tone, more on its harmonics. (The whine's
+            // lines keep their own, much smaller mismatch: at this one, the
+            // fan tone, 24 times higher, would flutter at 7 to 19 Hz.)
+            { every: [4, 10], at: (t, tau) => engines[1].detune.setTargetAtTime(between(8, 22), t, tau) },
+            { every: [0.8, 3], at: (t, tau) => bump.gain.setTargetAtTime(Math.exp(0.3 * gauss()), t, tau) },
+            { every: [2, 6], at: (t, tau) => drift.gain.setTargetAtTime(Math.exp(0.08 * gauss()), t, tau) },
+            ...(whine > 0 ? highTones(k, whine) : []),
+          ],
+        };
+      },
+      // The same cabin, with more of the engines' high tones.
+      'airliner-whine': () => voices.airliner(WHINE),
+
+      // No engine: only the air, as from an open window or a glider. Gusts
+      // come and go; thin and quiet high up, fuller low down.
+      wind() {
+        const k = kit();
+        // The rush past the ears and the frame, low-passed; a gust makes it
+        // both louder and brighter (the filter's detune follows the gust).
+        const thin = k.filter('highpass', 60), bodyLp = k.filter('lowpass', 800, 0.5);
+        const shelf = k.filter('lowshelf', 250), body = k.gain(), gust = k.gain(1);
+        k.noise(thin, bodyLp, shelf, body, gust);
+        // Buffeting: the low, irregular push of the wind, under 120 Hz, which
+        // rises more than the rest in a strong gust.
+        const buffet = k.gain(), heave = k.gain(1);
+        k.noise(k.filter('lowpass', 110, 0.7), buffet, heave);
+        // Whistles: air on an edge sings at a pitch set by its speed (vortex
+        // shedding); two faint narrow bands that come and go.
+        const whistles = [1, 1.62].map(r => {
+          const bp = k.filter('bandpass', 700 * r, 22), g = k.gain(), on = k.gain(0);
+          k.noise(bp, g, on);
+          return { r, bp, g, on };
+        });
+        // Gusts: a slow swell (tens of seconds) with quicker gusts on top,
+        // log-normal, so that strong ones are rare.
+        let swell = 0;
+        return {
+          k,
+          set(f, when, glide) {
+            // Standing still, a breeze remains: 15 dB under the cruise at
+            // 11 km, 9 dB under it near the ground.
+            const rush = Math.max(f.rush, 0.18 * Math.sqrt(f.sigma / Math.exp(-11 / 8)));
+            to(thin.frequency, 40 + 160 * (1 - f.sigma), when, glide && 0.6);
+            to(bodyLp.frequency, 800 * f.bright, when, glide && 0.4);
+            to(shelf.gain, f.body, when, glide && 0.6);
+            to(body.gain, 0.55 * rush, when, glide && 0.4);
+            to(buffet.gain, 1.3 * rush * f.sigma, when, glide && 0.4);
+            for (const w of whistles) {
+              to(w.bp.frequency, 700 * w.r * f.bright, when, glide && 0.6);
+              to(w.g.gain, 0.25 * rush * Math.sqrt(f.sigma), when, glide && 0.6);
+            }
+          },
+          tracks: [
+            { every: [0.8, 2.6], at: (t, tau) => {
+              swell = 0.9 * swell + 0.44 * gauss();
+              const g = 0.33 * swell + 0.45 * gauss();
+              gust.gain.setTargetAtTime(Math.exp(0.6 * g - 0.15), t, tau);
+              heave.gain.setTargetAtTime(Math.exp(0.9 * g - 0.3), t, tau);
+              bodyLp.detune.setTargetAtTime(300 * g, t, tau);
+              for (const w of whistles) w.bp.detune.setTargetAtTime(250 * g, t, tau);
+            } },
+            ...[0, 1].map(i => ({ every: [1.5, 5], at: (t, tau) =>
+              whistles[i].on.gain.setTargetAtTime(Math.random() < 0.35 ? between(0.3, 1) : 0, t, tau) })),
+          ],
+        };
+      },
+    };
+
+    let now = flight(11, 900), voice = null, current = 'off';
+    const live = new Set();
+    return {
+      get kind() { return current; },
+      play(kind, when) {
+        current = voices[kind] ? kind : 'off';
+        if (voice) {
+          // The old voice fades out, keeps its movement until it is silent,
+          // and leaves the graph.
+          to(voice.k.out.gain, 0, when, FADE);
+          voice.end = when + 8 * FADE;
+          voice.k.release(voice.end);
+          voice = null;
+        }
+        if (!voices[kind]) return;
+        voice = voices[kind]();
+        voice.set(now, when, false);
+        voice.end = Infinity;
+        for (const tr of voice.tracks) tr.t = when;
+        live.add(voice);
+        voice.k.out.gain.setValueAtTime(0, when);
+        to(voice.k.out.gain, 1, when, FADE);
+      },
+      fly(alt, speed, when, glide = true) {
+        now = flight(alt, speed);
+        if (voice) voice.set(now, when, glide);
+      },
+      volume(v, when, glide = true) { to(level.gain, v * v, when, glide && 0.05); },
+      hush(quiet, when) { to(hushed.gain, quiet ? 0 : 1, when, 0.1); },
+      tick(until) {
+        for (const v of live) {
+          const stop = Math.min(until, v.end);
+          for (const tr of v.tracks) {
+            while (tr.t < stop) {
+              const step = between(...tr.every);
+              tr.at(tr.t, step / 3);
+              tr.t += step;
+            }
+          }
+          if (v.tracks.every(tr => tr.t >= v.end)) live.delete(v);
+        }
+      },
+    };
+  }
+
+  // Runs the sound in the page. Takes
+  //   select, volume: the controls; their parents are hidden without Web Audio;
+  //   note, volumeOut: <output>s, for the note that the sound waits for a
+  //   click (waiting(): its text, in the page's language) and the volume;
+  //   params: the address's URLSearchParams; aircraft(): { alt, speed } now.
+  // Returns follow(), to call when the altitude or the speed changes, and
+  // show(), to call when the language changes.
+  function attach({ select, volume, note, volumeOut, waiting, params, aircraft }) {
+    const AC = window.AudioContext;
+    if (!AC) {
+      select.parentElement.hidden = volume.parentElement.hidden = true;
+      return { follow() {}, show() {} };
+    }
+    // The address, else the last choice, else off and half volume.
+    let stored = [null, null];
+    try { stored = [localStorage.getItem('sky.sound'), localStorage.getItem('sky.volume')]; } catch (err) {}
+    let kind = [params.get('sound'), stored[0]].find(k => KINDS.includes(k)) || 'off';
+    const v = [params.get('volume'), stored[1]].find(x => x !== null && x !== '' && isFinite(x));
+    let vol = v === undefined ? 0.5 : Math.min(1, Math.max(0, +v));
+    select.value = kind;
+    volume.value = vol;
+    let ctx = null, eng = null, timer = 0, gen = 0;
+    const show = () => {
+      note.textContent = kind !== 'off' && (!ctx || ctx.state !== 'running') && !document.hidden ? waiting() : '';
+      volumeOut.textContent = Math.round(vol * 100) + ' %';
+    };
+    const tick = () => eng.tick(ctx.currentTime + 4);
+    // Starts or resumes the context and the chosen variation. Browsers allow
+    // sound only from a user gesture: this runs from one, or waits for one.
+    function wake() {
+      if (kind === 'off' || document.hidden) return;
+      // Without a gesture yet, a new context would only be refused (and warn).
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+      const my = ++gen;
+      if (!ctx) {
+        try { ctx = new AC({ latencyHint: 'playback' }); } catch (err) { return; }
+        eng = engine(ctx);
+        eng.volume(vol, 0, false);
+        eng.fly(aircraft().alt, aircraft().speed, 0, false);
+        ctx.onstatechange = show;
+      }
+      ctx.resume().then(() => {
+        if (my !== gen) return;
+        const t = ctx.currentTime;
+        eng.hush(false, t);
+        if (eng.kind !== kind) eng.play(kind, t);
+        tick();
+        clearInterval(timer);
+        timer = setInterval(tick, 1000);
+        show();
+      }, () => {});
+    }
+    // Fades out, then suspends: nothing runs while it is off or hidden.
+    function sleep(off) {
+      const my = ++gen;
+      if (!ctx || ctx.state !== 'running') return;
+      const t = ctx.currentTime;
+      if (off) eng.play('off', t); else eng.hush(true, t);
+      setTimeout(() => {
+        if (my !== gen) return;
+        clearInterval(timer);
+        ctx.suspend();
+      }, off ? 1300 : 600);
+    }
+    for (const type of ['pointerdown', 'pointerup', 'keydown', 'click']) {
+      window.addEventListener(type, () => { if (!ctx || ctx.state !== 'running') wake(); }, { capture: true, passive: true });
+    }
+    document.addEventListener('visibilitychange', () => { if (document.hidden) sleep(false); else wake(); show(); });
+    select.addEventListener('change', () => {
+      kind = select.value;
+      try { localStorage.setItem('sky.sound', kind); } catch (err) {}
+      if (kind === 'off') sleep(true); else wake();
+      show();
+    });
+    volume.addEventListener('input', () => {
+      vol = +volume.value;
+      try { localStorage.setItem('sky.volume', vol); } catch (err) {}
+      if (eng) eng.volume(vol, ctx.currentTime);
+      show();
+    });
+    show();
+    return { follow() { if (eng) eng.fly(aircraft().alt, aircraft().speed, ctx.currentTime); }, show };
+  }
+
+  return { engine, attach };
+})();
+</script>
+
+<script>
 (() => {
   'use strict';
   const RAD = Math.PI / 180;
@@ -2953,6 +3425,16 @@ void main() {
   showIntro();
   wake();
 
+  // Background sound: its air follows the altitude and the speed, and it
+  // never asks for a frame.
+  const sound = SkySound.attach({
+    select: document.getElementById('sound'), volume: document.getElementById('volume'),
+    note: document.getElementById('soundOut'), volumeOut: document.getElementById('volumeOut'),
+    waiting: () => TEXT[LANG].soundWait, params, aircraft: () => state,
+  });
+  alt.addEventListener('input', sound.follow);
+  speed.addEventListener('input', sound.follow);
+
   // The language: at once, and kept for the next visit. The title and the
   // hint come back for a while, in the new language.
   langSelect.addEventListener('change', () => {
@@ -2960,6 +3442,7 @@ void main() {
     try { localStorage.setItem('sky.lang', LANG); } catch (err) {}
     showLabels();
     showFullScreen();
+    sound.show();
     showIntro();
   });
 
