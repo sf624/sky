@@ -1805,13 +1805,17 @@ void main() {
   col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
 #if AIRCRAFT
-  // How far is what this pixel shows? As far as the clouds, if they give
-  // enough of its light, or else as far as the sea; the sky is infinitely
-  // far. A thin sheet counts when nothing else is there, or when it hides
-  // the rest.
+  // How far is what this pixel shows? As far as the clouds, if they hide
+  // enough of what is behind or give enough of its light, or else as far
+  // as the sea; the sky is infinitely far. A thin sheet counts when nothing
+  // else is there, or when it hides the rest.
   float wCloud = tBar > 0.0 ? (1.0 - Tc) * (cloudsFirst ? 1.0 : Th) : 0.0;
   float wHigh = tHigh > 0.0 ? (1.0 - Th) * (cloudsFirst ? Tc : 1.0) : 0.0;
-  float tSeen = wCloud > 0.1 ? tBar : ground ? tmax : -1.0;
+  // A wisp that hides little of the dark sea still gives much of the
+  // light. Counted as sea, that light would stay on the sea while the
+  // cloud flies past, and trail behind a near cloud in streaks.
+  bool cloudLight = dot(C[1], vec4(1.0)) > 0.05 * dot(L[1], vec4(1.0));
+  float tSeen = tBar > 0.0 && (wCloud > 0.1 || cloudLight) ? tBar : ground ? tmax : -1.0;
   // Against the sky, a sheet too thin to hide much still gives much of the
   // light, and its streaks would smear if they stayed put: it counts by
   // its share of the light (the sun, the moon and stars behind it, by far
@@ -1980,8 +1984,12 @@ void main() {
     n = any(isnan(was)) ? 0.0 : min(n, uTrust);
     if (n > 0.0) {
       col = mix(was, col, 1.0 / (n + 1.0));
-      // A cloud's distance stays for a few frames after a miss.
-      codeNow = min(code, mix(codeWas, code, 0.5));
+      // A cloud's distance stays after a miss, and fades only as fast as
+      // its light does in the mean. While the picture still holds a near
+      // cloud's light, the pixel moves with that cloud; once the cloud has
+      // gone, the past is in doubt (above) and its light is let go. Faded
+      // sooner, the light would stay behind on the sea, in streaks.
+      codeNow = min(code, mix(codeWas, code, 1.0 / (n + 1.0)));
     }
   }
   // Round up or down at random, as the other shader does, so that the mean
