@@ -1,9 +1,0 @@
-Sky
-Copyright (c) 2026 Shun Fujioka
-
-The code of this project is under the MIT licence (see LICENSE).
-
-The star catalogue embedded in index.html (the block with the id "stars")
-comes from Wikidata, whose structured data is under the Creative Commons
-CC0 licence (https://www.wikidata.org/wiki/Wikidata:Copyright). It was
-retrieved on 2026-11-15 with tools/make-stars.py. No credit is required.
