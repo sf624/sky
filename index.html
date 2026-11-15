@@ -88,8 +88,10 @@
     letter-spacing: .06em;
   }
   .panel label { display: block; }
-  .panel .time { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; }
-  .panel .time label { flex: 1; }
+  /* The time row: play, now, the rate, then the time slider; the slider
+     goes to a line of its own when the row is too narrow for its label. */
+  .panel .time { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+  .panel .time label { flex: 1; min-width: 260px; }
   .panel button {
     width: 38px; height: 38px; flex: none;
     border-radius: 50%;
@@ -99,6 +101,7 @@
     cursor: pointer;
   }
   .panel button:hover { background: rgba(255, 255, 255, .25); }
+  .panel button svg { display: block; width: 18px; height: 18px; margin: auto; }
   .panel .row { display: flex; justify-content: space-between; }
   .panel output { font-variant-numeric: tabular-nums; opacity: .9; }
   .panel input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #fff; }
@@ -111,6 +114,7 @@
     cursor: pointer;
   }
   .panel select option { color: #123; }
+  .panel .time select { width: auto; flex: none; margin: 0; }
   .title .hint {
     margin: 10px 0 0;
     font-size: 12px;
@@ -186,6 +190,16 @@
   <form class="panel" onsubmit="return false">
     <div class="time">
       <button id="play" type="button" aria-label="時間を進める" data-t-label="play">▶</button>
+      <button id="now" type="button" aria-label="いまの日時" title="いまの日時" data-t-label="now" data-t-title="now">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M9 4.8V9l2.8 1.8"/></svg>
+      </button>
+      <select id="rate" aria-label="時間の進む速さ" title="時間の進む速さ" data-t-label="rate" data-t-title="rate">
+        <option value="1" data-t="rate1">実時間</option>
+        <option value="60" data-t="rate60">1分/秒</option>
+        <option value="600" data-t="rate600">10分/秒</option>
+        <option value="960" data-t="rate960" selected>16分/秒</option>
+        <option value="3600" data-t="rate3600">1時間/秒</option>
+      </select>
       <label>
         <span class="row"><span data-t="time">時刻</span><output id="timeOut"></output></span>
         <input id="time" type="range" min="0" max="24" step="0.05" value="15">
@@ -255,8 +269,8 @@
 <script>
 // The text of the hero, in Japanese and English. The HTML holds the Japanese;
 // this runs as soon as the hero is parsed, before the long scripts below, so
-// an English reader does not see the Japanese first. Elements
-// name their text with data-t (contents) and data-t-label (aria-label).
+// an English reader does not see the Japanese first. Elements name their
+// text with data-t (contents), data-t-label (aria-label) and data-t-title.
 const TEXT = {
   ja: {
     title: 'Sky — レイリー散乱の空',
@@ -265,7 +279,8 @@ const TEXT = {
     hint: 'ドラッグで見回す',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
-    play: '時間を進める',
+    play: '時間を進める', now: 'いまの日時',
+    rate: '時間の進む速さ', rate1: '実時間', rate60: '1分/秒', rate600: '10分/秒', rate960: '16分/秒', rate3600: '1時間/秒',
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
     alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     lang: '言語 / Language',
@@ -288,7 +303,8 @@ const TEXT = {
     hint: 'Drag to look around',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
-    play: 'Play time-lapse',
+    play: 'Play time-lapse', now: 'Now',
+    rate: 'Speed of time', rate1: 'real time', rate60: '1 min/s', rate600: '10 min/s', rate960: '16 min/s', rate3600: '1 h/s',
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
     alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     lang: 'Language / 言語',
@@ -326,6 +342,7 @@ function applyLanguage(lang) {
   document.title = T.title;
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t];
   for (const el of document.querySelectorAll('[data-t-label]')) el.setAttribute('aria-label', T[el.dataset.tLabel]);
+  for (const el of document.querySelectorAll('[data-t-title]')) el.title = T[el.dataset.tTitle];
   document.getElementById('lang').value = lang;
 }
 applyLanguage(LANG);
@@ -2611,6 +2628,10 @@ const SkySound = (() => {
     alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, airExposure: EXPOSURE,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
     speed: 900, heading: 0, drift: [0, 0], cirrus: 0.4,
+    // Days the sun has moved on beyond state.day while the time ran (see
+    // tick): playing past midnight then turns the sky on smoothly. 0 once the
+    // date or the time is set.
+    dayShift: 0,
   };
   let builtHaze = null;
 
@@ -2623,10 +2644,10 @@ const SkySound = (() => {
   const fromEcliptic = lon => [
     Math.atan2(Math.cos(OBLIQUITY) * Math.sin(lon), Math.cos(lon)),
     Math.asin(Math.sin(OBLIQUITY) * Math.sin(lon))];
-  // Where the sun, the moon and the stars are on state.day at state.time.
+  // Where the sun, the moon and the stars are on state.day (and dayShift) at state.time.
   // The time is local solar time: the sun is due south at 12:00.
   function celestial() {
-    const lon = (state.day - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
+    const lon = (state.day + state.dayShift - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
     const [sunRA, sunDec] = fromEcliptic(lon);
     const H = (state.time - 12) * 15 * RAD;                // hour angle of the sun
     const siderealTime = H + sunRA;
@@ -3269,7 +3290,8 @@ const SkySound = (() => {
   const cirrus = document.getElementById('cirrus'), cirrusOut = document.getElementById('cirrusOut');
   function showLabels() {
     const T = TEXT[LANG];
-    const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 0.5);
+    // Hours and minutes, as a clock shows them (the minute that has begun).
+    const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 1e-6);
     const clock = String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
     timeOut.textContent = clock + ' ' + (e < -18 ? T.night : e < -12 ? T.astronomical : e < -6 ? T.nautical
       : e < -0.4 ? T.civil : e < 6 ? (t < 12 ? T.morning : T.evening) : T.day);
@@ -3294,31 +3316,35 @@ const SkySound = (() => {
   };
   // A leap year has 366 days. The sun's declination takes the day number as it is.
   date.max = Math.round((new Date(YEAR + 1, 0, 1) - new Date(YEAR, 0, 1)) / 864e5);
-  if (!date.hasAttribute('value')) {
-    // Today's day of the year in local time, whatever the hour. Local midnights
-    // are a whole number of days apart only up to a clock change: round.
-    const now = new Date();
-    date.value = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(YEAR, 0, 0)) / 864e5);
-  }
+  // The day of the year of a moment, in local time, whatever the hour. Local
+  // midnights are a whole number of days apart only up to a clock change: round.
+  const dayOf = d => Math.min(+date.max,
+    Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(d.getFullYear(), 0, 0)) / 864e5));
+  if (!date.hasAttribute('value')) date.value = dayOf(new Date());
   if (!moon.hasAttribute('value')) moon.value = moonAgeOn(+date.value);
   date.addEventListener('input', () => { moon.value = moonAgeOn(+date.value); });
+  // Each slider sets its own part of the state: moving one does not round
+  // the others (while playing, the time and the moon's age run unrounded).
+  const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze', alt: 'alt',
+    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus' };
+  const read = id => {
+    state[sliders[id]] = +document.getElementById(id).value;
+    if (id === 'time' || id === 'date') state.dayShift = 0;
+  };
   function readInputs() {
-    state.time = +time.value;
-    state.day = +date.value;
-    state.moonAge = +moon.value;
-    state.haze = +haze.value;
-    state.alt = +alt.value;
-    state.cloud = +cloud.value;
-    state.wind = +wind.value;
-    state.speed = +speed.value;
-    state.cirrus = +cirrus.value;
+    for (const id in sliders) read(id);
     update();
   }
-  const sliders = [time, date, moon, haze, alt, cloud, wind, speed, cirrus];
-  for (const el of sliders) el.addEventListener('input', readInputs);
+  for (const id in sliders) {
+    document.getElementById(id).addEventListener('input', () => {
+      read(id);
+      if (id === 'date') read('moon');      // set from the date, above
+      update();
+    });
+  }
   // A view can be given in the address: ?time=17.5&cloud=0.7&yaw=120&pitch=-10
   const params = new URLSearchParams(location.search);
-  for (const el of sliders) if (params.has(el.id)) el.value = params.get(el.id);
+  for (const id in sliders) if (params.has(id)) document.getElementById(id).value = params.get(id);
   // The drawing limit of the hero: the address, else the last choice, else WQHD.
   const pixels = document.getElementById('pixels');
   let storedPixels = null;
@@ -3334,21 +3360,94 @@ const SkySound = (() => {
   });
   if (params.has('date') && !params.has('moon')) moon.value = moonAgeOn(+date.value);
 
-  // Play: a day in a minute and a half.
-  let playing = false, last = 0;
-  function tick(now) {
-    if (!playing) return;
-    state.time = (state.time + Math.min((now - last) / 1000, 0.1) * 24 / 90) % 24;
-    last = now;
-    time.value = state.time;
+  // Play: the time runs at a rate, a factor of real time (960, the first
+  // choice: a day in a minute and a half). It moves by the time elapsed
+  // since the last tick. Past midnight the date moves on (after the last day
+  // of the year, to the first). The moon's age runs with the time (a day of
+  // age a day), and so does the sun on the ecliptic (state.dayShift, which
+  // takes back the day the date adds): the moon and the stars do not jump
+  // at midnight.
+  const rate = document.getElementById('rate'), nowButton = document.getElementById('now');
+  // At real time the sky changes too slowly to see from frame to frame. The
+  // sky is drawn again every REAL_STEP seconds (at the default limit, WQHD,
+  // 1440 rows over 62 degrees, the sun moves less than a pixel in 10 s);
+  // in between, the picture settles and the drawing stops. The ticks then
+  // come from a timer, once a second, not with every frame.
+  const REAL_STEP = 10, LUNATION = 29.530588;
+  const atStep = t => Math.floor(t * 3600 / REAL_STEP + 1e-6) * REAL_STEP / 3600;
+  let playing = false, pace = +rate.value, last = 0, clock = 0, moonClock = 0, shiftClock = 0, shown = null, ticks = 0;
+  // The time, the date, the moon's age and the day's shift, in the state and on the sliders.
+  function setTime(t, day, age, shift) {
+    state.time = t;
+    state.day = day;
+    state.moonAge = age;
+    state.dayShift = shift;
+    time.value = t;
+    date.value = day;
+    moon.value = age;
+    shown = [t, age, shift];
     update();
-    requestAnimationFrame(tick);
   }
-  play.addEventListener('click', () => {
-    playing = !playing;
-    play.textContent = playing ? '⏸' : '▶';
-    if (playing) { last = performance.now(); requestAnimationFrame(tick); }
+  function tick() {
+    const now = performance.now();
+    // A longer gap than a quarter of a second is not a frame (the tab was
+    // hidden): real time catches up, a time-lapse does not leap.
+    const dt = Math.max(0, pace === 1 ? now - last : Math.min(now - last, 250)) / 1000;
+    last = now;
+    // A slider moved since the last tick (or before the first) sets the clock.
+    if (!shown || state.time !== shown[0]) clock = state.time;
+    if (!shown || state.moonAge !== shown[1]) moonClock = state.moonAge;
+    if (!shown || state.dayShift !== shown[2]) shiftClock = state.dayShift;
+    clock += dt * pace / 3600;
+    moonClock = (moonClock + dt * pace / 86400) % LUNATION;
+    shiftClock += dt * pace / 86400;
+    let day = state.day;
+    for (; clock >= 24; clock -= 24) {
+      day = day % +date.max + 1;
+      shiftClock -= 1;
+    }
+    const t = pace === 1 ? atStep(clock) : clock;
+    if (t !== state.time || day !== state.day) setTime(t, day, moonClock, shiftClock);
+    else shown = [state.time, state.moonAge, state.dayShift];
+  }
+  // Only the latest schedule goes on ticking.
+  function schedule() {
+    const id = ++ticks;
+    const next = () => { if (playing && id === ticks) { tick(); schedule(); } };
+    if (pace === 1) setTimeout(next, 1000);
+    else requestAnimationFrame(next);
+  }
+  function setPlaying(on) {
+    playing = on;
+    play.textContent = on ? '⏸' : '▶';
+    if (on) {
+      last = performance.now();
+      schedule();
+    }
+  }
+  play.addEventListener('click', () => setPlaying(!playing));
+  // A new rate takes over from now: the time so far runs at the old one.
+  rate.addEventListener('change', () => {
+    if (playing) tick();
+    pace = +rate.value;
+    if (playing) schedule();
   });
+  // Back in the tab, real time is the present again at once.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && playing && pace === 1) tick(); });
+  // Now: today's date, the time of the clock, the moon's age of the date (as
+  // moving the date sets it), and real time, playing.
+  function toNow() {
+    const d = new Date(), day = dayOf(d);
+    clock = d.getHours() + d.getMinutes() / 60 + (d.getSeconds() + d.getMilliseconds() / 1000) / 3600;
+    moonClock = moonAgeOn(day);
+    shiftClock = 0;
+    setTime(atStep(clock), day, moonClock, 0);
+    rate.value = pace = 1;
+    last = performance.now();
+    if (playing) schedule();
+    else setPlaying(true);
+  }
+  nowButton.addEventListener('click', toNow);
 
   // Drag to look around.
   let drag = null;
@@ -3470,6 +3569,14 @@ const SkySound = (() => {
   new ResizeObserver(update).observe(document.body);
   window.addEventListener('resize', update);
   readInputs();
+  // ?now=1 is the button; ?rate= (one of the select's) and ?play=1 are the
+  // select and the play button.
+  if (params.get('now') === '1') toNow();
+  if ([...rate.options].some(o => o.value === params.get('rate'))) {
+    rate.value = params.get('rate');
+    rate.dispatchEvent(new Event('change'));
+  }
+  if (params.get('play') === '1' && !playing) setPlaying(true);
   // Start with the sun off to one side, where it models the clouds best.
   celestial();
   state.yaw = params.has('yaw') ? params.get('yaw') * RAD : Math.atan2(state.sun[0], state.sun[2]) + 65 * RAD;

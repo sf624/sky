@@ -81,8 +81,9 @@ The JS runs once, at load:
    gradient.
 3. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
-   `readInputs()` copies the sliders into `state`. `yaw`, `pitch`, `heading`,
-   `at`, `pixels` and `res` are read directly (see
+   `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
+   then act as the now button, the select and the play button. `yaw`,
+   `pitch`, `heading`, `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -104,6 +105,34 @@ The JS runs once, at load:
 The renderer returns true while the aircraft flies or while its picture is
 still settling. So the page draws nothing at rest once the picture is
 clean, or in a hidden tab. `visibilitychange` calls `kick()` again.
+
+**Playing.** The play button runs the time at the rate of the select beside
+it (`pace`, a factor of real time; 960 at first, a day in a minute and a
+half). Each `tick()` moves the time by the time elapsed since the last tick
+(`performance.now()`) times the rate. A gap longer than a quarter of a second
+is not a frame (the tab was hidden): at real time the time catches up with
+it, at the faster rates it counts as 0.25 s, so the time does not leap. A
+new rate applies from the moment it is chosen. Past 24:00 the date moves
+on by a day, and from the last day of the year to the first. The moon's age
+runs on with the time, a day of age a day, and so does the sun on the
+ecliptic (`state.dayShift`, see below): nothing jumps at midnight. At the
+faster rates, ticks come with the frames (`requestAnimationFrame`), and
+every frame is drawn again.
+
+**Real time.** The sun moves a quarter of a degree a minute. At the default
+drawing limit (WQHD, 1440 rows over the 62 degrees of the view) that is
+less than a pixel in 10 s. So at real time the ticks come from a timer,
+once a second, and the time that is drawn (`state.time`) moves in steps of
+10 s (`REAL_STEP`): each step draws the picture again and lets it settle
+(39 frames), and nothing is drawn in between, about 6 % of the frames.
+The panel's clock shows the minute, which changes only on a step. In a
+hidden tab the timer runs on (the browser slows it); `visibilitychange`
+brings the time to the present at once. In flight every frame is drawn
+anyway.
+
+**Now.** The now button sets the date to today, the time to the device's
+clock (taken as local solar time), the moon's age as moving the date does,
+the rate to real time, and plays.
 
 ## Sun, moon and sky in the JS
 
@@ -129,6 +158,12 @@ date (`moonAgeOn`: the mean lunation, from the new moon of 6 January 2000)
 and is set again whenever the date slider moves; the moon slider then
 changes it alone. With `date` and no `moon` in the address, it follows the
 given date.
+
+The sun's place on the ecliptic comes from the day number, one step a day.
+While the time plays past midnight, `state.dayShift` (in days) holds the
+sun where the time has carried it: it grows with the time and loses a day
+when the date moves on, so the sun and the stars turn on smoothly. Setting
+the date or the time sets it back to 0.
 
 ## The air
 
@@ -464,7 +499,9 @@ count, capped by `uTrust`, which the JS sets per frame:
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
 the frames since the last change (`calm`) and stops once it reaches
 `SETTLE + RELIGHT` = 38: 39 frames in all after the last change. While
-the aircraft flies, it never stops. A still picture for testing therefore
+the aircraft flies, it never stops. Playing at real time, each step of 10 s
+starts the count again (see [Playing](#from-the-address-bar-to-the-first-frame)).
+A still picture for testing therefore
 needs `speed=0`, and from page load about 46 frames: the first frames may
 start the mean again (the first reset, and a restart if the drawing size
 grows).
