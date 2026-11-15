@@ -221,8 +221,30 @@ and `docs/` are on the site too.
   "after Hillaire (2020)").
 - Reference photographs are for looking at only: nothing from them goes
   into the page.
-- The star data embedded in `index.html` has terms of its own: see
-  `NOTICE`.
+- The star data embedded in `index.html` comes from Wikidata (CC0).
+  `NOTICE` names the source. Nothing in the repository is under other terms.
+
+### The star catalogue
+
+The `stars` block of `index.html` is built by `tools/make-stars.py` (standard
+library only):
+
+    python3 tools/make-stars.py --cache wikidata-cache --index index.html
+
+It asks the Wikidata Query Service for stars with a V magnitude of at most
+6.5, their B magnitude and their classes, keeps real stars, merges double
+entries and writes the six-byte format. The first run sends one request a
+minute (about 70 requests, so more than an hour) and keeps every answer in
+the cache directory. A second run with the same cache needs no network
+(`--offline`) and gives the same bytes. `--table FILE` writes the chosen
+stars as CSV; the column `estimate` marks the stars whose V is estimated.
+
+The rule: every value comes from Wikidata. Nothing is copied from another
+catalogue, and no star is added because another list has it. Stars that
+Wikidata gives no V magnitude get an estimate from the same item's own
+other bands (rules and tests in the script). The choices made by hand
+(classes that are not stars, items dropped or kept) are data at the top of
+the script, with their reasons.
 
 ## Plans and known flaws
 

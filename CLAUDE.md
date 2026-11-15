@@ -19,7 +19,7 @@ Read these before you touch this repository.
   otherwise. Code in `fs` outside `#if AIRCRAFT` is shared with it.
 - Use only MIT-compatible material. Never copy code from Shadertoy, GPL
   projects or sources without a licence; write it from published ideas.
-  The star data has terms of its own (`NOTICE`).
+  The star data comes from Wikidata (CC0); `NOTICE` names the source.
 - Every change goes through a pull request. Each pull request from a
   branch of this repository gets a preview at
   `https://sf624.github.io/sky/pr/N/`.

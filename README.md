@@ -53,7 +53,7 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 - Clouds: their shapes come from 3D noise. The ray steps through the clouds; how a cloud is lit is found by stepping through it towards the sun.
 - Sea: from the spread of the waves' slopes, the page works out the sun's glitter, the mirrored sky, the blue light that comes back out of the water, and whitecaps.
 - Thin cloud: streaks of ice crystals drawn out by the wind. A 22-degree halo appears around the sun.
-- Night: the moon is a sphere lit by the sun, so its phases come out by themselves. The positions and brightness of the stars come from the Hipparcos Catalogue.
+- Night: the moon is a sphere lit by the sun, so its phases come out by themselves. The positions, brightness and colours of the stars come from Wikidata (CC0).
 - One picture is the mean of many pictures, each drawn slightly shifted. At rest it turns smooth within a few dozen frames, and then drawing stops. While the view moves, the last picture is shifted with the movement and laid under the new one.
 
 ## What it needs
@@ -73,7 +73,7 @@ The page is a single HTML file. It loads nothing else.
 ## Licence
 
 MIT licence ([LICENSE](LICENSE)).
-The star data embedded in the page has terms of its own: see [NOTICE](NOTICE).
+The whole repository is under these terms. The star data embedded in the page comes from Wikidata (CC0); [NOTICE](NOTICE) says where from.
 
 ## For developers
 
