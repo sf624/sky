@@ -47,6 +47,7 @@ export function parseTrace(text) {
 export const CLASSES = {
   shader: 'the text of shaders (calls that pass one still count)',
   line: '#line directives in shader texts',
+  comments: 'comments, blank lines and spacing in shader texts',
   readback: 'hashes of what the frames drew (textures and canvases)',
   query: 'calls that only ask (get*, is*, checkFramebufferStatus)',
 };
@@ -56,12 +57,16 @@ function normalise(t, ignore) {
   const text = (h) => {
     let s = t.sources.get(h) ?? '';
     if (ignore.has('line')) s = s.split('\n').filter((l) => !/^\s*#\s*line\b/.test(l)).join('\n');
+    if (ignore.has('comments')) {
+      s = s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, '')
+        .split('\n').map((l) => l.trim().replace(/\s+/g, ' ')).filter(Boolean).join('\n');
+    }
     return s;
   };
   const ids = new Map();
   const srcId = (h) => {
     if (ignore.has('shader')) return '*';
-    if (!ids.has(h)) ids.set(h, ignore.has('line') ? hashBytes(new TextEncoder().encode(text(h))) : h);
+    if (!ids.has(h)) ids.set(h, ignore.has('line') || ignore.has('comments') ? hashBytes(new TextEncoder().encode(text(h))) : h);
     return ids.get(h);
   };
   const canvases = new Map();
@@ -115,24 +120,14 @@ function textDiff(x, y) {
   return out;
 }
 
-// Canvases that may be missing: the skylight (#sky2) is being removed from the page. Where only one trace has it,
-// it is left out with a note instead of a difference.
-const OPTIONAL = ['sky2'];
-
-// Compares two trace texts. Returns { same, summary, report (lines), notes, headers }. max: how many differences
-// to print.
+// Compares two trace texts. Returns { same, summary, report (lines), headers }. max: how many differences to print.
 export function compareTraces(textA, textB, { ignore = new Set(), max = 10 } = {}) {
   const ta = parseTrace(textA), tb = parseTrace(textB);
   const a = normalise(ta, ignore), b = normalise(tb, ignore);
   const report = [];
   let count = 0;
   const where = [];
-  const notes = [];
-  const names = [...new Set([...a.canvases.keys(), ...b.canvases.keys()])].filter((n) => {
-    if (!OPTIONAL.includes(n) || (a.canvases.has(n) && b.canvases.has(n))) return true;
-    notes.push(`no #${n} in ${a.canvases.has(n) ? 'B' : 'A'}: skipped`);
-    return false;
-  });
+  const names = [...new Set([...a.canvases.keys(), ...b.canvases.keys()])];
   for (const name of names) {
     const fa = a.canvases.get(name), fb = b.canvases.get(name);
     if (!fa || !fb) {
@@ -167,5 +162,5 @@ export function compareTraces(textA, textB, { ignore = new Set(), max = 10 } = {
   if (count > max) report.push(`... and ${count - max} more difference${count - max > 1 ? 's' : ''}`);
   const ha = ta.header.join(' | '), hb = tb.header.join(' | ');
   const head = count ? `${count} difference${count > 1 ? 's' : ''} (${where.join('; ')})` : 'identical';
-  return { same: count === 0, summary: head, report, notes, headers: ha === hb ? null : [ha, hb] };
+  return { same: count === 0, summary: head, report, headers: ha === hb ? null : [ha, hb] };
 }

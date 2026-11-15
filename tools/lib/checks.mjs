@@ -2,7 +2,6 @@
 // Those that compare with a base need --base; the others test the page alone.
 import fs from 'node:fs';
 import path from 'node:path';
-import { sleep } from './browser.mjs';
 import { compareTraces } from './trace.mjs';
 import { diffPng, fmtDiff, readPng, shiftOf } from './png.mjs';
 import * as run from './run.mjs';
@@ -33,90 +32,60 @@ async function shoot(ctx, root, q, steps, file, extra = {}) {
 }
 const stillAt = (ctx, root, q, file) => shoot(ctx, root, run.stillQuery(q), [[run.view('default').frames, 50]], file);
 
+// One run of each view per page, shared by the checks trace and stills: its still and its GL trace.
+async function viewRun(ctx, who, name) {
+  const key = who + ':' + name;
+  if (!ctx.runs.has(key)) {
+    const dir = path.join(ctx.out, 'views');
+    const files = { png: path.join(dir, `${name}.${who}.png`), traceFile: path.join(dir, `${name}.${who}.trace`) };
+    const r = await run.runView(ctx.session, who === 'base' ? ctx.base : ctx.page, run.view(name), ctx.size, files);
+    ctx.runs.set(key, { ...r, ...files });
+  }
+  return ctx.runs.get(key);
+}
+
 export const CHECKS = {
-  // The GL trace of a few views, against the base's: every call and every read-back the same.
+  // The GL trace of every view, to the end of its run, against the base's: every call, every upload and every
+  // read-back the same. This proves the commands and the buffers; the stills prove the picture as composited.
   async trace(ctx) {
     if (!ctx.base) return { skip: 'needs --base' };
     const ignore = new Set(ctx.ignore.split(',').filter(Boolean));
-    const lines = [], notes = [];
-    let ok = true;
-    for (const name of ['default', 'night-dark', 'sea-low-sun']) {
-      const v = run.view(name);
-      const q = name === 'default' ? '' : v.q;   // the default view flies, as the page does when opened
-      const size = run.parseSize(run.TRACE_SIZE);
-      const files = {};
-      for (const [who, root] of [['base', ctx.base], ['page', ctx.page]]) {
-        files[who] = path.join(ctx.dir, `${name}.${who}.trace`);
-        const r = await run.trace(ctx.session, root, { q, size, file: files[who] });
-        if (r.errors.length) { ok = false; lines.push(`${name} (${who}): ERRORS ${r.errors.join(' | ')}`); }
-      }
-      const r = compareTraces(fs.readFileSync(files.base, 'utf8'), fs.readFileSync(files.page, 'utf8'), { ignore, max: 4 });
-      for (const n of r.notes.map((x) => x.replace(' in A', ' in the base').replace(' in B', ' on this page'))) {
-        if (!notes.includes(n)) notes.push(n);
-      }
+    const lines = [], skipped = [];
+    let ok = true, n = 0;
+    for (const name of run.viewNames()) {
+      const b = await viewRun(ctx, 'base', name), p = await viewRun(ctx, 'page', name);
+      if (b.skip || p.skip) { skipped.push(`${name} (${b.skip || p.skip})`); continue; }
+      const errors = [...b.errors.map((e) => 'base: ' + e), ...p.errors];
+      if (errors.length) { ok = false; lines.push(`${name}: ERRORS ${errors.join(' | ')}`); }
+      const r = compareTraces(fs.readFileSync(b.traceFile, 'utf8'), fs.readFileSync(p.traceFile, 'utf8'), { ignore, max: 4 });
+      n++;
       if (!r.same) { ok = false; lines.push(`${name}: ${r.summary}`, ...r.report.map((l) => '    ' + l)); }
     }
-    const same = `3 views, identical${ignore.size ? ` (ignoring ${[...ignore].join(', ')})` : ''}`;
-    return { ok, msg: [...(ok ? [same] : lines), ...notes].join('\n') };
+    const same = `${n} views, identical${ignore.size ? ` (ignoring ${[...ignore].join(', ')})` : ''}`;
+    return { ok, msg: [...(ok ? [same] : lines), ...skipped.map((s) => 'skipped: ' + s)].join('\n') };
   },
 
   // Stills of every view against the base's: max difference 0.
   async stills(ctx) {
     if (!ctx.base) return { skip: 'needs --base' };
-    const bad = [], errors = [];
+    const bad = [], errors = [], skipped = [];
     let n = 0;
     for (const name of run.viewNames()) {
-      const v = run.view(name);
-      const fp = path.join(ctx.dir, `${name}.png`), fb = path.join(ctx.dir, `${name}.base.png`);
-      const a = await run.still(ctx.session, ctx.page, v, ctx.size, fp);
-      const b = await run.still(ctx.session, ctx.base, v, ctx.size, fb);
-      errors.push(...a.errors, ...b.errors.map((e) => 'base: ' + e));
-      const d = diffPng(fb, fp, { out: path.join(ctx.dir, `${name}.diff.png`) });
+      const b = await viewRun(ctx, 'base', name), p = await viewRun(ctx, 'page', name);
+      if (b.skip || p.skip) { skipped.push(`${name} (${b.skip || p.skip})`); continue; }
+      errors.push(...p.errors, ...b.errors.map((e) => 'base: ' + e));
+      const d = diffPng(b.png, p.png, { out: path.join(ctx.dir, `${name}.diff.png`) });
       n++;
       if (d.max) bad.push(`${name}: ${fmtDiff(d)}`);
     }
     const ok = !bad.length && !errors.length;
-    return { ok, msg: ok ? `${n} views, max difference 0` : [...bad, ...errors].join('\n') };
+    return { ok, msg: [ok ? `${n} views, max difference 0` : '', ...bad, ...errors, ...skipped.map((s) => 'skipped: ' + s)].filter(Boolean).join('\n') };
   },
 
-  // The skylight (#sky2) against the base's, scrolled into view: pixel for pixel. Skipped where a page has none.
-  async skylight(ctx) {
-    if (!ctx.base) return { skip: 'needs --base' };
-    const views = { day: 'time=13&date=172', dusk: 'time=17.6&date=80', night: 'time=21&date=80&moon=14', haze: 'time=9&haze=4&date=300' };
-    const bad = [], errors = [];
-    for (const [name, q] of Object.entries(views)) {
-      const files = {};
-      for (const [who, root] of [['base', ctx.base], ['page', ctx.page]]) {
-        const p = await ctx.session.open(root, q + '&speed=0', { ...ctx.size, hide: false });
-        try {
-          const r = await p.eval(`(() => { const c = document.getElementById('sky2'); if (!c) return null;
-            c.scrollIntoView({ block: 'center' });
-            const b = c.getBoundingClientRect();
-            return [b.left + scrollX, b.top + scrollY, b.width, b.height].map(Math.round); })()`);
-          if (!r) return { skip: `no #sky2 on ${who === 'base' ? 'the base' : 'this page'}: skipped` };
-          await p.eval('window.__realFrame().then(() => window.__realFrame()).then(() => 0)');
-          await p.step(3, 50);
-          files[who] = path.join(ctx.dir, `${name}.${who}.png`);
-          // The clip is in page coordinates, not in those of the viewport.
-          await p.shot(files[who], { x: r[0], y: r[1], width: r[2], height: r[3] });
-          errors.push(...p.errors);
-        } finally {
-          await p.close();
-        }
-      }
-      const d = diffPng(files.base, files.page, { out: path.join(ctx.dir, `${name}.diff.png`) });
-      if (d.max) bad.push(`${name}: ${fmtDiff(d)}`);
-      // A flat picture would mean that the clip missed the sky, or that nothing was drawn.
-      let lo = 255, hi = 0;
-      for (const v of readPng(files.page).rgb) { if (v < lo) lo = v; if (v > hi) hi = v; }
-      if (hi - lo < 8) bad.push(`${name}: the skylight is flat (nothing drawn, or the clip missed it)`);
-    }
-    const ok = !bad.length && !errors.length;
-    return { ok, msg: ok ? '4 views, identical' : [...bad, ...errors].join('\n') };
-  },
-
-  // No seam where the way flown wraps at 256 km: two stills 2.8 m apart across the wrap differ no more than two
-  // stills 2.8 m apart elsewhere; a flight across the wrap matches stills along it as well as a flight elsewhere.
+  // No seam where the way flown wraps at 256 km. Pictures are compared tile by tile (8 x 8), so that a seam in
+  // one part of the picture is not lost in the mean of the whole: two stills 2.8 m apart across the wrap differ
+  // no more than two stills 2.8 m apart elsewhere, and a flight across the wrap matches stills along it no worse
+  // than a flight elsewhere.
   async wrap(ctx) {
     const v = 'date=172&time=14&cloud=0.6&yaw=40&pitch=-14&heading=0';
     const f = (n) => path.join(ctx.dir, n + '.png');
@@ -125,8 +94,8 @@ export const CHECKS = {
       pages.push(await stillAt(ctx, ctx.page, `${v}&at=${x},${z}`, f(n)));
     }
     const across = diffPng(f('s1'), f('s2')), control = diffPng(f('c1'), f('c2'));
-    const lines = [`stills across the wrap: ${fmtDiff(across)}; elsewhere: ${fmtDiff(control)}`];
-    let ok = across.mean <= LIMITS.wrapStill(control.mean);
+    const lines = [`stills across the wrap: worst tile ${across.tile}, ${fmtDiff(across)}; elsewhere: worst tile ${control.tile}, ${fmtDiff(control)}`];
+    let ok = across.tile <= LIMITS.wrap(control.tile);
     // 27 frames at 900 km/h: 104 m, 4 m past the wrap; 61 frames: 240 m.
     const flown = {};
     for (const [n, z0] of [['across', 255.9], ['control', 100.9]]) {
@@ -147,89 +116,45 @@ export const CHECKS = {
     }
     for (const k of [27, 61]) {
       const a = flown[`across-${k}`], c = flown[`control-${k}`];
-      lines.push(`frame ${k} of a flight against the still there: across ${fmtDiff(a)}; elsewhere ${fmtDiff(c)}`);
-      ok = ok && a.mean <= LIMITS.wrapFlight(c.mean);
+      lines.push(`frame ${k} of a flight against the still there: across worst tile ${a.tile}, mean ${a.mean}; elsewhere worst tile ${c.tile}, mean ${c.mean}`);
+      ok = ok && a.tile <= LIMITS.wrap(c.tile);
     }
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
   },
 
-  // The loop: it stops at rest, in a hidden tab and with the hero out of view, and starts again; with the hero
-  // out of view, the time-lapse draws only the skylight (where there is one).
+  // The loop: it stops at rest, and in a hidden tab, and starts again when the tab is shown.
   async loop(ctx) {
     const lines = [], pages = [];
     let ok = true;
     const expect = (cond, text) => { if (!cond) { ok = false; lines.push('not so: ' + text); } };
-    const open = async (q) => { const p = await ctx.session.open(ctx.page, q, { ...ctx.size, hide: false }); pages.push(p); return p; };
-    const counts = async (p) => { const d = await p.draws(); return { sky: d.sky ? d.sky.screen + d.sky.offscreen : 0, sky2: d.sky2 ? d.sky2.screen : 0 }; };
-    const real = (p) => p.eval('window.__realFrame().then(() => window.__realFrame()).then(() => 0)').then(() => sleep(200));
+    const open = async (q) => { const p = await ctx.session.open(ctx.page, q, ctx.size); pages.push(p); return p; };
+    const count = async (p) => { const d = (await p.draws()).sky; return d ? d.screen + d.offscreen : 0; };
     const hidden = (h) => `(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => ${h} });
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => ${h} ? 'hidden' : 'visible' });
       document.dispatchEvent(new Event('visibilitychange')); return 0; })()`;
-    // Scrolls the hero just out of view (or back to the top); true if it is out of view then. A page with nothing
-    // below the hero cannot scroll it away, and needs no pause out of view (the page since 4ccf2e4).
-    const scroll = (out) => `(() => { const c = document.getElementById('sky');
-      window.scrollTo(0, ${out ? 'scrollY + c.getBoundingClientRect().bottom + 1' : 0});
-      return c.getBoundingClientRect().bottom <= 0; })()`;
     const pending = (p) => p.eval('window.__pending()');
     try {
       let p = await open('speed=0');
       await p.step(60, 16);
-      const r1 = await counts(p);
+      const r1 = await count(p);
       await p.step(60, 16);
-      const r2 = await counts(p), rq = await pending(p);
-      lines.push(`at rest: hero draws ${r1.sky} after 60 frames, ${r2.sky} after 120; ${rq} frames queued`);
-      expect(r1.sky > 0 && r2.sky === r1.sky && rq === 0, 'the hero stops drawing at rest');
+      const r2 = await count(p), rq = await pending(p);
+      lines.push(`at rest: draws ${r1} after 60 frames, ${r2} after 120; ${rq} frames queued`);
+      expect(r1 > 0 && r2 === r1 && rq === 0, 'the drawing stops at rest');
 
       p = await open('');
       await p.step(10, 16);
-      const h1 = await counts(p);
+      const h1 = await count(p);
       await p.eval(hidden(true));
       await p.step(10, 16);
-      const h2 = await counts(p), hq = await pending(p);
+      const h2 = await count(p), hq = await pending(p);
       await p.eval(hidden(false));
       await p.step(10, 16);
-      const h3 = await counts(p);
-      lines.push(`flying, hidden, visible: hero draws ${h1.sky}, ${h2.sky}, ${h3.sky}; ${hq} frames queued while hidden`);
-      expect(h1.sky > 0 && h2.sky === h1.sky && h2.sky2 === h1.sky2 && hq === 0, 'nothing is drawn in a hidden tab');
-      expect(h3.sky > h2.sky, 'drawing starts again when the tab is shown');
-
-      p = await open('');
-      await p.step(10, 16);
-      const s1 = await counts(p);
-      if (!(await p.eval(scroll(true)))) {
-        lines.push('the page cannot scroll the hero out of view: those parts skipped');
-      } else {
-        await real(p);
-        await p.step(10, 16);
-        const s2 = await counts(p), sq = await pending(p);
-        await p.eval(scroll(false));
-        await real(p);
-        await p.step(10, 16);
-        const s3 = await counts(p);
-        lines.push(`flying, scrolled past the hero, back: hero draws ${s1.sky}, ${s2.sky}, ${s3.sky}; ${sq} frames queued out of view`);
-        expect(s2.sky === s1.sky && sq === 0, 'the hero is not drawn out of view');
-        expect(s3.sky > s2.sky, 'the hero is drawn again in view');
-
-        p = await open('speed=0');
-        await p.step(60, 16);
-        const t1 = await counts(p);
-        const skylight = await p.eval("!!document.getElementById('sky2')");
-        await p.eval("(document.getElementById('play').click(), 0)");
-        await p.eval(scroll(true));
-        await real(p);
-        await p.step(20, 16);
-        const t2 = await counts(p);
-        await p.eval(scroll(false));
-        await real(p);
-        await p.step(5, 16);
-        const t3 = await counts(p);
-        lines.push(`time-lapse out of view: hero ${t1.sky} -> ${t2.sky}, ` +
-          (skylight ? `skylight ${t1.sky2} -> ${t2.sky2}` : 'no #sky2 on this page: skylight skipped') + `; back in view: hero ${t3.sky}`);
-        expect(t2.sky === t1.sky, 'out of view, the time-lapse does not draw the hero');
-        if (skylight) expect(t2.sky2 > t1.sky2, 'out of view, the time-lapse draws the skylight');
-        expect(t3.sky > t2.sky, 'back in view, the time-lapse draws the hero');
-      }
+      const h3 = await count(p);
+      lines.push(`flying, hidden, visible: draws ${h1}, ${h2}, ${h3}; ${hq} frames queued while hidden`);
+      expect(h1 > 0 && h2 === h1 && hq === 0, 'nothing is drawn in a hidden tab');
+      expect(h3 > h2, 'drawing starts again when the tab is shown');
     } finally {
       for (const p of pages) await p.close();
     }
@@ -273,7 +198,7 @@ export const CHECKS = {
     }
     expect(sizes.fly !== sizes.settled, 'res=0.5 draws smaller in flight');
     expect(sizes.grown1 === sizes.settled && sizes.settled.startsWith(still.w + 'x'), 'the picture is full size soon after the stop');
-    expect(diffPng(still, f('settled')).mean <= LIMITS.settled, 'the settled picture matches the still');
+    expect(diffPng(still, f('settled')).mean <= LIMITS.settled[ctx.renderer], `the settled picture is within ${LIMITS.settled[ctx.renderer]} of the still`);
 
     // (2) Frames of 60 ms are too slow for 25 per second: the picture shrinks; frames of 16 ms let it grow back.
     const q = await ctx.session.open(ctx.page, `${v}&speed=900&at=10,60`, ctx.size);
@@ -296,6 +221,7 @@ export const CHECKS = {
   },
 
   // A flight against a settled still at the place reached: the moving picture keeps close to the still one.
+  // The limits are per renderer; with a base, the page must also do no worse than the base.
   async flight(ctx) {
     const flights = [
       { name: 'cruise', q: 'date=172&time=15&yaw=20&pitch=-12', frames: 61 },
@@ -304,30 +230,41 @@ export const CHECKS = {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
     let ok = true;
+    const measure = async (root, who) => {
+      const out = {};
+      for (const fl of flights) {
+        const fly = f(`${fl.name}.${who}`), still = f(`${fl.name}-still.${who}`);
+        pages.push(await shoot(ctx, root, `${fl.q}&speed=900&heading=0&at=40,60`, [[fl.frames, 16]], fly));
+        pages.push(await stillAt(ctx, root, `${fl.q}&heading=0&${at(reached(40, 60, 900, 0, fl.frames, 16))}`, still));
+        out[fl.name] = diffPng(still, fly, { out: f(`${fl.name}-diff.${who}`) });
+      }
+      return out;
+    };
+    const page = await measure(ctx.page, 'page'), base = ctx.base ? await measure(ctx.base, 'base') : null;
     for (const fl of flights) {
-      pages.push(await shoot(ctx, ctx.page, `${fl.q}&speed=900&heading=0&at=40,60`, [[fl.frames, 16]], f(fl.name)));
-      pages.push(await stillAt(ctx, ctx.page, `${fl.q}&heading=0&${at(reached(40, 60, 900, 0, fl.frames, 16))}`, f(fl.name + '-still')));
-      const d = diffPng(f(fl.name + '-still'), f(fl.name), { out: f(fl.name + '-diff') });
-      lines.push(`${fl.name}: ${fl.frames} frames flown against the still: ${fmtDiff(d)}`);
-      if (d.mean > LIMITS.flight) ok = false;
+      const d = page[fl.name], limit = LIMITS.flight[ctx.renderer][fl.name];
+      const rel = base ? LIMITS.flightBase(base[fl.name].mean) : Infinity;
+      lines.push(`${fl.name}: ${fl.frames} frames flown against the still: ${fmtDiff(d)} (limit ${limit}` +
+        (base ? `; base ${base[fl.name].mean}, limit ${rel.toFixed(3)})` : ')'));
+      if (d.mean > limit || d.mean > rel) ok = false;
     }
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
   },
 };
 
-// Limits, from the numbers measured on main (see tools/README.md), with room for noise.
+// Limits, from the numbers measured on main and on broken copies (see tools/README.md), with room for noise.
 const LIMITS = {
-  wrapStill: (control) => control * 1.5 + 0.3,
-  wrapFlight: (control) => control * 1.5 + 0.3,
-  settled: 1.5,
-  flight: 1.3,
+  wrap: (control) => control * 1.5 + 1,
+  settled: { gpu: 0.8, swiftshader: 0.8 },
+  flight: { gpu: { cruise: 1.6, low: 1.6 }, swiftshader: { cruise: 1.6, low: 1.9 } },
+  flightBase: (base) => base * 1.1 + 0.03,
 };
 
 export async function runChecks(session, { names, page, base, size, gpu, dir, ignore }) {
   const list = names.length ? names : Object.keys(CHECKS);
   for (const n of list) if (!CHECKS[n]) throw new Error(`no check ${n} (${Object.keys(CHECKS).join(', ')})`);
-  const t0 = Date.now();
+  const t0 = Date.now(), runs = new Map();
   let failed = 0, skipped = 0;
   console.log(`page ${page}${base ? `, base ${base}` : ''}, ${size.w}x${size.h}, ${gpu ? 'GPU' : 'SwiftShader'}`);
   for (const name of list) {
@@ -336,7 +273,7 @@ export async function runChecks(session, { names, page, base, size, gpu, dir, ig
     fs.mkdirSync(sub, { recursive: true });
     let r;
     try {
-      r = await CHECKS[name]({ session, page, base, size, dir: sub, ignore });
+      r = await CHECKS[name]({ session, page, base, size, dir: sub, out: dir, ignore, runs, renderer: gpu ? 'gpu' : 'swiftshader' });
     } catch (err) {
       r = { ok: false, msg: err.stack || String(err) };
     }

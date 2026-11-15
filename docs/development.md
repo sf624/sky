@@ -69,7 +69,7 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 
 ## Judging a change
 
-**The tools.** [`tools/`](../tools/README.md) does the checks below from
+**The tools.** [`tools/`](https://github.com/sf624/sky/blob/main/tools/README.md) (in the repository, not on the site) does the checks below from
 the command line, in headless Chrome on a fake clock: stills of a fixed
 set of views against a base, the wrap, the loop, the drawing size, flight
 against a still, and a GL trace that shows whether a change sends the

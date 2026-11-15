@@ -1,9 +1,8 @@
 // The commands that drive pages: trace, stills, drive, perf; and the helpers the checks share.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { sleep } from './browser.mjs';
+import { shortTmp, sleep } from './browser.mjs';
 import { formatTrace } from './trace.mjs';
 import { diffPng, fmtDiff } from './png.mjs';
 
@@ -15,7 +14,7 @@ export const parseSize = (s) => {
   return { w, h };
 };
 
-// A view of views.json by name, with its frames and ms; or a plain query.
+// A view of views.json by name, with its frames and ms; or a plain query as a still.
 export function view(name, q) {
   if (name) {
     const v = VIEWS.views.find((x) => x.name === name);
@@ -24,6 +23,7 @@ export function view(name, q) {
   }
   return { name: 'query', frames: VIEWS.frames, ms: VIEWS.ms, q: q || '' };
 }
+export const viewSettings = () => ({ frames: VIEWS.frames, ms: VIEWS.ms });
 // A still stands at rest: speed=0 unless the query sets the speed.
 export const stillQuery = (q) => (/(^|&)speed=/.test(q) ? q : q ? q + '&speed=0' : 'speed=0');
 export const viewNames = () => VIEWS.views.map((v) => v.name);
@@ -33,7 +33,7 @@ export function resolveBase(spec, repo) {
   if (fs.existsSync(spec) && fs.statSync(spec).isDirectory()) return path.resolve(spec);
   const rev = spawnSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', spec + '^{commit}'], { encoding: 'utf8' });
   if (rev.status !== 0) throw new Error(`--base ${spec}: neither a directory nor a git revision`);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir().length <= 24 ? os.tmpdir() : '/tmp', 'sky-base-'));
+  const dir = fs.mkdtempSync(path.join(shortTmp(), 'sky-base-'));
   process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
   const tar = spawnSync('git', ['-C', repo, 'archive', '--format=tar', rev.stdout.trim()], { maxBuffer: 1 << 30 });
   const x = spawnSync('tar', ['-x', '-C', dir], { input: tar.stdout });
@@ -42,36 +42,56 @@ export function resolveBase(spec, repo) {
   return dir;
 }
 
-// Loads a view, steps its frames and saves a still. Returns { file, errors }.
-export async function still(session, root, v, size, file) {
-  const p = await session.open(root, v.q, size);
+// Runs a view as views.json describes it: loads it, steps its frames (with its input after 2 frames), and saves
+// a still (png) and/or its GL trace (traceFile). Returns { skip } when the machine lacks what the view needs, else
+// { errors, warnings, lines, bytes }.
+export async function runView(session, root, v, size, { png, traceFile } = {}) {
+  if (v.font === 'ja' && !(await session.hasFont('ja'))) return { skip: 'no Japanese font on this machine' };
+  const w = v.w || size.w, h = v.h || size.h;
+  const p = await session.open(root, v.q, { w, h, dpr: v.dpr, hide: !v.ui, trace: traceFile ? v.frames : 0 });
   try {
-    await p.step(v.frames, v.ms);
-    await p.shot(file);
-    return { file, errors: p.errors };
+    let left = v.frames;
+    if (v.before || v.drag) {
+      await p.step(2, v.ms);
+      left -= 2;
+      if (v.before) await p.eval(`(() => { ${v.before}; return 0; })()`);
+      if (v.drag) {
+        const [x0, y0, x1, y1] = v.drag.map((f, i) => Math.round(f * (i % 2 ? h : w)));
+        await p.mouse({ type: 'mouseMoved', x: x0, y: y0 });
+        await p.mouse({ type: 'mousePressed', x: x0, y: y0, button: 'left', buttons: 1, clickCount: 1 });
+        for (let k = 1; k <= 5; k++) {
+          await p.mouse({ type: 'mouseMoved', x: Math.round(x0 + (x1 - x0) * k / 5), y: Math.round(y0 + (y1 - y0) * k / 5), button: 'left', buttons: 1 });
+        }
+        await p.mouse({ type: 'mouseReleased', x: x1, y: y1, button: 'left', buttons: 0, clickCount: 1 });
+      }
+    }
+    await p.step(left, v.ms);
+    if (png) await p.shot(png);
+    const r = { errors: p.errors, warnings: p.warnings };
+    if (traceFile) {
+      const dump = await p.trace();
+      const text = formatTrace(dump, [`query ?${v.q}`, `size ${w}x${h}${v.dpr ? ' at dpr ' + v.dpr : ''}, ${v.frames} frames of ${v.ms} ms`,
+        `renderer ${session.chrome.renderer}: ${await session.renderer()}`]);
+      fs.mkdirSync(path.dirname(traceFile), { recursive: true });
+      fs.writeFileSync(traceFile, text);
+      Object.assign(r, { lines: text.split('\n').length - 1, bytes: text.length, errors: [...p.errors, ...dump.errors.map((e) => 'trace: ' + e)] });
+    }
+    return r;
   } finally {
     await p.close();
   }
 }
 
-// Traces use one size on every renderer, so that traces of the GPU and of SwiftShader can be compared.
+// The trace command: a view of views.json, or a query (by default the page as it opens, flying, 12 frames of
+// 16 ms). Traces use one size on every renderer, so that traces of the GPU and of SwiftShader can be compared.
 export const TRACE_SIZE = '480x270';
 export async function trace(session, root, { view: name, q, frames, ms, size, file }) {
-  const v = name ? view(name) : view(null, q || '');
-  const n = frames || 12, step = ms || 16;
+  const v = name ? view(name) : { name: 'query', q: q || '', frames: 12, ms: 16 };
+  if (frames) v.frames = frames;
+  if (ms) v.ms = ms;
   const t0 = Date.now();
-  const p = await session.open(root, v.q, { ...size, trace: n });
-  try {
-    await p.step(n, step);
-    const dump = await p.trace();
-    const text = formatTrace(dump, [`query ?${v.q}`, `size ${size.w}x${size.h}, ${n} frames of ${step} ms`,
-      `renderer ${session.chrome.renderer}: ${await session.renderer()}`]);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, text);
-    return { file, lines: text.split('\n').length - 1, bytes: text.length, seconds: ((Date.now() - t0) / 1000).toFixed(1), errors: p.errors, warnings: p.warnings };
-  } finally {
-    await p.close();
-  }
+  const r = await runView(session, root, v, size, { traceFile: file });
+  return { file, seconds: ((Date.now() - t0) / 1000).toFixed(1), ...r, errors: r.errors || [], warnings: r.warnings || [] };
 }
 
 // Stills of the views (all, or a list), with an HTML page to look at them; with a base, each compared.
@@ -83,13 +103,14 @@ export async function stills(session, root, { views, size, dir, base }) {
   for (const name of names) {
     const v = view(name);
     const t0 = Date.now();
-    const r = await still(session, root, v, size, path.join(dir, `${name}.png`));
+    const r = await runView(session, root, v, size, { png: path.join(dir, `${name}.png`) });
+    if (r.skip) { console.log(`${name}: ${r.skip}: skipped`); continue; }
     let line = `${name}: ${((Date.now() - t0) / 1000).toFixed(1)} s`;
     const row = { name, q: v.q, page: `${name}.png` };
     if (base) {
-      const b = await still(session, base, v, size, path.join(dir, `${name}.base.png`));
+      const b = await runView(session, base, v, size, { png: path.join(dir, `${name}.base.png`) });
       r.errors.push(...b.errors.map((e) => 'base: ' + e));
-      const d = diffPng(path.join(dir, `${name}.base.png`), r.file, { out: path.join(dir, `${name}.diff.png`) });
+      const d = diffPng(path.join(dir, `${name}.base.png`), path.join(dir, `${name}.png`), { out: path.join(dir, `${name}.diff.png`) });
       Object.assign(row, { base: `${name}.base.png`, diff: `${name}.diff.png`, stats: fmtDiff(d) });
       line += `, against the base: ${fmtDiff(d)}`;
       if (d.max) ok = false;
@@ -98,7 +119,7 @@ export async function stills(session, root, { views, size, dir, base }) {
     console.log(line);
     rows.push(row);
   }
-  const cell = (f) => (f ? `<td><a href="${f}"><img src="${f}" width="${Math.min(size.w, 480)}"></a></td>` : '');
+  const cell = (f) => (f ? `<td><a href="${f}"><img src="${f}" width="480"></a></td>` : '');
   fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Stills</title>
 <style>body{font:14px sans-serif;background:#222;color:#ddd}td{vertical-align:top;padding:4px}img{display:block}</style>
 <table><tr><th></th><th>page</th>${base ? '<th>base</th><th>difference x8</th>' : ''}</tr>

@@ -93,16 +93,36 @@ export async function startServer() {
 // Starts Chrome with a fresh profile in a short temporary directory (Chrome puts sockets there; a long path makes
 // it fail at start). Chrome dies with this process: it gets SIGKILL from the kernel when its parent dies
 // (setpriv --pdeathsig), and close() kills its whole process group on exit, on a signal or on an error.
+// The short temporary directory for profiles and base copies.
+export const shortTmp = () => (os.tmpdir().length <= 24 ? os.tmpdir() : '/tmp');
+
+// Removes profiles and base copies of this user older than a day: a run killed with SIGKILL leaves its own.
+export function cleanStale() {
+  const tmp = shortTmp(), day = Date.now() - 864e5;
+  let names = [];
+  try { names = fs.readdirSync(tmp); } catch {}
+  for (const n of names) {
+    if (!/^sky-(base-)?[A-Za-z0-9]{6}$/.test(n)) continue;
+    const f = path.join(tmp, n);
+    try {
+      const st = fs.lstatSync(f);
+      if (st.isDirectory() && st.uid === process.getuid() && st.mtimeMs < day) fs.rmSync(f, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 export async function launchChrome() {
   const chrome = findChrome();
   const r = renderer();
-  const tmp = os.tmpdir().length <= 24 ? os.tmpdir() : '/tmp';
+  cleanStale();
+  const tmp = shortTmp();
   const profile = fs.mkdtempSync(path.join(tmp, 'sky-'));
   const args = ['--headless=new', ...r.flags, '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--mute-audio',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-    '--hide-scrollbars', '--window-size=1400,900', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'];
-  const env = { ...process.env, ...r.env, TMPDIR: profile };
+    '--hide-scrollbars', '--window-size=1400,900', '--lang=en-US', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'];
+  // The language of the page follows the browser's: pinned, like the time zone (see page.mjs).
+  const env = { ...process.env, ...r.env, TMPDIR: profile, LANG: 'en_US.UTF-8', LANGUAGE: 'en_US' };
   if (process.env.SKY_CHROME_LIBS) env.LD_LIBRARY_PATH = [process.env.SKY_CHROME_LIBS, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   delete env.DISPLAY; // headless must not touch a desktop; with DISPLAY set, headless Chrome on WSLg got no WebGL2
   delete env.WAYLAND_DISPLAY;
@@ -140,9 +160,22 @@ export async function launchChrome() {
       else resolve(m.result);
     } else if (m.method) for (const h of handlers) h(m);
   };
-  ws.onclose = () => { for (const { reject } of pending.values()) reject(new Error('Chrome went away')); pending.clear(); };
+  // Once Chrome is gone (its process ended, or the connection closed), every call waiting and every later call
+  // fails at once, instead of waiting for the time limit.
+  let dead = null;
+  const die = (why) => {
+    if (dead) return;
+    dead = new Error(`Chrome went away (${why})${stderr ? ':\n' + stderr.slice(-800) : ''}`);
+    for (const { reject } of pending.values()) reject(dead);
+    pending.clear();
+    for (const h of handlers) h({ method: 'sky.chromeDied' });
+  };
+  ws.onclose = () => die('the DevTools connection closed');
+  proc.on('exit', (code, sig) => die(`its process ended, ${sig || 'status ' + code}`));
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = () => reject(new Error('CDP connection failed')); });
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    if (dead) return reject(dead);
+    if (ws.readyState !== WebSocket.OPEN) { die('the DevTools connection is not open'); return reject(dead); }
     const i = ++id;
     pending.set(i, { resolve, reject, method });
     ws.send(JSON.stringify({ id: i, method, params, sessionId }));
@@ -150,7 +183,7 @@ export async function launchChrome() {
   const version = await send('Browser.getVersion');
   return {
     renderer: r.name, chrome, version: version.product,
-    send, on: (h) => handlers.add(h), off: (h) => handlers.delete(h), stderr: () => stderr,
+    send, on: (h) => handlers.add(h), off: (h) => handlers.delete(h), stderr: () => stderr, dead: () => dead,
     close() { try { ws.close(); } catch {} close(); },
   };
 }

@@ -1,5 +1,5 @@
 {
-  "about": "The fixed views for stills. q is the query string; speed=0 is added unless q sets speed. A still steps frames frames of ms each (46 frames let the running mean settle). Dates are given so that the views do not depend on the day.",
+  "about": "The fixed views, for stills and traces. q is the query string; speed=0 is added unless q sets speed. Each view steps frames frames of ms each (46 frames let the running mean settle). Optional: w, h, dpr (the viewport, instead of the run's size); before (JavaScript run in the page after 2 frames); drag ([x0, y0, x1, y1], fractions of the viewport, a mouse drag after 2 frames); ui (true: the text and the controls are shown); font (ja: skipped where the machine has no Japanese font). Dates are given so that the views do not depend on the day.",
   "frames": 46,
   "ms": 50,
   "views": [
@@ -7,13 +7,22 @@
     { "name": "dusk", "q": "date=80&time=17.6" },
     { "name": "night-moon", "q": "date=180&time=23&moon=14&yaw=-5&pitch=8&cloud=0.3" },
     { "name": "night-dark", "q": "date=80&time=1&moon=0&pitch=5" },
+    { "name": "crescent", "q": "date=80&time=19.5&moon=4&yaw=85&pitch=20&cloud=0.3&cirrus=0" },
     { "name": "haze4", "q": "date=300&time=13&haze=4&pitch=-10" },
     { "name": "overcast-0.5km", "q": "date=172&time=11&cloud=1&alt=0.5&pitch=-10" },
-    { "name": "in-cloud-3km", "q": "date=172&time=13&alt=3&cloud=1&pitch=-2" },
+    { "name": "in-cloud", "q": "date=172&time=13&alt=1.5&cloud=1&pitch=0" },
     { "name": "cirrus1", "q": "date=172&time=13&pitch=12&yaw=100&cirrus=1" },
     { "name": "sea-low-sun", "q": "date=172&time=17.8&alt=0.3&cloud=0.2&yaw=115&pitch=-4" },
+    { "name": "gale", "q": "date=172&time=11&wind=15&alt=1&cloud=0.2&yaw=150&pitch=-50" },
+    { "name": "clear", "q": "date=172&time=14&cloud=0&cirrus=0&pitch=-10" },
     { "name": "up-cirrus-11.5km", "q": "date=172&time=14&alt=11.5&pitch=40&cirrus=0.7&yaw=270" },
     { "name": "near-clouds-3km", "q": "date=172&time=14&alt=3&pitch=-5&yaw=60" },
-    { "name": "flight", "q": "date=172&time=15&yaw=20&pitch=-12&speed=900&heading=0&at=40,60", "frames": 40, "ms": 16 }
+    { "name": "at-the-wrap", "q": "date=172&time=14&cloud=0.6&yaw=40&pitch=-14&at=255.999,255.999" },
+    { "name": "dpr2-fhd", "q": "date=172&time=15&pixels=fhd", "w": 1280, "h": 720, "dpr": 2, "frames": 3 },
+    { "name": "flight", "q": "date=172&time=15&yaw=20&pitch=-12&speed=900&heading=0&at=40,60", "frames": 40, "ms": 16 },
+    { "name": "time-lapse", "q": "date=172&time=16.5", "before": "document.getElementById('play').click()", "frames": 24 },
+    { "name": "drag", "q": "date=172&time=15", "drag": [0.6, 0.5, 0.35, 0.4], "frames": 24 },
+    { "name": "ui-en", "q": "date=172&time=15&lang=en", "ui": true },
+    { "name": "ui-ja", "q": "date=172&time=15&lang=ja", "ui": true, "font": "ja" }
   ]
 }

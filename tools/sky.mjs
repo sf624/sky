@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { which } from './lib/browser.mjs';
 
 const TOOLS = import.meta.dirname;
@@ -12,14 +12,14 @@ const REPO = path.dirname(TOOLS);
 const USAGE = `usage: node tools/sky.mjs <command> [options]
   trace       [--view NAME | --q QUERY] [--frames N] [--ms MS] [--size WxH] [--out FILE]
               the GL trace of the page's first frames, as text
-  trace-diff  A B [--ignore ${'shader,line,readback,query'}] [--max N]
+  trace-diff  A B [--ignore ${'shader,line,comments,readback,query'}] [--max N]
               compares two traces; exit status 1 if they differ
   stills      [--views a,b] [--base DIR|REV] [--size WxH] [--out DIR]
               stills of the fixed views (tools/views.json); with --base, compared with the base's
   img-diff    A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]
               differences of two pictures
   check       [NAME...] [--base DIR|REV] [--size WxH] [--out DIR] [--ignore CLASSES]
-              runs the checks (all of: trace stills skylight wrap loop res flight); one line each
+              runs the checks (all of: trace stills wrap loop res flight); one line each
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
@@ -44,6 +44,9 @@ function parseArgs(argv) {
 
 // On a machine with a queue for heavy runs (SKY_WRAP=path, or ~/.claude/bin/heavy when it exists), the command
 // runs again inside it, under timeout and, where systemd-run exists, a memory cap. SKY_WRAP=none turns this off.
+// The queue and everything under it run in a process group of their own (timeout --foreground makes no group of
+// its own), and a signal to this process goes to that whole group: Ctrl-C stops the run and frees the slot.
+// Returns a promise of the exit status, or false when the command runs here.
 function wrapped(cmd) {
   if (!LIMITS[cmd] || process.env.SKY_WRAPPED) return false;
   const mode = process.env.SKY_WRAP || 'auto';
@@ -56,9 +59,13 @@ function wrapped(cmd) {
   const secs = limit(cmd);
   const cap = which('systemd-run') ? ['systemd-run', '--user', '--scope', '-q', '-p', `MemoryMax=${process.env.SKY_MEMORY_MAX || '3G'}`,
     '-p', 'MemorySwapMax=0', '-p', 'TasksMax=500', '-p', `RuntimeMaxSec=${secs + 30}`] : [];
-  const r = spawnSync(heavy, ['timeout', '-k', '10', String(secs + 20), ...cap, process.execPath, ...process.argv.slice(1)],
-    { stdio: 'inherit', env: { ...process.env, SKY_WRAPPED: '1' } });
-  process.exit(r.status ?? 1);
+  console.error(`${cmd}: queued through ${heavy} (it waits for a free slot)`);
+  const child = spawn(heavy, ['timeout', '--foreground', '-k', '10', String(secs + 20), ...cap, process.execPath, ...process.argv.slice(1)],
+    { stdio: 'inherit', detached: true, env: { ...process.env, SKY_WRAPPED: '1' } });
+  const pass = (sig) => { try { process.kill(-child.pid, sig); } catch {} };
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => pass(sig));
+  process.on('exit', () => { if (child.exitCode === null && child.signalCode === null) pass('SIGTERM'); });
+  return new Promise((resolve) => child.on('exit', (code, sig) => resolve(code ?? (sig ? 128 : 1))));
 }
 const limit = (cmd) => +(process.env.SKY_TIMEOUT || LIMITS[cmd]);
 
@@ -67,14 +74,17 @@ async function main() {
   if (!cmd || cmd === 'help' || cmd === '--help') { console.log(USAGE); return 0; }
   const opt = parseArgs(rest);
   if (!['trace', 'trace-diff', 'stills', 'img-diff', 'check', 'drive', 'perf'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
-  wrapped(cmd);
+  const queued = wrapped(cmd);
+  if (queued) return await queued;
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(130));
   if (LIMITS[cmd]) {
     setTimeout(() => { console.error(`${cmd}: time limit of ${limit(cmd)} s reached`); process.exit(124); }, limit(cmd) * 1000).unref();
   }
   const page = path.resolve(opt.page || REPO);
   const gpu = !!process.env.SKY_GPU && process.env.SKY_GPU !== '0';
-  const out = (name) => path.resolve(opt.out || path.join(TOOLS, 'out', name));
+  // Without --out, each run writes to a folder of its own, so that two runs do not mix their files.
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15) + '-' + process.pid;
+  const out = (name) => path.resolve(opt.out || path.join(TOOLS, 'out', name, stamp));
 
   if (cmd === 'trace-diff') {
     const { compareTraces, CLASSES } = await import('./lib/trace.mjs');
@@ -83,7 +93,7 @@ async function main() {
     const [a, b] = opt._;
     const r = compareTraces(fs.readFileSync(a, 'utf8'), fs.readFileSync(b, 'utf8'), { ignore, max: +(opt.max || 10) });
     if (r.headers) console.log(`headers differ:\n  A: ${r.headers[0]}\n  B: ${r.headers[1]}`);
-    for (const l of [...r.report, ...r.notes]) console.log(l);
+    for (const l of r.report) console.log(l);
     console.log(r.summary);
     return r.same ? 0 : 1;
   }
@@ -101,9 +111,10 @@ async function main() {
     console.log(`chrome: ${session.chrome.version} (${session.chrome.renderer}: ${await session.renderer()})`);
     const size = run.parseSize(opt.size || (gpu ? '1280x720' : '480x270'));
     if (cmd === 'trace') {
-      const file = opt.out ? path.resolve(opt.out) : path.join(TOOLS, 'out', 'trace', `${opt.view || 'query'}.trace`);
+      const file = opt.out ? path.resolve(opt.out) : path.join(TOOLS, 'out', 'trace', `${stamp}-${opt.view || 'query'}.trace`);
       const r = await run.trace(session, page, { view: opt.view, q: opt.q, frames: opt.frames && +opt.frames, ms: opt.ms && +opt.ms,
         size: run.parseSize(opt.size || run.TRACE_SIZE), file });
+      if (r.skip) { console.log(`${opt.view}: ${r.skip}: skipped`); return 0; }
       console.log(`${file}: ${r.lines} lines, ${(r.bytes / 1024).toFixed(0)} kB, ${r.seconds} s${r.warnings.length ? '\nwarnings:\n  ' + r.warnings.join('\n  ') : ''}${r.errors.length ? '\nERRORS:\n  ' + r.errors.join('\n  ') : ''}`);
       return r.errors.length ? 1 : 0;
     }
