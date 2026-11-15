@@ -2791,7 +2791,7 @@ void main() {
   const pixels = document.getElementById('pixels');
   let storedPixels = null;
   try { storedPixels = localStorage.getItem('sky.pixels'); } catch (err) {}
-  const pixelsKey = [params.get('pixels'), storedPixels].find(k => Object.hasOwn(HERO_PIXELS, k)) || 'wqhd';
+  const pixelsKey = [params.get('pixels'), storedPixels].find(k => typeof HERO_PIXELS[k] === 'number') || 'wqhd';
   pixels.value = pixelsKey;
   heroPixels = HERO_PIXELS[pixelsKey];
   // The next frame fits the canvas again, as after a resize.
