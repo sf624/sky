@@ -301,12 +301,12 @@
       <article class="card">
         <span class="k">CLOUD</span>
         <h3>雲</h3>
-        <p>雲の粒は、どの色もほぼ同じに、何度も散らします。だから雲は白く、厚いほど底が暗くなります。形は3次元のノイズで作り、光を雲の中までたどって、日なたと陰を分けています。</p>
+        <p>雲の粒は、どの色もほぼ同じに、何度も散らします。だから雲は白く、厚いほど底が暗くなります。形は3次元のノイズで作り、光を雲の中までたどって、日なたと陰を分けています。高い空の薄雲は氷の粒で、光を前へ強く散らします。</p>
       </article>
       <article class="card">
         <span class="k">SEA</span>
         <h3>海</h3>
-        <p>海は空を映し、水の中からは、おもに青い光がわずかに戻ります。太陽の反射は、波の傾きのぶんだけ広がります。風が強いほど、きらめきの帯は広く、淡くなります。</p>
+        <p>海は空を映し、水の中からは、おもに青い光がわずかに戻ります。太陽の反射は、波の傾きのぶんだけ広がります。風が強いほど、きらめきの帯は広く、淡くなり、白波が立ちます。</p>
       </article>
       <article class="card">
         <span class="k">DITHER</span>
@@ -391,6 +391,17 @@ float perlinFbm(vec3 p, vec3 freq, int octaves, float seed) {
   return sum;
 }
 
+// The same with a chosen gain: nearer 1, more of the small sizes.
+float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
+  float sum = 0.0, amp = 1.0;
+  for (int i = 0; i < octaves; i++) {
+    sum += amp * perlin(p, freq, seed + float(i));
+    freq.xy *= 2.0;
+    amp *= gain;
+  }
+  return sum;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
   if (uZ >= 0.0) {
@@ -402,20 +413,99 @@ void main() {
     float a = worleyFbm(p, vec3(16.0), 30.0);
     outColor = vec4(g + billow * (1.0 - g), g, b, a);
   } else {
-    // Weather, on a map 256 km wide: systems of some 80 km, cells of
-    // 30 km, groups of clouds within them.
+    // Weather, on a map 256 km wide: systems of some 80 km; open cells of
+    // 30 km, with the cloud along their walls; streets, rows of cloud 5 km
+    // apart; and clumps from 6 km down to single clouds of 1 km. The many
+    // sizes of the clumps make clouds of many sizes.
     vec3 p = vec3(uv, 0.37);
     float systems = perlinFbm(p, vec3(3.0, 3.0, 1.0), 3, 40.0);
-    float cells = worley(p, vec3(9.0, 9.0, 1.0), 50.0);
-    float groups = perlinFbm(p, vec3(14.0, 14.0, 1.0), 5, 60.0);
-    float cover = 0.5 + 0.5 * systems + 0.25 * (cells - 0.45) + 0.3 * groups;
-    float tall = 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0);
-    float gusts = 0.5 + 0.6 * perlinFbm(p, vec3(40.0, 40.0, 1.0), 4, 80.0);
+    float walls = smoothstep(0.3, 0.75, 1.0 - worley(p, vec3(9.0, 9.0, 1.0), 50.0));
+    // Whole numbers turn the streets and keep them repeating.
+    vec3 s = vec3(4.0 * uv.x + uv.y, 4.0 * uv.y - uv.x, 0.37);
+    float streets = fbm(s, vec3(12.0, 3.0, 1.0), 3, 0.7, 90.0);
+    float clumps = fbm(p, vec3(40.0, 40.0, 1.0), 4, 0.75, 60.0);
+    float cover = 0.5 + 0.18 * systems + 0.15 * (walls - 0.5) + 0.3 * streets + 0.5 * clumps;
+    // Towers: the widest clumps, where the weather lets them grow; some
+    // grow taller than others.
+    float tall = smoothstep(0.4, 0.55, 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0))
+               * smoothstep(0.15, 0.4, fbm(p, vec3(20.0, 20.0, 1.0), 3, 0.6, 65.0))
+               * (0.7 + 0.6 * perlin(p, vec3(11.0, 11.0, 1.0), 75.0));
+    // Wind on the sea, which blows towards (2, 1): gusts and calms some
+    // 7 km across and twice as long down the wind, with finer ones inside
+    // them.
+    vec3 pw = vec3(2.0 * uv.x + uv.y, 2.0 * uv.y - uv.x, 0.37);
+    float gusts = 0.5 + 0.55 * perlinFbm(pw, vec3(8.0, 16.0, 1.0), 5, 80.0);
 
-    float cirrus = 1.0;                              // free: for the high, thin cloud
+    // High, thin cloud: the wind draws it out along a, the direction (3, 1)
+    // on the map; b runs across. Both step by whole numbers across the map,
+    // so the pattern repeats; a few long waves bend b (the same in the
+    // aircraft's shader, which adds the streaks). Patches of some 80 km,
+    // bands of 40 by 10 km within them, and shorter runs of 8 by 2 km.
+    const float TAU = 6.2831853;
+    float bend = 0.05 * sin(TAU * dot(uv, vec2(2.0, 1.0)) + 1.3) + 0.04 * sin(TAU * dot(uv, vec2(-1.0, 3.0)) + 4.1)
+               + 0.03 * sin(TAU * dot(uv, vec2(3.0, -2.0)) + 2.2) + 0.02 * sin(TAU * dot(uv, vec2(5.0, 4.0)) + 0.4)
+               + 0.015 * sin(TAU * dot(uv, vec2(-6.0, 5.0)) + 5.0) + 0.006 * sin(TAU * dot(uv, vec2(13.0, -9.0)) + 2.9);
+    vec3 c = vec3(dot(uv, vec2(3.0, 1.0)), dot(uv, vec2(-1.0, 3.0)) + bend, 0.61);
+    float patches = perlinFbm(p, vec3(3.0, 3.0, 1.0), 3, 85.0);
+    float bands = perlinFbm(c, vec3(2.0, 8.0, 1.0), 3, 100.0);
+    float runs = perlinFbm(c, vec3(10.0, 40.0, 1.0), 2, 105.0);
+    float cirrus = 0.42 + 0.5 * patches + 0.45 * bands + 0.3 * runs;
 
     outColor = vec4(cover, tall, gusts, cirrus);
   }
+}
+</script>
+
+<script id="waves" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+
+// Draws the map of the waves on the sea once, at start: many plane waves,
+// each a whole number of times across the map, so that it repeats.
+// R, G: the slope along x and z, in units of its rms (0.125 per unit, flat
+// at 0.5). B: the slope squared, over 8: averaged over a footprint, it
+// tells how much slope the averaged R and G have lost. A: streaks along
+// the wind.
+uniform float uSize;
+out vec4 outColor;
+
+const float TAU = 6.28318530718;
+const float WIND = 0.4636;          // the wind blows towards (2, 1)
+
+// Three random numbers (0 to 1) for wave i (a PCG hash, as in the noise).
+vec3 rnd(int i) {
+  uvec3 v = uvec3(ivec3(i, i + 977, i + 2311)) * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return vec3(v) * (1.0 / 4294967296.0);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uSize;
+  // Wind waves: 10 to 64 crests across the map, with the same slope in
+  // every octave (a sea in equilibrium). They run within some 70 degrees
+  // of the wind, short-crested; the long ones keep closer to it.
+  const int N = 96;
+  vec2 s = vec2(0.0);
+  for (int i = 0; i < N; i++) {
+    vec3 r = rnd(i), q = rnd(i + 5000);
+    float f = (float(i) + r.x) / float(N);
+    float a = WIND + mix(1.1, 1.6, f) * (r.y + r.z - 1.0);
+    vec2 m = round(10.0 * pow(6.4, f) * vec2(cos(a), sin(a)));
+    s += normalize(m) * cos(TAU * (dot(m, uv) + q.x));
+  }
+  s *= sqrt(2.0 / float(N));
+  // Streaks: 6 to 40 across the wind, and about twice as long along it.
+  const int M = 40;
+  float w = 0.0;
+  for (int i = 0; i < M; i++) {
+    vec3 r = rnd(i + 9000);
+    float k = 6.0 * pow(7.0, r.x);
+    float a = WIND + 0.25 * TAU + 0.7 * (r.y + r.z - 1.0);
+    w += cos(TAU * (dot(round(k * vec2(cos(a), sin(a))), uv) + fract(61.0 * r.x + r.y))) / sqrt(k);
+  }
+  outColor = vec4(0.5 + 0.125 * s, dot(s, s) / 8.0, 0.5 + 0.165 * w);
 }
 </script>
 
@@ -456,20 +546,27 @@ uniform float uCloud;   // cloud amount: 0 (none) to 1 (overcast)
 uniform float uWind;    // wind over the sea, m/s
 uniform vec3 uLight;    // what lights the clouds and the sea: the sun, or the moon at night
 uniform float uLightI;
-// A still view is drawn several times and averaged: each pass shifts the
-// rays within the pixel (uJitter, in pixels) and the samples along them.
+// The view from the aircraft is a mean over frames: each frame shifts the
+// rays within the pixel (uJitter, in pixels) and the samples through the
+// clouds (uPass, the number of the frame).
 uniform vec2 uJitter;
 uniform float uPass;
-uniform float uShare;   // the share of this pass in the mean
 // How far the aircraft has flown, km: clouds and sea are read at p.xz + uDrift.
 // It wraps at the width of the weather map, which every pattern must divide.
 uniform vec2 uDrift;
 uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
 // Cloud noise, repeating. R: Perlin-Worley; G, B, A: Worley at rising frequencies.
 uniform sampler3D uNoise;
-// Weather map, repeating. R: cloud cover, G: height of the tops, B: gusts on the sea.
+// Weather map, repeating. R: cloud cover, G: towers, B: gusts on the sea.
 uniform sampler2D uWeather;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+#if AIRCRAFT
+// The aircraft's frames go on to the shader that joins them into a picture
+// (see there), with the distance of what each pixel shows (outAux). They are
+// kept in steps of 1 / uSteps.
+uniform float uSteps;
+layout(location = 1) out vec4 outAux;
+#endif
 
 const float PI = 3.14159265359;
 // Lengths in km.
@@ -480,7 +577,11 @@ const float MIE_EXT = 1.11;     // extinction / scattering
 const float HR = 8.0;           // Rayleigh scale height
 const float HM = 1.2;           // Mie scale height
 const float ISUN = 20.0;
+#if AIRCRAFT
+const int NV = 20;              // view samples: the picture is within two steps of 8 bits of 40's
+#else
 const int NV = 40;              // view samples
+#endif
 const int NL = 16;              // light samples
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
@@ -609,9 +710,12 @@ float ign(vec2 p) {
 // skylight's shader leaves all this out.
 
 // ---------- Clouds ----------
-// A shell from CB to CT holds them. The shapes follow Schneider (2015): a
-// weather map says where clouds stand and how tall, a Perlin-Worley noise
-// gives the billows, and a finer noise erodes the edges.
+// A shell from CB to CT holds them. A field says where they are: positive
+// inside a cloud, rising by about 1 per km of depth under its surface. It
+// is a sum: a weather map (where clouds stand, and how wide), less what a
+// height costs (flat bases, domed tops, thicker where wider), plus noise on
+// smaller and smaller scales (billows on billows). A sum keeps the small
+// sizes at the edge of a cloud: its outline is ragged, not a smooth blob.
 const float CB = 0.6;               // cloud base, km
 const float CT = 5.0;               // the highest tops, km
 const float WEATHER_KM = 256.0;     // size of the weather map
@@ -619,66 +723,118 @@ const float BASE_KM = 8.0;          // size of one tile of the noise
 const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
-const int CLOUD_STEPS = 128;
+const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
+const float RELIEF = 0.7;           // the same for the fine noise
+const float EDGE = 0.04;            // depth under the surface at which a cloud is dense
+const int CLOUD_STEPS = 160;
 
 float remap01(float v, float lo, float hi) {
   return clamp((v - lo) / (hi - lo), 0.0, 1.0);
 }
 
-// The shape of the clouds at p, before the fine erosion: 0 outside, up to
-// 1 deep inside. lod: how much to smooth, as a mip level of the noise
-// (negative: finer than its texels; the fine noise still gains from that).
-// slack: extra cover, to ask "is a cloud near?". Also gives the height
-// within the cloud (hf) and the place in the noise (q).
-float cloudShape(vec3 p, float lod, float slack, out float hf, out vec3 q) {
+// The field at p without the fine noise. lod: how much to smooth, as a mip
+// level of the noise (negative: finer than its texels; the fine noise still
+// gains from that). Also gives the height in the shell (y, 0 to 1), the
+// place in the noise (q.xyz), how rough the cloud is there (q.w) and how
+// thick it is from base to top (body, 1 for a deck).
+float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body) {
   float h = length(p) - RG;
-  float y = (h - CB) / (CT - CB);
-  if (y <= 0.0 || y >= 1.0) return 0.0;
+  y = (h - CB) / (CT - CB);
+  q = vec4(0.0);
+  body = 0.0;
+  if (y <= 0.0 || y >= 1.0) return -9.0;
   vec2 x = p.xz + uDrift;
   vec4 w = textureLod(uWeather, x / WEATHER_KM, lod - 2.0);
-  float cov = clamp(2.2 * (w.r - 1.0 + 1.4 * uCloud) + slack, 0.0, 1.0);
-  if (cov <= 0.0) return 0.0;
-  hf = y / mix(0.3, 1.0, smoothstep(0.35, 0.85, w.g));
-  if (hf >= 1.0) return 0.0;
-  // Flat below, rounded above.
-  float prof = smoothstep(0.0, 0.07, hf) * (1.0 - smoothstep(0.35, 1.0, hf));
+  // The cloud amount sets the level of the map above which clouds stand.
+  // Towers grow where the map says so, unless the clouds are few.
+  float tower = w.g * smoothstep(0.1, 0.5, uCloud);
+  float e = 3.0 * (w.r - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud))) + 1.5 * tower;
+  // A dome over a flat base, with steep sides: a height costs its cube.
+  // Wider clouds are thicker, up to a point; a deck swells where the map
+  // is high.
+  float top = 0.28 + 0.4 * sqrt(tower);
+  float thick = 1.0 - exp(-e / 1.6);
+  float cube = top * top * top;
+  float swell = 0.022 * max(e - 1.0, 0.0) / cube;
+  float f = 1.6 * (thick - y * y * y / cube) + 1.2 * swell - 4.0 * max(y - 0.85, 0.0);
+  // The cube costs nothing near the base: there the thin edge of a cloud,
+  // where the map is barely over its level, would reach out sideways as a
+  // wide, flat sheet. Round off the lowest 180 m, so that a base ends under
+  // the side of its cloud.
+  float rim = max(1.0 - y / 0.04, 0.0);
+  f -= 0.2 * rim * rim;
+  // A thicker cloud has bigger lumps.
+  float lumps = LUMPS * mix(0.8, 2.0, clamp(thick, 0.0, 1.0)) * (1.0 + 0.6 * swell);
+  if (f < -0.6 * lumps) return f;                    // no noise could make a cloud here
   // The noise repeats every few km. Read it at a depth that drifts from
   // place to place, so that no two tiles show the same clouds.
   vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
-  q = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
-  vec4 n = textureLod(uNoise, q, max(lod, 0.0));
-  float base = remap01(n.r, n.g * 0.625 + n.b * 0.25 + n.a * 0.125 - 1.0, 1.0);
-  return remap01(remap01(base, 0.5, 0.95) * prof, 1.0 - cov, 1.0);
+  q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
+  vec4 n = textureLod(uNoise, q.xyz, max(lod, 0.0));
+  // Hard, growing turrets stand beside older, smoother cloud.
+  q.w = mix(0.45, 1.3, smoothstep(0.35, 0.65, n.g));
+  // Billows of 2 km down to 125 m (the numbers are the means of the noise).
+  float billows = lumps * (0.5 * (n.r - 0.571) + 0.5 * (n.g - 0.485) + 0.5 * (n.b - 0.481) + 0.4 * (n.a - 0.475));
+  // How high the top stands over this place, as the field has it here.
+  body = pow(max(thick + (billows + 1.2 * swell) / 1.6, 0.0), 1.0 / 3.0) * top / 0.28;
+  // A flat base, a few tens of metres higher or lower from place to place
+  // (30 to 80 m over CB), that gets dense over 20 m: soft, and clear of the
+  // shell's own cut at CB even where the fine noise swells.
+  return min(f + billows, 2.0 * (h - CB - 0.03 - 0.05 * n.r));
 }
 
-// Extinction (per km) at p. fine: with the eroded edges.
-float cloudDensity(vec3 p, float lod, bool fine) {
-  float hf;
-  vec3 q;
-  float dens = cloudShape(p, lod, 0.0, hf, q);
-  if (dens <= 0.0) return 0.0;
-  float er = 0.35;
-  if (fine) {
-    vec4 e = textureLod(uNoise, q * DETAIL, lod + 2.7);
-
-    er = e.g * 0.625 + e.b * 0.25 + e.a * 0.125;
-    er = mix(er, 1.0 - er, clamp(hf * 4.0, 0.0, 1.0));   // wisps below, billows above
-    if (lod < -2.0) {                                // close by: finer still
-      vec4 f = textureLod(uNoise, q * (5.0 * DETAIL), lod + 5.1);
-      er += 0.35 * (1.0 - smoothstep(-3.5, -2.0, lod)) * (f.g * 0.625 + f.b * 0.25 + f.a * 0.125 - 0.45);
+// The field at p; fine: with the fine noise, which also comes out by
+// itself (bump: positive on a billow, negative in a crease).
+float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body) {
+  vec4 q;
+  float f = cloudShape(p, lod, y, q, body);
+  bump = 0.0;
+  if (fine && f > -0.5 * RELIEF) {
+    // Billows of 300 m down to 20 m, read a mip level sharper than the
+    // pixel: the mean over the frames averages what that leaves.
+    vec4 d = textureLod(uNoise, q.xyz * DETAIL, lod + 1.7);
+    float bumps = 0.3 * d.r + 0.25 * d.g + 0.25 * d.b + 0.2 * d.a;
+    if (lod < -1.0) {                                // close by: finer still
+      vec4 c = textureLod(uNoise, q.xyz * (5.0 * DETAIL), lod + 4.1);
+      bumps += 0.3 * (1.0 - smoothstep(-2.0, -1.0, lod)) * (0.5 * c.g + 0.3 * c.b + 0.2 * c.a - 0.482);
     }
+    bump = RELIEF * q.w * (bumps - 0.508);
   }
-  dens = remap01(dens, 0.45 * er, 1.0);
-  // Dense a little way in: a cloud has a surface. More water higher up.
-  return SIGMA * min(4.0 * dens, 1.0) * mix(0.45, 1.0, hf);
+  return f + bump;
+}
+
+// Extinction (per km) for a value of the field at height y, in a cloud of
+// that body: dense a little way in (a cloud has a surface), with more water
+// higher up and in thicker clouds. A smoothed field (lod) has a wider edge.
+float cloudExtinction(float f, float lod, float y, float body) {
+  return SIGMA * clamp(f / max(EDGE, 1.5 * TEXEL_KM * exp2(lod)), 0.0, 1.0)
+       * mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)) * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
+}
+
+// Extinction (per km) at p. fine: with the fine noise.
+float cloudDensity(vec3 p, float lod, bool fine) {
+  float y, bump, body;
+  float f = cloudField(p, lod, fine, y, bump, body);
+  return f > 0.0 ? cloudExtinction(f, lod, y, body) : 0.0;
 }
 
 // Optical depth of the clouds from p towards the light, over the next
-// 26 steps' worth of distance; the steps grow.
-float lightDepth(vec3 p, vec3 dir, float ds, float lod) {
+// 26 steps' worth of distance; the steps grow. The first two see the fine
+// noise, and their depth comes apart (crisp): bumps shade the creases
+// beside them. Also gives the slope of the field towards the light (per
+// km), mostly over 200 m, from its values at p without and with the fine
+// noise (fc, ff).
+float lightDepth(vec3 p, vec3 dir, float ds, float lod, float fc, float ff, out float crisp, out float slope) {
   float tau = 0.0, s = 0.0;
+  crisp = 0.0;
+  slope = 0.0;
   for (int i = 0; i < 6; i++) {
-    tau += cloudDensity(p + dir * (s + 0.5 * ds), lod + 0.5 * float(i), false) * ds;
+    float y, bump, body, l = i < 2 ? lod : max(lod, 0.0) + 0.5 * float(i), sm = s + 0.5 * ds;
+    float fl = cloudField(p + dir * sm, l, i < 2, y, bump, body);
+    float dt = fl > 0.0 ? cloudExtinction(fl, l, y, body) * ds : 0.0;
+    if (i < 2) crisp += dt; else tau += dt;
+    if (i == 1) slope += 0.3 * (fl - ff) / sm;
+    if (i == 2) slope += 0.7 * (fl - fc) / sm;
     s += ds;
     ds *= 1.6;
   }
@@ -712,7 +868,7 @@ float hg(float mu, float g) {
 // (tBar; negative without clouds).
 void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float tBar) {
-  const float DS_MIN = 0.02, DS_REL = 0.0045, COARSE = 3.0;
+  const float DS_MIN = 0.02, DS_REL = 0.0045, COARSE = 3.0, FINE = 0.35;
   Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; tBar = -1.0;
   float pix = 2.0 * uTan / uRes.y;
   // The steps grow with the distance. On a long path they grow faster, to
@@ -722,52 +878,92 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   float near = max(min(tb, knee) - ta, 0.0) / DS_MIN;
   float rel = DS_REL * max(1.0, log(max(tb, knee) / max(ta, knee)) / DS_REL / max(BUDGET - near, 0.3 * BUDGET));
   // Light scattered once keeps the forward peak of the droplets; light
-  // scattered many times goes deeper and forgets its direction. These four
-  // terms stand for the orders of scattering; a thick cloud top comes out
-  // with an albedo near 0.7.
+  // scattered many times goes deeper and forgets its direction. These five
+  // terms stand for the orders of scattering; a thick cloud top that faces
+  // the light comes out with an albedo near 0.7.
   float mu = dot(d, uLight);
   float p0 = 0.8 * hg(mu, 0.8) + 0.2 * hg(mu, -0.25);
-  float p1 = 0.6 * hg(mu, 0.4), p2 = 1.4 * hg(mu, 0.1), p3 = 1.6 / (4.0 * PI);
+  float p1 = 0.6 * hg(mu, 0.4), p2 = 1.4 * hg(mu, 0.1), p3 = 1.6 / (4.0 * PI), p4 = 0.3 / (4.0 * PI);
   float ds = max(DS_MIN, rel * ta);
-  float t = ta + jitter * COARSE * ds, done = ta - ds, wsum = 0.0, tsum = 0.0;
-  bool fine = false;
-  int empty = 0;
+  float t = ta + jitter * COARSE * ds, wsum = 0.0, tsum = 0.0;
+  // The field tells how far the next surface is, roughly: stride through
+  // clear air, and slow down to a pixel's worth near a cloud, so that its
+  // edge comes out crisp. came: the step that led here.
+  float fPrev = 1.0, came = COARSE * ds;
+  int walk = 0;
+  // The light of the last sample; deeper in the same cloud the next ones
+  // share it.
+  float one = 0.0, many = 0.0, amb = 0.0;
+  bool lit = false;
   for (int i = 0; i < CLOUD_STEPS; i++) {
     if (t >= tb || Tc < 0.01) break;
     ds = max(DS_MIN, rel * t);
-    float lod = log2(max(1.2 * pix * t, 0.3 * ds) / TEXEL_KM);
+    float lod = log2(max(0.8 * pix * t, 0.2 * ds) / TEXEL_KM);
     vec3 p = o + d * t;
-    if (!fine) {
-      // Stride through clear air. Near a cloud (a smoothed shape tells),
-      // go back and walk.
-      float hf;
-      vec3 q;
-      if (cloudShape(p, max(lod, 0.0) + 1.0, 0.12, hf, q) > 0.0) {
-        fine = true;
-        empty = 0;
-        t = min(max(t - (COARSE - 1.0) * ds, done + ds), t);
-      } else {
-        t += COARSE * ds;
-      }
+    float y, bump, body;
+    float f = cloudField(p, lod, true, y, bump, body);
+    if (f > 0.0 && came > 1.5 * ds) {
+      // Strode into a cloud: go back and walk.
+      t -= came - ds;
+      came = ds;
+      walk = 3;
       continue;
     }
-    float den = cloudDensity(p, lod, true);
-    if (den > 0.0) {
-      empty = 0;
-      float tau = lightDepth(p, uLight, max(0.05, 0.6 * ds), max(lod, 0.0));
-      float a = 1.0 - exp(-den * ds);
-      float lift = clamp((length(p) - RG - CB) / 1.5, 0.0, 1.0);   // the sky lights the tops more
-      sOne += Tc * a * p0 * exp(-tau);
-      sMany += Tc * a * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * tau) + p3 * exp(-0.05 * tau));
-      sAmb += Tc * a * mix(0.45, 1.0, lift);
+    float next;
+    if (f > 0.0) {
+      next = clamp(0.5 * f, FINE * ds, ds);
+      float den = cloudExtinction(f, lod, y, body);
+      float a = 1.0 - exp(-den * next);
+      if (Tc > 0.25 || !lit) {
+        lit = true;
+        // Light the cloud where the ray met its surface, not where the
+        // step happened to land beneath it.
+        vec3 ps = fPrev < 0.0 ? p - d * (came * f / (f - fPrev)) : p;
+        float fs = fPrev < 0.0 ? 0.0 : f;
+        // Which way the surface faces: the field falls towards the light
+        // on a side turned to it. A thick cloud is a matt surface: the
+        // light it sends back goes with the cosine.
+        float crisp, slope;
+        float tau = lightDepth(ps, uLight, max(0.05, 0.6 * ds), lod, fs - bump, fs, crisp, slope);
+        float facing = clamp((0.3 - slope / sqrt(slope * slope + 2.0)) / 1.3, 0.0, 1.0);
+        // The sky lights what faces up, the higher the better, and the
+        // creases less.
+        float yu, bu, cu;
+        float reach = max(0.1, 2.0 * exp2(lod) * TEXEL_KM);
+        float rise = (cloudField(ps + normalize(ps) * reach, lod, true, yu, bu, cu) - fs) / reach;
+        float open = (0.6 - 0.4 * rise / sqrt(rise * rise + 2.0))
+                   * mix(0.6, 1.0, clamp((length(p) - RG - CB) / 1.5, 0.0, 1.0)) * clamp(0.9 + 1.5 * bump, 0.6, 1.1);
+        // Light scattered a few times casts the crisp shadows of the
+        // bumps; light scattered many times goes round them, and the last
+        // term comes through the whole cloud or from its neighbours. A
+        // thin cloud lets most of the light through: only a thick one is
+        // brilliant.
+        float soft = tau + 0.4 * crisp;
+        tau += crisp;
+        float white = 1.12 * body / (body + 0.12);
+        one = p0 * exp(-tau);
+        many = white * (0.66 * mix(0.12, 1.0, facing) * clamp(1.0 + 3.0 * bump, 0.6, 1.2)
+                        * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft) + p3 * exp(-0.05 * soft))
+                        + p4 * exp(-0.012 * soft));
+        amb = open * mix(1.0, white, 0.5);
+      }
+      sOne += Tc * a * one;
+      sMany += Tc * a * many;
+      sAmb += Tc * a * amb;
       wsum += Tc * a;
       tsum += Tc * a * t;
       Tc *= 1.0 - a;
-    } else if (++empty >= 3) {
-      fine = false;
+    } else {
+      lit = false;
+      next = clamp(-0.35 * f, FINE * ds, COARSE * ds);
+      if (walk > 0) {
+        next = min(next, ds);
+        walk--;
+      }
     }
-    done = t;
-    t += ds;
+    fPrev = f;
+    came = next;
+    t += next;
   }
   if (Tc < 0.01) Tc = 0.0;
   if (wsum > 0.0) tBar = tsum / wsum;
@@ -819,53 +1015,186 @@ float waveShade(float c, float s2) {
   return a < 1.6 ? (1.0 - 1.259 * a + 0.396 * a * a) / (3.535 * a + 2.181 * a * a) : 0.0;
 }
 
+// Map of the waves, repeating (drawn at start). R, G: the slope of a wind
+// sea along x and z, in units of its rms; B: the slope squared; A: streaks.
+uniform sampler2D uWaves;
+const vec2 WIND = vec2(0.8944, 0.4472);              // the wind blows this way (x, z)
+// Swell from far storms: plane waves with a whole number of crests (x, z)
+// in WEATHER_KM, and the amplitude of their slope along x and z. Two
+// trains: six waves of 200 to 340 m, and two of 120 to 170 m from elsewhere.
+const int SWELLS = 8;
+const vec4 SWELL[SWELLS] = vec4[SWELLS](
+  vec4(-1246.0, 182.0, -0.0109, 0.0016), vec4(-1043.0, 324.0, -0.0114, 0.0035),
+  vec4(-1061.0, 74.0, -0.0152, 0.0011), vec4(-978.0, -23.0, -0.0111, -0.0003),
+  vec4(-827.0, 187.0, -0.0112, 0.0025), vec4(-794.0, 212.0, -0.0118, 0.0031),
+  vec4(-775.0, -1975.0, -0.0036, -0.0091), vec4(-468.0, -1475.0, -0.0031, -0.0098));
+
 // The sea at pg, at distance t along d, behind air of depth od and under
 // clouds of depth tau towards the light: the glitter of the sun on the
 // waves, the mirrored sky, and the blue light from below.
+// The slopes of the waves have the variance of Cox and Munk (1954). The
+// waves long enough for the picture to show tilt the surface: swell, and
+// three bands of the wind sea from the map. What a pixel's footprint
+// averages away stays in the variance, so that the light of the glitter
+// is the same from near and far.
 void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vis, float tau, inout vec4 L[3]) {
   vec3 n = normalize(pg);
   vec3 ps = pg + n * 0.001;
   float cv = max(dot(n, -d), 0.0);
   float pix = 2.0 * uTan / uRes.y;
-  float gust = textureLod(uWeather, (pg.xz + uDrift) / WEATHER_KM,
-                          log2(max(pix * t / max(cv, 0.02) / (WEATHER_KM / 1024.0), 1.0))).b;
-  // Variance of the slopes of the waves: Cox and Munk (1954), with gusts.
-  float s2 = (0.003 + 0.00512 * uWind) * (0.55 + 0.9 * gust);
-  float foam = 0.2 * 2.95e-6 * pow(uWind, 3.52);     // whitecaps (Monahan), as an albedo
-  vec4 T[3];
+  // Axes on the sea along the map's x and z, and the footprint of the pixel
+  // on them: fa along the view (long when seen aslant), fc across.
+  vec3 ex = normalize(vec3(1.0, 0.0, 0.0) - n * n.x), ez = cross(ex, n);
+  vec2 x = pg.xz + uDrift;
+  vec2 dh = vec2(dot(d, ex), dot(d, ez));
+  float dl = length(dh);
+  vec2 ua = dl > 1e-4 ? dh / dl : vec2(1.0, 0.0);
+  float across = pix * t, along = across / max(cv, 0.02);
+  vec2 fa = along * ua, fc = across * vec2(-ua.y, ua.x);
+
+  // The wind varies: gusts and calms over kilometres (the weather map),
+  // more so in light airs, and streaks within them.
+  float gust = textureLod(uWeather, x / WEATHER_KM, log2(max(along / (WEATHER_KM / 1024.0), 1.0))).b;
+  float streak = textureGrad(uWaves, x * (40.0 / WEATHER_KM), fa * (40.0 / WEATHER_KM), fc * (40.0 / WEATHER_KM)).a;
+  float wind = uWind * exp(mix(1.2, 0.4, smoothstep(2.0, 9.0, uWind)) * (2.0 * gust - 1.0) + 0.3 * (streak - 0.5));
+  float s2 = 0.003 + 0.00512 * wind;
+
+  // Wind waves. The longest are as long as a grown sea has them
+  // (0.9 U^2 metres), ten to a tile of the map; each band reaches down to a
+  // sixth of that, and holds the same variance (0.0075, from the constant
+  // of Phillips), up to a fifth of the whole. slope: the tilt of the
+  // footprint; hidden: the variance within it.
+  float share = min(0.0075 / s2, 0.2) * s2;
+  float rep = max(round(WEATHER_KM / (0.0096 * uWind * uWind)), 1.0) / WEATHER_KM;
+  vec2 slope = vec2(0.0);
+  float hidden = 0.0, crest = 0.0;
+  for (int i = 0; i < 3; i++) {
+    vec4 w = vec4(0.5, 0.5, 0.125, 0.0);             // a footprint as wide as the waves averages them all
+    if (along * rep < 0.12) w = textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep);
+    vec2 s = 8.0 * w.rg - 4.0;
+    float h = max(8.0 * w.b - dot(s, s), 0.0);
+    slope += s;
+    hidden += h;
+    if (i > 0) crest += dot(s, WIND);                // the short waves, down the wind
+    rep *= 6.0;
+  }
+  slope *= sqrt(share);
+  hidden *= share;
+  float micro = s2 - 3.0 * share;
+  // Swell, smoothed over the footprint. Currents bend its crests: the map
+  // of the streaks, read wide, shifts it by up to some 200 m.
+  vec2 xs = (x + (textureLod(uWaves, x * (5.0 / WEATHER_KM), 2.0).a - 0.5) * vec2(0.24, 0.32)) / WEATHER_KM;
+  for (int i = 0; i < SWELLS; i++) {
+    vec2 k = SWELL[i].xy * (2.0 * PI / WEATHER_KM);
+    float keep = exp(-0.125 * (dot(k, fa) * dot(k, fa) + dot(k, fc) * dot(k, fc)));
+    float var = 0.5 * dot(SWELL[i].zw, SWELL[i].zw);
+    slope += SWELL[i].zw * (keep * cos(2.0 * PI * fract(dot(SWELL[i].xy, xs))));
+    hidden += var * (1.0 - keep * keep);
+    micro -= var;
+  }
+  // What is left for the ripples no picture shows.
+  float s2r = max(micro, 0.1 * s2) + hidden;
+
+  // Whitecaps cover 2.95e-6 U^3.52 of the sea (Monahan and O'Muircheartaigh,
+  // 1980); two fifths of that is thick, white foam. It lies in separate
+  // breakers: a cell of a grid (0.3 of the longest wave) holds one at
+  // most, somewhere, of some size (many small, a few large), longer along
+  // the crest; more of them in the streaks of the wind. From close, count
+  // what the footprint covers of the breakers around (seen sharp, a
+  // breaker has an edge, ragged with the short waves); from far, take the
+  // mean.
+  float white = 0.4 * 2.95e-6 * pow(wind, 3.52);
+  float cells = max(round(WEATHER_KM / (2.7e-4 * uWind * uWind)), 1.0);
+  float cell = WEATHER_KM / cells;
+  float foam = white;
+  if (white > 1e-5 && along < 1.5 * cell) {
+    const float SB = 0.07;                           // size of a breaker, in cells
+    float chance = white / (2.0 * PI * SB * SB * 1.2) * exp(3.5 * (streak - 0.5) - 0.245);
+    vec2 g = x / cell, g0 = floor(g);
+    // The footprint as a Gaussian (covariance aa, ac, cc), in cells.
+    vec2 ha = 0.5 * fa / cell, hc = 0.5 * fc / cell;
+    vec3 cov = vec3(ha.x * ha.x + hc.x * hc.x, ha.x * ha.y + hc.x * hc.y, ha.y * ha.y + hc.y * hc.y);
+    // A breaker of unit size: 1.5 SB along the crest, SB / 1.5 down the wind.
+    vec3 one = SB * SB * (2.25 * vec3(WIND.y * WIND.y, -WIND.x * WIND.y, WIND.x * WIND.x)
+                        + 0.444 * vec3(WIND.x * WIND.x, WIND.x * WIND.y, WIND.y * WIND.y));
+    float sum = 0.0;
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        vec2 id = g0 + vec2(i, j);
+        float r = hash(floor(mod(id, cells) + 0.5) + 0.37);       // under the chance: a breaker; also its size and place
+        if (r < chance) {
+          float size = fract(1731.7 * r);
+          size = 0.5 * exp(1.6 * size * size);
+          vec2 e = id + fract(vec2(4217.3, 9127.1) * r) - g;
+          vec3 v = cov + size * size * one;
+          float det = v.x * v.z - v.y * v.y;
+          float sharp = size * size * SB * SB / sqrt(det);
+          float b = sharp * exp(-0.5 * (v.z * e.x * e.x - 2.0 * v.y * e.x * e.y + v.x * e.y * e.y) / det);
+          float edge = mix(0.3, 0.06, smoothstep(0.3, 0.9, sharp));
+          sum += mix(b, smoothstep(0.37 - edge, 0.37 + edge, b * exp(0.7 * crest)), smoothstep(0.3, 0.7, sharp));
+        }
+      }
+    }
+    foam = mix(min(max(chance, 1.0) * sum, 1.0), white, smoothstep(0.6, 1.5, along / cell));
+  }
+  foam *= 0.5;                                       // the albedo of thick foam
+
+  vec4 T[3], lit[3];
   for (int k = 0; k < 3; k++) {
     T[k] = vis * exp(-(uBR[k] * od.x + extM * od.y + uBO[k] * od.z));
+    lit[k] = vec4(0.0);
   }
   // A cloud blocks the direct light, but lets diffuse light through.
   float soft = 1.0 / (1.0 + 0.1 * tau);
   float c = dot(n, uLight);
   if (uLightI > 0.0 && c > 0.0) {
     vec3 ol = depthToTop(ps, uLight);
-    // Glitter: the share of the waves tilted so as to mirror the light to the eye.
+    // Glitter: the share of the waves tilted so as to mirror the light to
+    // the eye. That takes the slope zh; the ripples spread around the tilt
+    // of the footprint.
     vec3 hv = normalize(uLight - d);
     float ch = max(dot(hv, n), 1e-3);
+    vec2 zh = -vec2(dot(hv, ex), dot(hv, ez)) / ch - slope;
     float F = 0.02 + 0.98 * pow(1.0 - clamp(dot(hv, -d), 0.0, 1.0), 5.0);
-    float glint = F * exp(-(1.0 - ch * ch) / (ch * ch * s2))
-                / (4.0 * PI * s2 * max(cv, 1e-3) * ch * ch * ch * ch)
+    float glint = F * exp(-dot(zh, zh) / s2r)
+                / (4.0 * PI * s2r * max(cv, 1e-3) * ch * ch * ch * ch)
                 / (1.0 + waveShade(max(cv, 1e-3), s2) + waveShade(c, s2));
     float direct = exp(-tau);
     for (int k = 0; k < 3; k++) {
-      L[k] += uLightI * T[k] * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z))
-            * (direct * glint + soft * c / PI * (SEA[k] + foam));
+      lit[k] = uLightI * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
+      L[k] += T[k] * lit[k] * (direct * glint + soft * c / PI * (SEA[k] + foam));
     }
   }
-  // Skylight. Rough water mirrors less at grazing angles than flat water
-  // (the mean Fresnel factor of Bruneton et al., 2010, from the spread of
-  // the slopes along the view: half the variance), and mirrors a higher
-  // part of the sky. Under a cloud less light comes down, of any kind.
-  float sigma = sqrt(0.5 * s2);
-  float Fm = 0.02 + 0.98 * pow(1.0 - cv, 5.0 * exp(-2.69 * sigma)) / (1.0 + 22.7 * pow(sigma, 1.5));
+  // The sky, mirrored by the tilted footprint. Rough water mirrors less at
+  // grazing angles than flat water (the mean Fresnel factor of Bruneton et
+  // al., 2010, from the spread of the slopes along the view: half the
+  // variance), and mirrors a higher part of the sky.
+  vec3 nr = normalize(n - slope.x * ex - slope.y * ez);
+  float sigma = sqrt(0.5 * s2r);
+  float Fm = 0.02 + 0.98 * pow(1.0 - max(dot(nr, -d), 0.0), 5.0 * exp(-2.69 * sigma)) / (1.0 + 22.7 * pow(sigma, 1.5));
+  vec3 up = reflect(d, nr);
+  up += max(0.02 - dot(up, n), 0.0) * n;             // never into the sea
+  up = normalize(up + 0.3 * n);
   vec4 S[3], msS[3], msM[3];
-  skyAt(ps, normalize(reflect(d, n) + 0.3 * n), betaM, extM, S);
+  skyAt(ps, up, betaM, extM, S);
   multiScatter(0.0, dot(n, uSun), msS);
   multiScatter(0.0, dot(n, uMoon), msM);
+  // Clouds in the mirror hide that sky (three samples up the layer tell how
+  // much is left) and show their sides and bases: grey with skylight, and
+  // whiter where the sun reaches around the sea.
+  float seen = 1.0;
+  if (uCloud > 0.0) {
+    float veil = 0.0;
+    for (int i = 0; i < 3; i++) {
+      vec2 h = (CT - CB) * (i == 0 ? vec2(0.07, 0.14) : i == 1 ? vec2(0.23, 0.18) : vec2(0.47, 0.3));
+      veil += cloudDensity(ps + up * ((CB + h.x) / dot(up, n)), 3.0, false) * h.y / dot(up, n);
+    }
+    seen = exp(-veil);
+  }
+  // Under a cloud less light comes down to the water, of any kind.
   for (int k = 0; k < 3; k++) {
-    L[k] += T[k] * soft * (Fm * S[k] + 1.6 * (SEA[k] + foam) * (uSunI * msS[k] + uMoonI * msM[k]));
+    vec4 sky = uSunI * msS[k] + uMoonI * msM[k];
+    L[k] += T[k] * (Fm * mix(0.75 * sky + 0.035 * soft * c * lit[k], S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
   }
 }
 
@@ -873,10 +1202,189 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
 // A sheet of cirrus along the ray (as far as tmax): what it lets through
 // (Th), the light it sends to the eye (H, like C of the clouds in main) and
 // the distance it comes from (tHigh; negative without any).
+// It fills a shell from CI_LO to CI_HI, but its pattern is drawn on one
+// height: where the ray crosses the middle of the shell.
+const float CI_LO = 12.2, CI_HI = 12.8;    // km
+const float CI_TAU = 0.15;                 // scale of its vertical optical depth
+// The pattern runs along and across the wind, in a frame that repeats over
+// the map (see its alpha channel): one unit of it is 81 km.
+const float CI_UNIT = WEATHER_KM / 3.1623;
+// The octaves of the streaks: their directions on the map (whole numbers,
+// near the wind's) and frequencies along and across them: 7 by 0.9 km,
+// 3 by 0.4 km, 2 by 0.25 km.
+const vec2 CI_DIR[3] = vec2[3](vec2(3.0, 1.0), vec2(5.0, 1.0), vec2(2.0, 1.0));
+const vec2 CI_FREQ[3] = vec2[3](vec2(12.0, 90.0), vec2(16.0, 120.0), vec2(56.0, 450.0));
+
+// Gradient noise on a lattice that repeats every `period` cells (whole
+// numbers).
+float ciNoise(vec2 p, vec2 period) {
+  vec2 i = floor(p), f = p - i;
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec4 g[2];
+  for (int k = 0; k < 2; k++) {
+    uvec4 v = uvec4(floor(mod(i.xyxy + vec4(0.0, float(k), 1.0, float(k)), period.xyxy) + 0.5));
+    v = v * 1664525u + 1013904223u;
+    v.xz += v.yw * 1664525u; v.yw += v.xz * 1664525u;
+    v ^= v >> 16u;
+    v.xz += v.yw * 1664525u; v.yw += v.xz * 1664525u;
+    v ^= v >> 16u;
+    g[k] = vec4(v) * (2.0 / 4294967296.0) - 1.0;   // gradients at (0, k) and (1, k)
+  }
+  return mix(mix(dot(g[0].xy, f), dot(g[0].zw, f - vec2(1.0, 0.0)), u.x),
+             mix(dot(g[1].xy, f - vec2(0.0, 1.0)), dot(g[1].zw, f - vec2(1.0)), u.x), u.y);
+}
+
+// Vertical optical depth of the cirrus at x on the map, smoothed over a
+// footprint of `foot` km; the streaks over `across` km, the footprint
+// across the line of sight, where a ray aslant foreshortens them most.
+float cirrusDepth(vec2 x, float foot, float across) {
+  vec2 uv = x / WEATHER_KM;
+  float w = textureLod(uWeather, uv, log2(max(foot / 0.25, 1.0))).a;
+  float thr = 0.62 - 0.8 * uCirrus;
+  if (w < thr - 0.11) return 0.0;                   // cov below is 0 there
+  // Streaks, finer and finer: thin ridges of noise drawn out along the
+  // wind, each octave turned a little from the others, as hairs of a
+  // brush cross. A cascade: each octave scales what the coarser ones left.
+  // Each fades out before it gets finer than the footprint.
+  const float TAU = 6.2831853;
+  float bend = 0.05 * sin(TAU * dot(uv, vec2(2.0, 1.0)) + 1.3) + 0.04 * sin(TAU * dot(uv, vec2(-1.0, 3.0)) + 4.1)
+             + 0.03 * sin(TAU * dot(uv, vec2(3.0, -2.0)) + 2.2) + 0.02 * sin(TAU * dot(uv, vec2(5.0, 4.0)) + 0.4)
+             + 0.015 * sin(TAU * dot(uv, vec2(-6.0, 5.0)) + 5.0) + 0.006 * sin(TAU * dot(uv, vec2(13.0, -9.0)) + 2.9);
+  float m = 1.0, first = 0.0, g = 0.6;
+  for (int i = 0; i < 3; i++) {
+    vec2 e = CI_DIR[i], fr = CI_FREQ[i];
+    float k = 1.0 - smoothstep(0.15, 0.5, across * length(e) * fr.y / WEATHER_KM);   // footprint / spacing
+    if (k <= 0.0) break;
+    vec2 ab = vec2(dot(uv, e), dot(uv, vec2(-e.y, e.x)) + bend);
+    float n = ciNoise(ab * fr, fr);
+    float r = 1.0 - abs(n);
+    float v = i == 0 ? (r * r - 0.68) / 0.32 : 3.0 * n;   // a ridge first, then soft
+    if (i == 0) first = k * v;
+    m *= max(1.0 + g * k * v, 0.0);
+    g *= 0.85;
+  }
+  // Lumps along the streaks, and a thin veil between them.
+  vec2 al = vec2(dot(uv, CI_DIR[0]), dot(uv, vec2(-CI_DIR[0].y, CI_DIR[0].x)) + bend);
+  float lump = max(1.0 + 1.2 * ciNoise(al * vec2(30.0, 60.0), vec2(30.0, 60.0)), 0.0);
+  // The edges thin out over a wide margin: seen aslant, a sheet turns
+  // opaque where it is a little dense, and a narrow margin would look cut.
+  float cov = clamp((w - thr) / 0.45 + 0.3 * first, 0.0, 1.0);
+  cov *= cov;
+  float veil = 0.2 + 0.4 * uCirrus;
+  float base = cov * (veil + (1.0 - veil) * m * lump);
+  // Below some hundreds of metres the ice is flocculent, not smooth: the
+  // Worley noise, drawn out four or five times along the wind, eats into
+  // it as into the edges of the low clouds.
+  const float T1 = CI_UNIT / 80.0 / 128.0, T2 = CI_UNIT / 20.0 / 128.0;   // texels across, km
+  float d1 = textureLod(uNoise, vec3(al * vec2(16.0, 80.0), 0.3), log2(max(foot / T1, 1.0))).a;
+  float d2 = textureLod(uNoise, vec3(al * vec2(5.0, 20.0), 0.7), log2(max(foot / T2, 1.0))).a;
+  float dd = 0.55 * d1 + 0.45 * d2;
+  float er = 0.5 * (1.0 - dd);
+  float dens = clamp((base - er) / max(1.0 - er, 0.2), 0.0, 2.0) * (0.2 + 1.6 * dd * dd);
+  float u2 = uCirrus * uCirrus;
+  return CI_TAU * (0.18 + 10.0 * u2 * u2) * dens;           // a veil when there is much
+}
+
+// depthToTop in fewer steps, denser near p: enough for the light of one
+// sheet, and it halves the cost.
+vec3 ciDepthToTop(vec3 p, vec3 d) {
+  float t = raySphere(p, d, RT).y, prev = 0.0;
+  vec3 s = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    float f = (float(i) + 1.0) / 8.0, t1 = t * f * f;
+    s += density(length(p + d * (0.5 * (prev + t1))) - RG) * (t1 - prev);
+    prev = t1;
+  }
+  return s;
+}
+
+// The depth of the thin cloud between a point under it and the light, as
+// direct light feels it. Ice scatters mostly forward, and that light still
+// arrives: half of the depth counts. The width of the sun blurs the shadow
+// over some hundreds of metres.
+float cirrusShadow(vec3 p) {
+  if (uCirrus <= 0.0) return 0.0;
+  vec3 pc = p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+  return 0.5 * cirrusDepth(pc.xz + uDrift, 0.5, 0.5) / max(dot(normalize(pc), uLight), 0.05);
+}
+
 void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float tHigh, out vec4 H[3]) {
   Th = 1.0;
   tHigh = -1.0;
   H[0] = vec4(0.0); H[1] = vec4(0.0); H[2] = vec4(0.0);
+  // Where the ray is inside the shell: t0 to t1.
+  vec2 lo = raySphere(o, d, RG + CI_LO), hi = raySphere(o, d, RG + CI_HI);
+  float t0, t1;
+  if (uAlt < CI_LO) {
+    t0 = lo.y; t1 = hi.y;
+  } else if (uAlt < CI_HI) {
+    t0 = 0.0; t1 = lo.y > lo.x && lo.x > 0.0 ? lo.x : hi.y;
+  } else {
+    t0 = hi.x; t1 = lo.y > lo.x && lo.x > 0.0 ? lo.x : hi.y;
+  }
+  t1 = min(t1, tmax);
+  if (t0 < 0.0 || t1 <= t0) return;
+  // The pattern is read where the ray crosses the middle height, or
+  // halfway along a ray that only grazes it.
+  vec2 mid = raySphere(o, d, RG + 0.5 * (CI_LO + CI_HI));
+  float tm = uAlt < 0.5 * (CI_LO + CI_HI) ? mid.y : mid.x;
+  if (tm < t0 || tm > t1) tm = 0.5 * (t0 + t1);
+  vec3 pc = o + d * tm;
+  vec3 up = normalize(pc);
+  float cv = abs(dot(d, up));
+  float pix = 2.0 * uTan / uRes.y;
+  // A ray aslant sees the pattern foreshortened, and a long way through
+  // the shell averages it.
+  float thick = 0.01 * (t1 - t0) * sqrt(max(1.0 - cv * cv, 0.0));
+  float tauV = cirrusDepth(pc.xz + uDrift, pix * tm * pow(max(cv, 1e-3), -0.35) + thick,
+                           pix * tm / max(cv, 0.02) + thick);
+  if (tauV <= 0.0) return;
+  float tau = tauV * (t1 - t0) / (CI_HI - CI_LO);
+  if (tau < 0.003) return;                          // too thin to see
+  Th = exp(-tau);
+  tHigh = tm;
+  float a = 1.0 - Th;
+
+  // Light. Ice crystals scatter forward: a narrow peak (diffraction), a
+  // broad one (refraction), little to the side and back; and the halo at
+  // 22 degrees from the sun, red inside, which a min-deviation prism of
+  // ice draws.
+  float mu = dot(d, uLight);
+  float ph = 0.3 * hg(mu, 0.95) + 0.6 * hg(mu, 0.65) + 0.1 * hg(mu, -0.2);
+  float th = acos(clamp(mu, -1.0, 1.0));
+  float mus = dot(up, uLight);
+  bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
+  vec3 ol = lit ? ciDepthToTop(pc, uLight) : vec3(0.0);
+  // Sunlight dims on its way into the sheet (less the forward peak, which
+  // goes on as if not scattered): its depth ts there, against te along
+  // the view. Scattered once, the sheet sends to the eye te times the mean
+  // of exp(-t - ts(t)) along the view: lit on the side the eye is on, or
+  // through it. A low sun lights it from below.
+  float te = tau, ts = 0.6 * tauV / max(abs(mus), 0.02);
+  float once = (dot(d, up) < 0.0) == (mus > 0.0)
+    ? te * (1.0 - exp(-te - ts)) / (te + ts)
+    : abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
+  // Along a long path most light is scattered more than once, which
+  // spreads the peak and the halo out; a thicker sheet sends more back.
+  float many = 1.0 - exp(-0.3 * tau), spread = 0.15 * tauV / (tauV + 0.3);
+  // Light from below: the low clouds, lit by the same sun, add to the sea
+  // that the mean sky already holds. Forward scattering sends more of it
+  // to an eye below the sheet.
+  float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
+  float wBelow = 0.5 + 0.35 * dot(d, up);
+  vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS;
+  float rc = length(pc);
+  if (uSunI > 0.0) multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
+  if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
+  for (int k = 0; k < 3; k++) {
+    vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
+    vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
+    vec4 halo = 0.08 * mix(exp(-x * x / 1.5e-4), exp(-max(x, 0.0) / 0.05), step(0.0, x));
+    vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z)) : vec4(0.0);
+    H[k] = a * ((uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0))
+                + uLightI * sun * wBelow * below)
+           + uLightI * sun * mix(ph + halo, vec4(spread), many) * once;
+  }
 }
 
 #else
@@ -890,6 +1398,16 @@ void addGround(vec3 pg, vec3 n, vec3 od, float extM, vec3 dir, float gain, inout
   for (int k = 0; k < 3; k++) {
     L[k] += gain * ALBEDO * c / PI * exp(-(uBR[k] * o2.x + extM * o2.y + uBO[k] * o2.z));
   }
+}
+#endif
+
+#if AIRCRAFT
+// A distance (km; negative: infinitely far) as a number from 0 to 1, in 16
+// bits over two channels of 8.
+vec2 distanceCode(float t) {
+  float c = floor((t > 0.0 ? clamp(0.5 + log2(t) / 20.0, 0.0, 0.99) : 1.0) * 65535.0 + 0.5);
+  float high = floor(c / 256.0);
+  return vec2(high, c - 256.0 * high) / 255.0;
 }
 #endif
 
@@ -932,15 +1450,13 @@ void main() {
       float rc = length(pc);
       bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
       vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
-      // A low sun spreads its light over more cloud top: the light
-      // scattered many times dims with it.
-      float sDir = sOne + sMany * clamp(0.4 + 0.75 * dot(pc, uLight) / rc, 0.0, 1.0);
+      float dim = lit ? exp(-cirrusShadow(pc)) : 1.0;   // the thin cloud above shades them
       vec4 msS[3], msM[3];
       multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
       multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
       for (int k = 0; k < 3; k++) {
-        C[k] = sAmb * (1.6 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
-        if (lit) C[k] += uLightI * sDir * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
+        C[k] = sAmb * (2.0 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
+        if (lit) C[k] += uLightI * (sOne + sMany) * dim * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
       }
     }
   }
@@ -952,13 +1468,14 @@ void main() {
   // near the sea (shade).
   float shadow = 0.0, shade = 1.0;
 #if AIRCRAFT
-  if (uCloud > 0.0 && uLightI > 0.0) {
+  if (uLightI > 0.0 && (uCloud > 0.0 || uCirrus > 0.0)) {
     if (!ground) {
       // The ray runs on through far air, under all the clouds there are.
       shade = mix(1.0, 0.2, smoothstep(0.4, 1.0, uCloud));
     } else if (Tc > 0.0) {
       vec3 pg = o + d * tmax;
-      shadow = shadowDepth(pg + 0.001 * normalize(pg), uLight);
+      if (uCloud > 0.0) shadow = shadowDepth(pg + 0.001 * normalize(pg), uLight);
+      shadow += cirrusShadow(pg);                      // the thin cloud shades the sea too
       shade = exp(-shadow);
     }
   }
@@ -1083,6 +1600,13 @@ void main() {
     float deg = degrees(acos(min(mu, 1.0)));
     float glare = 0.3 / (deg * deg + 0.3);
     if (uCloud > 0.0 && uAlt < CT) glare *= exp(-shadowDepth(o, uSun));
+    if (uCirrus > 0.0 && uAlt < CI_HI) {
+      // The thin cloud towards the sun: read where that ray crosses it.
+      float hc = max(0.5 * (CI_LO + CI_HI), uAlt);
+      vec3 pc = o + uSun * raySphere(o, uSun, RG + hc).y;
+      float slant = (CI_HI - max(uAlt, CI_LO)) / (CI_HI - CI_LO) / max(dot(normalize(pc), uSun), 0.05);
+      glare *= exp(-cirrusDepth(pc.xz + uDrift, 0.3, 0.3) * slant);
+    }
     vec3 ol = depthToTop(o, uSun);
     for (int k = 0; k < 3; k++) {
       L[k] += uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
@@ -1095,6 +1619,11 @@ void main() {
     dot(uWG[0], L[0]) + dot(uWG[1], L[1]) + dot(uWG[2], L[2]),
     dot(uWB[0], L[0]) + dot(uWB[1], L[1]) + dot(uWB[2], L[2]));
   col = max(col, 0.0) * uExposure;                   // colours outside sRGB
+#if AIRCRAFT
+  // A camera's white balance for daylight: sunlit cloud, a little yellow on
+  // a screen whose white is D65, comes out white, and the sea a deeper blue.
+  col *= vec3(0.932, 1.013, 1.074);
+#endif
   // Light far too strong for the screen turns white, as on film, instead
   // of a flat saturated colour (the glitter of a low sun would be yellow).
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -1104,9 +1633,209 @@ void main() {
   col = pow(col, vec3(uLook));
   col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
+#if AIRCRAFT
+  // How far is what this pixel shows? As far as the clouds, if they give
+  // enough of its light, or else as far as the sea; the sky is infinitely
+  // far. A thin sheet counts when nothing else is there, or when it hides
+  // the rest.
+  float wCloud = tBar > 0.0 ? (1.0 - Tc) * (cloudsFirst ? 1.0 : Th) : 0.0;
+  float wHigh = tHigh > 0.0 ? (1.0 - Th) * (cloudsFirst ? Tc : 1.0) : 0.0;
+  float tSeen = wCloud > 0.1 ? tBar : ground ? tmax : -1.0;
+  if (wHigh > (tSeen < 0.0 ? 0.1 : 0.5)) tSeen = tHigh;
+  outAux = vec4(distanceCode(tSeen), 0.0, 1.0);
+  // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
+  // the nearest, a smooth sky would come out in bands; rounded down, it
+  // would be too dark. So round up or down at random, anew each frame:
+  // then the mean over the frames is right.
+  outColor = vec4(floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps, 1.0);
+#else
   // Triangular dither of one 8-bit step removes the banding.
   float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
-  outColor = vec4(col + n / 255.0, uShare);
+  outColor = vec4(col + n / 255.0, 1.0);
+#endif
+}
+</script>
+
+<script id="mean" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+// The picture of the aircraft's view is a mean over frames: one frame is
+// noisy (its rays cross the pixels and step through the clouds at random).
+// This shader joins a new frame to the picture so far. While the view
+// moves, each pixel finds what it shows now in that picture, where it was a
+// frame ago.
+uniform sampler2D uFrame;     // the new frame, as shown
+uniform sampler2D uFrameAux;  // the distance of what each pixel shows, coded (r, g)
+uniform sampler2D uPast;      // the picture so far
+uniform sampler2D uPastAux;   // its distances (r, g), and the number of frames in the mean / 64 (b)
+uniform vec2 uRes;
+uniform mat3 uCam;      // columns: right, up, forward
+uniform float uTan;     // tan(vertical fov / 2)
+uniform float uAlt;     // altitude of the eye, km
+uniform mat3 uCamPast;  // the camera a frame ago
+uniform vec2 uResPast;  // the size of the picture so far
+uniform vec3 uWay;      // how far the eye has moved since, km
+uniform float uTrust;   // the most frames a pixel's past may count for
+uniform float uSteps;   // the picture is kept in steps of 1 / uSteps
+uniform float uPass;    // the number of the frame
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outAux;
+
+const float RG = 6360.0;        // ground radius, km
+
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+// The code of a distance (see distanceCode in the other shader) as one
+// number from 0 to 1, and one over the distance (km; 0: infinitely far).
+float decode(vec2 c) {
+  return (floor(c.x * 255.0 + 0.5) * 256.0 + floor(c.y * 255.0 + 0.5)) / 65535.0;
+}
+float nearness(float code) {
+  return code > 0.995 ? 0.0 : exp2((0.5 - code) * 20.0);
+}
+
+// Where in the picture so far (0 to 1; outside: nowhere) was what this pixel
+// shows, if that is at one over inv km from the eye (0: infinitely far)?
+// Clouds and sea have come nearer by the eye's way since, at the same height
+// above the ground; the sky stays (the air rides with the eye). The camera
+// of that frame says which pixel it was.
+vec2 whence(float inv) {
+  vec3 q = normalize(uCam * vec3((gl_FragCoord.xy * 2.0 - uRes) * uTan / uRes.y, 1.0));
+  if (inv > 0.0) {
+    q /= inv;
+    q += vec3(uWay.x, uWay.y - dot(2.0 * q.xz + uWay.xz, uWay.xz) / (2.0 * (RG + uAlt + q.y)), uWay.z);
+  }
+  q = q * uCamPast;
+  return q.z > 0.0 ? 0.5 + 0.5 * q.xy / (q.z * uTan) * vec2(uResPast.y / uResPast.x, 1.0) : vec2(-1.0);
+}
+
+void main() {
+  ivec2 here = ivec2(gl_FragCoord.xy);
+  vec3 col = texelFetch(uFrame, here, 0).rgb;
+  float code = decode(texelFetch(uFrameAux, here, 0).rg);
+  float inv = nearness(code);
+  // Things at different distances pass each other as the eye moves: by
+  // `parallax` pixels a frame for a difference of 1 in one over the distance.
+  float parallax = length(uWay) * uRes.y / (2.0 * uTan);
+  vec2 st = whence(inv);
+  // If something nearer was there, this pixel may show its ragged edge,
+  // where one frame hits the cloud and the next misses it. Then look where
+  // that nearer thing was: for a miss, it leads to the same edge; for sea
+  // that the cloud has just uncovered, to the sea next to the cloud.
+  if (uTrust > 0.0 && parallax > 0.0 && st == clamp(st, 0.0, 1.0)) {
+    float invWas = nearness(decode(textureLod(uPastAux, st, 0.0).rg));
+    if (parallax * (0.8 * invWas - inv) > 0.1) st = whence(invWas);
+  }
+
+  // The mean of n frames takes this one as the next. Without a past (the
+  // first frame, a pixel that comes into view), this frame is the picture.
+  float n = 0.0, codeNow = code;
+  if (uTrust > 0.0 && st == clamp(st, 0.0, 1.0)) {
+    // Read the picture so far through a Catmull-Rom filter (nine bilinear
+    // reads: Jimenez, 2016): a bilinear read, frame after frame, would
+    // blur it.
+    vec2 size = vec2(textureSize(uPast, 0));
+    vec2 pos = st * size - 0.5;
+    vec2 i = floor(pos), f = pos - i;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 c0 = (i - 0.5) / size, c12 = (i + 0.5 + w2 / w12) / size, c3 = (i + 2.5) / size;
+    vec3 was = (textureLod(uPast, vec2(c0.x, c0.y), 0.0).rgb * w0.x
+              + textureLod(uPast, vec2(c12.x, c0.y), 0.0).rgb * w12.x
+              + textureLod(uPast, vec2(c3.x, c0.y), 0.0).rgb * w3.x) * w0.y
+             + (textureLod(uPast, vec2(c0.x, c12.y), 0.0).rgb * w0.x
+              + textureLod(uPast, vec2(c12.x, c12.y), 0.0).rgb * w12.x
+              + textureLod(uPast, vec2(c3.x, c12.y), 0.0).rgb * w3.x) * w12.y
+             + (textureLod(uPast, vec2(c0.x, c3.y), 0.0).rgb * w0.x
+              + textureLod(uPast, vec2(c12.x, c3.y), 0.0).rgb * w12.x
+              + textureLod(uPast, vec2(c3.x, c3.y), 0.0).rgb * w3.x) * w3.y;
+    // The filter overshoots at edges: stay within the four texels around.
+    // They also tell how many frames the mean has, and how far away the
+    // pixel's past was.
+    ivec2 last = ivec2(size) - 1;
+    vec3 lo = vec3(1e9), hi = vec3(-1e9);
+    float codeWas = 0.0;
+    for (int k = 0; k < 4; k++) {
+      ivec2 t = clamp(ivec2(i) + ivec2(k & 1, k >> 1), ivec2(0), last);
+      vec3 c = texelFetch(uPast, t, 0).rgb;
+      lo = min(lo, c);
+      hi = max(hi, c);
+      vec4 aux = texelFetch(uPastAux, t, 0);
+      vec2 g = mix(1.0 - f, f, vec2(k & 1, k >> 1));
+      n += g.x * g.y * 64.0 * aux.b;
+      codeWas += g.x * g.y * decode(aux.rg);
+    }
+    was = clamp(was, lo, hi);
+    // Is the past what the pixel shows now? Not if it was nearer or further
+    // by enough to slip a fraction of a pixel since. Then the past only
+    // counts as far as it looks like this frame around the pixel. At the
+    // ragged edge of a cloud both cloud and sea are around, and the mean
+    // goes on.
+    float invWas = nearness(codeWas);
+    float doubt = smoothstep(0.1, 0.3, parallax * max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0));
+    if (doubt > 0.0) {
+      ivec2 edge = textureSize(uFrame, 0) - 1;
+      lo = col;
+      hi = col;
+      for (int k = 0; k < 9; k++) {
+        vec3 c = texelFetch(uFrame, clamp(here + ivec2(k % 3 - 1, k / 3 - 1), ivec2(0), edge), 0).rgb;
+        lo = min(lo, c);
+        hi = max(hi, c);
+      }
+      vec3 fit = clamp(was, lo, hi);
+      vec3 off = abs(fit - was);
+      // A past that had to change much was something else: begin again.
+      float other = doubt * smoothstep(0.02, 0.1, max(off.r, max(off.g, off.b)));
+      was = mix(was, fit, doubt);
+      n = mix(n, min(n, 1.0), other);
+      codeWas = mix(codeWas, code, other);
+    }
+    n = any(isnan(was)) ? 0.0 : min(n, uTrust);
+    if (n > 0.0) {
+      col = mix(was, col, 1.0 / (n + 1.0));
+      // A cloud's distance stays for a few frames after a miss.
+      codeNow = min(code, mix(codeWas, code, 0.5));
+    }
+  }
+  // Round up or down at random, as the other shader does, so that the mean
+  // neither stops moving nor sinks.
+  col = floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass + 5.3)) / uSteps;
+  outColor = vec4(col, 1.0);
+  float c = floor(codeNow * 65535.0 + 0.5), high = floor(c / 256.0);
+  outAux = vec4(high / 255.0, (c - 256.0 * high) / 255.0, (n + 1.0) / 64.0, 1.0);
+}
+</script>
+
+<script id="show" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+
+// Copies the picture of the aircraft's view to the canvas, which may be larger.
+uniform sampler2D uPicture;
+uniform vec2 uSize;     // of the canvas
+uniform float uDither;  // 0 when the picture is rounded to 8 bits already
+out vec4 outColor;
+
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+  vec3 col = textureLod(uPicture, gl_FragCoord.xy / uSize, 0.0).rgb;
+  // Triangular dither of one 8-bit step removes the banding.
+  float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
+  outColor = vec4(col + uDither * n / 255.0, 1.0);
 }
 </script>
 
@@ -1119,15 +1848,21 @@ void main() {
   const FOV = 62 * RAD;
   const EXPOSURE = 2.1;    // daytime exposure; twilight adds a metered gain
   const LOOK_POWER = 1.4;
-  const AIR_LOOK = 1.15;   // gentler from the air: white clouds must leave the sky some light
+  const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
   const MAX_PIXELS = 2.6e6;
   const CRUISE = 11;       // km: 36,000 ft
   // From high up the haze below fills half the view, and the exposure comes
   // down, as a camera's would; further with clouds, at any altitude, to keep
   // their tops white. The sky overhead turns deep.
-  const AIR_STOP = 0.5, CLOUD_STOP = 0.36;
+  const AIR_STOP = 0.5, CLOUD_STOP = 0.29;
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
-  const PASSES = 16;       // a still view with clouds is the mean of this many passes
+  const WEATHER_KM = 256;  // the weather map repeats after this many km (as in the shader)
+  // The view from the aircraft is a mean over frames: of about IN_MOTION
+  // while it moves, of all of them at rest. When the light changes, RELIGHT
+  // frames take half of each new one, so that the old light is soon gone.
+  // SETTLE frames after that, a still picture is clean and the drawing stops.
+  const SETTLE = 32, IN_MOTION = 10, RELIGHT = 6;
+  const MIN_SCALE = 0.35;  // the smallest picture a slow GPU may draw, relative to the canvas
 
   // ---------- The atmosphere (the same model as the shader) ----------
   const RG = 6360, RT = 6460, HR = 8, HM = 1.2;
@@ -1450,8 +2185,13 @@ void main() {
       + (state.moonI > 0 ? state.moonI * airLight(state.moon) : 0) + 1.5 * NIGHT;
     // A sheet of cloud is all white: stop down further.
     const clear = 1 + (AIR_STOP - 1) * Math.min(1, state.alt / 5);
-    const stop = (clear + (CLOUD_STOP - clear) * Math.min(1, state.cloud / 0.15))
+    const above = (clear + (CLOUD_STOP - clear) * Math.min(1, state.cloud / 0.15))
       * (1 - 0.3 * Math.min(1, Math.max(0, (state.cloud - 0.4) / 0.5)));
+    // Under a sheet of cloud no bright tops are in sight and little light
+    // is left: open up, though not all the way (a dull day looks dull).
+    const under = Math.min(1, Math.max(0, (1.2 - state.alt) / 0.6))
+      * Math.min(1, Math.max(0, (state.cloud - 0.5) / 0.4));
+    const stop = above + (0.6 - above) * under;
     return EXPOSURE * stop * Math.max(1, 0.6 * airLight(REF_SUN) / L) ** 0.85;
   }
 
@@ -1473,8 +2213,14 @@ void main() {
     return new Float32Array([...r, ...u, ...f]);
   };
 
+  // ?res=0.5 in the address fixes the size of the aircraft's picture while it
+  // moves, relative to the canvas (for tests). Without it, the frame time sets it.
+  const fixedScale = Math.min(1, Math.max(0, +new URLSearchParams(location.search).get('res') || 0));
+
   // aircraft: with the clouds and the sea (their part of the shader, and
   // their textures). Without, the view must keep its cloud amount at 0.
+  // Returns a function that draws: render(fresh, now). fresh: something has
+  // changed; now: the time of the frame, ms.
   function makeSky(canvas, view, aircraft) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
@@ -1546,10 +2292,41 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
     }
 
+    // The map of the waves on the sea, on unit 4, drawn by its own program.
+    if (aircraft) {
+      const n = 512;
+      gl.activeTexture(gl.TEXTURE4);
+      const waves = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, waves);
+      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(n) + 1, gl.RGBA8, n, n);
+      const draw = link(document.getElementById('waves').textContent.trim());
+      gl.useProgram(draw);
+      gl.uniform1f(gl.getUniformLocation(draw, 'uSize'), n);
+      const target = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, waves, 0);
+      gl.viewport(0, 0, n, n);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(target);
+      gl.deleteProgram(draw);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      // Seen aslant, a pixel covers a long strip of sea: where the GPU can,
+      // it averages along the strip instead of blurring across it.
+      const aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+      if (aniso) {
+        gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT,
+          Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+      }
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
     gl.useProgram(prog);
     const U = n => gl.getUniformLocation(prog, n);
     gl.uniform1i(U('uNoise'), 2);
     gl.uniform1i(U('uWeather'), 3);
+    gl.uniform1i(U('uWaves'), 4);
     gl.uniform4fv(U('uBR'), new Float32Array(BR));
     gl.uniform4fv(U('uBO'), new Float32Array(BO));
     gl.uniform4fv(U('uWL'), new Float32Array(WL.map(l => l / 550)));
@@ -1576,56 +2353,17 @@ void main() {
     const uEarth = U('uEarth'), uAlt = U('uAlt'), uCloud = U('uCloud'), uWind = U('uWind');
     const uDrift = U('uDrift'), uCirrus = U('uCirrus');
     const uLight = U('uLight'), uLightI = U('uLightI');
-    const uJitter = U('uJitter'), uPass = U('uPass'), uShare = U('uShare');
-    let tableHaze = null, pass = 0;
-    // While the view changes, the picture is drawn smaller if a pass takes
-    // long; at rest it is drawn in full. The passes of a still view tell
-    // how long one takes.
-    let lowRes = 1, low = false, lastChange = -1e9, lastPass = 0, drawn = 0;
-    // Low-discrepancy offsets within the pixel.
-    const halton = (i, b) => { let f = 1, r = 0; for (; i > 0; i = Math.floor(i / b)) { f /= b; r += f * (i % b); } return r; };
-
-    // Draws one pass; a fresh one starts the picture again. Returns true
-    // while more passes would refine it.
-    return function render(fresh) {
-      const cw = canvas.clientWidth, ch = canvas.clientHeight;
-      if (!cw || !ch) return false;
-      const now = performance.now();
-      const moving = fresh && now - lastChange < 150;
-      if (fresh) lastChange = now;
-      else if (low) fresh = true;                      // come to rest: draw in full
-      low = moving && lowRes < 1;
-      let scale = Math.min(window.devicePixelRatio || 1, 2);
-      scale = Math.min(scale, Math.sqrt(MAX_PIXELS / (cw * ch))) * (low ? lowRes : 1);
-      const w = Math.max(1, Math.round(cw * scale)), h = Math.max(1, Math.round(ch * scale));
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; fresh = true; }
-      const v = view();
-      // Without clouds one pass is the picture; a second, the same, times it.
-      const passes = v.cloud > 0 ? PASSES : 2;
-      if (fresh) pass = 0;
-      if (pass >= passes) return false;
-      if ((pass >= 2 || (pass && passes === 2)) && now - lastPass < 500) {   // longer: the page was hidden
-        lowRes = Math.min(1, Math.max(0.35, Math.sqrt(40 / (now - lastPass))));
-      }
-      lastPass = now;
-      gl.viewport(0, 0, w, h);
-      // Pass n joins the mean of the n before it.
-      if (pass > 0) {
-        gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      } else {
-        gl.disable(gl.BLEND);
-      }
-      const shift = v.cloud > 0 ? pass : 0;
-      gl.uniform2f(uJitter, shift ? halton(shift, 2) - 0.5 : 0, shift ? halton(shift, 3) - 0.5 : 0);
-      gl.uniform1f(uPass, drawn++ % 64);             // a moving view gets new noise each frame
-      gl.uniform1f(uShare, 1 / (pass + 1));
+    const uJitter = U('uJitter'), uPass = U('uPass');
+    let tableHaze = null;
+    // Draws the view v, w by h pixels, into the bound framebuffer.
+    const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
+      gl.viewport(0, 0, w, h);
       gl.uniform2f(uRes, w, h);
-      gl.uniformMatrix3fv(uCam, false, camera(v.yaw, v.pitch));
+      gl.uniformMatrix3fv(uCam, false, cam);
       gl.uniform1f(uTan, Math.tan(v.fov / 2));
       gl.uniform3fv(uSun, state.sun);
       gl.uniform1f(uSunI, state.sunOn);
@@ -1647,7 +2385,217 @@ void main() {
       gl.uniform3fv(uLight, state.light);
       gl.uniform1f(uLightI, state.lightI);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      return ++pass < passes || low;
+    };
+    // Fits the canvas to its place on the page. Returns 0 when it has no
+    // place, 2 when its size has changed, else 1.
+    const fit = () => {
+      const cw = canvas.clientWidth, ch = canvas.clientHeight;
+      if (!cw || !ch) return 0;
+      let scale = Math.min(window.devicePixelRatio || 1, 2);
+      scale = Math.min(scale, Math.sqrt(MAX_PIXELS / (cw * ch)));
+      const w = Math.max(1, Math.round(cw * scale)), h = Math.max(1, Math.round(ch * scale));
+      if (canvas.width === w && canvas.height === h) return 1;
+      canvas.width = w;
+      canvas.height = h;
+      return 2;
+    };
+
+    if (!aircraft) {
+      // The skylight: one pass, straight to the canvas, when something has
+      // changed. Returns false: no more frames needed.
+      let stale = true;
+      return function render(fresh) {
+        stale = stale || fresh;
+        if (!stale || !fit()) return false;
+        const v = view();
+        gl.uniform2f(uJitter, 0, 0);
+        gl.uniform1f(uPass, 0);
+        draw(v, camera(v.yaw, v.pitch), canvas.width, canvas.height);
+        stale = false;
+        return false;
+      };
+    }
+
+    // The aircraft's view. Each frame is drawn into a texture, joins the
+    // picture so far in a second one (the shader "mean"), and that picture
+    // is copied to the canvas (the shader "show"). The textures hold half
+    // floats where the GPU can draw to those (eight times finer steps than
+    // 8 bits, so the mean of many frames stays smooth); else 8 bits. Each
+    // has a second texture of 8 bits for the distances and the counts.
+    const uSteps = U('uSteps');
+    const mean = link(document.getElementById('mean').textContent.trim());
+    const show = link(document.getElementById('show').textContent.trim());
+    const M = {};
+    gl.useProgram(mean);
+    for (const n of ['uRes', 'uCam', 'uTan', 'uAlt', 'uCamPast', 'uResPast', 'uWay', 'uTrust', 'uSteps', 'uPass']) {
+      M[n] = gl.getUniformLocation(mean, n);
+    }
+    // Texture units 6 to 9: the new frame and the picture so far.
+    ['uFrame', 'uFrameAux', 'uPast', 'uPastAux'].forEach((n, i) => gl.uniform1i(gl.getUniformLocation(mean, n), 6 + i));
+    gl.useProgram(show);
+    gl.uniform1i(gl.getUniformLocation(show, 'uPicture'), 6);
+    const uSize = gl.getUniformLocation(show, 'uSize'), uDither = gl.getUniformLocation(show, 'uDither');
+    gl.useProgram(prog);
+    let fine = !!(gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float'));
+    // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
+    const picture = (old, w, h) => {
+      if (old && old.w === w && old.h === h) return old;
+      if (old) {
+        gl.deleteFramebuffer(old.target);
+        gl.deleteTexture(old.colour);
+        gl.deleteTexture(old.aux);
+      }
+      const p = { w, h, target: gl.createFramebuffer(), colour: gl.createTexture(), aux: gl.createTexture() };
+      gl.activeTexture(gl.TEXTURE6);
+      for (const [texture, format, filter] of [[p.colour, fine ? gl.RGBA16F : gl.RGBA8, gl.LINEAR], [p.aux, gl.RGBA8, gl.NEAREST]]) {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, format, w, h);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, p.target);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, p.colour, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, p.aux, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      if (fine && gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        fine = false;                                  // the extension did not keep its word
+        p.w = 0;
+        return picture(p, w, h);
+      }
+      return p;
+    };
+    // The new frame, and two pictures that take turns: the one so far is
+    // read while the next is drawn.
+    let shot = null, turn = 0, drawn = 0;
+    const pictures = [null, null];
+    const bind = (unit, texture) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+    };
+    // What the last frame showed, to tell what has changed since.
+    let camPast = null, driftPast = [0, 0], altPast = 0, lookPast = '';
+    // Frames drawn since anything moved or changed, and since the light changed.
+    let calm = 0, relit = RELIGHT + 1, lastStir = -1e9;
+    // While the view moves or changes, the picture is drawn smaller than
+    // the canvas if frames take long (scale); at rest it is drawn in full.
+    // The wall clock tells how long frames take, while one follows another.
+    let scale = fixedScale || 1, clock = 0, span = 0, count = 0, slow = 0, chained = false;
+    // Low-discrepancy offsets within the pixel.
+    const halton = (i, b) => { let f = 1, r = 0; for (; i > 0; i = Math.floor(i / b)) { f /= b; r += f * (i % b); } return r; };
+    const wrapped = x => ((x + 1.5 * WEATHER_KM) % WEATHER_KM) - 0.5 * WEATHER_KM;
+
+    // Draws a frame, if the picture can still gain from one. Returns true
+    // while more frames are needed.
+    return function render(fresh, now) {
+      // Scrolled out of view, the picture waits (and so does the aircraft:
+      // see frame). A scroll starts the frames again.
+      const box = canvas.getBoundingClientRect();
+      if (box.bottom <= 0 || box.top >= window.innerHeight) return false;
+      const fitted = fit();
+      if (!fitted) return false;
+      const v = view(), cam = camera(v.yaw, v.pitch);
+      const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
+      // Start again without a past: at first, when the canvas has changed,
+      // and if the place ever jumps (today it cannot: the aircraft stands
+      // still while nothing is drawn).
+      const reset = !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
+      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud].join();
+      const flying = state.speed > 0;
+      const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
+      const lit = !reset && look !== lookPast;
+      if (!reset && !moved && !lit && calm >= SETTLE + RELIGHT) return false;   // settled
+      if (moved || lit) lastStir = now;
+      const small = now - lastStir < 150 ? scale : 1;
+      const w = Math.max(1, Math.round(canvas.width * small)), h = Math.max(1, Math.round(canvas.height * small));
+      shot = picture(shot, w, h);
+      const cur = pictures[turn] = picture(pictures[turn], w, h);
+      const past = pictures[1 - turn] || (pictures[1 - turn] = picture(null, w, h));
+      // A sharper picture than the past one, at rest: the past counts as one frame.
+      const grown = !reset && !moved && cur.w > past.w;
+      if (reset) {
+        calm = 0;
+        relit = RELIGHT + 1;
+      } else if (lit) {
+        calm = relit = 0;
+      } else if (grown) {
+        calm = 0;
+        relit = Math.min(relit + 1, RELIGHT);
+      } else {
+        relit++;
+        calm = moved ? 0 : calm + 1;
+      }
+      // How many frames the past may count for (the shader keeps count, up to 64).
+      const trust = reset ? 0 : relit <= RELIGHT ? 1 : moved ? IN_MOTION - 1 : 63;
+      const steps = fine ? 2048 : 255;                 // every half float up to 1 is a multiple of 1/2048
+      const pass = drawn % 64;
+
+      // The frame. New noise for each: where the ray crosses the pixel, and
+      // where its samples lie.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+      const k = drawn++ % 1024 + 1;
+      gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
+      gl.uniform1f(uPass, pass);
+      gl.uniform1f(uSteps, steps);
+      draw(v, cam, w, h);
+
+      // The picture: the mean so far, and this frame.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, cur.target);
+      gl.useProgram(mean);
+      bind(6, shot.colour);
+      bind(7, shot.aux);
+      bind(8, past.colour);
+      bind(9, past.aux);
+      gl.uniform2f(M.uRes, w, h);
+      gl.uniformMatrix3fv(M.uCam, false, cam);
+      gl.uniform1f(M.uTan, Math.tan(v.fov / 2));
+      gl.uniform1f(M.uAlt, v.alt);
+      gl.uniformMatrix3fv(M.uCamPast, false, camPast || cam);
+      gl.uniform2f(M.uResPast, past.w, past.h);
+      gl.uniform3fv(M.uWay, reset ? [0, 0, 0] : way);
+      gl.uniform1f(M.uTrust, trust);
+      gl.uniform1f(M.uSteps, steps);
+      gl.uniform1f(M.uPass, pass);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      camPast = cam;
+      driftPast = [state.drift[0], state.drift[1]];
+      altPast = v.alt;
+      lookPast = look;
+
+      // To the canvas.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(show);
+      bind(6, cur.colour);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform2f(uSize, canvas.width, canvas.height);
+      gl.uniform1f(uDither, fine ? 1 : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.useProgram(prog);
+      turn = 1 - turn;
+
+      // Too slow for 25 frames a second, twice in a row (the first frames
+      // of a page are slow on any GPU): draw fewer pixels. Fast again: try
+      // more. Gaps longer than a quarter of a second are not frames (the
+      // page was hidden).
+      const wall = Date.now();
+      if (chained && small === scale && wall - clock < 250) {
+        span += wall - clock;
+        count++;
+      }
+      clock = wall;
+      if (!fixedScale && count >= 4 && span >= 400) {
+        const ms = span / count;
+        slow = ms > 40 ? slow + 1 : 0;
+        if (slow >= 2) scale = Math.max(MIN_SCALE, scale * Math.sqrt(30 / ms));
+        else if (ms < 24) scale = Math.min(1, scale * 1.12);
+        span = count = 0;
+      }
+      chained = flying || calm < SETTLE + RELIGHT;
+      return chained;
     };
   }
 
@@ -1693,6 +2641,8 @@ void main() {
   }
 
   // ---------- Wiring ----------
+  // The way made stays within the weather map (the shader computes in single precision).
+  const wrap = x => ((x % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
   const heroCanvas = document.getElementById('sky');
   // Each view on its own: if one fails, the other still draws.
   const renderers = [
@@ -1711,11 +2661,16 @@ void main() {
     }
   }).filter(Boolean);
 
-  // A change draws everything afresh; then passes follow, frame by frame,
-  // until the picture is clean.
-  let queued = false, changed = false;
-  function frame() {
+  // A change draws everything afresh. Frames follow one another while a
+  // view needs them: the aircraft flies, or its picture is not yet clean.
+  // Then the drawing stops; and nothing is drawn in a hidden tab.
+  let queued = false, changed = false, running = false, lastFrame = 0;
+  function frame(now) {
     queued = false;
+    if (document.hidden) {
+      running = false;
+      return;
+    }
     const fresh = changed;
     changed = false;
     if (fresh) {
@@ -1728,20 +2683,32 @@ void main() {
       state.airExposure = airExposure();
       showLabels();
     }
+    // The aircraft flies on, in real time: the clouds and the sea come
+    // towards it. After a pause it does not jump.
+    const dt = running ? Math.min(Math.max(now - lastFrame, 0) / 1000, 0.1) : 0;
+    lastFrame = now;
+    const step = state.speed / 3600 * dt;
+    state.drift[0] = wrap(state.drift[0] + step * Math.sin(state.heading));
+    state.drift[1] = wrap(state.drift[1] + step * Math.cos(state.heading));
     let more = false;
-    for (const r of renderers) more = r(fresh) || more;
+    for (const r of renderers) more = r(fresh, now) || more;
     if (fresh) layoutLight();
-    if (more && !queued) {
-      queued = true;
-      requestAnimationFrame(frame);
-    }
+    running = more;
+    if (more) kick();
   }
-  function update() {
-    changed = true;
+  function kick() {
     if (queued) return;
     queued = true;
     requestAnimationFrame(frame);
   }
+  function update() {
+    changed = true;
+    kick();
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
+  // The hero may have come back into view.
+  window.addEventListener('scroll', kick, { passive: true });
+  if (window.IntersectionObserver) new IntersectionObserver(kick).observe(heroCanvas);
 
   const time = document.getElementById('time'), moon = document.getElementById('moon');
   const date = document.getElementById('date'), dateOut = document.getElementById('dateOut');
@@ -1843,7 +2810,12 @@ void main() {
   state.yaw = params.has('yaw') ? params.get('yaw') * RAD : Math.atan2(state.sun[0], state.sun[2]) + 65 * RAD;
   if (params.has('pitch')) state.pitch = params.get('pitch') * RAD;
   // The view starts out of a window ahead and to the right of the nose.
-  state.heading = params.has('heading') ? params.get('heading') * RAD : state.yaw - 60 * RAD;
+  state.heading = params.has('heading') ? (+params.get('heading') || 0) * RAD : state.yaw - 60 * RAD;
+  // A place to start from, in km: ?at=120,40
+  if (params.has('at')) {
+    const [x, z] = params.get('at').split(',');
+    state.drift = [wrap(+x || 0), wrap(+z || 0)];
+  }
 })();
 </script>
 </body>
