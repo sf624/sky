@@ -98,6 +98,15 @@
   .panel .row { display: flex; justify-content: space-between; }
   .panel output { font-variant-numeric: tabular-nums; opacity: .9; }
   .panel input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #fff; }
+  .panel select {
+    width: 100%; margin: 4px 0 0; padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, .6);
+    background: rgba(255, 255, 255, .12);
+    color: #fff; font: inherit; letter-spacing: inherit;
+    cursor: pointer;
+  }
+  .panel select option { color: #123; }
   .hint {
     position: absolute;
     right: 20px;
@@ -257,6 +266,14 @@
     <label>
       <span class="row"><span>薄雲</span><output id="cirrusOut"></output></span>
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
+    </label>
+    <label>
+      <span class="row"><span>解像度</span></span>
+      <select id="pixels">
+        <option value="fhd">フルHD</option>
+        <option value="wqhd" selected>WQHD</option>
+        <option value="4k">4K</option>
+      </select>
     </label>
   </form>
 </section>
@@ -1849,7 +1866,10 @@ void main() {
   const EXPOSURE = 2.1;    // daytime exposure; twilight adds a metered gain
   const LOOK_POWER = 1.4;
   const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
-  const MAX_PIXELS = 2.6e6;
+  const MAX_PIXELS = 2.6e6;   // the skylight's limit
+  // The hero's limit, chosen in the panel (the skylight keeps MAX_PIXELS).
+  const HERO_PIXELS = { fhd: 1920 * 1080, wqhd: 2560 * 1440, '4k': 3840 * 2160 };
+  let heroPixels = HERO_PIXELS.wqhd;
   const CRUISE = 11;       // km: 36,000 ft
   // From high up the haze below fills half the view, and the exposure comes
   // down, as a camera's would; further with clouds, at any altitude, to keep
@@ -2392,7 +2412,7 @@ void main() {
       const cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (!cw || !ch) return 0;
       let scale = Math.min(window.devicePixelRatio || 1, 2);
-      scale = Math.min(scale, Math.sqrt(MAX_PIXELS / (cw * ch)));
+      scale = Math.min(scale, Math.sqrt((aircraft ? heroPixels : MAX_PIXELS) / (cw * ch)));
       const w = Math.max(1, Math.round(cw * scale)), h = Math.max(1, Math.round(ch * scale));
       if (canvas.width === w && canvas.height === h) return 1;
       canvas.width = w;
@@ -2767,6 +2787,19 @@ void main() {
   // A view can be given in the address: ?time=17.5&cloud=0.7&yaw=120&pitch=-10
   const params = new URLSearchParams(location.search);
   for (const el of sliders) if (params.has(el.id)) el.value = params.get(el.id);
+  // The drawing limit of the hero: the address, else the last choice, else WQHD.
+  const pixels = document.getElementById('pixels');
+  let storedPixels = null;
+  try { storedPixels = localStorage.getItem('sky.pixels'); } catch (err) {}
+  const pixelsKey = [params.get('pixels'), storedPixels].find(k => typeof HERO_PIXELS[k] === 'number') || 'wqhd';
+  pixels.value = pixelsKey;
+  heroPixels = HERO_PIXELS[pixelsKey];
+  // The next frame fits the canvas again, as after a resize.
+  pixels.addEventListener('change', () => {
+    heroPixels = HERO_PIXELS[pixels.value];
+    try { localStorage.setItem('sky.pixels', pixels.value); } catch (err) {}
+    update();
+  });
   if (params.has('date') && !params.has('moon')) moon.value = moonAgeOn(+date.value);
 
   // Play: a day in a minute and a half.
