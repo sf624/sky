@@ -443,7 +443,9 @@ when the picture is in half floats.
 **The distance code** (`distanceCode`, read back by `decode` and
 `nearness`): `0.5 + log2(t) / 20`, in 16 bits over two 8-bit channels; the
 sky is infinitely far (code 1, nearness 0). The pixel's distance is that
-of the clouds if they give enough of its light, else of the sea, else
+of the clouds if they hide a tenth of what is behind or give a twentieth
+of its light (`C` against `L`, in one band of wavelengths: a wisp in
+front of the dark sea), else of the sea, else
 infinity; a cirrus sheet counts when nothing else is there, or when it
 hides the rest.
 
@@ -465,6 +467,16 @@ slip a fraction of a pixel (`doubt`, from the parallax), it counts only as
 far as it fits the 3 by 3 neighbourhood of the new frame (clamped to its
 minimum and maximum). A past that had to change much was something else:
 its count drops to 1.
+
+**The picture's distance** (R, G of the picture's `aux`): the nearer of
+the new frame's distance and a mean of the past one and the new one, with
+the new one weighed as the new frame's colour is (without a past, the
+new frame's distance). So after a miss a
+cloud's distance fades only as fast as its light does. While the picture
+holds a near cloud's light, the pixel moves with that cloud; once the
+cloud has gone, the neighbourhood check lets its light go. If the
+distance went back to the sea sooner, the light would stay on the sea
+and trail behind a near cloud in flight, in streaks.
 
 **The weights.** The new frame weighs `1 / (n + 1)`, with `n` the past's
 count, capped by `uTrust`, which the JS sets per frame:
