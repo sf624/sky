@@ -78,12 +78,21 @@ same commands to WebGL. For example
 
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
-frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
-page load, step about 46 frames before the screenshot: the first frames
-may start the mean again (the first reset, and a restart if the drawing
-size grows). Hide the overlays (`.title`, `.panel`,
-`.hint`, `.fs`) for a clean picture. The canvas is made with
-`preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
+frames and stops (`SETTLE + RELIGHT`, and the frame of the change), or
+more while the exposure moves. From page load, step about 48 frames
+before the screenshot: the first frame is only metered, and the next ones
+may start the mean again (a restart if the drawing size grows). Hide the
+overlays (`.title`, `.panel`, `.hint`, `.fs`) for a clean picture. The
+canvas is made with `preserveDrawingBuffer`, so `canvas.toDataURL()`
+reads what is shown.
+
+**The exposure in tests.** The exposure follows the meter, which is read
+back after a fence. A browser lets a fence pass only between tasks, after
+real time has gone by: a harness that steps many frames in one task on a
+fake clock sees the meter stand still. Pause briefly (some 40 ms) between
+groups of frames when a test changes the view or the light and waits for
+the exposure. A still from page load needs no pause: its first frame is
+metered at once.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
 photograph taken from an aircraft window. Compare with real photographs,
@@ -156,7 +165,10 @@ on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
 Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`. The scene is nearly all of it. Measured on an
+texture, `mean`, and `show`; and at most every 100 ms a fourth, the
+exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
+November 2026; reading it back costs about 2 ms of the main thread here,
+none of the GPU's). The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The page had a scroll bar then, so the drawing sizes are
 those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
@@ -216,11 +228,9 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `eyeSphere` takes `c` from the heights and the near
   crossing from the far one. `highCloud` uses it.
 - **Facts kept twice are changed together.**
-  - The density profile, written out five times: `density()` in `fs`, and
-    in the JS `buildDepths`, `buildMultiScatter`, `skyLuminance` and the
-    depth table in `makeSky`.
-  - The phase functions, Mie `g` = 0.8 included: `phases` in `fs` and
-    `skyLuminance` in the JS.
+  - The density profile, written out four times: `density()` in `fs`, and
+    in the JS `buildDepths`, `buildMultiScatter` and the depth table in
+    `makeSky`.
   - The depth table: `DEPTH_MU`, `DEPTH_R` and `H_TOP` (1132.2544, from
     `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,

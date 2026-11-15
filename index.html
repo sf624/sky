@@ -636,8 +636,11 @@ uniform float uEarth;   // earthshine on the dark side of the moon
 // cell. Texel: direction (J2000 equatorial), colour index + brightness.
 uniform sampler2D uStars;
 uniform float uHaze;    // multiplier on the aerosol (Mie) density
-uniform float uExposure;
+uniform float uExposure; // set by the meter (see "meter")
 uniform float uLook;    // power of the "look" curve
+// The frame's alpha holds the luminance before exposure, for the meter: log2
+// of it, from uLogRange.x (0) to uLogRange.y (1).
+uniform vec2 uLogRange;
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -1826,7 +1829,9 @@ void main() {
     dot(uWR[0], L[0]) + dot(uWR[1], L[1]) + dot(uWR[2], L[2]),
     dot(uWG[0], L[0]) + dot(uWG[1], L[1]) + dot(uWG[2], L[2]),
     dot(uWB[0], L[0]) + dot(uWB[1], L[1]) + dot(uWB[2], L[2]));
-  col = max(col, 0.0) * uExposure;                   // colours outside sRGB
+  col = max(col, 0.0);                               // colours outside sRGB
+  float level = (log2(max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
+  col *= uExposure;
   // A camera's white balance for daylight: sunlit cloud, a little yellow on
   // a screen whose white is D65, comes out white, and the sea a deeper blue.
   col *= vec3(0.932, 1.013, 1.074);
@@ -1862,8 +1867,8 @@ void main() {
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
   // would be too dark. So round up or down at random, anew each frame:
-  // then the mean over the frames is right.
-  outColor = vec4(floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps, 1.0);
+  // then the mean over the frames is right. The same for the level.
+  outColor = floor(clamp(vec4(col, level), 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps;
 }
 </script>
 
@@ -1877,7 +1882,7 @@ precision highp sampler2D;
 // This shader joins a new frame to the picture so far. While the view
 // moves, each pixel finds what it shows now in that picture, where it was a
 // frame ago.
-uniform sampler2D uFrame;     // the new frame, as shown
+uniform sampler2D uFrame;     // the new frame, as shown, and its level before exposure (a)
 uniform sampler2D uFrameAux;  // the distance of what each pixel shows, coded (r, g)
 uniform sampler2D uPast;      // the picture so far
 uniform sampler2D uPastAux;   // its distances (r, g), and the number of frames in the mean / 64 (b)
@@ -1929,7 +1934,7 @@ vec2 whence(float inv) {
 
 void main() {
   ivec2 here = ivec2(gl_FragCoord.xy);
-  vec3 col = texelFetch(uFrame, here, 0).rgb;
+  vec4 col = texelFetch(uFrame, here, 0);
   float code = decode(texelFetch(uFrameAux, here, 0).rg);
   float inv = nearness(code);
   // Things at different distances pass each other as the eye moves: by
@@ -1962,24 +1967,24 @@ void main() {
     vec2 w3 = f * f * (-0.5 + 0.5 * f);
     vec2 w12 = w1 + w2;
     vec2 c0 = (i - 0.5) / size, c12 = (i + 0.5 + w2 / w12) / size, c3 = (i + 2.5) / size;
-    vec3 was = (textureLod(uPast, vec2(c0.x, c0.y), 0.0).rgb * w0.x
-              + textureLod(uPast, vec2(c12.x, c0.y), 0.0).rgb * w12.x
-              + textureLod(uPast, vec2(c3.x, c0.y), 0.0).rgb * w3.x) * w0.y
-             + (textureLod(uPast, vec2(c0.x, c12.y), 0.0).rgb * w0.x
-              + textureLod(uPast, vec2(c12.x, c12.y), 0.0).rgb * w12.x
-              + textureLod(uPast, vec2(c3.x, c12.y), 0.0).rgb * w3.x) * w12.y
-             + (textureLod(uPast, vec2(c0.x, c3.y), 0.0).rgb * w0.x
-              + textureLod(uPast, vec2(c12.x, c3.y), 0.0).rgb * w12.x
-              + textureLod(uPast, vec2(c3.x, c3.y), 0.0).rgb * w3.x) * w3.y;
+    vec4 was = (textureLod(uPast, vec2(c0.x, c0.y), 0.0) * w0.x
+              + textureLod(uPast, vec2(c12.x, c0.y), 0.0) * w12.x
+              + textureLod(uPast, vec2(c3.x, c0.y), 0.0) * w3.x) * w0.y
+             + (textureLod(uPast, vec2(c0.x, c12.y), 0.0) * w0.x
+              + textureLod(uPast, vec2(c12.x, c12.y), 0.0) * w12.x
+              + textureLod(uPast, vec2(c3.x, c12.y), 0.0) * w3.x) * w12.y
+             + (textureLod(uPast, vec2(c0.x, c3.y), 0.0) * w0.x
+              + textureLod(uPast, vec2(c12.x, c3.y), 0.0) * w12.x
+              + textureLod(uPast, vec2(c3.x, c3.y), 0.0) * w3.x) * w3.y;
     // The filter overshoots at edges: stay within the four texels around.
     // They also tell how many frames the mean has, and how far away the
     // pixel's past was.
     ivec2 last = ivec2(size) - 1;
-    vec3 lo = vec3(1e9), hi = vec3(-1e9);
+    vec4 lo = vec4(1e9), hi = vec4(-1e9);
     float codeWas = 0.0;
     for (int k = 0; k < 4; k++) {
       ivec2 t = clamp(ivec2(i) + ivec2(k & 1, k >> 1), ivec2(0), last);
-      vec3 c = texelFetch(uPast, t, 0).rgb;
+      vec4 c = texelFetch(uPast, t, 0);
       lo = min(lo, c);
       hi = max(hi, c);
       vec4 aux = texelFetch(uPastAux, t, 0);
@@ -2000,12 +2005,12 @@ void main() {
       lo = col;
       hi = col;
       for (int k = 0; k < 9; k++) {
-        vec3 c = texelFetch(uFrame, clamp(here + ivec2(k % 3 - 1, k / 3 - 1), ivec2(0), edge), 0).rgb;
+        vec4 c = texelFetch(uFrame, clamp(here + ivec2(k % 3 - 1, k / 3 - 1), ivec2(0), edge), 0);
         lo = min(lo, c);
         hi = max(hi, c);
       }
-      vec3 fit = clamp(was, lo, hi);
-      vec3 off = abs(fit - was);
+      vec4 fit = clamp(was, lo, hi);
+      vec3 off = abs(fit.rgb - was.rgb);
       // A past that had to change much was something else: begin again.
       float other = doubt * smoothstep(0.02, 0.1, max(off.r, max(off.g, off.b)));
       was = mix(was, fit, doubt);
@@ -2025,8 +2030,7 @@ void main() {
   }
   // Round up or down at random, as the other shader does, so that the mean
   // neither stops moving nor sinks.
-  col = floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass + 5.3)) / uSteps;
-  outColor = vec4(col, 1.0);
+  outColor = floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass + 5.3)) / uSteps;
   float c = floor(codeNow * 65535.0 + 0.5), high = floor(c / 256.0);
   outAux = vec4(high / 255.0, (c - 256.0 * high) / 255.0, (n + 1.0) / 64.0, 1.0);
 }
@@ -2054,6 +2058,30 @@ void main() {
   // Triangular dither of one 8-bit step removes the banding.
   float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
   outColor = vec4(col + uDither * n / 255.0, 1.0);
+}
+</script>
+
+<script id="meter" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+
+// The exposure meter: each pixel of this small target is a block of the
+// picture, and holds the mean of its level (log2 of the luminance before
+// exposure, coded from 0 to 1) at 4 x 4 points, in 16 bits over two 8-bit
+// channels. The JS reads the blocks back and sets the exposure.
+uniform sampler2D uPicture;
+uniform vec2 uBlocks;   // the number of blocks across and up
+out vec4 outColor;
+
+void main() {
+  vec2 size = vec2(textureSize(uPicture, 0));
+  float sum = 0.0;
+  for (int k = 0; k < 16; k++) {
+    vec2 at = (floor(gl_FragCoord.xy) + (vec2(k & 3, k >> 2) + 0.5) / 4.0) / uBlocks * size;
+    sum += texelFetch(uPicture, ivec2(at), 0).a;
+  }
+  float c = floor(sum / 16.0 * 65535.0 + 0.5), high = floor(c / 256.0);
+  outColor = vec4(high / 255.0, (c - 256.0 * high) / 255.0, 0.0, 1.0);
 }
 </script>
 
@@ -2519,16 +2547,11 @@ const SkySound = (() => {
   const LATITUDE = 35 * RAD;         // of the observer
   const OBLIQUITY = 23.44 * RAD;     // tilt of the earth's axis
   const FOV = 62 * RAD;
-  const EXPOSURE = 2.1;    // daytime exposure; twilight adds a metered gain
   const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
   // The hero's limit, chosen in the panel.
   const HERO_PIXELS = { fhd: 1920 * 1080, wqhd: 2560 * 1440, '4k': 3840 * 2160 };
   let heroPixels = HERO_PIXELS.wqhd;
   const CRUISE = 11;       // km: 36,000 ft
-  // From high up the haze below fills half the view, and the exposure comes
-  // down, as a camera's would; further with clouds, at any altitude, to keep
-  // their tops white. The sky overhead turns deep.
-  const AIR_STOP = 0.5, CLOUD_STOP = 0.29;
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
   const WEATHER_KM = 256;  // the weather map repeats after this many km (as in the shader)
   // The view from the aircraft is a mean over frames: of about IN_MOTION
@@ -2537,6 +2560,22 @@ const SkySound = (() => {
   // SETTLE frames after that, a still picture is clean and the drawing stops.
   const SETTLE = 32, IN_MOTION = 10, RELIGHT = 6;
   const MIN_SCALE = 0.35;  // the smallest picture a slow GPU may draw, relative to the canvas
+  // The exposure follows the picture (see exposureFor and the shader
+  // "meter"). Levels are log2 of the luminance before exposure.
+  const METER = [64, 36];        // blocks of the picture the meter reads
+  const LOG_RANGE = [-34, 18];   // the levels the frames' alpha codes from 0 to 1
+  const METER_MS = 100;          // the meter is read at most this often
+  const LOW_SHARE = 0.25;        // the darker quarter of the picture sets the key...
+  const KEY = -1.3;              // ...the exposure is KEY - EYE * its level...
+  const EYE = 0.85;              // ...opening EYE stops for each stop darker...
+  const NIGHT_LEVEL = -25.5;     // ...down to a moonless night sky
+  const HIGH_SHARE = 0.03;       // the brightest 3 % of the picture...
+  const WHITE = 0.3;             // ...end at this level after exposure (just below white)...
+  const DAY_HIGH = 0;            // ...when they are this bright or more (daylight),
+  const DIM = 0.3;               // ...and DIM stops lower for each stop dimmer
+  const SPAN = 4, GLOW = 2;      // how far highlights may stop down (exposureFor)
+  const ADAPT_FAST = 0.2, ADAPT_SLOW = 0.5;  // s: towards less exposure, towards more
+  const ADAPT_STOP = 0.01, ADAPT_START = 0.03;   // stops
 
   // ---------- The atmosphere (the same model as the shader) ----------
   // The parameters of the air follow Bruneton's demo (2017, BSD): see THIRD_PARTY_NOTICES.md.
@@ -2673,23 +2712,11 @@ const SkySound = (() => {
       }
     }
   }
-  function multiScatter(h, mus, out) {
-    const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
-    const y = Math.sqrt(Math.min(1, Math.max(0, h / (RT - RG)))) * (NH - 1);
-    const x0 = Math.min(Math.floor(x), NMU - 2), y0 = Math.min(Math.floor(y), NH - 2);
-    const fx = x - x0, fy = y - y0;
-    for (let w = 0; w < NW; w++) {
-      const a = (((w >> 2) * NH + y0) * NMU + x0) * 4 + (w & 3), b = a + NMU * 4;
-      out[w] = (msData[a] * (1 - fx) + msData[a + 4] * fx) * (1 - fy)
-             + (msData[b] * (1 - fx) + msData[b + 4] * fx) * fy;
-    }
-  }
-
   // Axes: x west, y up, z south. The view starts towards the south-west.
   const state = {
     time: 15, day: 80, moonAge: 13, haze: 0.35, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
-    alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, airExposure: EXPOSURE,
+    alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
     speed: 900, heading: 0, drift: [0, 0], cirrus: 0.4,
     // Days the sun has moved on beyond state.day while the time ran (see
@@ -2717,7 +2744,10 @@ const SkySound = (() => {
     const siderealTime = H + sunRA;
     state.sun = onSky(sunDec, H);
     state.elev = Math.asin(state.sun[1]) / RAD;
-    state.sunOn = state.elev > -21 ? 1 : 0;
+    // The sun's light fades out between 18 and 21 degrees down, where it no
+    // longer matters, rather than stopping at once: no step shows.
+    const fade = Math.min(1, Math.max(0, (state.elev + 21) / 3));
+    state.sunOn = fade * fade * (3 - 2 * fade);
     // The moon runs ahead of the sun along the ecliptic by its age.
     const elong = state.moonAge / 29.53 * 360;
     const [moonRA, moonDec] = fromEcliptic(lon + elong * RAD);
@@ -2791,96 +2821,36 @@ const SkySound = (() => {
     }
   }
 
-  // Sky luminance towards (azimuth, elevation), relative to the sun's
-  // irradiance: the shader's integral again, at a few points, to meter the
-  // exposure. Uses the current multiple-scattering table.
-  function skyLuminance(az, el, S, alt, haze = state.haze) {
-    const NV = 24;
-    const bM = BETA_M * haze, bMe = bM * MIE_EXT;
-    const D = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
-    const r0 = RG + alt;
-    const mu = D[0] * S[0] + D[1] * S[1] + D[2] * S[2], g = 0.8;
-    const pR = 3 / (16 * Math.PI) * (1 + mu * mu);
-    const pM = 3 / (8 * Math.PI) * ((1 - g * g) * (1 + mu * mu)) / ((2 + g * g) * (1 + g * g - 2 * g * mu) ** 1.5);
-    const b = r0 * D[1], tmax = -b + Math.sqrt(b * b - (r0 * r0 - RT * RT));
-    const ds = [0, 0, 0], ms = new Float64Array(NW);
-    let o0 = 0, o1 = 0, o2 = 0, prev = 0, Y = 0;
-    for (let i = 0; i < NV; i++) {
-      const f = (i + 1) / NV, t1 = tmax * f * f, dt = t1 - prev, t = prev + 0.5 * dt;
-      prev = t1;
-      const px = D[0] * t, py = r0 + D[1] * t, pz = D[2] * t, rr = Math.hypot(px, py, pz);
-      const h = Math.max(0, rr - RG);
-      const dR = Math.exp(-h / HR) * dt, dM = Math.exp(-h / HM) * dt;
-      const dO = Math.max(0, 1 - Math.abs(h - 25) / 15) * dt;
-      o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
-      const mus = (px * S[0] + py * S[1] + pz * S[2]) / rr;
-      multiScatter(h, mus, ms);
-      const lit = sunDepth(rr, mus, ds);
-      for (let w = 0; w < NW; w++) {
-        const scR = BR[w] * dR, scM = bM * dM;
-        let L = Math.exp(-(BR[w] * o0 + bMe * o1 + BO[w] * o2)) * (scR + scM) * ms[w];
-        if (lit) {
-          L += Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
-             * (scR * pR + scM * pM);
-        }
-        Y += WY[w] * L;
-      }
-      o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
-    }
-    return Y;
-  }
-  // Meter the average sky, but also the glow above the sun, so that the
-  // afterglow keeps its colour instead of burning out.
-  function meterLight(S, alt = 0.3, haze = state.haze) {
-    const az = Math.atan2(S[0], S[2]);
-    return Math.max(
-      (skyLuminance(az, 25 * RAD, S, alt, haze) + skyLuminance(az + 120 * RAD, 35 * RAD, S, alt, haze)
-        + skyLuminance(az - 120 * RAD, 35 * RAD, S, alt, haze)) / 3,
-      0.4 * skyLuminance(az, 8 * RAD, S, alt, haze),
-      0.12 * skyLuminance(az, 2 * RAD, S, alt, haze));
-  }
-  // A moonless night sky is about 4e-8 times as bright as the day sky,
-  // metered at the haze the page starts with (NIGHT_HAZE, the slider's
-  // own value), from the table for that haze: a job of the loading.
-  const NIGHT_HAZE = state.haze;
-  let NIGHT = 0;
-  function* nightSky() {
-    NIGHT = 4e-8 * meterLight([0, Math.sin(42 * RAD), Math.cos(42 * RAD)], 0.3, NIGHT_HAZE);
-  }
+  // The moonless night sky (airglow), in units of the sun's irradiance:
+  // about 4e-8 of the daytime sky.
+  const NIGHT = 8.59e-10;
 
-  // From the aircraft, meter the sky at that altitude and the sunlit cloud
-  // tops, whichever is brighter.
-  const REF_SUN = [0, Math.sin(42 * RAD), Math.cos(42 * RAD)];
-  function cloudLuminance(S) {
-    const ds = [0, 0, 0], mu = S[1] + 0.03;
-    if (state.cloud <= 0 || mu <= 0 || !sunDepth(RG + 2.5, S[1], ds)) return 0;
-    const bMe = BETA_M * state.haze * MIE_EXT;
-    let Y = 0;
-    for (let w = 0; w < NW; w++) Y += WY[w] * Math.exp(-(BR[w] * ds[0] + bMe * ds[1] + BO[w] * ds[2]));
-    return 0.2 * Y * mu / (mu + 0.15);
-  }
-  // Up there the sky overhead is dark, and the band of light along the
-  // horizon fills the view: meter it almost fully.
-  const airLight = S => Math.max(meterLight(S, state.alt),
-    0.8 * skyLuminance(Math.atan2(S[0], S[2]), 2 * RAD, S, state.alt), 0.6 * cloudLuminance(S));
-  function airExposure() {
-    const L = (state.sunOn ? airLight(state.sun) : 0)
-      + (state.moonI > 0 ? state.moonI * airLight(state.moon) : 0) + 1.5 * NIGHT;
-    // A sheet of cloud is all white: stop down further.
-    const clear = 1 + (AIR_STOP - 1) * Math.min(1, state.alt / 5);
-    const above = (clear + (CLOUD_STOP - clear) * Math.min(1, state.cloud / 0.15))
-      * (1 - 0.3 * Math.min(1, Math.max(0, (state.cloud - 0.4) / 0.5)))
-      // Close over the tops, the cloud fills more of the picture, and its
-      // billows need room below white. Not from under the base: no sunlit
-      // tops are in sight there.
-      * (1 - 0.4 * Math.min(1, Math.max(0, (7 - state.alt) / 4)) * Math.min(1, state.cloud / 0.5)
-        * Math.min(1, Math.max(0, (state.alt - 1.2) / 0.6)));
-    // Under a sheet of cloud no bright tops are in sight and little light
-    // is left: open up, though not all the way (a dull day looks dull).
-    const under = Math.min(1, Math.max(0, (1.2 - state.alt) / 0.6))
-      * Math.min(1, Math.max(0, (state.cloud - 0.5) / 0.4));
-    const stop = above + (0.6 - above) * under;
-    return EXPOSURE * stop * Math.max(1, 0.6 * airLight(REF_SUN) / L) ** 0.85;
+  // The exposure (log2) that a picture asks for, from the levels v of its
+  // blocks. As the eye's:
+  // - key: it opens up as the view darkens, but not all the way (EYE stops
+  //   for each stop of the darker quarter), and no further than for a
+  //   moonless night sky: a night is darker than a day, dusk is in between,
+  //   and black sea at night is not lifted into noise;
+  // - white: it stops down so that the brightest HIGH_SHARE of the picture
+  //   ends at WHITE in daylight, and DIM stops lower for each stop that
+  //   they are dimmer: the brightest parts of a dim view are not white
+  //   either, and dusk shows darker than day;
+  // - it takes the lesser; but the highlights may not stop down so far that
+  //   the darker quarter shows darker than the night's, except by up to
+  //   GLOW stops as far as they stand more than SPAN stops above it: a band
+  //   of glow at dusk keeps its colour, and facing away from it the sky
+  //   does not fall below the night's.
+  function exposureFor(v) {
+    const q = Float64Array.from(v).sort();
+    const share = k => {
+      const i = k * (q.length - 1), i0 = Math.floor(i);
+      return q[i0] + (q[Math.min(i0 + 1, q.length - 1)] - q[i0]) * (i - i0);
+    };
+    const low = Math.max(share(LOW_SHARE), NIGHT_LEVEL), high = share(1 - HIGH_SHARE);
+    const key = KEY - EYE * low;
+    const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
+    const most = (1 - EYE) * (low - NIGHT_LEVEL) + Math.min(GLOW, Math.max(0, high - low - SPAN));
+    return Math.max(Math.min(key, white), key - most);
   }
 
   // ---------- Drawing ----------
@@ -2946,7 +2916,7 @@ const SkySound = (() => {
       throw new Error(gl.getProgramInfoLog(prog));
     };
     const prog = link('fs'), noiseProgram = link('noise'), wavesProgram = link('waves');
-    const mean = link('mean'), show = link('show');
+    const mean = link('mean'), show = link('show'), meter = link('meter');
     gl.flush();
 
     // Waits, a frame at a time, until the GPU has done all that it was
@@ -3001,13 +2971,8 @@ const SkySound = (() => {
       }
     }
     done(0.05);
-    // The table of multiple scattering for the haze of the night sky (see
-    // NIGHT), and then for the haze the address gives, if another.
     const forHaze = state.haze;
-    const jobs = [buildDepths(), buildStars(), buildMultiScatter(NIGHT_HAZE), nightSky()];
-    if (forHaze !== NIGHT_HAZE) jobs.push(buildMultiScatter(forHaze));
-    jobs.push(depthTable());
-    await slices(jobs, share => done(0.05 + 0.25 * share));
+    await slices([buildDepths(), buildStars(), buildMultiScatter(forHaze), depthTable()], share => done(0.05 + 0.25 * share));
     builtHaze = forHaze;
 
     // The programs. Without the extension, asking waits until a program is
@@ -3154,7 +3119,10 @@ const SkySound = (() => {
     const uDrift = U('uDrift'), uCirrus = U('uCirrus');
     const uLight = U('uLight'), uLightI = U('uLightI');
     const uJitter = U('uJitter'), uPass = U('uPass');
+    gl.uniform2fv(U('uLogRange'), LOG_RANGE);
     let tableHaze = null;
+    // The exposure, log2; null until the first picture has been metered.
+    let logE = null;
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
@@ -3173,9 +3141,10 @@ const SkySound = (() => {
       // Earthshine is 1e-6 in these units, but the night exposure would burn
       // it out and hide the phase. The eye adapts to the moon locally; so
       // hold the dark side at a dim grey (20 is the shader's ISUN).
-      gl.uniform1f(uEarth, Math.min(1e-6, 0.06 / (20 * v.exposure)));
+      const exposure = 2 ** (logE ?? 0);
+      gl.uniform1f(uEarth, Math.min(1e-6, 0.06 / (20 * exposure)));
       gl.uniform1f(uHaze, state.haze);
-      gl.uniform1f(uExposure, v.exposure);
+      gl.uniform1f(uExposure, exposure);
       gl.uniform1f(uLook, v.look);
       gl.uniform1f(uAlt, v.alt);
       gl.uniform1f(uCloud, v.cloud);
@@ -3218,6 +3187,58 @@ const SkySound = (() => {
     gl.uniform1i(gl.getUniformLocation(show, 'uPicture'), 6);
     const uSize = gl.getUniformLocation(show, 'uSize'), uDither = gl.getUniformLocation(show, 'uDither');
     gl.useProgram(prog);
+    // The meter: METER blocks of the picture, drawn into a small target. Its
+    // answer is read once the GPU has passed a fence after it, so that the
+    // read never waits for the GPU's work; it still costs a round trip to
+    // the GPU process (about 2 ms here), so the meter is read at most every
+    // METER_MS of the page's time.
+    gl.useProgram(meter);
+    gl.uniform1i(gl.getUniformLocation(meter, 'uPicture'), 6);
+    gl.uniform2fv(gl.getUniformLocation(meter, 'uBlocks'), METER);
+    gl.useProgram(prog);
+    const blocks = { target: gl.createFramebuffer(), texture: gl.createTexture() };
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, blocks.texture);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, METER[0], METER[1]);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, blocks.texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const meterBytes = new Uint8Array(METER[0] * METER[1] * 4);
+    const levels = new Float64Array(METER[0] * METER[1]);
+    // The exposure the meter last asked for (log2), and the fence after the
+    // blocks being drawn, if any.
+    let target = null, fence = null;
+    const readMeter = () => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
+      gl.readPixels(0, 0, METER[0], METER[1], gl.RGBA, gl.UNSIGNED_BYTE, meterBytes);
+      for (let i = 0; i < levels.length; i++) {
+        levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
+      }
+      target = exposureFor(levels);
+    };
+    // Meters the picture p; with wait, at once, else when the fence has passed (poll).
+    const meterPicture = (p, wait) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
+      gl.viewport(0, 0, METER[0], METER[1]);
+      gl.useProgram(meter);
+      bind(6, p.colour);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.useProgram(prog);
+      if (wait) readMeter();
+      else {
+        fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+      }
+    };
+    const poll = () => {
+      if (!fence || gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) return;
+      gl.deleteSync(fence);
+      fence = null;
+      readMeter();
+    };
     // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
     const picture = (old, w, h) => {
       if (old && old.w === w && old.h === h) return old;
@@ -3261,6 +3282,9 @@ const SkySound = (() => {
     let camPast = null, driftPast = [0, 0], altPast = 0, lookPast = '';
     // Frames drawn since anything moved or changed, and since the light changed.
     let calm = 0, relit = RELIGHT + 1, lastStir = -1e9;
+    // The exposure moves towards the meter's target (adapting) in the page's
+    // time (then, ms); restart: the next frame begins the picture again.
+    let adapting = false, then = null, restart = false, meteredAt = -1e9;
     // While the view moves or changes, the picture is drawn smaller than
     // the canvas if frames take long (scale); at rest it is drawn in full.
     // The wall clock tells how long frames take, while one follows another.
@@ -3275,16 +3299,28 @@ const SkySound = (() => {
       const fitted = fit();
       if (!fitted) return false;
       const v = view(), cam = camera(v.yaw, v.pitch);
+      poll();
+      const dt = then === null ? 0 : Math.min(Math.max(now - then, 0), 100) / 1000;
+      then = now;
+      if (target !== null && logE !== null) {
+        // Fast towards less light (a brighter view), slower towards more. It
+        // stops within ADAPT_STOP stops and starts again beyond ADAPT_START,
+        // so that the noise of the picture does not keep it moving.
+        const d = target - logE;
+        adapting = Math.abs(d) > (adapting ? ADAPT_STOP : ADAPT_START);
+        if (adapting) logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
+      }
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
       // Start again without a past: at first, when the canvas has changed,
       // and if the place ever jumps (today it cannot: the aircraft stands
       // still while nothing is drawn).
-      const reset = !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
+      const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
+      restart = false;
       const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud].join();
       const flying = state.speed > 0;
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
-      if (!reset && !moved && !lit && calm >= SETTLE + RELIGHT) return false;   // settled
+      if (!reset && !moved && !lit && !adapting && calm >= SETTLE + RELIGHT) return false;   // settled
       if (moved || lit) lastStir = now;
       const small = now - lastStir < 150 ? scale : 1;
       const w = Math.max(1, Math.round(canvas.width * small)), h = Math.max(1, Math.round(canvas.height * small));
@@ -3303,10 +3339,12 @@ const SkySound = (() => {
         relit = Math.min(relit + 1, RELIGHT);
       } else {
         relit++;
-        calm = moved ? 0 : calm + 1;
+        calm = moved || adapting ? 0 : calm + 1;
       }
-      // How many frames the past may count for (the shader keeps count, up to 64).
-      const trust = reset ? 0 : relit <= RELIGHT ? 1 : moved ? IN_MOTION - 1 : 63;
+      // How many frames the past may count for (the shader keeps count, up to
+      // 64). While the exposure moves, as while the view does: the picture
+      // then follows it within a few frames.
+      const trust = reset ? 0 : relit <= RELIGHT ? 1 : moved || adapting ? IN_MOTION - 1 : 63;
       const steps = fine ? 2048 : 255;                 // every half float up to 1 is a multiple of 1/2048
       const pass = drawn % 64;
 
@@ -3350,6 +3388,20 @@ const SkySound = (() => {
         return true;
       }
 
+      // The first picture is metered at once (the only frame that waits for
+      // the GPU), and begun again at that exposure: it is not shown.
+      if (logE === null) {
+        meterPicture(cur, true);
+        logE = target;
+        restart = true;
+        turn = 1 - turn;
+        return true;
+      }
+      if (!fence && now - meteredAt >= METER_MS) {
+        meterPicture(cur, false);
+        meteredAt = now;
+      }
+
       // To the canvas.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -3383,7 +3435,7 @@ const SkySound = (() => {
         else if (ms < 24) scale = Math.min(1, scale * 1.12);
         span = count = 0;
       }
-      chained = flying || calm < SETTLE + RELIGHT;
+      chained = flying || adapting || calm < SETTLE + RELIGHT;
       return chained;
     };
 
@@ -3430,7 +3482,6 @@ const SkySound = (() => {
         builtHaze = state.haze;
       }
       celestial();
-      state.airExposure = airExposure();
       showLabels();
     }
     // The aircraft flies on, in real time: the clouds and the sea come
@@ -3810,7 +3861,7 @@ const SkySound = (() => {
       channel.port2.postMessage(0);
     }))
     .then(() => makeSky(heroCanvas, () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV,
-      alt: state.alt, cloud: state.cloud, exposure: state.airExposure, look: AIR_LOOK }),
+      alt: state.alt, cloud: state.cloud, look: AIR_LOOK }),
       { done, shown: () => hero.classList.add('shown') }))
     .catch(err => {
       console.error(err);
