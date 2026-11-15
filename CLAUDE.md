@@ -15,8 +15,6 @@ Read these before you touch this repository.
 - `index.html` holds one line of 71 kB: the `<script id="stars">` block.
   Never print it. Read around it with offset and limit, and cut grep
   output (`grep … | cut -c1-200`).
-- The skylight (`#sky2`) must stay pixel-identical unless the owner says
-  otherwise. Code in `fs` outside `#if AIRCRAFT` is shared with it.
 - Use only MIT-compatible material. Never copy code from Shadertoy, GPL
   projects or sources without a licence; write it from published ideas.
   Code and data by others (the star data from Wikidata, CC0, among them)

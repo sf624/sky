@@ -5,7 +5,6 @@
 A web page that draws the sky as seen from the window of an aircraft.
 It draws the air, low clouds, the sea, high thin cloud, the sun, the moon
 and the stars, from the way light scatters.
-Below, a wall in a room is lit by the light of a skylight.
 
 **The page: https://sf624.github.io/sky/**
 
@@ -22,10 +21,10 @@ Click a picture to open the page with that view.
 
 ## How to use it
 
-Drag the upper view to look around. You can look up or down by up to
+Drag the view to look around. You can look up or down by up to
 89 degrees.
 
-The panel below changes the time and the weather. The panel is labelled in
+The panel at the bottom changes the time and the weather. The panel is labelled in
 Japanese only; each label is given in parentheses.
 
 - **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
@@ -38,10 +37,7 @@ Japanese only; each label is given in parentheses.
 - **Speed (速度)**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds (雲)**: the amount of low cloud, from none to overcast.
 - **Thin cloud (薄雲)**: the amount of high, thin cloud (cirrus).
-- **Resolution (解像度)**: the most pixels the upper view may draw: Full HD (フルHD), WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
-
-In the room below, the sky in the skylight and the sunlit patch on the wall
-follow the time: its place and its colour.
+- **Resolution (解像度)**: the most pixels the view may draw: Full HD (フルHD), WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
 A view can also be given in the address, for example
 `?time=16.75&yaw=60&pitch=-6`.
@@ -58,8 +54,8 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 
 ## What it needs
 
-- A browser with WebGL2. Without it, the upper view shows only a gradient of sky colours, and the skylight a flat blue.
-- A fast GPU. The page is heavy on the GPU. Time to draw one frame of the upper view, measured on an RTX 3090 (the first view, flying):
+- A browser with WebGL2. Without it, the page shows only a gradient of sky colours.
+- A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
   - 2560×1440: about 9.3 ms
   - 3840×2160 (resolution 4K): about 19 ms
