@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and nine `<script>`
+`index.html` holds everything: the markup, the CSS and ten `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -19,6 +19,7 @@ blocks. It loads no other file.
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| `meter` | fragment shader | Meters the picture for the exposure, block by block. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
 | (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
 
@@ -88,7 +89,7 @@ The JS then runs once, at load, and does little:
    function: it waits a frame (`nextFrame`) wherever it would otherwise
    hold the main thread or wait for the GPU. Its steps:
    - `getContext`, and the extensions.
-   - Every program (`fs`, `noise`, `waves`, `mean`, `show`) is
+   - Every program (`fs`, `noise`, `waves`, `mean`, `show`, `meter`) is
      compiled and linked at once, and nothing asks how it went yet. With
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
@@ -103,12 +104,11 @@ The JS then runs once, at load, and does little:
        each. Read by `sunDepth()` in the JS only.
      - `starData` (`buildStars`): the star texture.
      - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
-       (see [The air](#the-air)), for the haze the page starts with
-       (`NIGHT_HAZE`, the slider's own value).
-     - `NIGHT` (`nightSky`): the moonless night sky (airglow), 4e-8 of the
-       metered sky with the sun at 42 degrees, at `NIGHT_HAZE`.
-     - `msData` again, if the address gives another haze, for that one.
+       (see [The air](#the-air)), for the haze given.
      - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
+     - With them goes a constant, `NIGHT`: the moonless night sky
+       (airglow), 8.59e-10 of the sun's irradiance, about 4e-8 of the
+       daytime sky.
    - The textures (see [Textures made at start](#textures-made-at-start)).
      The noise and the weather map are drawn in batches (`batches`), the
      weather map in strips of 64 rows (the scissor; each pixel is the
@@ -149,16 +149,15 @@ which asks for one `requestAnimationFrame(frame)`.
 
 - does nothing in a hidden tab;
 - if something changed: rebuilds `msData` when the haze has changed (at
-  once, with `finish`), runs `celestial()`, sets the exposure
-  (`state.airExposure`) and the panel's labels;
+  once, with `finish`), runs `celestial()` and sets the panel's labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
 - calls the renderer;
 - asks for another frame only if the renderer returned true.
 
-The renderer returns true while the aircraft flies or while its picture is
-still settling. So the page draws nothing at rest once the picture is
+The renderer returns true while the aircraft flies, while its picture is
+still settling, or while the exposure moves. So the page draws nothing at rest once the picture is
 clean, or in a hidden tab. `visibilitychange` calls `kick()` again.
 
 **Playing.** The play button runs the time at the rate of the select beside
@@ -203,7 +202,9 @@ the rate to real time, and plays.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
   angle. It counts (`state.moonI`) only when the sun is below -3 degrees and
   the moon above -18.
-- `state.sunOn` (`uSunI`) is 0 when the sun is below -21 degrees.
+- `state.sunOn` (`uSunI`) fades from 1 to 0 as the sun goes from 18 to 21
+  degrees down (a smoothstep), so that no step shows when it stops
+  mattering.
 - One light for the clouds and the sea (`uLight`, `uLightI`): the sun while
   it is above -3 degrees, else the moon.
 - `state.sky` (`uSky`) turns J2000 equatorial directions into local axes.
@@ -262,10 +263,9 @@ layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
-- The table repeats the density profile. The profile is written out five
+- The table repeats the density profile. The profile is written out four
   times: `density()` in `fs`, and in the JS `buildDepths`,
-  `buildMultiScatter`, `skyLuminance` and this table in `makeSky`. Change
-  all five.
+  `buildMultiScatter` and this table in `makeSky`. Change all four.
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
 each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
@@ -279,9 +279,6 @@ of four wavelengths stacked in y. It depends on the haze, so `frame`
 rebuilds it when the haze changes, and the renderer uploads it again.
 `fs` reads it through the GPU's filter (`textureLod`; RGBA16F when full
 floats cannot be filtered).
-
-The JS keeps a copy of the march, `skyLuminance()`, to meter the exposure
-(see [Exposure](#exposure-and-the-tone-curve)).
 
 ## Low clouds
 
@@ -466,18 +463,60 @@ light in a lens, dimmed by the clouds and the cirrus towards the sun.
 
 ## Exposure and the tone curve
 
-The exposure is set in the JS, once per change, by `airExposure()`. It
-meters the sky at the aircraft's altitude (`meterLight()`: the mean of
-three points, or the glow above the sun if brighter), the band along the
-horizon and the sunlit cloud tops (`cloudLuminance`), whichever is
-brightest, against the same with the sun at 42 degrees (`REF_SUN`). It
-opens up as the sky darkens, but not all the way. It stops down from high
-up (`AIR_STOP`) and further with clouds (`CLOUD_STOP`), more so close over
-the tops, and opens up under a sheet of cloud.
+The exposure follows the picture, as the eye or a camera's automatic
+exposure does: it is set from what the view shows, sky, clouds, sea,
+glitter and the inside of a cloud alike.
+
+**The level.** `fs` writes, in the alpha of each frame, the level of the
+pixel: log2 of its luminance before exposure, coded from 0 to 1 over
+`LOG_RANGE` (-34 to 18, `uLogRange`). `mean` carries it along with the
+colour, so the picture's level is as clean as its colours.
+
+**The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
+texels (`METER`): each is a block of the picture and holds the mean level
+of 4 by 4 points in it, in 16 bits over two 8-bit channels. The JS reads
+it back after a fence (`fenceSync`), once the GPU has drawn it, so that
+the read never waits for the GPU's work. A read still costs a round trip
+to the GPU process (about 2 ms on the test machine), so the meter is read
+at most every `METER_MS` = 100 ms of the page's time. The first frame of
+the page is metered at once (the one read that waits), not shown, and
+drawn again at its exposure: the page starts adapted.
+
+**The exposure the picture asks for** (`exposureFor`, log2) comes from the
+2304 block levels, sorted:
+
+- `low`, the level of the darker quarter (`LOW_SHARE`), but at least
+  `NIGHT_LEVEL` = -25.5 (a moonless night sky);
+- `high`, the level that only the brightest 3% of the blocks pass
+  (`HIGH_SHARE`);
+- `key` = `KEY` - `EYE` * `low` (`KEY` = -1.3): as the view darkens,
+  the eye opens up `EYE` = 0.85 stops for each stop, not all the way. So
+  a night is darker than a day and dusk is in between, and black sea at night is exposed as
+  the night sky, not lifted into noise;
+- `white` brings `high` to `WHITE` (2^0.3 before the tone curve: just
+  below white) in daylight (`high` at `DAY_HIGH` = 0 or more), and `DIM`
+  = 0.3 stops lower for each stop that `high` is below that: the
+  brightest parts of a dim view are not white either, and dusk shows
+  darker than day;
+- the exposure is the lesser of `key` and `white`; but the highlights may
+  not stop it down so far that the darker quarter shows darker than at
+  night, except by up to `GLOW` = 2 stops more as far as they stand more
+  than `SPAN` = 4 stops above the darker quarter. So the band of glow at
+  dusk keeps its colour (to about 8 degrees of the sun below the horizon;
+  beyond, it is many stops above the rest of the sky and burns out), and
+  facing away from it the sky does not fall below the night's level.
+
+**Adaptation.** Each frame the exposure moves towards that target by the
+page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
+a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
+view) and `ADAPT_SLOW` = 0.5 s towards more. It starts when the target is
+`ADAPT_START` = 0.03 stops away and stops within `ADAPT_STOP` = 0.01, so
+that the noise of the picture does not keep it moving.
 
 At the end of `main`:
 
-1. Spectrum to linear sRGB, times `ISUN` and `uExposure`.
+1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
+   taken here; then times `uExposure`.
 2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
 3. Light far too strong for the screen turns towards white (as on film).
 4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
@@ -491,8 +530,9 @@ pixel (`uJitter`, Halton (2, 3)) and the samples through the clouds
 (`uPass`). The picture is the mean of many frames. `makeSky` keeps three
 textures for it, each with a second 8-bit texture beside it (`aux`):
 
-- `shot`: the new frame, drawn by `fs` into two outputs: the colour
-  (`outColor`) and the distance of what each pixel shows (`outAux`);
+- `shot`: the new frame, drawn by `fs` into two outputs: the colour with
+  the level in alpha (`outColor`) and the distance of what each pixel
+  shows (`outAux`);
 - two `pictures` that take turns: the one so far is read while the next is
   drawn by `mean`; then `show` copies the new one to the canvas.
 
@@ -548,18 +588,24 @@ count, capped by `uTrust`, which the JS sets per frame:
 |---|---|---|
 | First frame, canvas resized, or a jump of more than 1 km | 0 | 1 |
 | The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames | 1 | 1/2 |
-| The view moves or the aircraft flies | `IN_MOTION - 1` = 9 | 1/10 |
+| The view moves, the aircraft flies, or the exposure moves | `IN_MOTION - 1` = 9 | 1/10 |
 | At rest | 63 | 1/(n + 1): the plain mean |
 
+The frames are tone-mapped before they join the mean, so a frame drawn
+at another exposure would linger in it. While the exposure moves, the
+mean therefore weighs the frames as in motion: the picture lags the
+exposure by a few frames, and once the exposure stops, the plain mean
+takes over.
+
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
-the frames since the last change (`calm`) and stops once it reaches
-`SETTLE + RELIGHT` = 38: 39 frames in all after the last change. While
-the aircraft flies, it never stops. Playing at real time, each step of 10 s
+the frames since the last change or the last move of the exposure
+(`calm`) and stops once it reaches `SETTLE + RELIGHT` = 38: 39 frames in
+all after the last change, if the exposure does not move. While the
+aircraft flies, it never stops. Playing at real time, each step of 10 s
 starts the count again (see [Playing](#from-the-address-bar-to-the-first-frame)).
-A still picture for testing therefore
-needs `speed=0`, and from page load about 46 frames: the first frames may
-start the mean again (the first reset, and a restart if the drawing size
-grows).
+A still picture for testing therefore needs `speed=0`, and from page load
+about 48 frames: the first frame is only metered, and the next ones may
+start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
@@ -592,7 +638,7 @@ All are made during the loading, in `makeSky`:
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-reads unit 6.
+and `meter` read unit 6.
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
