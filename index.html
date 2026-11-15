@@ -623,8 +623,28 @@ vec3 density(float h) {
   return vec3(exp(-h / HR), exp(-h / HM), max(0.0, 1.0 - abs(h - 25.0) / 15.0));
 }
 
+#if AIRCRAFT
+// The depths of depthToTop hang only on the height of p and the angle of d
+// to the vertical. The aircraft's view reads them from a table, the same
+// sum made once in JS: one filtered read instead of 16 steps. Its axes, as
+// in Bruneton (2017): the distance to the top between its least and its
+// most at that height, and the distance to the horizon. They keep the
+// table smooth near the horizon.
+uniform sampler2D uDepth;
+const int DEPTH_MU = 512, DEPTH_R = 128;
+const float H_TOP = 1132.2544;  // distance from the ground to the top, along the horizon: sqrt(RT^2 - RG^2)
+#endif
+
 // Optical depth (per species) from p to the top of the atmosphere.
 vec3 depthToTop(vec3 p, vec3 d) {
+#if AIRCRAFT
+  float r = length(p);
+  float rho = sqrt(max((r - RG) * (r + RG), 0.0));
+  float lo = RT - r, hi = rho + H_TOP;
+  vec2 x = vec2(clamp((raySphere(p, d, RT).y - lo) / (hi - lo), 0.0, 1.0), clamp(rho / H_TOP, 0.0, 1.0));
+  const vec2 N = vec2(DEPTH_MU, DEPTH_R);
+  return textureLod(uDepth, (x * (N - 1.0) + 0.5) / N, 0.0).rgb;
+#else
   float t = raySphere(p, d, RT).y;
   float dt = t / float(NL);
   vec3 s = vec3(0.0);
@@ -633,6 +653,7 @@ vec3 depthToTop(vec3 p, vec3 d) {
     s += density(length(q) - RG) * dt;
   }
   return s;
+#endif
 }
 
 // Bilinear lookup of the multiple-scattering table.
@@ -2355,8 +2376,43 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
     }
 
+    // The table of depthToTop (see there), on unit 5: the shader's own sum,
+    // 16 midpoint steps, at each texel.
+    if (aircraft) {
+      const NM = 512, NR = 128, NL = 16, H = Math.sqrt(RT * RT - RG * RG);
+      const data = new Float32Array(NM * NR * 4);
+      for (let j = 0; j < NR; j++) {
+        const rho = H * j / (NR - 1), r = Math.sqrt(rho * rho + RG * RG);
+        for (let i = 0; i < NM; i++) {
+          const t = (RT - r) + (rho + H - (RT - r)) * i / (NM - 1);
+          const mu = t > 0 ? (H * H - rho * rho - t * t) / (2 * r * t) : 1, dt = t / NL;
+          let a = 0, m = 0, o = 0;
+          for (let s = 0; s < NL; s++) {
+            const u = (s + 0.5) * dt;
+            const h = Math.max(0, Math.sqrt(r * r + u * u + 2 * r * mu * u) - RG);
+            a += Math.exp(-h / HR) * dt;
+            m += Math.exp(-h / HM) * dt;
+            o += Math.max(0, 1 - Math.abs(h - 25) / 15) * dt;
+          }
+          data.set([a, m, o, 0], (j * NM + i) * 4);
+        }
+      }
+      // Read through the GPU's own filter: full floats where it can filter
+      // them, else half floats (2.4e-4 apart, plenty for a depth).
+      const full = !!gl.getExtension('OES_texture_float_linear');
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+        [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
+        gl.texParameteri(gl.TEXTURE_2D, k, v);
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, full ? gl.RGBA32F : gl.RGBA16F, NM, NR, 0, gl.RGBA, gl.FLOAT, data);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
     gl.useProgram(prog);
     const U = n => gl.getUniformLocation(prog, n);
+    if (aircraft) gl.uniform1i(U('uDepth'), 5);
     gl.uniform1i(U('uNoise'), 2);
     gl.uniform1i(U('uWeather'), 3);
     gl.uniform1i(U('uWaves'), 4);
