@@ -47,9 +47,14 @@ These are read directly.
 | `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
+| `lang` | stored choice, else the browser's language | The page's language: `ja` or `en`. Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
 
 With `date` and no `moon`, the moon's age follows the given date.
+
+The page keeps two choices in `localStorage`: `sky.pixels` (the drawing
+limit) and `sky.lang` (the language, set by the panel's language select).
+The address wins over both.
 
 The page does not check `yaw` and `pitch`: a value that is not a number
 makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
@@ -63,7 +68,7 @@ frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
 page load, step about 46 frames before the screenshot: the first frames
 may start the mean again (the first reset, and a restart if the drawing
 size grows). Hide the overlays (`.title`, `.panel`,
-`.hint`) for a clean picture. The canvas is made with
+`.hint`, `.fs`) for a clean picture. The canvas is made with
 `preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
