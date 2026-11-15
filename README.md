@@ -37,7 +37,9 @@ mouse cursor hides with them over the view, and comes back with them.
 
 The panel at the bottom changes the time and the weather.
 
-- **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
+- **Play (▶)**: runs the time, at the speed chosen beside it. Press again to stop. Past midnight the date moves on to the next day, and the moon's age with it.
+- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. The clock of your device is taken as the page's time, which is local solar time.
+- **Speed of time**: real time, 1 min/s, 10 min/s, 16 min/s (a day in a minute and a half; the first choice) or 1 h/s. In real time the sky is drawn again every 10 seconds and rests in between.
 - **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
 - **Moon**: the age of the moon, 0 to 29.5 days.
