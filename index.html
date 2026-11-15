@@ -891,9 +891,20 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
   const float BUDGET = COARSE * 80.0;
+  // The steps also set how a cloud looks, so the plan must not jump where
+  // the end of the ray does. A ray that meets the sea ends early: plan it
+  // as if the sea were a mirror and the ray went on up to the tops. A ray
+  // that just meets the sea is then planned like one that just misses it,
+  // and a cloud in front of the horizon looks the same above and below it.
+  float plan = tb;
+  vec2 sea = raySphere(o, d, RG);
+  if (sea.x > 0.0 && sea.x < 1e8) {
+    vec3 pg = o + d * sea.x;
+    plan = min(sea.x + raySphere(pg, reflect(d, normalize(pg)), RG + CT).y, 600.0);
+  }
   float knee = DS_MIN / DS_REL;
-  float near = max(min(tb, knee) - ta, 0.0) / DS_MIN;
-  float rel = DS_REL * max(1.0, log(max(tb, knee) / max(ta, knee)) / DS_REL / max(BUDGET - near, 0.3 * BUDGET));
+  float near = max(min(plan, knee) - ta, 0.0) / DS_MIN;
+  float rel = DS_REL * max(1.0, log(max(plan, knee) / max(ta, knee)) / DS_REL / max(BUDGET - near, 0.3 * BUDGET));
   // Light scattered once keeps the forward peak of the droplets; light
   // scattered many times goes deeper and forgets its direction. These five
   // terms stand for the orders of scattering; a thick cloud top that faces
