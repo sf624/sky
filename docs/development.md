@@ -48,13 +48,17 @@ These are read directly.
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
 | `lang` | stored choice, else the browser's language | The page's language: `ja` or `en`. Not stored |
+| `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
+| `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
 
 With `date` and no `moon`, the moon's age follows the given date.
 
-The page keeps two choices in `localStorage`: `sky.pixels` (the drawing
-limit) and `sky.lang` (the language, set by the panel's language select).
-The address wins over both.
+The page keeps four choices in `localStorage`: `sky.pixels` (the drawing
+limit), `sky.lang` (the language, set by the panel's language select),
+`sky.sound` and `sky.volume` (the sound and its volume). The address wins
+over all of them. Each is read and written inside `try`: without storage
+the page works and forgets.
 
 The page does not check `yaw` and `pitch`: a value that is not a number
 makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
@@ -90,6 +94,21 @@ SwiftShader, `--use-angle=swiftshader`). Look at the console: `makeSky`
 throws the compiler's log, and the page prints it.
 
 **Cost.** Measure the GPU time before and after (next section).
+
+**Sound.** It cannot be judged by looking, and an agent cannot hear it:
+measure it, and give a person files to listen to. Render it offline in
+headless Chrome: in a page from the same origin, take the text of the
+`<script>` that defines `SkySound` from `index.html`, run it, and build
+`SkySound.engine(ctx)` on an `OfflineAudioContext` (48 kHz, stereo). Call
+`volume`, `fly` and `play` at the times wanted (a speed sweep is `fly`
+every 50 ms), then `tick(duration)`, then `startRendering()`; write the
+channels to a 16-bit WAV. Check the peak at volume 1 in the loudest state
+(0.3 km, 3000 km/h: it must stay below -1 dBFS), the largest jump between
+samples in a sweep and at a switch (no larger than in a steady state), the
+autocorrelation of 40 s at the noise buffers' lengths (11 s and 10.3 s: no
+peak), and a spectrogram. In the real page, check that no `AudioContext`
+exists before a click, and that choosing off or hiding the page suspends
+it. Keep renders out of the repository.
 
 ## GPU time
 
