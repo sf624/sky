@@ -1,0 +1,91 @@
+# Publishes the site on GitHub Pages, from the gh-pages branch:
+#   main            -> https://<owner>.github.io/<repo>/
+#   pull request N  -> https://<owner>.github.io/<repo>/pr/N/  (removed when it closes)
+# Pages builds the site about a minute after each push to gh-pages.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  contents: write        # push to gh-pages
+  pull-requests: write   # comment the link to the preview
+
+# One run at a time per place on the site. Different places may run together:
+# each changes a directory of its own, and the push below retries.
+concurrency:
+  group: pages-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # A pull request from a fork gets a read-only token, so it gets no preview.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the source
+        if: github.event.action != 'closed'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request shows its own head, not the merge with main.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: src
+          persist-credentials: false
+
+      - name: Check out the site
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Update the site
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          if [ -z "$PR" ]; then
+            # main is the root of the site. The previews under pr/ stay.
+            rsync -a --delete --exclude=/.git --exclude=/.github --exclude=/pr src/ site/
+            touch site/.nojekyll
+            what="main at $GITHUB_SHA"
+          elif [ "$ACTION" = closed ]; then
+            rm -rf "site/pr/$PR"
+            what="Remove the preview of #$PR"
+          else
+            mkdir -p "site/pr/$PR"
+            rsync -a --delete --exclude=/.git --exclude=/.github src/ "site/pr/$PR/"
+            what="Preview of #$PR at $HEAD_SHA"
+          fi
+          cd site
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Nothing to publish.'
+            exit 0
+          fi
+          git commit -q -m "$what"
+          # Another run may have pushed meanwhile: take its commit and try again.
+          for attempt in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            git pull --rebase
+          done
+          echo 'Could not push to gh-pages.' >&2
+          exit 1
+
+      - name: Link the preview
+        if: github.event.action == 'opened'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          url="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/pr/${PR}/"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "Preview: $url
+          It follows every push to this pull request, about a minute behind, and is removed when the pull request closes."
