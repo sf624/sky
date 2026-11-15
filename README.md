@@ -1,76 +1,83 @@
 # Sky
 
-航空機の窓から見た空を、ブラウザーで描くページです。
-空気、低い雲、海、高い空の薄雲、太陽、月、星を、光の散乱を計算して描きます。
-ページの下には、天窓の光で照らされた部屋の壁もあります。
+日本語: [README.ja.md](README.ja.md)
 
-**ページ: https://sf624.github.io/sky/**
+A web page that draws the sky as seen from the window of an aircraft.
+It draws the air, low clouds, the sea, high thin cloud, the sun, the moon
+and the stars, from the way light scatters.
+Below, a wall in a room is lit by the light of a skylight.
 
-[![巡航高度 11 km から見た、雲と海と薄雲](docs/images/cruise.jpg)](https://sf624.github.io/sky/?date=319&at=150,90)
+**The page: https://sf624.github.io/sky/**
+
+[![Clouds, sea and thin cloud, seen from 11 km](docs/images/cruise.jpg)](https://sf624.github.io/sky/?date=319&at=150,90)
 
 <p>
-<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=60,20"><img src="docs/images/sunset.jpg" width="49%" alt="夕方。低い太陽と、海の照り返し"></a>
-<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3"><img src="docs/images/cloud-tops.jpg" width="49%" alt="高度 2500 m。すぐ下の雲の頂"></a>
-<a href="https://sf624.github.io/sky/?date=319&time=13&yaw=17&pitch=-25&cloud=0.25"><img src="docs/images/sea.jpg" width="49%" alt="太陽の方の海。波のきらめきと雲の影"></a>
-<a href="https://sf624.github.io/sky/?date=200&time=22&moon=10&yaw=34&pitch=10&cloud=0.3&cirrus=0"><img src="docs/images/night.jpg" width="49%" alt="夜。月と星、月明かりの海"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=60,20"><img src="docs/images/sunset.jpg" width="49%" alt="Late afternoon: a low sun and its glare on the sea"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3"><img src="docs/images/cloud-tops.jpg" width="49%" alt="At 2,500 m: the tops of the clouds just below"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=13&yaw=17&pitch=-25&cloud=0.25"><img src="docs/images/sea.jpg" width="49%" alt="The sea towards the sun: glitter on the waves, and the shadows of clouds"></a>
+<a href="https://sf624.github.io/sky/?date=200&time=22&moon=10&yaw=34&pitch=10&cloud=0.3&cirrus=0"><img src="docs/images/night.jpg" width="49%" alt="Night: the moon, stars, and moonlight on the sea"></a>
 </p>
 
-絵をクリックすると、その景色でページが開きます。
+Click a picture to open the page with that view.
 
-## 使い方
+## How to use it
 
-上の画面をドラッグすると、まわりを見回せます。上下は 89 度まで向けます。
+Drag the upper view to look around. You can look up or down by up to
+89 degrees.
 
-下のパネルで、時刻や天気を変えられます。
+The panel below changes the time and the weather. The panel is labelled in
+Japanese only; each label is given in parentheses.
 
-- **▶**: 時間を進めます。1 日を 1 分半で回ります。もう一度押すと止まります。
-- **時刻**: 0 時から 24 時まで。太陽が真南に来るのが 12 時です。場所は北緯 35 度です。
-- **日付**: 1 月 1 日から 12 月 31 日まで。初めは今日です。日付を動かすと、月齢もその日のものに変わります。
-- **月**: 月齢。0 日から 29.5 日まで。
-- **大気の霞**: 空気中のちりや小さな水滴の量。0 から 6 まで(初めは 0.35)。多いほど、地平線と太陽のまわりが白く霞みます。
-- **海上の風**: 1 m/s から 15 m/s まで。強いほど、太陽の照り返しの帯が広く淡くなり、白波が立ちます。
-- **高度**: 300 m から 13,000 m まで(初めは 11,000 m)。
-- **速度**: 0 から 3,000 km/h まで(初めは 900 km/h)。雲と海が流れていきます。0 にすると止まります。
-- **雲**: 低い雲の量。なしから一面まで。
-- **薄雲**: 高い空の薄い雲(巻雲)の量。
-- **解像度**: 上の画面を描く画素数の上限です。フルHD、WQHD(初め)、4K から選びます。選んだものはブラウザーに残ります。画面の実際の画素数より細かくは描きません。
+- **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
+- **Time (時刻)**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
+- **Date (日付)**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
+- **Moon (月)**: the age of the moon, 0 to 29.5 days.
+- **Haze (大気の霞)**: the amount of dust and small droplets in the air, 0 to 6 (0.35 at first). With more, the horizon and the sky around the sun turn white.
+- **Wind over the sea (海上の風)**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
+- **Altitude (高度)**: 300 m to 13,000 m (11,000 m at first).
+- **Speed (速度)**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
+- **Clouds (雲)**: the amount of low cloud, from none to overcast.
+- **Thin cloud (薄雲)**: the amount of high, thin cloud (cirrus).
+- **Resolution (解像度)**: the most pixels the upper view may draw: Full HD (フルHD), WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
-下の部屋では、天窓に見える空と、壁の日なたの位置と色が、時刻に合わせて変わります。
+In the room below, the sky in the skylight and the sunlit patch on the wall
+follow the time: its place and its colour.
 
-景色はアドレスでも指定できます。たとえば `?time=16.75&yaw=60&pitch=-6` です。
-指定できるものの一覧は [docs/development.md](docs/development.md) にあります。
+A view can also be given in the address, for example
+`?time=16.75&yaw=60&pitch=-6`.
+All the parameters are listed in [docs/development.md](docs/development.md).
 
-## 絵のしくみ
+## How the picture is made
 
-- 空: 12 の波長ごとに、空気の分子とちりが光を散らす量を、視線に沿って足し合わせます。オゾンの吸収と、何度も散った光も入れています。
-- 雲: 形は 3 次元のノイズで作ります。視線に沿って雲の中を進み、光の当たり方は、太陽の方へ雲をたどって決めます。
-- 海: 波の傾きの分布から、太陽のきらめき、空の映り込み、水の中から戻る青い光、白波を計算します。
-- 薄雲: 風に引き伸ばされた、氷の粒の筋です。太陽のまわりに 22 度のかさも出ます。
-- 夜: 月は太陽に照らされた球なので、満ち欠けが出ます。星の位置と明るさは Hipparcos 星表によります。
-- 1 枚の絵は、少しずつずらして描いた何枚もの絵の平均です。止まっていると数十フレームで滑らかになり、描くのをやめます。動いている間は、前の絵を動きに合わせてずらして重ねます。
+- Sky: for each of 12 wavelengths, the light that air molecules and dust scatter is added up along the line of sight. The absorption of ozone and light scattered many times are included.
+- Clouds: their shapes come from 3D noise. The ray steps through the clouds; how a cloud is lit is found by stepping through it towards the sun.
+- Sea: from the spread of the waves' slopes, the page works out the sun's glitter, the mirrored sky, the blue light that comes back out of the water, and whitecaps.
+- Thin cloud: streaks of ice crystals drawn out by the wind. A 22-degree halo appears around the sun.
+- Night: the moon is a sphere lit by the sun, so its phases come out by themselves. The positions and brightness of the stars come from the Hipparcos Catalogue.
+- One picture is the mean of many pictures, each drawn slightly shifted. At rest it turns smooth within a few dozen frames, and then drawing stops. While the view moves, the last picture is shifted with the movement and laid under the new one.
 
-## 必要なもの
+## What it needs
 
-- WebGL2 が使えるブラウザー。使えないときは、空の色のグラデーションだけが出ます。
-- 速い GPU。このページは GPU に重い処理をさせます。RTX 3090 で測った、上の画面の 1 フレームの描画時間は次のとおりです(初めの景色、飛行中)。
-  - 1920×1080: 約 5.5 ms
-  - 2560×1440: 約 9.3 ms
-  - 3840×2160: 約 19 ms
+- A browser with WebGL2. Without it, the upper view shows only a gradient of sky colours, and the skylight a flat blue.
+- A fast GPU. The page is heavy on the GPU. Time to draw one frame of the upper view, measured on an RTX 3090 (the first view, flying):
+  - 1920×1080: about 5.5 ms
+  - 2560×1440: about 9.3 ms
+  - 3840×2160 (resolution 4K): about 19 ms
 
-  飛んでいる間は、毎フレーム描き続けます。ノート PC やスマートフォンでは遅くなります。
-  遅いときは、動いている間だけ、描く画素数を自動で減らします。
-  速度を 0 にするか、解像度をフルHD にすると、軽くなります。
+  While the aircraft flies, every frame is drawn. Laptops and phones will be slower.
+  When frames are slow, the page draws fewer pixels while the view moves.
+  Setting the speed to 0, or the resolution to Full HD, makes it lighter.
 
-ページは HTML ファイル 1 つだけで、ほかに読み込むものはありません。
+The page is a single HTML file. It loads nothing else.
 
-## ライセンス
+## Licence
 
-MIT ライセンスです([LICENSE](LICENSE))。
-ページに埋め込んだ星のデータは、別の条件です。[NOTICE](NOTICE) を見てください。
+MIT licence ([LICENSE](LICENSE)).
+The star data embedded in the page has terms of its own: see [NOTICE](NOTICE).
 
-## 開発する方へ
+## For developers
 
-しくみと開発の手順は [docs/](docs/) にあります(英語)。
+How the page works and how to work on it is in [docs/](docs/).
 
-- [docs/design.md](docs/design.md): 1 フレームができるまで
-- [docs/development.md](docs/development.md): 動かし方、確かめ方、決まりごと
+- [docs/design.md](docs/design.md): how a frame is made
+- [docs/development.md](docs/development.md): running the page, judging a change, the rules
