@@ -23,7 +23,8 @@ A view can be given in the address, for example
 `?time=17.5&cloud=0.7&yaw=120&pitch=-10`.
 
 These set the slider with the same id. The browser clamps the value to the
-slider's range and rounds it to its step.
+slider's range and rounds it to its step. A value that is not a number
+becomes the middle of the range (`time=abc` gives 12).
 
 | Parameter | Range, step | Default | Meaning |
 |---|---|---|---|
@@ -42,7 +43,7 @@ is fixed.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `yaw` | the sun's azimuth + 65 | Direction of view, degrees: 0 south, 90 west, -90 east |
+| `yaw` | the sun's direction as a `yaw`, + 65 | Direction of view, degrees: 0 south, 90 west, -90 east. A larger `yaw` turns the view to the right (clockwise seen from above) |
 | `pitch` | -8 | Elevation of the view, degrees, up positive. Not clamped (a drag clamps to 89) |
 | `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
@@ -51,12 +52,18 @@ is fixed.
 
 With `date` and no `moon`, the moon's age follows the given date.
 
+The page does not check `yaw` and `pitch`: a value that is not a number
+makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
+`heading` and the parts of `at` fall back to 0.
+
 ## Judging a change
 
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
-still, set `speed=0` and let it settle: after a change it draws 39 frames
-and stops. A headless capture with a stepped clock should step about 46
-frames before the screenshot. Hide the overlays (`.title`, `.panel`,
+still, set `speed=0` and let it settle: after the last change it draws 39
+frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
+page load, step about 46 frames before the screenshot: the first frames
+may start the mean again (the first reset, and a restart if the drawing
+size grows). Hide the overlays (`.title`, `.panel`,
 `.hint`) for a clean picture. Both canvases are made with
 `preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
 
@@ -76,8 +83,10 @@ fly across it, for example `?at=255.5,0&heading=90&speed=3000`.
 **The skylight.** `#sky2` must stay pixel-identical unless the owner says
 otherwise. It shares everything in `fs` outside `#if AIRCRAFT`, and in the
 JS the atmosphere's constants and tables (`buildMultiScatter`,
-`sunDepth`), `celestial()`, `meterLight()`, `twilightGain()`,
-`EXPOSURE` and `LOOK_POWER`. After a change, compare `#sky2` before and
+`sunDepth`), the colour weights `W`, the stars (`buildStars`,
+`starData`), `DAY_LEVEL` and `NIGHT`, `celestial()`, `meterLight()`,
+`twilightGain()`, `EXPOSURE`, `LOOK_POWER`, `camera()`, and in `makeSky`
+its `draw` and `fit()`. After a change, compare `#sky2` before and
 after, byte for byte, at a few states: day, dusk, night and strong haze
 (for example `?time=12`, `?time=17.5`, `?time=22`, `?haze=5`).
 
@@ -101,7 +110,9 @@ Each frame of the hero is three draws: the scene (`fs`) into the frame
 texture, `mean`, and `show`. The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The drawing sizes are those of 1920 x 1080, 2560 x 1440 and
-3840 x 2160 windows, less a scrollbar:
+3840 x 2160 windows, less a scrollbar. The last was measured with
+`?pixels=4k`: with the default limit (WQHD), a 4K window is drawn at
+about 2555 x 1443.
 
 | Drawing size | Scene (`fs`) | `mean` | `show` |
 |---|---|---|---|
@@ -131,7 +142,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   the implicit derivatives that `texture` needs are undefined, and most of
   the scene is loops and branches.
 - **No reversed `smoothstep`.** `smoothstep(edge0, edge1, x)` is undefined
-  when `edge0 >= edge1`. Write `1.0 - smoothstep(lo, hi, x)`.
+  when `edge0 >= edge1`. Write `1.0 - smoothstep(lo, hi, x)`. The rule
+  holds for new code. Two old ones remain in the shared `main`: the sun's
+  disc (`smoothstep(0.0050, 0.0043, …)`) and the moon's edge
+  (`smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm)`). The skylight runs
+  them, so they change only with the owner's leave.
 - **No constant-alpha blending.** Some drivers ignore the alpha of
   `blendColor`, so `CONSTANT_ALPHA` and `ONE_MINUS_CONSTANT_ALPHA` leave the
   picture as it was. The mean over frames is computed in a shader, with
@@ -147,13 +162,25 @@ The shaders must run on any WebGL2. The code keeps these rules:
   whole number of times in `WEATHER_KM` (see
   [design.md](design.md#conventions)).
 - **Facts kept twice are changed together.**
-  - `density()` and the depth table built in `makeSky`;
-  - the `bend` of the cirrus, in the `noise` shader and in `ciDepth`;
-  - constants in both the JS and the shaders: `RG`, `RT`, `HR`, `HM`,
-    `BETA_M`, `MIE_EXT`, `ALBEDO`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`,
-    `SLOTS`, `LN_FLUX_MAX`, `WEATHER_KM`, the size of the depth table
-    (`DEPTH_MU`, `DEPTH_R`) and its 16 steps (`NL`), and `ISUN` (20, also
-    in the JS's earthshine).
+  - The density profile, written out five times: `density()` in `fs`, and
+    in the JS `buildDepths`, `buildMultiScatter`, `skyLuminance` and the
+    depth table in `makeSky`.
+  - The phase functions, Mie `g` = 0.8 included: `phases` in `fs` and
+    `skyLuminance` in the JS.
+  - The depth table: `DEPTH_MU`, `DEPTH_R`, `NL` and `H_TOP` (1132.2544,
+    from `RG` and `RT`) in `fs`; `NM`, `NR`, `NL` and `H` in `makeSky`.
+  - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
+    `MIE_EXT`, `ALBEDO`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
+    `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
+    earthshine). `RG` is also in the `mean` shader.
+  - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
+    (`BASE_KM / 128.0`) and the cirrus's `T0`, `T1`, `T2`.
+  - The size of the weather map, 1024: `WEATHER` in the JS;
+    `WEATHER_KM / 1024.0` in `addSea`.
+  - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
+    the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
+  - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
+    shader and in `fs` (`CI_DIR`, `CI_UNIT`, and the `bend` in `ciDepth`).
 - **The skylight's code stays as it is.** Change shared code (outside
   `#if AIRCRAFT`) only when the owner asks; put the hero's changes inside
   `#if AIRCRAFT`.

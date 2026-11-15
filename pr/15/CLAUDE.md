@@ -20,7 +20,8 @@ Read these before you touch this repository.
 - Use only MIT-compatible material. Never copy code from Shadertoy, GPL
   projects or sources without a licence; write it from published ideas.
   The star data has terms of its own (`NOTICE`).
-- Every change goes through a pull request; each gets a preview at
+- Every change goes through a pull request. Each pull request from a
+  branch of this repository gets a preview at
   `https://sf624.github.io/sky/pr/N/`.
 - Plans, follow-ups and known flaws go to the issues
   (https://github.com/sf624/sky/issues), not into the repository.
@@ -29,7 +30,8 @@ Read these before you touch this repository.
 
 ## Where things are
 
-- `README.md`: for users (Japanese, like the page).
+- `README.md`: for users, in English. `README.ja.md`: its Japanese
+  version. Keep both in step.
 - `docs/design.md`: how a frame is made.
 - `docs/development.md`: running, URL parameters, judging a change, GLSL
   rules, GPU time, publishing, licences.
