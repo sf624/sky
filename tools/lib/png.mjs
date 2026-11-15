@@ -73,20 +73,24 @@ export const crop = (img, [x, y, w, h]) => {
   return { w, h, rgb };
 };
 
-// Differences of two pictures of one size, in 8-bit levels: mean and max over all channels, and the share of
-// pixels (%) whose largest channel difference is over 2 and over 8. With out, also writes |a - b| * gain.
+// Differences of two pictures of one size, in 8-bit levels: mean and max over all channels, the share of pixels
+// (%) whose largest channel difference is over 2 and over 8, and tile: the largest mean over the tiles of an
+// 8 x 8 grid (a difference in one part of the picture). With out, also writes |a - b| * gain.
 export function diffPng(a, b, { box, out, gain = 8 } = {}) {
   if (!a.rgb) a = readPng(a);
   if (!b.rgb) b = readPng(b);
   if (box) { a = crop(a, box); b = crop(b, box); }
   if (a.w !== b.w || a.h !== b.h) throw new Error(`sizes differ: ${a.w}x${a.h} and ${b.w}x${b.h}`);
   let sum = 0, max = 0, over2 = 0, over8 = 0;
-  const d = new Uint8Array(a.rgb.length);
+  const d = new Uint8Array(a.rgb.length), tiles = new Float64Array(64), counts = new Float64Array(64);
   for (let i = 0; i < a.rgb.length; i += 3) {
     let m = 0;
+    const px = i / 3, t = Math.floor((Math.floor(px / a.w) * 8) / a.h) * 8 + Math.floor(((px % a.w) * 8) / a.w);
+    counts[t] += 3;
     for (let k = 0; k < 3; k++) {
       const v = Math.abs(a.rgb[i + k] - b.rgb[i + k]);
       sum += v;
+      tiles[t] += v;
       if (v > m) m = v;
       d[i + k] = Math.min(255, v * gain);
     }
@@ -96,7 +100,9 @@ export function diffPng(a, b, { box, out, gain = 8 } = {}) {
   }
   const n = a.w * a.h;
   if (out) writePng(out, { w: a.w, h: a.h, rgb: d });
-  return { mean: +(sum / a.rgb.length).toFixed(3), max, over2: +(over2 / n * 100).toFixed(3), over8: +(over8 / n * 100).toFixed(3) };
+  let tile = 0;
+  for (let t = 0; t < 64; t++) if (counts[t]) tile = Math.max(tile, tiles[t] / counts[t]);
+  return { mean: +(sum / a.rgb.length).toFixed(3), max, over2: +(over2 / n * 100).toFixed(3), over8: +(over8 / n * 100).toFixed(3), tile: +tile.toFixed(3) };
 }
 export const fmtDiff = (d) => `mean ${d.mean} max ${d.max} >2: ${d.over2}% >8: ${d.over8}%`;
 

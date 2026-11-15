@@ -15,51 +15,73 @@ node tools/sky.mjs help                         # all commands and options
 
 ## Commands
 
-Every command that loads the page takes `--page DIR`: the directory that holds `index.html`. The default is this repository. A local server serves it (no cache, the right MIME types for `.js`, `.mjs`, `.css`, `.glsl`, `.bin`), so pages that load modules and shader files work too. Output goes to `tools/out/` (ignored by git), unless `--out` says otherwise.
+Every command that loads the page takes `--page DIR`: the directory that holds `index.html`. The default is this repository. A local server serves it (no cache, the right MIME types for `.js`, `.mjs`, `.css`, `.glsl`, `.bin`), so pages that load modules and shader files work too.
+
+Output goes to a folder of its own for each run, under `tools/out/` (ignored by git): `tools/out/check/<time>-<pid>/`, for example. `--out` names another place.
 
 `--base` takes a directory, or a git revision of this repository (`origin/main`, `HEAD~1`, a SHA). A revision is exported with `git archive` into a temporary directory, which is deleted at the end.
 
 | Command | What it does |
 |---|---|
-| `trace [--view NAME \| --q QUERY] [--frames N] [--ms MS] [--size WxH] [--out FILE]` | Writes the GL trace of the first N frames (default 12 frames of 16 ms, at 480x270). Without `--view` or `--q`, the page as it opens (flying). |
+| `trace [--view NAME \| --q QUERY] [--frames N] [--ms MS] [--size WxH] [--out FILE]` | Writes the GL trace of a view of `views.json` to the end of its run, or of a query (default: the page as it opens, flying, 12 frames of 16 ms). The size is 480x270 unless `--size` says otherwise. |
 | `trace-diff A B [--ignore CLASSES] [--max N]` | Compares two traces. Prints the first differences by canvas, frame and call, then a summary. Exit status 0 if identical, 1 if not. |
-| `stills [--views a,b] [--base DIR\|REV] [--size WxH]` | Stills of the fixed views in `tools/views.json`, and `index.html` to look at them. With `--base`, also the base's stills, the difference of each, and a difference picture (x8). |
-| `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), and the share of pixels that differ by more than 2 and 8 levels. |
-| `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS` or `FAIL`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if all pass. |
+| `stills [--views a,b] [--base DIR\|REV] [--size WxH]` | Stills of the views in `tools/views.json`, and `index.html` to look at them. With `--base`, also the base's stills, the difference of each, and a difference picture (x8). |
+| `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
+| `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
 | `perf [--q QUERY] [--size WxH] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas, the frame rate, and the GPU time per kind of draw (median and p90). Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
-The default size is 1280x720 on the GPU and 480x270 on SwiftShader. Traces always use 480x270, so that the traces of both renderers can be compared.
+The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
+
+## The views
+
+`views.json` holds the fixed views. Each runs its own frames from a fresh page: 46 frames of 50 ms for a still, so that the running mean settles (see [Judging a change](../docs/development.md#judging-a-change)). `speed=0` is added to every view that does not set a speed.
+
+| View | What it takes |
+|---|---|
+| `default` | the page's defaults, at rest |
+| `dusk`, `night-moon`, `night-dark` | twilight; a full moon over clouds; a moonless night (the stars, `uNight`) |
+| `crescent` | a crescent moon (`moon=4`) in the evening: the earthshine term |
+| `haze4` | strong haze: the table of multiple scattering is built again |
+| `overcast-0.5km`, `in-cloud` | under the cloud deck; inside the cloud at 1.5 km |
+| `cirrus1`, `up-cirrus-11.5km` | thick cirrus; cirrus overhead from near its base |
+| `sea-low-sun`, `gale`, `clear` | sun glitter at 0.3 km; wind of 15 m/s; no cloud at all |
+| `near-clouds-3km` | low clouds seen from near |
+| `at-the-wrap` | a still at 255.999 km, where the way flown wraps |
+| `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies (3 frames) |
+| `flight` | 40 frames of 16 ms at 900 km/h |
+| `time-lapse` | the play button, pressed after 2 frames |
+| `drag` | a mouse drag across the hero after 2 frames |
+| `ui-en`, `ui-ja` | the text and the controls in English and in Japanese. `ui-ja` is skipped, with a line saying so, on a machine without a Japanese font |
 
 ## The checks
 
 | Check | Needs `--base` | Passes when |
 |---|---|---|
-| `trace` | yes | The traces of three views (the page as it opens, `night-dark`, `sea-low-sun`) equal the base's. `--ignore` applies. |
-| `stills` | yes | Every view of `views.json` gives the base's picture exactly (max difference 0). |
-| `skylight` | yes | The skylight (`#sky2`), scrolled into view, gives the base's pixels exactly, in four views: day, dusk, night and haze. |
-| `wrap` | no | No seam where the way flown wraps at 256 km. Two stills 2.8 m apart across the wrap differ no more than 1.5 times (plus 0.3 levels) two stills 2.8 m apart elsewhere. A flight across the wrap, after 27 and 61 frames, matches stills at those places within the same margin of a flight elsewhere. |
-| `loop` | no | The hero stops drawing at rest (no frame queued); nothing is drawn in a hidden tab; the hero is not drawn when scrolled out of view; drawing starts again in each case; with the hero out of view, the time-lapse draws the skylight but not the hero. A page that cannot scroll the hero out of view (`main` since 4ccf2e4, which has nothing below the hero) skips those parts, with a line saying so. |
-| `res` | no | With `?res=0.5`, the picture is drawn at half size in flight and at full size soon after the aircraft stops. No frame is shifted against a still at that place (the best shift within 6 pixels is 0, 0), and the settled picture is within 1.5 levels (mean) of the still. Without `res`, slow frames (60 ms) make the picture smaller, and fast ones (16 ms) restore it. |
-| `flight` | no | Two flights of 61 frames (cruise, and near the clouds at 3 km) each stay within 1.3 levels (mean) of a settled still at the place reached. |
+| `trace` | yes | The GL trace of every view, to the end of its run, equals the base's. `--ignore` applies. |
+| `stills` | yes | Every view gives the base's picture exactly (max difference 0). |
+| `wrap` | no | No seam where the way flown wraps at 256 km. The pictures are compared tile by tile (8 x 8), so that a seam in one part of the picture shows. Two stills 2.8 m apart across the wrap differ no more than two stills 2.8 m apart elsewhere (worst tile at most 1.5 times, plus 1 level). A flight across the wrap, after 27 and 61 frames, matches stills at those places within the same margin of a flight elsewhere. |
+| `loop` | no | The drawing stops at rest (no frame queued); nothing is drawn in a hidden tab; drawing starts again when the tab is shown. |
+| `res` | no | With `?res=0.5`, the picture is drawn at half size in flight and at full size soon after the aircraft stops. No frame is shifted against a still at that place (the best shift within 6 pixels is 0, 0), and the settled picture is within 0.8 levels (mean) of the still. Without `res`, slow frames (60 ms) make the picture smaller, and fast ones (16 ms) restore it. |
+| `flight` | no | Two flights of 61 frames (cruise, and near the clouds at 3 km) each stay within a limit (mean levels, per renderer, below) of a settled still at the place reached. With a base, each also does no worse than the base's (at most 1.1 times, plus 0.03). |
 
-Without `--base`, the checks that need one are skipped (`SKIP`), and the others still run.
+The trace and the stills of a view come from one run of it, so the two checks together load each view once per page.
 
-**The skylight** (`#sky2`) has been removed from the page (558c255). The tools still test it where it exists (a branch older than the removal, or such a base), and skip it with a line saying so (`no #sky2 on this page: skipped`) where it does not, in the page or in the base. The parts to delete once no such branch is left: the check `skylight` (`CHECKS.skylight` in `lib/checks.mjs`), the skylight's part of the check `loop`, and `OPTIONAL` in `lib/trace.mjs` (which leaves a canvas `sky2` out of a trace comparison when only one trace has it).
+Without `--base`, the checks that need one are skipped (`SKIP`), and the others still run. A check that fails prints its numbers; its pictures are in its own folder of the run.
 
-The limits of `wrap`, `res` and `flight` were set from the numbers measured on `main` (below), with room for noise. A check that fails prints its numbers; its pictures are in `tools/out/check/NAME/`.
+**The trace and the stills prove different things.** Equal traces mean that the page sent WebGL the same commands with the same values, and got the same buffers back. Equal stills mean that the composited picture is the same, with the CSS around the canvas and the overlays. A CSS filter on the canvas changes the stills and not the trace; a frame drawn in another order may change the trace and not the stills.
 
 ## The fake clock
 
 Every page (except under `perf`) runs on a fake clock, so that two runs give the same frames:
-- `performance.now()` and `requestAnimationFrame` advance only when the tool steps a frame (`__step(n, ms)` in the page).
+- `performance.now()`, `requestAnimationFrame` and `cancelAnimationFrame` advance or act only when the tool steps a frame (`__step(n, ms)` in the page).
+- `setTimeout`, `setInterval` and `requestIdleCallback` run on the fake clock too: in a step, the timers due run first (in the order of their time), then the animation frames. The page's fades of the overlays (6 s and 4 s) wait for the fake clock.
 - `Date` starts at 2026-11-15 00:00 UTC and advances with the fake clock. The page reads the date for its default day, and the wall clock for the frame time that sets its drawing size in flight.
-- The time zone is UTC, `Math.random` is seeded, and local storage is cleared.
-- The text and the controls over the hero, and the scroll bar, are hidden from the first frame on (except in `loop` and `skylight`, which need the page as it is).
+- The time zone is UTC and the language `en-US` (Chrome's `--lang`, and the DevTools locale), `Math.random` is seeded (mulberry32), and local storage is cleared.
+- CSS transitions and animations are turned off: they would run on the real clock.
+- The text and the controls over the hero (`.title`, `.panel`, `.hint`, `.fs`) and the scroll bar are hidden from the first frame on, except in the views marked `ui`.
 
-A still stands at rest and steps 46 frames, so that the running mean settles (see [Judging a change](../docs/development.md#judging-a-change)). `views.json` adds `speed=0` to every view that does not set a speed.
-
-**When is the page ready?** Today, at the load event. A page that loads in parts (fetched modules and shaders) must mark an element with `data-sky="loading"` in its markup, and set it to `ready` when it can draw, or to `failed`. The tools wait for `ready`, or stop on `failed`. Then they let two real frames of the browser pass, so that the resize and intersection observers have run, before the first fake frame.
+**When is the page ready?** At the load event; where an element has `data-sky`, when its value is `ready` (`failed` stops the run); and when the network has been quiet for 300 ms (no request in flight, as the DevTools Network domain counts them), so that files fetched after the load, one after another, are in. A page that loads in parts should still mark itself `data-sky="loading"` in its markup: a pause longer than 300 ms between two requests would otherwise end the wait. Then the tools let two real frames of the browser pass, so that the resize and intersection observers have run, before the first fake frame.
 
 ## The GL trace
 
@@ -68,14 +90,14 @@ The trace records what the page asks of WebGL, per canvas, in order: every call 
 - Objects get names in the order they are made: `prog1`, `shader3`, `tex7`, `fb2`. A uniform location is named by its program and name: `prog1.uSun`.
 - Numbers are written as the 32-bit floats that the GPU receives (the shortest decimal that gives the same float). Enums are named where an argument is an enum.
 - A shader's text is named by a hash (`src:…`); each text is given once, at the end of the file.
-- A large array (an upload) is written as its type, length and a hash of its bytes.
-- After each frame, every texture that the frame drew into is read back and hashed (`readback tex7 level 0 RGBA16F 480x420 = #…`), and so is the canvas, if it was drawn. A 3D texture drawn layer by layer gets one hash for all its layers.
+- A large array (an upload) is written as its type, length and a hash of its bytes. An upload from an image, a canvas, a bitmap or an `ImageData` is written with a hash of its pixels.
+- After each frame, every texture that the frame drew into is read back and hashed (`readback tex7 level 0 RGBA16F 480x420 = #…`, SHA-256 cut to 64 bits), and so is the canvas, if it was drawn. A 3D texture drawn layer by layer gets one hash for all its layers. A texture the trace cannot read back (an unknown format or size, a failed `readPixels`) is an error of the run, not a line that two traces could share.
+- The read-back keeps the GL errors already pending for the page's own `getError`.
+- A call made outside a stepped frame after the setup (in an event or an observer) is marked `outside a frame:`: when it runs depends on the browser.
 
-Frame 0 is everything before the first fake frame: compiling, linking, building the noise, weather and wave textures. Frame k ends after the callbacks of the k-th frame.
+Frame 0 is everything before the first fake frame: compiling, linking, building the noise, weather and wave textures. Frame k ends after the timers and the animation frames of the k-th step.
 
-Two traces are equal exactly when the page sent the same commands with the same values, and got the same pixels back. On one renderer, the same page gives the same trace byte for byte, run after run: the trace has no time in it and no GPU noise. Equal traces mean equal pictures.
-
-The GPU and SwiftShader give different pictures, and the page asks some things that depend on the renderer (extensions). So compare traces of one renderer with each other. `--ignore readback` compares the commands alone, across renderers.
+On one renderer, the same page gives the same trace byte for byte, run after run: the trace has no time in it and no GPU noise. The GPU and SwiftShader give different pixels, and the page asks some things that depend on the renderer (extensions). So compare traces of one renderer with each other; `--ignore readback` compares the commands alone, across renderers.
 
 `trace-diff` and `check trace` can ignore classes of difference:
 
@@ -83,6 +105,7 @@ The GPU and SwiftShader give different pictures, and the page asks some things t
 |---|---|
 | `shader` | the text of shaders (the calls that pass a text still count) |
 | `line` | `#line` directives in shader texts |
+| `comments` | comments, blank lines and spacing in shader texts (for moves of shader code) |
 | `readback` | the hashes of what the frames drew |
 | `query` | calls that only ask (`get…`, `is…`, `checkFramebufferStatus`), for example a different order of `getUniformLocation` |
 
@@ -120,9 +143,9 @@ canvas sky, frame 1, call 113 of 133 in A, 113 of 133 in B:
 | `SKY_TIMEOUT` | The time limit in seconds (defaults: trace 900, stills 2400, check 5400, drive 900, perf 300). |
 | `SKY_READY_MS` | How long to wait for the page to be ready (default 180000). |
 
-With a queue, the command runs again inside it: `heavy timeout -k 10 T systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p TasksMax=500 -p RuntimeMaxSec=… node tools/sky.mjs …` (without `systemd-run` where there is none). Without one, the command runs directly, with its own time limit.
+With a queue, the command runs again inside it: `heavy timeout --foreground -k 10 T systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p TasksMax=500 -p RuntimeMaxSec=… node tools/sky.mjs …` (without `systemd-run` where there is none). It prints one line when it queues. The queue and everything under it run in a process group of their own, and the command passes `SIGINT`, `SIGTERM` and `SIGHUP` on to that group: Ctrl-C stops the run and frees the queue's slot. Without a queue, the command runs directly, with its own time limit.
 
-Chrome always dies with the command: it is started in a process group of its own, under `setpriv --pdeathsig KILL`, and the group is killed on exit, on a signal and on an error. Its profile goes in a short temporary directory (`/tmp/sky-…`): Chrome puts sockets there, and a long path makes it fail at start. Do not set `TMPDIR` to a long path.
+Chrome always dies with the command: it is started in a process group of its own, under `setpriv --pdeathsig KILL`, and the group is killed on exit, on a signal and on an error. If Chrome or the page's renderer dies, every call waiting on it fails at once, and the run ends with the reason. Its profile goes in a short temporary directory (`/tmp/sky-…`): Chrome puts sockets there, and a long path makes it fail at start. Do not set `TMPDIR` to a long path. A run killed outright leaves its profile behind; each run removes this user's `sky-…` and `sky-base-…` folders older than a day.
 
 ### The owner's machine (WSL2, RTX 3090)
 
@@ -135,32 +158,36 @@ SKY_GPU=1 node tools/sky.mjs check --base origin/main
 - With `SKY_GPU=1` and `/dev/dxg` present, the tools start Chrome with `--use-angle=gl-egl --ignore-gpu-blocklist` and set `GALLIUM_DRIVER=d3d12` and `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`. Mesa then renders through D3D12 on the GPU; without `GALLIUM_DRIVER` it falls back to llvmpipe, on the CPU. `DISPLAY` is removed: with it, headless Chrome got no WebGL2. These flags live in `renderer()` in `lib/browser.mjs`.
 - `~/.claude/bin/heavy` exists, so every run queues there (two heavy runs at a time) under a 3 GB cap.
 - Every command prints the renderer: on the GPU it says `D3D12 (NVIDIA GeForce RTX 3090)`.
+- No Japanese font is installed, so `ui-ja` is skipped.
 - This GPU stack ignores the alpha of `blendColor` (see the [GLSL rules](../docs/development.md#glsl-rules)); SwiftShader does not.
 
-## Timings
+## Timings and limits
 
-Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, each page against itself. Other runs shared the machine, so take them as rough.
+Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.
 
 | Run | GPU (1280x720) | SwiftShader (480x270) |
 |---|---|---|
-| `trace` (12 frames, 480x270), `main` at f37367c | 4.4 s | 15 s |
-| `check` (all), `main` at f37367c (no skylight) | 3.1 min | not measured |
-| `check` (all seven), `main` at 56e4c31 (with the skylight) | 3.6 min | 44 min |
-| of which `stills` (12 views, page and base) | 87 s | 19 min |
-| of which `wrap` | 38 s | 10 min |
-| of which each of `trace`, `skylight`, `loop`, `res`, `flight` | 11 to 27 s | 0.5 to 5 min |
+| `trace` of the page as it opens (12 frames, 480x270) | 4 to 5 s | 14 to 15 s |
+| `check` (all six; `ui-ja` skipped) | 6.3 min | 43 min |
+| of which `trace` and `stills` (20 views, page and base, one run each) | 4.8 min | 24 min |
+| of which `wrap` | 39 s | 7.7 min |
+| of which `loop`, `res`, `flight` | 6 to 32 s each | 0.7 to 7 min each |
 
-A trace of the page as it opens (`main` at f37367c, one canvas) is 3042 lines, 137 kB. The same page gave the same trace byte for byte, twice on each renderer.
+A trace of the page as it opens is 3065 lines, 138 kB. The same page gave the same trace byte for byte, twice on each renderer.
 
-The numbers the limits were set from (mean difference, 8-bit levels):
+The limits, from `main` and from copies of it broken on purpose (8-bit levels; "worst tile": the largest mean over an 8 x 8 grid):
 
-| Measure | GPU | SwiftShader |
-|---|---|---|
-| `wrap`: stills across the wrap, elsewhere | 0.33, 0.31 | 0.12, 0.13 |
-| `wrap`: frame 27 of a flight against a still, across and elsewhere | 1.09, 0.98 | 0.81, 0.81 |
-| `res`: settled picture against the still | 0.56 | 0.52 |
-| `flight`: cruise, near the clouds | 0.83, 0.70 | 0.56, 0.96 |
-| `flight` with the reprojection broken (`uWay` always 0) | 1.69, 1.56 | 0.74, 1.72 |
+| Check, measure | `main`, GPU | `main`, SwiftShader | broken, GPU | broken, SwiftShader | limit |
+|---|---|---|---|---|---|
+| `wrap`: worst tile of stills across the wrap (elsewhere) | 0.93 (1.24) | 0.61 (0.77) | 4.07 | 4.07 | 1.5 x elsewhere + 1 |
+| `wrap`: worst tile at frame 27 of a flight, across (elsewhere) | 2.84 (2.80) | 3.46 (3.50) | 6.21 | 6.52 | 1.5 x elsewhere + 1 |
+| `res`: settled picture against the still, mean | 0.63 | 0.61 | 1.03 | 1.15 | 0.8 |
+| `flight`: cruise, mean | 1.13 | 1.16 | 2.79 | 2.10 | 1.6 |
+| `flight`: near the clouds, mean | 1.09 | 1.34 | 4.73 | 4.53 | 1.6 (GPU), 1.9 (SwiftShader) |
+
+The broken copies: for `wrap`, the sea's gusts read at `x / 250.0` instead of `x / WEATHER_KM` (a seam on the sea only); for `res`, the mean at rest trusting 3 frames instead of 63; for `flight`, `uWay` always 0 (no reprojection). With a base, `flight` also fails above 1.1 times the base's mean plus 0.03.
+
+Other copies broken on purpose, each caught: the loop stopping one frame early (`trace`: frame 39 of every still view; `stills`: max 1 to 6), `HERO_PIXELS.fhd` changed (`trace` and `stills` of `dpr2-fhd`), the earthshine doubled in the shader (`stills` of `crescent` only, max 22; the trace sees the shader text in every view), a CSS filter on the canvas (`stills` only: the trace is identical), the loop never stopping (`loop`), the picture kept small after a stop (`res`).
 
 ## Files
 
@@ -168,11 +195,11 @@ The numbers the limits were set from (mean difference, 8-bit levels):
 |---|---|
 | `sky.mjs` | The command line; the queue and the time limit. |
 | `make-stars.py` | Builds the star catalogue (not a test tool; see above). |
-| `views.json` | The fixed views for stills. |
+| `views.json` | The fixed views. |
 | `lib/browser.mjs` | Finding and starting Chrome (the renderer flags), the DevTools connection, the local server. |
 | `lib/page.mjs` | The driver: a page in a fresh tab on the fake clock, ready, stepped, shot. |
 | `lib/inpage.mjs` | The script that runs in the page first: the fake clock, the draw counts, the GL trace. |
 | `lib/trace.mjs` | The trace file: writing, reading, comparing. |
 | `lib/png.mjs` | PNG reading and writing (Node's zlib), picture differences, the shift between two pictures. |
-| `lib/run.mjs` | The commands `trace`, `stills`, `drive`, `perf`; base revisions. |
+| `lib/run.mjs` | Running a view; the commands `trace`, `stills`, `drive`, `perf`; base revisions. |
 | `lib/checks.mjs` | The checks and their limits. |

@@ -11,13 +11,16 @@ export const HIDE_CSS = '.title,.panel,.hint,.fs{display:none !important}body{ov
 export const EPOCH = Date.UTC(2026, 10, 15);
 const READY_MS = +(process.env.SKY_READY_MS || 180000);
 
-// Today: the load event. A page that loads in parts sets data-sky on an element: "loading" in its markup,
-// "ready" when it can draw, "failed" if it cannot.
+// Ready: the load event; where an element has data-sky, its value "ready" ("failed" stops the run); and the
+// network quiet (no request in flight for QUIET_MS, counted by the DevTools Network domain), so that files a
+// page fetches after the load, one after another, are in. A page that loads in parts should still mark itself
+// data-sky="loading" in its markup.
 const READY = `(() => {
   const el = document.querySelector('[data-sky]'), v = el && el.dataset.sky;
   if (v === 'failed') return 'failed';
   return document.readyState === 'complete' && (!el || v === 'ready') ? 'ready' : '';
 })()`;
+const QUIET_MS = 300;
 const RENDERER = `(() => { const g = document.createElement('canvas').getContext('webgl2');
   const e = g && g.getExtension('WEBGL_debug_renderer_info'); return e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()`;
 
@@ -26,6 +29,7 @@ export class Session {
     const s = new Session();
     s.server = await startServer();
     s.chrome = await launchChrome();
+    await s.chrome.send('Target.setDiscoverTargets', { discover: true });   // for Target.targetCrashed
     s.warm = s.chrome.renderer === 'swiftshader';
     return s;
   }
@@ -50,8 +54,11 @@ export class Session {
     await page.send('Runtime.enable');
     await page.send('Page.enable');
     await page.send('Log.enable');
+    await page.send('Inspector.enable');
+    await page.send('Network.enable');
     await page.size(opt.w || 1280, opt.h || 720, false);
     await page.send('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+    await page.send('Emulation.setLocaleOverride', { locale: 'en-US' });
     await page.send('Page.addScriptToEvaluateOnNewDocument', { source: pageScript({
       seed: opt.seed ?? 1, epoch: opt.epoch === undefined ? EPOCH : opt.epoch,
       hideCss: opt.hide === false ? '' : HIDE_CSS, trace: opt.trace ? { frames: opt.trace } : null }) });
@@ -61,8 +68,13 @@ export class Session {
     for (;;) {
       await sleep(100);
       let r = '';
-      try { r = await page.eval(READY); } catch {}
-      if (r === 'ready') break;
+      try {
+        r = await page.eval(READY);
+      } catch (err) {
+        // While the page navigates, its context may be gone for a moment; a crash is final.
+        if (page.crashed) throw err;
+      }
+      if (r === 'ready' && page.requests.size === 0 && Date.now() - page.lastRequest >= QUIET_MS) break;
       if (r === 'failed') throw new Error(`${page.url}: the page says data-sky="failed"\n${page.errors.join('\n')}`);
       if (Date.now() - t0 > READY_MS) throw new Error(`${page.url}: not ready after ${READY_MS} ms\n${page.errors.join('\n')}`);
     }
@@ -84,6 +96,24 @@ export class Session {
     return this._renderer;
   }
 
+  // Whether the machine has a font for the language (ja): two different characters drawn in a canvas of a blank
+  // tab; without a font both come out as the same empty box.
+  async hasFont(lang) {
+    this.fonts = this.fonts || {};
+    if (!(lang in this.fonts)) {
+      const pair = { ja: ['日', '本'] }[lang];
+      const { targetId } = await this.chrome.send('Target.createTarget', { url: 'about:blank' });
+      const { sessionId } = await this.chrome.send('Target.attachToTarget', { targetId, flatten: true });
+      const r = await this.chrome.send('Runtime.evaluate', { returnByValue: true, expression: `(() => {
+        const draw = (ch) => { const c = new OffscreenCanvas(40, 40).getContext('2d'); c.font = '32px sans-serif';
+          c.fillText(ch, 4, 34); return Array.from(c.getImageData(0, 0, 40, 40).data).join(); };
+        return draw(${JSON.stringify(pair[0])}) !== draw(${JSON.stringify(pair[1])}); })()` }, sessionId);
+      this.fonts[lang] = r.result.value === true;
+      await this.chrome.send('Target.closeTarget', { targetId });
+    }
+    return this.fonts[lang];
+  }
+
   close() {
     this.server?.close();
     this.chrome?.close();
@@ -92,10 +122,27 @@ export class Session {
 
 class Page {
   constructor(session, targetId, sessionId, opt) {
-    Object.assign(this, { session, targetId, sessionId, opt, errors: [], warnings: [] });
+    Object.assign(this, { session, targetId, sessionId, opt, errors: [], warnings: [], crashed: null, requests: new Set(), lastRequest: 0 });
+    // Settles with an error when the page's renderer crashes or Chrome goes away: every call waiting on this page
+    // fails then, instead of waiting for the time limit.
+    this.gone = new Promise((_, reject) => { this.fail = reject; });
+    this.gone.catch(() => {});
     this.handler = (m) => {
+      const crash = (m.sessionId === sessionId && m.method === 'Inspector.targetCrashed')
+        || (m.method === 'Target.targetCrashed' && m.params.targetId === targetId);
+      if (m.method === 'sky.chromeDied' || crash) {
+        this.crashed = m.method === 'sky.chromeDied' ? session.chrome.dead() : new Error(`the page crashed: ${this.url || ''}`);
+        this.fail(this.crashed);
+        return;
+      }
       if (m.sessionId !== sessionId) return;
       const p = m.params;
+      if (m.method === 'Network.requestWillBeSent') { this.requests.add(p.requestId); this.lastRequest = Date.now(); return; }
+      if (m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') {
+        this.requests.delete(p.requestId);
+        this.lastRequest = Date.now();
+        return;
+      }
       if (m.method === 'Runtime.exceptionThrown') this.errors.push(p.exceptionDetails.exception?.description || p.exceptionDetails.text);
       else if (m.method === 'Runtime.consoleAPICalled' && (p.type === 'error' || p.type === 'assert' || p.type === 'warning')) {
         (p.type === 'warning' ? this.warnings : this.errors).push(p.args.map((a) => a.value ?? a.description).join(' '));
@@ -107,7 +154,10 @@ class Page {
     session.chrome.on(this.handler);
   }
 
-  send(method, params) { return this.session.chrome.send(method, params, this.sessionId); }
+  send(method, params) {
+    if (this.crashed) return Promise.reject(this.crashed);
+    return Promise.race([this.session.chrome.send(method, params, this.sessionId), this.gone]);
+  }
 
   async eval(expression) {
     const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });

@@ -26,9 +26,9 @@ export function hashBytes(u8) {
 
 // cfg: { seed, epoch (ms since 1970 for Date, or null for the real clock), hideCss, trace: { frames } or null }
 function install(cfg, hashBytes) {
-  // ---- The fake clock: performance.now and requestAnimationFrame advance only through __step. ----
-  let now = 1000, frame = 0;
-  const cbs = [];
+  // ---- The fake clock: performance.now, requestAnimationFrame and the timers advance only through __step. ----
+  let now = 1000, frame = 0, inStep = false;
+  // The seeded Math.random is mulberry32 (Tommy Ettinger, public domain).
   let seed = cfg.seed >>> 0;
   Math.random = () => {
     seed = (seed + 0x6D2B79F5) | 0;
@@ -36,13 +36,37 @@ function install(cfg, hashBytes) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  const realRaf = window.requestAnimationFrame.bind(window);
+  const realRaf = window.requestAnimationFrame.bind(window), realTimeout = window.setTimeout.bind(window);
   // Resolves after a real frame of the browser (layout, observers): the page's own frames are fake.
   window.__realFrame = () => new Promise((r) => realRaf(() => r()));
   performance.now = () => now;
-  window.requestAnimationFrame = (cb) => { cbs.push(cb); return cbs.length; };
-  window.cancelAnimationFrame = () => {};
-  window.__pending = () => cbs.length;
+  // Animation frames: id -> callback, run in the order asked for.
+  const frames = new Map();
+  let nextId = 0;
+  window.requestAnimationFrame = (cb) => { frames.set(++nextId, cb); return nextId; };
+  window.cancelAnimationFrame = (id) => { frames.delete(id); };
+  // Timers: id -> { at, every, fn, args }, run when the fake clock passes their time, in the order of their time.
+  const timers = new Map();
+  const addTimer = (fn, ms, args, every) => {
+    timers.set(++nextId, { at: now + Math.max(0, +ms || 0), every, fn, args, order: nextId });
+    return nextId;
+  };
+  window.setTimeout = (fn, ms, ...args) => addTimer(fn, ms, args, false);
+  window.setInterval = (fn, ms, ...args) => addTimer(fn, ms, args, Math.max(1, +ms || 0));
+  window.clearTimeout = window.clearInterval = (id) => { timers.delete(id); };
+  window.requestIdleCallback = (fn) => addTimer(() => fn({ didTimeout: false, timeRemaining: () => 50 }), 0, [], false);
+  window.cancelIdleCallback = window.clearTimeout;
+  const later = (e) => realTimeout(() => { throw e; });
+  const runTimers = () => {
+    for (;;) {
+      let id = 0, t = null;
+      for (const [k, v] of timers) if (v.at <= now && (!t || v.at < t.at || (v.at === t.at && v.order < t.order))) { id = k; t = v; }
+      if (!t) return;
+      if (t.every) { t.at += t.every; t.order = ++nextId; } else timers.delete(id);
+      try { typeof t.fn === 'function' ? t.fn(...t.args) : (0, eval)(String(t.fn)); } catch (e) { later(e); }
+    }
+  };
+  window.__pending = () => frames.size;
   // Date follows the fake clock from a fixed instant: the page reads the date for its default day, and the wall
   // clock for the frame time that sets its drawing size. With the real clock, both would change between runs.
   if (cfg.epoch !== null) {
@@ -59,13 +83,12 @@ function install(cfg, hashBytes) {
     window.Date = FakeDate;
   }
   try { localStorage.clear(); } catch {}
-  if (cfg.hideCss) {
-    addEventListener('DOMContentLoaded', () => {
-      const st = document.createElement('style');
-      st.textContent = cfg.hideCss;
-      document.head.appendChild(st);
-    });
-  }
+  // CSS transitions and animations would run on the real clock: they are turned off.
+  addEventListener('DOMContentLoaded', () => {
+    const st = document.createElement('style');
+    st.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }' + cfg.hideCss;
+    document.head.appendChild(st);
+  });
 
   // ---- WebGL: draw counts (always), and the trace (when asked). ----
   const P = WebGL2RenderingContext.prototype;
@@ -84,7 +107,7 @@ function install(cfg, hashBytes) {
   const st = (gl) => {
     let s = S.get(gl);
     if (!s) S.set(gl, s = { drawFb: null, readFb: null, vp: null, unit: 0, units: [], att: new Map(), bufs: new Map(),
-      tex: new Map(), dirty: new Map(), screen: false, ids: new Map(), count: {}, locs: new Map(), fbo: null });
+      tex: new Map(), dirty: new Map(), screen: false, ids: new Map(), count: {}, locs: new Map(), fbo: null, errors: [] });
     return s;
   };
   // window.__draws[canvas] = { screen, offscreen, size }: draw calls to the canvas, to framebuffers, and the
@@ -100,13 +123,17 @@ function install(cfg, hashBytes) {
     } else d.screen++;
   };
 
-  const T = { on: !!cfg.trace, logs: new Map(), sources: {} };
+  // errors: what the trace could not record faithfully (a texture it cannot read back); the trace then fails.
+  const T = { on: !!cfg.trace, logs: new Map(), sources: {}, errors: [] };
   const log = (canvas) => {
     let l = T.logs.get(canvas);
     if (!l) T.logs.set(canvas, l = []);
     return l;
   };
-  const rec = (canvas, text) => { if (T.on) log(canvas).push([frame, text]); };
+  // A call made outside a stepped frame (an event, an observer) after the setup is marked: its frame depends
+  // on when the browser ran it.
+  // A line may end in a hash still being computed (then); __trace waits for it.
+  const rec = (canvas, text, then) => { if (T.on) log(canvas).push([frame, frame > 0 && !inStep ? 'outside a frame: ' + text : text, then]); };
 
   // Enum names, for the arguments that are enums (by method and position).
   const ENUM = {};
@@ -163,6 +190,8 @@ function install(cfg, hashBytes) {
   };
   const bytes = (v) => new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
   const textHash = (t) => hashBytes(new TextEncoder().encode(t));
+  // Read-backs are large (megabytes a frame): they are hashed natively (SHA-256, cut to 64 bits), off the frame.
+  const digest = (u8) => crypto.subtle.digest('SHA-256', u8).then((d) => Array.from(new Uint8Array(d, 0, 8), (b) => b.toString(16).padStart(2, '0')).join(''));
   const fmt = (gl, m, i, v, isEnum) => {
     if (v === null || v === undefined) return 'null';
     if (typeof v === 'boolean') return String(v);
@@ -170,6 +199,19 @@ function install(cfg, hashBytes) {
     if (typeof v === 'string') return JSON.stringify(v);
     if (v instanceof WebGLUniformLocation) return st(gl).locs.get(v) || 'location?';
     if (v.constructor && KIND[v.constructor.name]) return idOf(gl, v);
+    if (typeof ImageData !== 'undefined' && v instanceof ImageData) return `ImageData(${v.width}x${v.height}) #${hashBytes(bytes(v.data))}`;
+    if (typeof v === 'object' && 'width' in v && 'height' in v && !ArrayBuffer.isView(v) && !Array.isArray(v)) {
+      // An image, a canvas, a bitmap or a video: its pixels, drawn into a canvas of its own.
+      try {
+        const w = v.videoWidth || v.naturalWidth || v.width, h = v.videoHeight || v.naturalHeight || v.height;
+        const c = new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true });
+        c.drawImage(v, 0, 0);
+        return `${v.constructor.name}(${w}x${h}) #${hashBytes(bytes(c.getImageData(0, 0, w, h).data))}`;
+      } catch (e) {
+        T.errors.push(`${m}: cannot read the pixels of a ${v.constructor.name} (${e.message})`);
+        return `${v.constructor.name} unreadable`;
+      }
+    }
     if (ArrayBuffer.isView(v) || Array.isArray(v)) {
       const n = v.length;
       if (Array.isArray(v) || n <= 16) return '[' + Array.from(v, (x) => (typeof x === 'number' ? num(x, isEnum) : String(x))).join(', ') + ']';
@@ -200,34 +242,49 @@ function install(cfg, hashBytes) {
       s.dirty.set(key, d);
     }
   };
+  // How to read back a texture of an internal format: [format, type, array type].
+  const G = WebGL2RenderingContext;
+  const readAs = (f) => {
+    if ([G.RGBA8, G.RGBA, G.RGB8, G.RGB, G.SRGB8_ALPHA8, G.R8, G.RG8, G.RGB565, G.RGBA4, G.RGB5_A1, G.RGB10_A2].includes(f)) return [G.RGBA, G.UNSIGNED_BYTE, Uint8Array];
+    if ([G.R16F, G.RG16F, G.RGB16F, G.RGBA16F, G.R32F, G.RG32F, G.RGB32F, G.RGBA32F, G.R11F_G11F_B10F].includes(f)) return [G.RGBA, G.FLOAT, Float32Array];
+    if ([G.R8UI, G.RG8UI, G.RGBA8UI, G.R16UI, G.RG16UI, G.RGBA16UI, G.R32UI, G.RG32UI, G.RGBA32UI, G.RGB10_A2UI].includes(f)) return [G.RGBA_INTEGER, G.UNSIGNED_INT, Uint32Array];
+    if ([G.R8I, G.RG8I, G.RGBA8I, G.R16I, G.RG16I, G.RGBA16I, G.R32I, G.RG32I, G.RGBA32I].includes(f)) return [G.RGBA_INTEGER, G.INT, Int32Array];
+    return null;
+  };
   // Reads back what the frame drew (textures and the canvas) and logs a hash of each. Uses the unwrapped
-  // functions, its own framebuffer, and restores the read binding, so the page's state is left as it was.
+  // functions, its own framebuffer, and restores the read binding, so the page's state is left as it was. GL
+  // errors already pending are kept for the page's own getError (see below), not consumed.
   const readBack = (gl) => {
     const s = st(gl);
-    O.getError.call(gl);
+    for (let e; (e = O.getError.call(gl));) s.errors.push(e);
+    const fail = (key, why) => {
+      T.errors.push(`readback ${key}: ${why}`);
+      rec(gl.canvas, `readback ${key} ${why}`);
+    };
     if (s.dirty.size) {
       if (!s.fbo) s.fbo = O.createFramebuffer.call(gl);
       O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.fbo);
       O.readBuffer.call(gl, gl.COLOR_ATTACHMENT0);
       for (const [key, d] of [...s.dirty].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
-        const info = s.tex.get(d.tex);
-        if (!info) { rec(gl.canvas, `readback ${key} unknown size`); continue; }
+        const info = s.tex.get(d.tex), how = info && readAs(info.fmt);
+        if (!info) { fail(key, 'of unknown size'); continue; }
+        if (!how) { fail(key, `in a format the trace cannot read (${ENUM[info.fmt] || info.fmt})`); continue; }
         const w = Math.max(1, info.w >> d.level), h = Math.max(1, info.h >> d.level);
-        const byte = info.fmt === gl.RGBA8 || info.fmt === gl.RGBA;
         const parts = [];
         let ok = true;
         for (const layer of [...d.layers].sort((x, y) => x - y)) {
           if (layer === null) O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, d.tex, d.level);
           else O.framebufferTextureLayer.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, d.tex, d.level, layer);
-          const buf = byte ? new Uint8Array(w * h * 4) : new Float32Array(w * h * 4);
-          O.readPixels.call(gl, 0, 0, w, h, gl.RGBA, byte ? gl.UNSIGNED_BYTE : gl.FLOAT, buf);
+          const buf = new how[2](w * h * 4);
+          O.readPixels.call(gl, 0, 0, w, h, how[0], how[1], buf);
           if (O.getError.call(gl)) ok = false;
-          parts.push(hashBytes(bytes(buf)));
+          parts.push(digest(bytes(buf)));
         }
         O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
         const layers = d.layers.has(null) ? '' : ` layers ${d.layers.size}`;
-        const h1 = parts.length === 1 ? parts[0] : textHash(parts.join(''));
-        rec(gl.canvas, `readback ${key} ${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers} = ${ok ? '#' + h1 : 'unreadable'}`);
+        if (!ok) { fail(key, `${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers}: readPixels failed`); continue; }
+        const hash = Promise.all(parts).then((p) => (p.length === 1 ? p[0] : textHash(p.join(''))));
+        rec(gl.canvas, `readback ${key} ${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers} = #`, hash);
       }
       O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.readFb);
       s.dirty.clear();
@@ -237,7 +294,8 @@ function install(cfg, hashBytes) {
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, buf = new Uint8Array(w * h * 4);
       O.readPixels.call(gl, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
       O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.readFb);
-      rec(gl.canvas, `readback canvas ${w}x${h} = #${hashBytes(buf)}`);
+      if (O.getError.call(gl)) fail('canvas', 'readPixels failed');
+      else rec(gl.canvas, `readback canvas ${w}x${h} = #`, digest(buf));
       s.screen = false;
     }
   };
@@ -267,7 +325,8 @@ function install(cfg, hashBytes) {
         });
         text = m + '(' + args.join(', ') + ')';
       }
-      const r = orig.apply(this, a);
+      // An error that the read-back took off the queue goes back to the page first.
+      const r = m === 'getError' && s.errors.length ? s.errors.shift() : orig.apply(this, a);
       // Keep the state the read-back and the draw counts need.
       if (m === 'bindFramebuffer') {
         if (a[0] === this.FRAMEBUFFER || a[0] === this.DRAW_FRAMEBUFFER) s.drawFb = a[1];
@@ -311,21 +370,29 @@ function install(cfg, hashBytes) {
 
   // Steps n frames of ms each: every queued callback runs with the new time. Frame 0 of the trace is all
   // that happens before the first step; frame k ends after the callbacks of step k.
+  // The timers due by the new time run first, then the animation frames asked for before the step.
   window.__step = (n, ms) => {
     for (let i = 0; i < n; i++) {
       if (frame === 0) endFrame();
+      inStep = true;
       now += ms;
-      for (const cb of cbs.splice(0)) {
-        try { cb(now); } catch (e) { setTimeout(() => { throw e; }); }
+      runTimers();
+      const due = [...frames];
+      frames.clear();
+      for (const [, cb] of due) {
+        try { cb(now); } catch (e) { later(e); }
       }
       endFrame();
+      inStep = false;
     }
     return now;
   };
-  window.__trace = () => {
+  window.__trace = async () => {
     const canvases = [];
-    for (const [canvas, lines] of T.logs) canvases.push({ name: nameOf(canvas), lines });
-    return JSON.stringify({ frames: cfg.trace ? cfg.trace.frames : 0, canvases, sources: T.sources });
+    for (const [canvas, lines] of T.logs) {
+      canvases.push({ name: nameOf(canvas), lines: await Promise.all(lines.map(async ([f, t, then]) => [f, then ? t + (await then) : t])) });
+    }
+    return JSON.stringify({ frames: cfg.trace ? cfg.trace.frames : 0, canvases, sources: T.sources, errors: T.errors });
   };
 }
 
