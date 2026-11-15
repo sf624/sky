@@ -5,7 +5,6 @@
 A web page that draws the sky as seen from the window of an aircraft.
 It draws the air, low clouds, the sea, high thin cloud, the sun, the moon
 and the stars, from the way light scatters.
-Below, a wall in a room is lit by the light of a skylight.
 
 **The page: https://sf624.github.io/sky/**
 
@@ -22,9 +21,8 @@ Click a picture to open the page with that view.
 
 ## How to use it
 
-Drag the upper view to look around. You can look up or down by up to
-89 degrees. On a phone, swipe sideways; an upward or downward swipe scrolls
-the page.
+Drag the view to look around, with the mouse or a finger. You can look up
+or down by up to 89 degrees.
 
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).
@@ -34,9 +32,10 @@ choice.
 The title and the hint about dragging fade out after a few seconds. The panel
 and the full-screen button (top right) fade out when nothing moves for a few
 seconds; moving the mouse, touching the screen, pressing a key or tabbing
-into them brings them back. They stay while the pointer is on them.
+into them brings them back. They stay while the pointer is on them. The
+mouse cursor hides with them over the view, and comes back with them.
 
-The panel below changes the time and the weather.
+The panel at the bottom changes the time and the weather.
 
 - **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
 - **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
@@ -48,10 +47,7 @@ The panel below changes the time and the weather.
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
-- **Resolution**: the most pixels the upper view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
-
-In the room below, the sky in the skylight and the sunlit patch on the wall
-follow the time: its place and its colour.
+- **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
 A view can also be given in the address, for example
 `?time=16.75&yaw=60&pitch=-6`.
@@ -68,8 +64,8 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 
 ## What it needs
 
-- A browser with WebGL2. Without it, the upper view shows only a gradient of sky colours, and the skylight a flat blue.
-- A fast GPU. The page is heavy on the GPU. Time to draw one frame of the upper view, measured on an RTX 3090 (the first view, flying):
+- A browser with WebGL2. Without it, the page shows only a gradient of sky colours.
+- A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
   - 2560×1440: about 9.3 ms
   - 3840×2160 (resolution 4K): about 19 ms
@@ -83,7 +79,7 @@ The page is a single HTML file. It loads nothing else.
 ## Licence
 
 MIT licence ([LICENSE](LICENSE)).
-The whole repository is under these terms. The star data embedded in the page comes from Wikidata (CC0); [NOTICE](NOTICE) says where from.
+A few small pieces of code and data by others are under their own terms (MIT, BSD and others); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists them, with the star data from Wikidata (CC0).
 
 ## For developers
 

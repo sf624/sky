@@ -15,30 +15,15 @@ blocks. It loads no other file.
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled twice. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | (no id) | JS | Everything else, in one function that runs at load. |
 
-There are two canvases:
-
-- `#sky`, the hero: the view from an aircraft. Clouds, sea, cirrus, glare.
-  It flies (900 km/h by default) and is drawn as a mean over frames.
-- `#sky2`, the skylight in the room section: a clear sky seen from the
-  ground (0.3 km), looking south and up (`yaw` 0, `pitch` 62 degrees, field
-  of view 60 degrees). One pass per change, straight to the canvas.
-
-Both use the same fragment shader `fs`. `makeSky(canvas, view, aircraft)`
-inserts `#define AIRCRAFT 1` or `#define AIRCRAFT 0` after `#version 300 es`
-and compiles it. Code inside `#if AIRCRAFT` exists only in the hero. The
-rest is shared, so a change there also changes the skylight (see
-[development.md](development.md#judging-a-change)).
-
-Around the skylight, the room is CSS and SVG: `layoutLight()` colours the
-shade (`#shade`), the sunlit patch (`#patch`) and the shadow of the
-window's bars (`#bars`) from `sunColour()` and the sun's elevation, and
-sets the CSS variables `--sx` and `--sy` that throw the cards' blue
-shadows.
+There is one canvas, `#sky`, the hero: the view from an aircraft. Clouds,
+sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
+over frames. It fills the window, and the page does not scroll.
+`makeSky(canvas, view)` compiles `fs` and the other shaders for it.
 
 ## Conventions
 
@@ -89,8 +74,9 @@ The JS runs once, at load:
    - `starData` (`buildStars`): the star texture.
    - `DAY_LEVEL` (the metered sky with the sun at 42 degrees) and `NIGHT`
      (4e-8 of it: the moonless night sky, airglow).
-2. **Two renderers.** `makeSky` for `#sky` (aircraft) and for `#sky2`. Each is
-   made inside its own `try`: if one fails, the other still draws.
+2. **The renderer.** `makeSky` for `#sky`, inside a `try`: if it fails, the
+   error goes to the console. Without WebGL2, the canvas keeps its CSS
+   gradient.
 3. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `yaw`, `pitch`, `heading`,
@@ -105,20 +91,17 @@ The JS runs once, at load:
 
 - does nothing in a hidden tab;
 - if something changed: rebuilds `msData` when the haze has changed, runs
-  `celestial()`, sets the exposures (`state.exposure` for the skylight,
-  `state.airExposure` for the hero) and the panel's labels;
+  `celestial()`, sets the exposure (`state.airExposure`) and the panel's
+  labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
-- calls each renderer, and `layoutLight()` after a change;
-- asks for another frame only if a renderer returned true.
+- calls the renderer;
+- asks for another frame only if the renderer returned true.
 
-The skylight's renderer always returns false. The hero's returns true
-while it flies or while its picture is still settling. So the page draws
-nothing at rest once the picture is clean, in a hidden tab, or when the
-hero is scrolled out of view (its renderer checks `getBoundingClientRect`).
-A scroll, an `IntersectionObserver` and `visibilitychange` call `kick()`
-again.
+The renderer returns true while the aircraft flies or while its picture is
+still settling. So the page draws nothing at rest once the picture is
+clean, or in a hidden tab. `visibilitychange` calls `kick()` again.
 
 ## Sun, moon and sky in the JS
 
@@ -162,13 +145,13 @@ air, or to the sea. The air is three species, with densities from
 Phase functions (`phases`): Rayleigh, and the Cornette-Shanks form for Mie
 with `g` = 0.8.
 
-**The march.** `NV` samples (20 in the hero, 40 in the skylight) at
+**The march.** `NV` = 20 samples at
 `t = tmax * f * f`: denser near the eye. Each sample adds, for the sun and
 for the moon, `addLight`:
 
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
-  (`depthToTop`) times the phase functions; in the hero, times `direct`,
+  (`depthToTop`) times the phase functions, times `direct`,
   which the shadow of the clouds lowers near the sea;
 - light scattered many times: the multiple-scattering table times the
   local scattering coefficient, times the transmittance to the eye.
@@ -182,10 +165,8 @@ layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
-- In the skylight: a 16-step midpoint sum (`NL`).
-- In the hero: one filtered read of the depth table `uDepth` (512 by 128,
-  `DEPTH_MU` by `DEPTH_R`), made at start in `makeSky` by the same 16-step
-  sum. Its axes follow Bruneton (2017): the distance to the top, between
+- One filtered read of the depth table `uDepth` (512 by 128, `DEPTH_MU` by
+  `DEPTH_R`), made at start in `makeSky` by a 16-step midpoint sum. Its axes follow Bruneton (2017): the distance to the top, between
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
@@ -203,18 +184,16 @@ each), with sunlight bounced off the ground (`ALBEDO` = 0.07); the higher
 orders follow as a geometric series. One value per wavelength, per unit of
 scattering coefficient. The texture is `NMU` by `3 * NH`: the three groups
 of four wavelengths stacked in y. It depends on the haze, so `frame`
-rebuilds it when the haze changes, and each renderer uploads it again.
-The hero reads it through the GPU's filter (`textureLod`; RGBA16F when
-full floats cannot be filtered); the skylight reads four texels and
-interpolates itself (`texelFetch`).
+rebuilds it when the haze changes, and the renderer uploads it again.
+`fs` reads it through the GPU's filter (`textureLod`; RGBA16F when full
+floats cannot be filtered).
 
 The JS keeps a copy of the march, `skyLuminance()`, to meter the exposure
 (see [Exposure](#exposure-and-the-tone-curve)).
 
 ## Low clouds
 
-Low clouds live in a shell from `CB` = 0.6 km to `CT` = 5 km, inside
-`#if AIRCRAFT`.
+Low clouds live in a shell from `CB` = 0.6 km to `CT` = 5 km.
 
 **The field.** A signed field says where cloud is: positive inside,
 rising by about 1 per km of depth under the surface. `cloudShape` builds it
@@ -301,7 +280,7 @@ the sea is dimmed by the cloud amount alone (`shade`).
 
 ## The sea
 
-`addSea`, inside `#if AIRCRAFT`, where the ray meets the sphere `RG`:
+`addSea`, where the ray meets the sphere `RG`:
 
 - **Wind.** `uWind`, varied by gusts (B of the weather map) and streaks (A of
   the wave map). The slopes have the variance of Cox and Munk (1954):
@@ -329,12 +308,9 @@ The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
 depth of the clouds (`shadowDepth`) and of the cirrus (`cirrusShadow`)
 towards the light.
 
-The skylight has no sea: its rays that meet the ground get `addGround`, a
-dark matt ground of `ALBEDO` 0.07.
-
 ## Cirrus
 
-`highCloud`, inside `#if AIRCRAFT`. The cirrus fills a shell from `CI_LO` =
+`highCloud`. The cirrus fills a shell from `CI_LO` =
 12.2 to `CI_HI` = 12.8 km, but its pattern is drawn on one height: where
 the ray crosses the middle of the shell (or halfway along a ray that only
 grazes it).
@@ -382,7 +358,7 @@ all dimmed and reddened by the air:
   plane, brighter towards its centre.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
-  `tools/make-stars.py`, the source is named in `NOTICE`). About a hundred
+  `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
   stars that Wikidata gives no V magnitude have one estimated from their
   other bands.
   `buildStars` puts them into a `GRID` by `GRID` (128) octahedral map of the
@@ -393,33 +369,28 @@ all dimmed and reddened by the air:
   compressed brightness (a "look"). The brightest get diffraction spikes
   fixed to the screen.
 
-**Glare** (hero only): a glow of a few degrees around the sun, as strayed
+**Glare**: a glow of a few degrees around the sun, as strayed
 light in a lens, dimmed by the clouds and the cirrus towards the sun.
 
 ## Exposure and the tone curve
 
-The exposure is set in the JS, once per change:
-
-- **Skylight**: `EXPOSURE * twilightGain()`. `meterLight()` meters the sky
-  (the mean of three points, or the glow above the sun if brighter);
-  `twilightGain` opens up as the sky darkens, but not all the way.
-- **Hero**: `airExposure()`. It meters the sky at the aircraft's altitude,
-  the band along the horizon and the sunlit cloud tops
-  (`cloudLuminance`), whichever is brightest, against the same with the sun
-  at 42 degrees (`REF_SUN`). It stops down from high up (`AIR_STOP`) and
-  further with clouds (`CLOUD_STOP`), more so close over the tops, and
-  opens up under a sheet of cloud.
+The exposure is set in the JS, once per change, by `airExposure()`. It
+meters the sky at the aircraft's altitude (`meterLight()`: the mean of
+three points, or the glow above the sun if brighter), the band along the
+horizon and the sunlit cloud tops (`cloudLuminance`), whichever is
+brightest, against the same with the sun at 42 degrees (`REF_SUN`). It
+opens up as the sky darkens, but not all the way. It stops down from high
+up (`AIR_STOP`) and further with clouds (`CLOUD_STOP`), more so close over
+the tops, and opens up under a sheet of cloud.
 
 At the end of `main`:
 
 1. Spectrum to linear sRGB, times `ISUN` and `uExposure`.
-2. Hero only: a daylight white balance, `vec3(0.932, 1.013, 1.074)`.
+2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
 3. Light far too strong for the screen turns towards white (as on film).
-4. A "look": `pow(col, uLook)`, with `LOOK_POWER` (skylight) and
-   `AIR_LOOK` (hero), both 1.4.
+4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
 5. Tone mapping `1 - exp(-col)`, then the display power `1 / 2.2`.
-6. The skylight adds a triangular dither of one 8-bit step. The hero
-   rounds at random to its storage steps (next section).
+6. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames
 
@@ -443,7 +414,9 @@ when the picture is in half floats.
 **The distance code** (`distanceCode`, read back by `decode` and
 `nearness`): `0.5 + log2(t) / 20`, in 16 bits over two 8-bit channels; the
 sky is infinitely far (code 1, nearness 0). The pixel's distance is that
-of the clouds if they give enough of its light, else of the sea, else
+of the clouds if they hide a tenth of what is behind or give a twentieth
+of its light (`C` against `L`, in one band of wavelengths: a wisp in
+front of the dark sea), else of the sea, else
 infinity; a cirrus sheet counts when nothing else is there, or when it
 hides the rest.
 
@@ -466,6 +439,16 @@ far as it fits the 3 by 3 neighbourhood of the new frame (clamped to its
 minimum and maximum). A past that had to change much was something else:
 its count drops to 1.
 
+**The picture's distance** (R, G of the picture's `aux`): the nearer of
+the new frame's distance and a mean of the past one and the new one, with
+the new one weighed as the new frame's colour is (without a past, the
+new frame's distance). So after a miss a
+cloud's distance fades only as fast as its light does. While the picture
+holds a near cloud's light, the pixel moves with that cloud; once the
+cloud has gone, the neighbourhood check lets its light go. If the
+distance went back to the sea sooner, the light would stay on the sea
+and trail behind a near cloud in flight, in streaks.
+
 **The weights.** The new frame weighs `1 / (n + 1)`, with `n` the past's
 count, capped by `uTrust`, which the JS sets per frame:
 
@@ -486,16 +469,13 @@ grows).
 
 ## The drawing size
 
-`fit()` sizes each canvas: its CSS size times the device pixel ratio
-(at most 2), but no more pixels than a limit:
+`fit()` sizes the canvas: its CSS size times the device pixel ratio (at
+most 2), but no more pixels than the resolution choice (`#pixels`,
+`HERO_PIXELS`): Full HD (1920 x 1080 pixels' worth), WQHD (2560 x 1440,
+the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
+`localStorage` (`sky.pixels`, written when the choice changes), else WQHD.
 
-- the hero: the resolution choice (`#pixels`, `HERO_PIXELS`): Full HD
-  (1920 x 1080 pixels' worth), WQHD (2560 x 1440, the default) or 4K
-  (3840 x 2160). It comes from `?pixels=`, else from `localStorage`
-  (`sky.pixels`, written when the choice changes), else WQHD;
-- the skylight: `MAX_PIXELS` = 2.6e6.
-
-**Dynamic resolution** (hero only). While the view moves or the light
+**Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
 are drawn at `scale` times the canvas size, and `show` stretches them.
 The wall clock measures frames that follow one another: two measures in a
@@ -506,12 +486,11 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All are uploaded in `makeSky`. All but the first two are for the hero
-only:
+All are uploaded in `makeSky`:
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
-| `uMS` | 0 | 40 x 36, RGBA32F (hero: RGBA16F without float filtering) | JS, `buildMultiScatter` | Multiple scattering |
+| `uMS` | 0 | 40 x 36, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |

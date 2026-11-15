@@ -38,8 +38,7 @@ becomes the middle of the range (`time=abc` gives 12).
 | `cloud` | 0 to 1, 0.01 | 0.5 | Amount of low cloud |
 | `cirrus` | 0 to 1, 0.01 | 0.4 | Amount of high, thin cloud |
 
-These are read directly. They change the hero only; the skylight's view
-is fixed.
+These are read directly.
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -69,7 +68,7 @@ frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
 page load, step about 46 frames before the screenshot: the first frames
 may start the mean again (the first reset, and a restart if the drawing
 size grows). Hide the overlays (`.title`, `.panel`,
-`.hint`, `.fs`) for a clean picture. Both canvases are made with
+`.hint`, `.fs`) for a clean picture. The canvas is made with
 `preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
@@ -84,16 +83,6 @@ is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 resolution changes (`?res=` fixes it, to compare). A pattern read at
 `p.xz + uDrift` must not show a seam when the way flown wraps at 256 km:
 fly across it, for example `?at=255.5,0&heading=90&speed=3000`.
-
-**The skylight.** `#sky2` must stay pixel-identical unless the owner says
-otherwise. It shares everything in `fs` outside `#if AIRCRAFT`, and in the
-JS the atmosphere's constants and tables (`buildMultiScatter`,
-`sunDepth`), the colour weights `W`, the stars (`buildStars`,
-`starData`), `DAY_LEVEL` and `NIGHT`, `celestial()`, `meterLight()`,
-`twilightGain()`, `EXPOSURE`, `LOOK_POWER`, `camera()`, and in `makeSky`
-its `draw` and `fit()`. After a change, compare `#sky2` before and
-after, byte for byte, at a few states: day, dusk, night and strong haze
-(for example `?time=12`, `?time=17.5`, `?time=22`, `?haze=5`).
 
 **More than one GPU.** GLSL compilers differ. Check that the shaders
 compile and draw the same on a software renderer as well (Chrome's
@@ -114,14 +103,15 @@ medians or minimums.
 Each frame of the hero is three draws: the scene (`fs`) into the frame
 texture, `mean`, and `show`. The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
-November 2026. The drawing sizes are those of 1920 x 1080, 2560 x 1440 and
-3840 x 2160 windows, less a scrollbar. The last was measured with
-`?pixels=4k`: with the default limit (WQHD), a 4K window is drawn at
-about 2555 x 1443.
+November 2026. The page had a scroll bar then, so the drawing sizes are
+those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
+row was measured again once the page stopped scrolling (it was 5.5 ms at
+1905 x 1080 too). The last was measured with `?pixels=4k`: with the
+default limit (WQHD), a 4K window is drawn at 2560 x 1440.
 
 | Drawing size | Scene (`fs`) | `mean` | `show` |
 |---|---|---|---|
-| 1905 x 1080 | 5.5 ms | 0.08 ms | 0.02 ms |
+| 1920 x 1080 | 5.5 ms | 0.08 ms | 0.02 ms |
 | 2545 x 1440 | 9.3 ms | | |
 | 3825 x 2160 | 19 ms | | |
 
@@ -130,8 +120,6 @@ without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
-
-The skylight draws once per change, not per frame.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -148,10 +136,9 @@ The shaders must run on any WebGL2. The code keeps these rules:
   the scene is loops and branches.
 - **No reversed `smoothstep`.** `smoothstep(edge0, edge1, x)` is undefined
   when `edge0 >= edge1`. Write `1.0 - smoothstep(lo, hi, x)`. The rule
-  holds for new code. Two old ones remain in the shared `main`: the sun's
-  disc (`smoothstep(0.0050, 0.0043, …)`) and the moon's edge
-  (`smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm)`). The skylight runs
-  them, so they change only with the owner's leave.
+  holds for new code. Two old ones remain in `main`: the sun's disc
+  (`smoothstep(0.0050, 0.0043, …)`) and the moon's edge
+  (`smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm)`).
 - **No constant-alpha blending.** Some drivers ignore the alpha of
   `blendColor`, so `CONSTANT_ALPHA` and `ONE_MINUS_CONSTANT_ALPHA` leave the
   picture as it was. The mean over frames is computed in a shader, with
@@ -171,7 +158,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   sphere at or near the eye's own height, the crossing next to the eye
   then lands a hair ahead or behind it, ray by ray: from the base of the
   cirrus, rings and a disc of rays saw the whole sheet down to the sea.
-  `eyeSphere` (in `#if AIRCRAFT`) takes `c` from the heights and the near
+  `eyeSphere` takes `c` from the heights and the near
   crossing from the far one. `highCloud` uses it.
 - **Facts kept twice are changed together.**
   - The density profile, written out five times: `density()` in `fs`, and
@@ -179,10 +166,10 @@ The shaders must run on any WebGL2. The code keeps these rules:
     depth table in `makeSky`.
   - The phase functions, Mie `g` = 0.8 included: `phases` in `fs` and
     `skyLuminance` in the JS.
-  - The depth table: `DEPTH_MU`, `DEPTH_R`, `NL` and `H_TOP` (1132.2544,
-    from `RG` and `RT`) in `fs`; `NM`, `NR`, `NL` and `H` in `makeSky`.
+  - The depth table: `DEPTH_MU`, `DEPTH_R` and `H_TOP` (1132.2544, from
+    `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
-    `MIE_EXT`, `ALBEDO`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
+    `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
@@ -193,9 +180,6 @@ The shaders must run on any WebGL2. The code keeps these rules:
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
   - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
     shader and in `fs` (`CI_DIR`, `CI_UNIT`, and the `bend` in `ciDepth`).
-- **The skylight's code stays as it is.** Change shared code (outside
-  `#if AIRCRAFT`) only when the owner asks; put the hero's changes inside
-  `#if AIRCRAFT`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
@@ -224,10 +208,17 @@ and `docs/` are on the site too.
   Write the code yourself from published ideas (papers, talks, articles),
   and name the source in a comment, as the code does (for example
   "after Hillaire (2020)").
+- A piece of code or data by others may come in only under such terms.
+  List it in `THIRD_PARTY_NOTICES.md`: a row of its table (the source, its
+  version, its licence, where it sits) and its licence text with the
+  copyright line, or the attribution or citation its terms ask for. Put a
+  one-line comment at the code that names the source and points there.
+  A formula or an idea from a paper or a talk needs only the comment.
 - Reference photographs are for looking at only: nothing from them goes
   into the page.
-- The star data embedded in `index.html` comes from Wikidata (CC0).
-  `NOTICE` names the source. Nothing in the repository is under other terms.
+- `THIRD_PARTY_NOTICES.md` lists the code and data by others in the
+  repository, the star data from Wikidata (CC0) among them. Everything else
+  is under the MIT licence.
 
 ### The star catalogue
 
