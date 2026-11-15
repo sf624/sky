@@ -862,7 +862,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   vec4 q;
   float f = cloudShape(p, lod, y, q, body, lump);
   bump = 0.0;
-  if (fine && q.w > 0.0 && f > -0.4 * RELIEF) bump = cloudDetail(q.xyz, lod, q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)));
+  if (fine && q.w > 0.0 && f > -0.35 * RELIEF) bump = cloudDetail(q.xyz, lod, q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)));
   return f + bump;
 }
 
@@ -872,11 +872,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
 }
 
 // Extinction (per km) for a value of the field at height y, in a cloud of
-// that body: dense a little way in (a cloud has a surface; a thin one is
-// soft and frayed further in), with more water higher up and in thicker
-// clouds. A smoothed field (lod) has a wider edge.
+// that body: dense a little way in (a cloud has a surface), with more water
+// higher up and in thicker clouds. A smoothed field (lod) has a wider edge.
 float cloudExtinction(float f, float lod, float y, float body) {
-  return SIGMA * clamp(f / max(EDGE * mix(2.0, 1.0, smoothstep(0.1, 0.6, body)), 1.5 * TEXEL_KM * exp2(lod)), 0.0, 1.0)
+  return SIGMA * clamp(f / max(EDGE, 1.5 * TEXEL_KM * exp2(lod)), 0.0, 1.0)
        * mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)) * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
 }
 
