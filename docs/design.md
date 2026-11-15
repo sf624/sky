@@ -339,6 +339,13 @@ dark matt ground of `ALBEDO` 0.07.
 the ray crosses the middle of the shell (or halfway along a ray that only
 grazes it).
 
+The crossings of the eye's ray with `CI_LO`, `CI_HI` and the middle height
+come from `eyeSphere`, which takes them from the heights, not from
+`raySphere`: the slider stops on all three heights, and from an eye at a
+sphere's own height `raySphere` puts the near crossing a hair ahead or
+behind, ray by ray (see [development.md](development.md#glsl-rules)). From
+`CI_LO`, a ray down leaves the shell at once.
+
 ![Cirrus seen from 11 km: ?date=319&alt=11&pitch=20&cirrus=0.6&cloud=0.3&yaw=150](images/cirrus.jpg)
 
 - `ciDepth` gives the vertical optical depth at a place on the map: patches
