@@ -796,10 +796,6 @@ const float EDGE = 0.04;            // depth under the surface at which a cloud 
 const int CLOUD_STEPS = 160;
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
 
-float remap01(float v, float lo, float hi) {
-  return clamp((v - lo) / (hi - lo), 0.0, 1.0);
-}
-
 // The field at p without the fine noise. lod: how much to smooth, as a mip
 // level of the noise (negative: finer than its texels; the fine noise still
 // gains from that). Also gives the height in the shell (y, 0 to 1), the
@@ -2969,8 +2965,13 @@ void main() {
     const jd = Date.UTC(YEAR, 0, day, 3) / 864e5 + 2440587.5;       // noon in Japan
     return ((jd - 2451550.26) % 29.530588 + 29.530588) % 29.530588;
   };
+  // A leap year has 366 days. The sun's declination takes the day number as it is.
+  date.max = Math.round((new Date(YEAR + 1, 0, 1) - new Date(YEAR, 0, 1)) / 864e5);
   if (!date.hasAttribute('value')) {
-    date.value = Math.round((Date.now() - new Date(YEAR, 0, 0)) / 864e5);
+    // Today's day of the year in local time, whatever the hour. Local midnights
+    // are a whole number of days apart only up to a clock change: round.
+    const now = new Date();
+    date.value = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(YEAR, 0, 0)) / 864e5);
   }
   if (!moon.hasAttribute('value')) moon.value = moonAgeOn(+date.value);
   date.addEventListener('input', () => { moon.value = moonAgeOn(+date.value); });
