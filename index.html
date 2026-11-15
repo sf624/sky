@@ -1274,6 +1274,9 @@ const float CI_UNIT = WEATHER_KM / 3.1623;
 // 3 by 0.4 km, 2 by 0.25 km.
 const vec2 CI_DIR[3] = vec2[3](vec2(3.0, 1.0), vec2(5.0, 1.0), vec2(2.0, 1.0));
 const vec2 CI_FREQ[3] = vec2[3](vec2(12.0, 90.0), vec2(16.0, 120.0), vec2(56.0, 450.0));
+// The fine fibres, along CI_DIR[0]: frequencies along and across, per unit:
+// 1 km by 70 m, 0.3 km by 23 m, 0.1 km by 8 m.
+const vec2 CI_FIB[3] = vec2[3](vec2(80.0, 1200.0), vec2(270.0, 3600.0), vec2(810.0, 10800.0));
 
 // Gradient noise on a lattice that repeats every `period` cells (whole
 // numbers).
@@ -1296,8 +1299,9 @@ float ciNoise(vec2 p, vec2 period) {
 
 // Vertical optical depth of the cirrus at x on the map, smoothed over a
 // footprint of `foot` km; the streaks over `across` km, the footprint
-// across the line of sight, where a ray aslant foreshortens them most.
-float cirrusDepth(vec2 x, float foot, float across) {
+// across the line of sight, where a ray aslant foreshortens them most; the
+// fine fibres over `fibre` km, the footprint across them.
+float ciDepth(vec2 x, float foot, float across, float fibre) {
   vec2 uv = x / WEATHER_KM;
   float w = textureLod(uWeather, uv, log2(max(foot / 0.25, 1.0))).a;
   float thr = 0.62 - 0.8 * uCirrus;
@@ -1330,6 +1334,16 @@ float cirrusDepth(vec2 x, float foot, float across) {
   // opaque where it is a little dense, and a narrow margin would look cut.
   float cov = clamp((w - thr) / 0.45 + 0.3 * first, 0.0, 1.0);
   cov *= cov;
+  // Seen from near, thin streaks break into tufts some 1.3 km by 0.4 km,
+  // with clear sky between them; in a dense sheet they merge, and from
+  // afar too (mean 1).
+  float kt = 1.0 - smoothstep(0.08, 0.3, across * 200.0 / CI_UNIT);
+  float tn = 0.0;
+  if (kt > 0.0) {
+    float n = ciNoise(al * vec2(60.0, 200.0) + 0.3, vec2(60.0, 200.0));
+    lump *= 1.0 + 0.85 * kt * (1.0 - 0.7 * cov) * (smoothstep(-0.2, 0.25, n) / 0.45 - 1.0);
+    tn = kt * n;
+  }
   float veil = 0.2 + 0.4 * uCirrus;
   float base = cov * (veil + (1.0 - veil) * m * lump);
   // Below some hundreds of metres the ice is flocculent, not smooth: the
@@ -1339,10 +1353,46 @@ float cirrusDepth(vec2 x, float foot, float across) {
   float d1 = textureLod(uNoise, vec3(al * vec2(16.0, 80.0), 0.3), log2(max(foot / T1, 1.0))).a;
   float d2 = textureLod(uNoise, vec3(al * vec2(5.0, 20.0), 0.7), log2(max(foot / T2, 1.0))).a;
   float dd = 0.55 * d1 + 0.45 * d2;
+  // Seen from near, a grain some 20 by 100 m more (its mean taken off, so
+  // that from afar nothing changes).
+  const float T0 = CI_UNIT / 240.0 / 128.0;
+  if (foot < 0.05) {
+    vec3 g0 = vec3(al * vec2(48.0, 240.0), 0.5);
+    dd += 0.35 * (1.0 - smoothstep(0.02, 0.05, foot))
+        * (textureLod(uNoise, g0, log2(max(foot / T0, 1.0))).a - textureLod(uNoise, g0, 7.0).a);
+  }
   float er = 0.5 * (1.0 - dd);
   float dens = clamp((base - er) / max(1.0 - er, 0.2), 0.0, 2.0) * (0.2 + 1.6 * dd * dd);
+  // Seen from nearer still, a tuft is a bundle of fibres: the ice falling
+  // out of it, drawn into threads by the shear. Thin ridges of noise, 70,
+  // 23 and 8 m apart and a dozen times longer. They bend together, and
+  // crowd and curl at the heads of the tufts. In places they are sharp
+  // threads, in others a soft sheen. Their mean is 1, so from afar, where
+  // the footprint fades them, nothing changes.
+  if (dens > 0.0 && fibre * CI_FIB[0].y < 0.45 * CI_UNIT) {
+    float tangle = smoothstep(-0.15, 0.25, ciNoise(al * vec2(20.0, 100.0), vec2(20.0, 100.0)));
+    float sharp = mix(3.0, 20.0, tangle);
+    // al steps by whole numbers over the map: its fraction gives the same
+    // pattern, with more of the float's bits left for these fine scales.
+    vec2 aw = al - floor(al) + vec2(0.0, 7e-4 * ciNoise(al * vec2(60.0, 300.0) + 0.5, vec2(60.0, 300.0)) + 1.6e-3 * tn);
+    float c = mix(0.4, 0.95, tangle) * (1.0 - 0.75 * smoothstep(0.3, 1.4, dens));   // clearest where thin
+    for (int i = 0; i < 3; i++) {
+      vec2 fr = CI_FIB[i];
+      float q = fibre * fr.y / CI_UNIT;                         // footprint / spacing
+      float k = 1.0 - smoothstep(0.12, 0.45, q);
+      if (k <= 0.0) break;
+      float s = clamp(1.5 / max(q, 0.01), 2.0, sharp);                    // a thread no thinner than the footprint
+      float r = 1.0 - abs(ciNoise(aw * fr + float(i) * 0.37, fr));
+      dens *= 1.0 + k * c * (pow(r, s) * (1.0 + 0.18 * s) - 1.0);
+      c *= 0.8;
+    }
+  }
   float u2 = uCirrus * uCirrus;
   return CI_TAU * (0.18 + 10.0 * u2 * u2) * dens;           // a veil when there is much
+}
+
+float cirrusDepth(vec2 x, float foot, float across) {
+  return ciDepth(x, foot, across, across);
 }
 
 // depthToTop in fewer steps, denser near p: enough for the light of one
@@ -1396,8 +1446,14 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // A ray aslant sees the pattern foreshortened, and a long way through
   // the shell averages it.
   float thick = 0.01 * (t1 - t0) * sqrt(max(1.0 - cv * cv, 0.0));
-  float tauV = cirrusDepth(pc.xz + uDrift, pix * tm * pow(max(cv, 1e-3), -0.35) + thick,
-                           pix * tm / max(cv, 0.02) + thick);
+  // The footprint is drawn out along the ray's way over the map; across
+  // the fibres it is only as long as that way runs across them. Fibres
+  // seen end-on stay sharp further away.
+  vec2 dh = d.xz - up.xz * dot(d, up);
+  float sn = dot(dh, vec2(-1.0, 3.0) / 3.1623) / max(length(dh), 1e-6);
+  float fibre = pix * tm * sqrt(1.0 + sn * sn * (1.0 / max(cv * cv, 4e-4) - 1.0)) + 0.3 * thick;
+  float tauV = ciDepth(pc.xz + uDrift, pix * tm * pow(max(cv, 1e-3), -0.35) + thick,
+                       pix * tm / max(cv, 0.02) + thick, fibre);
   if (tauV <= 0.0) return;
   float tau = tauV * (t1 - t0) / (CI_HI - CI_LO);
   if (tau < 0.003) return;                          // too thin to see
@@ -1701,6 +1757,13 @@ void main() {
   float wCloud = tBar > 0.0 ? (1.0 - Tc) * (cloudsFirst ? 1.0 : Th) : 0.0;
   float wHigh = tHigh > 0.0 ? (1.0 - Th) * (cloudsFirst ? Tc : 1.0) : 0.0;
   float tSeen = wCloud > 0.1 ? tBar : ground ? tmax : -1.0;
+  // Against the sky, a sheet too thin to hide much still gives much of the
+  // light, and its streaks would smear if they stayed put: it counts by
+  // its share of the light (the sun, the moon and stars behind it, by far
+  // the brighter, stay put).
+  if (tSeen < 0.0 && tHigh > 0.0) {
+    wHigh = max(wHigh, dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30));
+  }
   if (wHigh > (tSeen < 0.0 ? 0.1 : 0.5)) tSeen = tHigh;
   outAux = vec4(distanceCode(tSeen), 0.0, 1.0);
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
