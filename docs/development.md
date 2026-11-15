@@ -172,6 +172,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
+  - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
+    `fs` shaders.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
     (`BASE_KM / 128.0`) and the cirrus's `T0`, `T1`, `T2`.
   - The size of the weather map, 1024: `WEATHER` in the JS;

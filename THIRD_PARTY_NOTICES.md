@@ -1,6 +1,6 @@
 # Third-party notices
 
-The page includes the following code and data by others (BSD-3-Clause, CC-BY-ND-3.0, CC0-1.0, MIT, and a CIE data set that asks for a citation). Their license texts, and the attributions and citations they ask for, are reproduced below. The rest of the project is under the MIT license in [LICENSE](LICENSE).
+The page includes the following code and data by others (BSD-3-Clause, CC0-1.0, MIT, the Unlicense, and a CIE data set that asks for a citation). Their license texts, and the attributions and citations they ask for, are reproduced below. The rest of the project is under the MIT license in [LICENSE](LICENSE).
 
 ## Code
 
@@ -8,7 +8,7 @@ The page includes the following code and data by others (BSD-3-Clause, CC-BY-ND-
 | --- | --- | --- | --- |
 | [Hash without Sine](https://www.shadertoy.com/view/4djSRW), by David Hoskins | 2014 | MIT | `hash` (hash12) in the `fs`, `mean` and `show` shaders and `hash3` (hash13) in the `fs` shader of `index.html` |
 | [Tex2DCatmullRom.hlsl](https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1), by MJP | gist of 2016 | MIT | the weights and the nine bilinear reads of the Catmull-Rom filter in the `mean` shader of `index.html`, in GLSL |
-| [Hash Functions for GPU Rendering](https://jcgt.org/published/0009/03/02/), by Mark Jarzynski and Marc Olano | JCGT vol. 9, no. 3, 2020 | CC-BY-ND-3.0 (the paper) | `pcg` in the `noise` shader and `rnd` in the `waves` shader (pcg3d); the hash inside `ciNoise` in the `fs` shader (pcg2d) of `index.html` |
+| [hash-prospector](https://github.com/skeeto/hash-prospector), by Chris Wellons: `lowbias32` | master branch, read 2026-11-16 | Unlicense | `ihash` in the `noise`, `waves` and `fs` shaders of `index.html` |
 
 ## Data
 
@@ -74,20 +74,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### Hash Functions for GPU Rendering
+### hash-prospector
 
-The paper lists pcg3d and names pcg2d as its own; the code of pcg2d is in its
-supplement. The paper gives its terms as below; the license is given by its address, as the
-license allows, not in full.
+The repository is dedicated to the public domain by its UNLICENSE file. Its
+first sentence is given here with its address, not the whole text. No
+credit is required.
 
 ```text
-(c) 2020 Mark Jarzynski and Marc Olano (the Authors).
-The Authors provide this document (the Work) under the Creative Commons CC BY-ND
-3.0 license available online at http://creativecommons.org/licenses/by-nd/3.0/.
-
-Mark Jarzynski and Marc Olano, Hash Functions for GPU Rendering, Journal of
-Computer Graphics Techniques (JCGT), vol. 9, no. 3, 21-38, 2020.
-http://jcgt.org/published/0009/03/02/
+This is free and unencumbered software released into the public domain.
+https://github.com/skeeto/hash-prospector/blob/master/UNLICENSE
+https://unlicense.org/
 ```
 
 ### Precomputed Atmospheric Scattering
