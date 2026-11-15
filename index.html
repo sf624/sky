@@ -931,8 +931,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     float y, bump, body;
     float f = cloudField(p, lod, true, y, bump, body);
     if (f > 0.0 && came > 1.5 * ds) {
-      // Strode into a cloud: go back and walk.
-      t -= came - ds;
+      // Strode into a cloud: go back and walk, though not to before the
+      // start (with the eye in a cloud, that would put the cloud behind
+      // it, and the sky would show through).
+      t = max(t - (came - ds), ta);
       came = ds;
       walk = 3;
       continue;
