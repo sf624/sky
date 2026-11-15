@@ -757,6 +757,25 @@ float ign(vec2 p) {
 // The view from the aircraft: clouds below and a sea under them. The
 // skylight's shader leaves all this out.
 
+// raySphere for a ray from the eye (o, at height uAlt) and the sphere at
+// height h, without its rounding. raySphere takes dot(o, o) - r * r, and at
+// 6372 km a float steps by 4 km²; from an eye at the sphere's own height
+// (the slider stops on the thin cloud's 12.2, 12.5 and 12.8 km) the
+// crossing next to the eye then came out a hair ahead or behind it, as
+// each ray's angle rounded. From the base of the thin cloud, rings of rays
+// (and a disc under the eye, where dot(o, d) passes a power of two) saw
+// through the whole sheet down to the sea, as lit bands. Here c comes from
+// the heights, and the near crossing from the far one (their product is c).
+vec2 eyeSphere(vec3 o, vec3 d, float h) {
+  float b = dot(o, d);
+  float c = (uAlt - h) * (2.0 * RG + uAlt + h);
+  float D = b * b - c;
+  if (D < 0.0) return vec2(1e9, -1e9);
+  float q = b < 0.0 ? sqrt(D) - b : -b - sqrt(D);   // the crossing farther from the eye
+  if (q == 0.0) return vec2(0.0);
+  return b < 0.0 ? vec2(c / q, q) : vec2(q, c / q);
+}
+
 // ---------- Clouds ----------
 // A shell from CB to CT holds them. A field says where they are: positive
 // inside a cloud, rising by about 1 per km of depth under its surface. It
@@ -1455,21 +1474,22 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   Th = 1.0;
   tHigh = -1.0;
   H[0] = vec4(0.0); H[1] = vec4(0.0); H[2] = vec4(0.0);
-  // Where the ray is inside the shell: t0 to t1.
-  vec2 lo = raySphere(o, d, RG + CI_LO), hi = raySphere(o, d, RG + CI_HI);
+  // Where the ray is inside the shell: t0 to t1. From its base, a ray down
+  // leaves it at once (lo.x is 0).
+  vec2 lo = eyeSphere(o, d, CI_LO), hi = eyeSphere(o, d, CI_HI);
   float t0, t1;
   if (uAlt < CI_LO) {
     t0 = lo.y; t1 = hi.y;
   } else if (uAlt < CI_HI) {
-    t0 = 0.0; t1 = lo.y > lo.x && lo.x > 0.0 ? lo.x : hi.y;
+    t0 = 0.0; t1 = lo.y > lo.x && lo.x >= 0.0 ? lo.x : hi.y;
   } else {
-    t0 = hi.x; t1 = lo.y > lo.x && lo.x > 0.0 ? lo.x : hi.y;
+    t0 = hi.x; t1 = lo.y > lo.x && lo.x >= 0.0 ? lo.x : hi.y;
   }
   t1 = min(t1, tmax);
   if (t0 < 0.0 || t1 <= t0) return;
   // The pattern is read where the ray crosses the middle height, or
   // halfway along a ray that only grazes it.
-  vec2 mid = raySphere(o, d, RG + 0.5 * (CI_LO + CI_HI));
+  vec2 mid = eyeSphere(o, d, 0.5 * (CI_LO + CI_HI));
   float tm = uAlt < 0.5 * (CI_LO + CI_HI) ? mid.y : mid.x;
   if (tm < t0 || tm > t1) tm = 0.5 * (t0 + t1);
   vec3 pc = o + d * tm;
