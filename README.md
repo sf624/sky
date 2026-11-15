@@ -21,23 +21,33 @@ Click a picture to open the page with that view.
 
 ## How to use it
 
-Drag the view to look around. You can look up or down by up to
-89 degrees.
+Drag the view to look around, with the mouse or a finger. You can look up
+or down by up to 89 degrees.
 
-The panel at the bottom changes the time and the weather. The panel is labelled in
-Japanese only; each label is given in parentheses.
+The page is in English or Japanese, following the browser's language
+(Japanese if the browser prefers Japanese to English, English otherwise).
+**Language / 言語** in the panel switches it, and the browser remembers the
+choice.
+
+The title and the hint about dragging fade out after a few seconds. The panel
+and the full-screen button (top right) fade out when nothing moves for a few
+seconds; moving the mouse, touching the screen, pressing a key or tabbing
+into them brings them back. They stay while the pointer is on them. The
+mouse cursor hides with them over the view, and comes back with them.
+
+The panel at the bottom changes the time and the weather.
 
 - **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
-- **Time (時刻)**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
-- **Date (日付)**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
-- **Moon (月)**: the age of the moon, 0 to 29.5 days.
-- **Haze (大気の霞)**: the amount of dust and small droplets in the air, 0 to 6 (0.35 at first). With more, the horizon and the sky around the sun turn white.
-- **Wind over the sea (海上の風)**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
-- **Altitude (高度)**: 300 m to 13,000 m (11,000 m at first).
-- **Speed (速度)**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
-- **Clouds (雲)**: the amount of low cloud, from none to overcast.
-- **Thin cloud (薄雲)**: the amount of high, thin cloud (cirrus).
-- **Resolution (解像度)**: the most pixels the view may draw: Full HD (フルHD), WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
+- **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
+- **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
+- **Moon**: the age of the moon, 0 to 29.5 days.
+- **Haze**: the amount of dust and small droplets in the air, 0 to 6 (0.35 at first). With more, the horizon and the sky around the sun turn white.
+- **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
+- **Altitude**: 300 m to 13,000 m (11,000 m at first).
+- **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
+- **Clouds**: the amount of low cloud, from none to overcast.
+- **Thin clouds**: the amount of high, thin cloud (cirrus).
+- **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
 A view can also be given in the address, for example
 `?time=16.75&yaw=60&pitch=-6`.

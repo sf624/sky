@@ -44,6 +44,7 @@
   .title {
     position: absolute;
     left: clamp(20px, 6vw, 88px);
+    right: clamp(20px, 6vw, 88px);
     top: clamp(28px, 12vh, 120px);
     pointer-events: none;
     text-shadow: 0 1px 24px rgba(10, 40, 110, .35);
@@ -103,78 +104,208 @@
     cursor: pointer;
   }
   .panel select option { color: #123; }
-  .hint {
-    position: absolute;
-    right: 20px;
-    top: 18px;
+  .title .hint {
+    margin: 10px 0 0;
     font-size: 12px;
     letter-spacing: .1em;
     opacity: .75;
-    pointer-events: none;
   }
+  /* Full screen, top right, in the corner that nothing else uses. */
+  .fs {
+    position: absolute;
+    right: 16px;
+    top: 14px;
+    width: 38px; height: 38px;
+    padding: 0;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .6);
+    background: rgba(24, 58, 120, .34);
+    color: #fff;
+    cursor: pointer;
+  }
+  .fs:hover { background: rgba(60, 100, 170, .5); }
+  .fs svg { width: 18px; height: 18px; }
+  .fs .leave, .hero:fullscreen .fs .enter { display: none; }
+  .hero:fullscreen .fs .leave { display: block; }
+  .fs[hidden] { display: none; }
   @media (max-width: 700px) {
     .panel { grid-template-columns: repeat(2, 1fr); gap: 6px 18px; padding: 12px 16px 14px; }
+  }
+  /* A short window (a phone on its side): a smaller title nearer the top,
+     the panel in fewer rows when it is wide enough, and a panel that never
+     runs off the screen (it scrolls inside itself). */
+  .panel { max-height: calc(100% - 2 * clamp(16px, 5vh, 44px)); overflow-y: auto; }
+  @media (max-height: 560px) {
+    .title { top: 14px; right: 70px; }
+    .title h1 { font-size: clamp(32px, 11vh, 56px); }
+    .title p { margin-top: 6px; font-size: 14px; }
+    .title .hint { margin-top: 4px; }
+  }
+  @media (max-height: 560px) and (min-width: 701px) {
+    .panel { grid-template-columns: repeat(5, 1fr); width: min(1040px, calc(100vw - 32px)); gap: 4px 20px; padding: 10px 18px 12px; }
+  }
+  /* The title and the hint are shown at first, then fade for good (.told).
+     The panel and the full-screen button fade while nothing moves (.still)
+     and come back with the pointer, a touch, a key or focus. Hidden, they
+     take no clicks, so the view behind them can still be dragged; their
+     controls stay in the tab order, and focus brings them back. Only
+     opacity changes: the canvases are not drawn again. */
+  .title { transition: opacity 1s, visibility 1s; }
+  .hero.told .title { opacity: 0; visibility: hidden; }
+  .panel, .fs { transition: opacity .6s; }
+  .hero.still .panel, .hero.still .fs { opacity: 0; pointer-events: none; }
+  /* The cursor goes with them, when their fade starts (a cursor cannot
+     fade), and comes back with them; it wins over grab and grabbing. */
+  .hero.still, .hero.still canvas, .hero.still canvas:active { cursor: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .title, .panel, .fs { transition: none; }
   }
 </style>
 </head>
 <body>
 
 <section class="hero">
-  <canvas id="sky" aria-label="巡航中の航空機から見た、空と雲と海"></canvas>
+  <canvas id="sky" aria-label="巡航中の航空機から見た、空と雲と海" data-t-label="canvas"></canvas>
   <div class="title">
     <h1>Sky</h1>
-    <p>レイリー散乱で描く、雲の上の空</p>
+    <p data-t="subtitle">レイリー散乱で描く、雲の上の空</p>
+    <p class="hint" data-t="hint">ドラッグで見回す</p>
   </div>
-  <div class="hint">ドラッグで見回す</div>
+  <button class="fs" type="button" hidden aria-label="全画面表示" title="全画面表示">
+    <svg class="enter" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 6.5V2h4.5M11.5 2H16v4.5M16 11.5V16h-4.5M6.5 16H2v-4.5"/></svg>
+    <svg class="leave" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 2v4.5H2M16 6.5h-4.5V2M11.5 16v-4.5H16M2 11.5h4.5V16"/></svg>
+  </button>
   <form class="panel" onsubmit="return false">
     <div class="time">
-      <button id="play" type="button" aria-label="時間を進める">▶</button>
+      <button id="play" type="button" aria-label="時間を進める" data-t-label="play">▶</button>
       <label>
-        <span class="row"><span>時刻</span><output id="timeOut"></output></span>
+        <span class="row"><span data-t="time">時刻</span><output id="timeOut"></output></span>
         <input id="time" type="range" min="0" max="24" step="0.05" value="15">
       </label>
     </div>
     <label>
-      <span class="row"><span>日付</span><output id="dateOut"></output></span>
+      <span class="row"><span data-t="date">日付</span><output id="dateOut"></output></span>
       <input id="date" type="range" min="1" max="365" step="1">
     </label>
     <label>
-      <span class="row"><span>月</span><output id="moonOut"></output></span>
+      <span class="row"><span data-t="moon">月</span><output id="moonOut"></output></span>
       <input id="moon" type="range" min="0" max="29.5" step="0.5">
     </label>
     <label>
-      <span class="row"><span>大気の霞</span><output id="hazeOut"></output></span>
+      <span class="row"><span data-t="haze">大気の霞</span><output id="hazeOut"></output></span>
       <input id="haze" type="range" min="0" max="6" step="0.05" value="0.35">
     </label>
     <label>
-      <span class="row"><span>海上の風</span><output id="windOut"></output></span>
+      <span class="row"><span data-t="wind">海上の風</span><output id="windOut"></output></span>
       <input id="wind" type="range" min="1" max="15" step="0.5" value="6">
     </label>
     <label>
-      <span class="row"><span>高度</span><output id="altOut"></output></span>
+      <span class="row"><span data-t="alt">高度</span><output id="altOut"></output></span>
       <input id="alt" type="range" min="0.3" max="13" step="0.1" value="11">
     </label>
     <label>
-      <span class="row"><span>速度</span><output id="speedOut"></output></span>
+      <span class="row"><span data-t="speed">速度</span><output id="speedOut"></output></span>
       <input id="speed" type="range" min="0" max="3000" step="50" value="900">
     </label>
     <label>
-      <span class="row"><span>雲</span><output id="cloudOut"></output></span>
+      <span class="row"><span data-t="cloud">雲</span><output id="cloudOut"></output></span>
       <input id="cloud" type="range" min="0" max="1" step="0.01" value="0.5">
     </label>
     <label>
-      <span class="row"><span>薄雲</span><output id="cirrusOut"></output></span>
+      <span class="row"><span data-t="cirrus">薄雲</span><output id="cirrusOut"></output></span>
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
     </label>
     <label>
-      <span class="row"><span>解像度</span></span>
+      <span class="row"><span data-t="pixels">解像度</span></span>
       <select id="pixels">
-        <option value="fhd">フルHD</option>
+        <option value="fhd" data-t="fhd">フルHD</option>
         <option value="wqhd" selected>WQHD</option>
         <option value="4k">4K</option>
       </select>
     </label>
+    <label>
+      <span class="row"><span data-t="lang">言語 / Language</span></span>
+      <select id="lang">
+        <option value="ja" lang="ja">日本語</option>
+        <option value="en" lang="en">English</option>
+      </select>
+    </label>
   </form>
+<script>
+// The text of the hero, in Japanese and English. The HTML holds the Japanese;
+// this runs as soon as the hero is parsed, before the long scripts below, so
+// an English reader does not see the Japanese first. Elements
+// name their text with data-t (contents) and data-t-label (aria-label).
+const TEXT = {
+  ja: {
+    title: 'Sky — レイリー散乱の空',
+    canvas: '巡航中の航空機から見た、空と雲と海',
+    subtitle: 'レイリー散乱で描く、雲の上の空',
+    hint: 'ドラッグで見回す',
+    fullScreen: '全画面表示',
+    exitFullScreen: '全画面を終了',
+    play: '時間を進める',
+    time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
+    alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
+    lang: '言語 / Language',
+    // The light of the hour, by the sun's elevation (see showLabels).
+    night: '夜', astronomical: '天文薄明', nautical: '航海薄明', civil: '市民薄明',
+    morning: '朝', evening: '夕方', day: '昼',
+    dateText: (month, day) => month + '月' + day + '日',
+    newMoon: '新月', firstQuarter: '上弦', fullMoon: '満月', lastQuarter: '下弦',
+    moonAge: age => '月齢 ' + age,
+    hazes: ['澄みきった', '澄んだ', 'うす霞', '霞'],
+    clouds: ['なし', '少ない', '中くらい', '多い', '一面'],
+    cirri: ['なし', '少ない', '中くらい', '多い'],
+  },
+  en: {
+    title: 'Sky — a Rayleigh-scattered sky',
+    canvas: 'The sky, clouds and sea, seen from a cruising aircraft',
+    subtitle: 'The sky above the clouds, drawn with Rayleigh scattering',
+    hint: 'Drag to look around',
+    fullScreen: 'Full screen',
+    exitFullScreen: 'Exit full screen',
+    play: 'Play time-lapse',
+    time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
+    alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
+    lang: 'Language / 言語',
+    night: 'night', astronomical: 'astronomical twilight', nautical: 'nautical twilight', civil: 'civil twilight',
+    morning: 'morning', evening: 'evening', day: 'day',
+    dateText: (month, day) => day + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1],
+    newMoon: 'new moon', firstQuarter: 'first quarter', fullMoon: 'full moon', lastQuarter: 'last quarter',
+    moonAge: age => 'day ' + age,
+    hazes: ['crystal clear', 'clear', 'light haze', 'hazy'],
+    clouds: ['none', 'few', 'some', 'many', 'overcast'],
+    cirri: ['none', 'few', 'some', 'many'],
+  },
+};
+// The language: the address (?lang=en), else the reader's last choice, else
+// the browser's first Japanese or English language; English for all others.
+let LANG = (() => {
+  const known = l => l === 'ja' || l === 'en';
+  const asked = new URLSearchParams(location.search).get('lang');
+  if (known(asked)) return asked;
+  let stored = null;
+  try { stored = localStorage.getItem('sky.lang'); } catch (err) {}
+  if (known(stored)) return stored;
+  for (const l of navigator.languages || [navigator.language || '']) {
+    if (/^ja(-|$)/i.test(l)) return 'ja';
+    if (/^en(-|$)/i.test(l)) return 'en';
+  }
+  return 'en';
+})();
+function applyLanguage(lang) {
+  LANG = lang;
+  const T = TEXT[lang];
+  document.documentElement.lang = lang;
+  document.title = T.title;
+  for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t];
+  for (const el of document.querySelectorAll('[data-t-label]')) el.setAttribute('aria-label', T[el.dataset.tLabel]);
+  document.getElementById('lang').value = lang;
+}
+applyLanguage(LANG);
+</script>
 </section>
 
 <!-- Stars to magnitude 6.5 (V band) from Wikidata: structured data under CC0
@@ -2635,22 +2766,22 @@ void main() {
   const speed = document.getElementById('speed'), speedOut = document.getElementById('speedOut');
   const cirrus = document.getElementById('cirrus'), cirrusOut = document.getElementById('cirrusOut');
   function showLabels() {
+    const T = TEXT[LANG];
     const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 0.5);
     const clock = String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-    timeOut.textContent = clock + ' ' + (e < -18 ? '夜' : e < -12 ? '天文薄明' : e < -6 ? '航海薄明'
-      : e < -0.4 ? '市民薄明' : e < 6 ? (t < 12 ? '朝' : '夕方') : '昼');
+    timeOut.textContent = clock + ' ' + (e < -18 ? T.night : e < -12 ? T.astronomical : e < -6 ? T.nautical
+      : e < -0.4 ? T.civil : e < 6 ? (t < 12 ? T.morning : T.evening) : T.day);
     const cal = new Date(YEAR, 0, state.day);
-    dateOut.textContent = (cal.getMonth() + 1) + '月' + cal.getDate() + '日';
+    dateOut.textContent = T.dateText(cal.getMonth() + 1, cal.getDate());
     const a = state.moonAge;
-    moonOut.textContent = a < 1.5 || a > 28 ? '新月' : Math.abs(a - 7.4) < 1 ? '上弦'
-      : Math.abs(a - 14.8) < 1 ? '満月' : Math.abs(a - 22.1) < 1 ? '下弦' : '月齢 ' + a.toFixed(0);
-    hazeOut.textContent = state.haze < 0.3 ? '澄みきった' : state.haze < 1.5 ? '澄んだ' : state.haze < 3.5 ? 'うす霞' : '霞';
+    moonOut.textContent = a < 1.5 || a > 28 ? T.newMoon : Math.abs(a - 7.4) < 1 ? T.firstQuarter
+      : Math.abs(a - 14.8) < 1 ? T.fullMoon : Math.abs(a - 22.1) < 1 ? T.lastQuarter : T.moonAge(a.toFixed(0));
+    hazeOut.textContent = T.hazes[state.haze < 0.3 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3.5 ? 2 : 3];
     altOut.textContent = Math.round(state.alt * 100) * 10 + ' m';
-    cloudOut.textContent = state.cloud < 0.02 ? 'なし' : state.cloud < 0.35 ? '少ない' : state.cloud < 0.65 ? '中くらい'
-      : state.cloud < 0.9 ? '多い' : '一面';
+    cloudOut.textContent = T.clouds[state.cloud < 0.02 ? 0 : state.cloud < 0.35 ? 1 : state.cloud < 0.65 ? 2 : state.cloud < 0.9 ? 3 : 4];
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
     speedOut.textContent = state.speed.toFixed(0) + ' km/h';
-    cirrusOut.textContent = state.cirrus < 0.02 ? 'なし' : state.cirrus < 0.35 ? '少ない' : state.cirrus < 0.7 ? '中くらい' : '多い';
+    cirrusOut.textContent = T.cirri[state.cirrus < 0.02 ? 0 : state.cirrus < 0.35 ? 1 : state.cirrus < 0.7 ? 2 : 3];
   }
   // The date slider covers this year. The moon's age follows the date (mean
   // lunation, counted from the new moon of 6 January 2000), until it is moved.
@@ -2733,6 +2864,95 @@ void main() {
   const endDrag = () => { drag = null; };
   heroCanvas.addEventListener('pointerup', endDrag);
   heroCanvas.addEventListener('pointercancel', endDrag);
+
+  // The overlays get out of the way of the sky (see .told and .still in the
+  // style). None of this draws: it only sets classes on the hero.
+  const hero = document.querySelector('.hero'), panel = document.querySelector('.panel');
+  const fsButton = document.querySelector('.fs'), langSelect = document.getElementById('lang');
+  const INTRO_MS = 6000, IDLE_MS = 4000;
+  let introTimer = 0;
+  function showIntro() {
+    hero.classList.remove('told');
+    clearTimeout(introTimer);
+    introTimer = setTimeout(() => hero.classList.add('told'), INTRO_MS);
+  }
+  // The panel and the button stay while the pointer is over them, while a
+  // slider is held, while a select's list may be open (from the press that
+  // opens it to a choice, a blur or the next move elsewhere: the page gets
+  // no events while the list is open), and while the keyboard is in them
+  // (a key was pressed since the last pointer press: Chrome counts a select
+  // focused by the mouse as :focus-visible, so that cannot tell).
+  const controls = [panel, fsButton];
+  let over = 0, pressed = false, opened = null, keyed = false, idleTimer = 0;
+  const held = () => over > 0 || pressed || !!opened
+    || keyed && controls.some(c => c.contains(document.activeElement));
+  function rest() {
+    if (held()) idleTimer = setTimeout(rest, IDLE_MS);
+    else hero.classList.add('still');
+  }
+  function wake() {
+    hero.classList.remove('still');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(rest, IDLE_MS);
+  }
+  for (const c of controls) {
+    c.addEventListener('pointerenter', () => { over++; });
+    c.addEventListener('pointerleave', () => { over = Math.max(0, over - 1); });
+    c.addEventListener('pointerdown', e => {
+      pressed = true;
+      if (e.target.tagName === 'SELECT') opened = e.target;
+    });
+    c.addEventListener('focusin', wake);
+  }
+  const letGo = () => { pressed = false; };
+  window.addEventListener('pointerup', letGo);
+  window.addEventListener('pointercancel', letGo);
+  const closed = () => { opened = null; };
+  for (const sel of panel.querySelectorAll('select')) {
+    sel.addEventListener('change', closed);
+    sel.addEventListener('blur', closed);
+  }
+  window.addEventListener('pointermove', e => {
+    if (opened && e.target !== opened) opened = null;
+    // The release can be lost (in a select's list, outside the window).
+    if (!e.buttons) pressed = false;
+    wake();
+  }, { passive: true });
+  window.addEventListener('pointerdown', () => { keyed = false; wake(); }, { passive: true });
+  window.addEventListener('keydown', () => { keyed = true; wake(); });
+  showIntro();
+  wake();
+
+  // The language: at once, and kept for the next visit. The title and the
+  // hint come back for a while, in the new language.
+  langSelect.addEventListener('change', () => {
+    applyLanguage(langSelect.value);
+    try { localStorage.setItem('sky.lang', LANG); } catch (err) {}
+    showLabels();
+    showFullScreen();
+    showIntro();
+  });
+
+  // Full screen: the hero with its overlays. Esc and the browser's own exits
+  // come through fullscreenchange too. Where the browser has no full screen
+  // for pages (an iPhone), the button stays hidden.
+  function showFullScreen() {
+    const label = TEXT[LANG][document.fullscreenElement ? 'exitFullScreen' : 'fullScreen'];
+    fsButton.setAttribute('aria-label', label);
+    fsButton.title = label;
+  }
+  if (document.fullscreenEnabled) {
+    fsButton.hidden = false;
+    fsButton.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else hero.requestFullscreen().catch(() => {});
+    });
+    document.addEventListener('fullscreenchange', () => {
+      showFullScreen();
+      update();
+    });
+  }
+  showFullScreen();
 
   new ResizeObserver(update).observe(document.body);
   window.addEventListener('resize', update);
