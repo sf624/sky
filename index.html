@@ -771,9 +771,10 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const float RELIEF = 0.7;           // the same for the fine noise
+const float RELIEF = 1.0;           // the same for the fine noise
 const float EDGE = 0.04;            // depth under the surface at which a cloud is dense
 const int CLOUD_STEPS = 160;
+const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
 
 float remap01(float v, float lo, float hi) {
   return clamp((v - lo) / (hi - lo), 0.0, 1.0);
@@ -782,13 +783,15 @@ float remap01(float v, float lo, float hi) {
 // The field at p without the fine noise. lod: how much to smooth, as a mip
 // level of the noise (negative: finer than its texels; the fine noise still
 // gains from that). Also gives the height in the shell (y, 0 to 1), the
-// place in the noise (q.xyz), how rough the cloud is there (q.w) and how
-// thick it is from base to top (body, 1 for a deck).
-float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body) {
+// place in the noise (q.xyz), how rough the cloud is there (q.w), how
+// thick it is from base to top (body, 1 for a deck) and the billows there
+// (lump: positive on one, negative between them).
+float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body, out float lump) {
   float h = length(p) - RG;
   y = (h - CB) / (CT - CB);
   q = vec4(0.0);
   body = 0.0;
+  lump = 0.0;
   if (y <= 0.0 || y >= 1.0) return -9.0;
   vec2 x = p.xz + uDrift;
   vec4 w = textureLod(uWeather, x / WEATHER_KM, lod - 2.0);
@@ -810,8 +813,8 @@ float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body) {
   // the side of its cloud.
   float rim = max(1.0 - y / 0.04, 0.0);
   f -= 0.2 * rim * rim;
-  // A thicker cloud has bigger lumps.
-  float lumps = LUMPS * mix(0.8, 2.0, clamp(thick, 0.0, 1.0)) * (1.0 + 0.6 * swell);
+  // A thicker cloud has bigger lumps, and a tower bigger still.
+  float lumps = LUMPS * mix(0.8, 2.0, clamp(thick, 0.0, 1.0)) * (1.0 + 0.6 * swell) * (1.0 + sqrt(tower));
   if (f < -0.6 * lumps) return f;                    // no noise could make a cloud here
   // The noise repeats every few km. Read it at a depth that drifts from
   // place to place, so that no two tiles show the same clouds.
@@ -820,8 +823,12 @@ float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body) {
   vec4 n = textureLod(uNoise, q.xyz, max(lod, 0.0));
   // Hard, growing turrets stand beside older, smoother cloud.
   q.w = mix(0.45, 1.3, smoothstep(0.35, 0.65, n.g));
-  // Billows of 2 km down to 125 m (the numbers are the means of the noise).
-  float billows = lumps * (0.5 * (n.r - 0.571) + 0.5 * (n.g - 0.485) + 0.5 * (n.b - 0.481) + 0.4 * (n.a - 0.475));
+  // Billows of 2 km down to 125 m, rounded into domes (see cloudDetail;
+  // the numbers are the means of the noise). lump: how far this place
+  // stands out of them.
+  n.gba *= 2.0 - n.gba;
+  lump = 0.5 * (n.r - 0.571) + 0.5 * (n.g - 0.712) + 0.5 * (n.b - 0.715) + 0.4 * (n.a - 0.715);
+  float billows = lumps * lump;
   // How high the top stands over this place, as the field has it here.
   body = pow(max(thick + (billows + 1.2 * swell) / 1.6, 0.0), 1.0 / 3.0) * top / 0.28;
   // A flat base, a few tens of metres higher or lower from place to place
@@ -830,31 +837,46 @@ float cloudShape(vec3 p, float lod, out float y, out vec4 q, out float body) {
   return min(f + billows, 2.0 * (h - CB - 0.03 - 0.05 * n.r));
 }
 
-// The field at p; fine: with the fine noise, which also comes out by
-// itself (bump: positive on a billow, negative in a crease).
-float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body) {
-  vec4 q;
-  float f = cloudShape(p, lod, y, q, body);
-  bump = 0.0;
-  if (fine && f > -0.5 * RELIEF) {
-    // Billows of 300 m down to 20 m, read a mip level sharper than the
-    // pixel: the mean over the frames averages what that leaves.
-    vec4 d = textureLod(uNoise, q.xyz * DETAIL, lod + 1.7);
-    float bumps = 0.3 * d.r + 0.25 * d.g + 0.25 * d.b + 0.2 * d.a;
-    if (lod < -1.0) {                                // close by: finer still
-      vec4 c = textureLod(uNoise, q.xyz * (5.0 * DETAIL), lod + 4.1);
-      bumps += 0.3 * (1.0 - smoothstep(-2.0, -1.0, lod)) * (0.5 * c.g + 0.3 * c.b + 0.2 * c.a - 0.482);
-    }
-    bump = RELIEF * q.w * (bumps - 0.508);
+// The fine noise at q (a place in the noise of the tile) on a cloud of
+// roughness rough, in units of the field: billows of 300 m down to 4 m,
+// read a mip level sharper than the pixel (the mean over the frames
+// averages what that leaves).
+float cloudDetail(vec3 q, float lod, float rough) {
+  // Worley noise rises in cones to its points; v (2 - v) rounds them into
+  // domes with creases between them, as the billows of a cloud.
+  vec4 d = textureLod(uNoise, q * DETAIL, lod + 1.7);
+  d.gba *= 2.0 - d.gba;
+  float bumps = 0.3 * d.r + 0.25 * d.g + 0.25 * d.b + 0.2 * d.a;
+  if (lod < -1.0) {                                  // close by: finer still
+    vec4 c = textureLod(uNoise, q * (5.0 * DETAIL), lod + 4.1);
+    c.gba *= 2.0 - c.gba;
+    bumps += 0.3 * (1.0 - smoothstep(-2.0, -1.0, lod)) * (0.5 * c.g + 0.3 * c.b + 0.2 * c.a - 0.714);
   }
+  return RELIEF * rough * (bumps - 0.67);
+}
+
+// The field at p; fine: with the fine noise, which also comes out by
+// itself (bump: positive on a billow, negative in a crease). lump: see
+// cloudShape. A thin cloud is rougher: its edge frays.
+float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body, out float lump) {
+  vec4 q;
+  float f = cloudShape(p, lod, y, q, body, lump);
+  bump = 0.0;
+  if (fine && q.w > 0.0 && f > -0.4 * RELIEF) bump = cloudDetail(q.xyz, lod, q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)));
   return f + bump;
 }
 
+float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body) {
+  float lump;
+  return cloudField(p, lod, fine, y, bump, body, lump);
+}
+
 // Extinction (per km) for a value of the field at height y, in a cloud of
-// that body: dense a little way in (a cloud has a surface), with more water
-// higher up and in thicker clouds. A smoothed field (lod) has a wider edge.
+// that body: dense a little way in (a cloud has a surface; a thin one is
+// soft and frayed further in), with more water higher up and in thicker
+// clouds. A smoothed field (lod) has a wider edge.
 float cloudExtinction(float f, float lod, float y, float body) {
-  return SIGMA * clamp(f / max(EDGE, 1.5 * TEXEL_KM * exp2(lod)), 0.0, 1.0)
+  return SIGMA * clamp(f / max(EDGE * mix(2.0, 1.0, smoothstep(0.1, 0.6, body)), 1.5 * TEXEL_KM * exp2(lod)), 0.0, 1.0)
        * mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)) * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
 }
 
@@ -868,16 +890,18 @@ float cloudDensity(vec3 p, float lod, bool fine) {
 // Optical depth of the clouds from p towards the light, over the next
 // 26 steps' worth of distance; the steps grow. The first two see the fine
 // noise, and their depth comes apart (crisp): bumps shade the creases
-// beside them. Also gives the slope of the field towards the light (per
-// km), mostly over 200 m, from its values at p without and with the fine
-// noise (fc, ff).
-float lightDepth(vec3 p, vec3 dir, float ds, float lod, float fc, float ff, out float crisp, out float slope) {
+// beside them. The later ones are moved aside by off: light strays inside
+// a cloud, and over the frames the shadows of other clouds soften. Also
+// gives the slope of the field towards the light (per km), mostly over four
+// first steps, from its values at p without and with the fine noise (fc,
+// ff).
+float lightDepth(vec3 p, vec3 dir, float ds, float lod, float fc, float ff, vec3 off, out float crisp, out float slope) {
   float tau = 0.0, s = 0.0;
   crisp = 0.0;
   slope = 0.0;
   for (int i = 0; i < 6; i++) {
     float y, bump, body, l = i < 2 ? lod : max(lod, 0.0) + 0.5 * float(i), sm = s + 0.5 * ds;
-    float fl = cloudField(p + dir * sm, l, i < 2, y, bump, body);
+    float fl = cloudField(p + dir * sm + (i < 3 ? vec3(0.0) : off), l, i < 2, y, bump, body);
     float dt = fl > 0.0 ? cloudExtinction(fl, l, y, body) * ds : 0.0;
     if (i < 2) crisp += dt; else tau += dt;
     if (i == 1) slope += 0.3 * (fl - ff) / sm;
@@ -959,7 +983,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     float lod = log2(max(0.8 * pix * t, 0.2 * ds) / TEXEL_KM);
     vec3 p = o + d * t;
     float y, bump, body;
-    float f = cloudField(p, lod, true, y, bump, body);
+    float lump;
+    float f = cloudField(p, lod, true, y, bump, body, lump);
     if (f > 0.0 && came > 1.5 * ds) {
       // Strode into a cloud: go back and walk, though not to before the
       // start (with the eye in a cloud, that would put the cloud behind
@@ -982,30 +1007,42 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float fs = fPrev < 0.0 ? 0.0 : f;
         // Which way the surface faces: the field falls towards the light
         // on a side turned to it. A thick cloud is a matt surface: the
-        // light it sends back goes with the cosine.
+        // light it sends back goes with the cosine. The steps towards the
+        // light shrink with the distance below 8 km (to 15 m), and so does
+        // the reach towards the sky (to 50 m): a near cloud shows its small
+        // billows lit and shaded as a far one shows its big ones.
         float crisp, slope;
-        float tau = lightDepth(ps, uLight, max(0.05, 0.6 * ds), lod, fs - bump, fs, crisp, slope);
+        vec3 side = normalize(cross(uLight, abs(uLight.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        float ang = 2.0 * PI * hash(gl_FragCoord.xy + 7.13 * uPass);
+        vec3 off = PENUMBRA * sqrt(hash(gl_FragCoord.xy + 3.71 * uPass + 19.1)) * (cos(ang) * side + sin(ang) * cross(uLight, side));
+        float tau = lightDepth(ps, uLight, max(clamp(0.00625 * t, 0.015, 0.05), 0.6 * ds), lod, fs - bump, fs, off, crisp, slope);
         float facing = clamp((0.3 - slope / sqrt(slope * slope + 2.0)) / 1.3, 0.0, 1.0);
         // The sky lights what faces up, the higher the better, and the
         // creases less.
         float yu, bu, cu;
-        float reach = max(0.1, 2.0 * exp2(lod) * TEXEL_KM);
+        float reach = max(clamp(0.0125 * t, 0.05, 0.1), 2.0 * exp2(lod) * TEXEL_KM);
         float rise = (cloudField(ps + normalize(ps) * reach, lod, true, yu, bu, cu) - fs) / reach;
         float open = (0.6 - 0.4 * rise / sqrt(rise * rise + 2.0))
-                   * mix(0.6, 1.0, clamp((length(p) - RG - CB) / 1.5, 0.0, 1.0)) * clamp(0.9 + 1.5 * bump, 0.6, 1.1);
+                   * mix(0.6, 1.0, clamp((length(p) - RG - CB) / 1.5, 0.0, 1.0)) * clamp(0.9 + bump, 0.6, 1.1);
         // Light scattered a few times casts the crisp shadows of the
         // bumps; light scattered many times goes round them, and the last
         // term comes through the whole cloud or from its neighbours. A
         // thin cloud lets most of the light through: only a thick one is
-        // brilliant.
+        // brilliant. The tops of the billows catch more of it than the
+        // creases between them, and far off, where the billows of the fine
+        // noise are smaller than a pixel, those of the tile do so.
         float soft = tau + 0.4 * crisp;
         tau += crisp;
         float white = 1.12 * body / (body + 0.12);
+        float billow = clamp(1.0 + 2.0 * smoothstep(5.0, 30.0, t) * lump, 0.6, 1.3);
+        // A side turned from the light still sees the sunlit cloud around
+        // it: white light, of the sun and of the sky, as that cloud sends.
+        float bounce = (1.0 - facing) * clamp(dot(ps, uLight) / length(ps), 0.0, 1.0);
         one = p0 * exp(-tau);
-        many = white * (0.66 * mix(0.12, 1.0, facing) * clamp(1.0 + 3.0 * bump, 0.6, 1.2)
-                        * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft) + p3 * exp(-0.05 * soft))
-                        + p4 * exp(-0.012 * soft));
-        amb = open * mix(1.0, white, 0.5);
+        many = billow * white * (0.66 * mix(0.15, 1.0, facing) * clamp(1.0 + 6.0 * bump, 0.5, 1.1)
+                                 * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft) + p3 * exp(-0.05 * soft))
+                                 + p4 * exp(-0.012 * soft) + 0.02 * bounce);
+        amb = billow * (open * mix(1.0, white, 0.5) + 0.15 * bounce);
       }
       sOne += Tc * a * one;
       sMany += Tc * a * many;
@@ -2312,7 +2349,10 @@ void main() {
     // A sheet of cloud is all white: stop down further.
     const clear = 1 + (AIR_STOP - 1) * Math.min(1, state.alt / 5);
     const above = (clear + (CLOUD_STOP - clear) * Math.min(1, state.cloud / 0.15))
-      * (1 - 0.3 * Math.min(1, Math.max(0, (state.cloud - 0.4) / 0.5)));
+      * (1 - 0.3 * Math.min(1, Math.max(0, (state.cloud - 0.4) / 0.5)))
+      // Close over the tops, the cloud fills more of the picture, and its
+      // billows need room below white.
+      * (1 - 0.4 * Math.min(1, Math.max(0, (7 - state.alt) / 4)) * Math.min(1, state.cloud / 0.5));
     // Under a sheet of cloud no bright tops are in sight and little light
     // is left: open up, though not all the way (a dull day looks dull).
     const under = Math.min(1, Math.max(0, (1.2 - state.alt) / 0.6))
