@@ -1,0 +1,11 @@
+Sky
+Copyright (c) 2026 Shun Fujioka
+
+The code of this project is under the MIT licence (see LICENSE).
+
+Not under the MIT licence: the star catalogue embedded in index.html
+(the block with the id "stars"). It is derived from the Hipparcos
+Catalogue. Credit: ESA. Licence: CC BY-NC 3.0 IGO
+(https://creativecommons.org/licenses/by-nc/3.0/igo/), which allows
+non-commercial use only. Anyone who needs the whole page under the terms
+of the MIT licence must replace that data.
