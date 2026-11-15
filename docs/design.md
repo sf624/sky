@@ -380,8 +380,11 @@ all dimmed and reddened by the air:
 - **Airglow** (`uNight`), brighter towards the horizon (van Rhijn's factor),
   and **the Milky Way** (`milkyWay`): a noise pattern on the real galactic
   plane, brighter towards its centre.
-- **Stars** from the Hipparcos Catalogue, to magnitude 6.5 (the `stars`
-  block: six bytes per star, brightest first; its licence is in `NOTICE`).
+- **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
+  bytes per star, brightest first, about 8,800 stars; built by
+  `tools/make-stars.py`, the source is named in `NOTICE`). About a hundred
+  stars that Wikidata gives no V magnitude have one estimated from their
+  other bands.
   `buildStars` puts them into a `GRID` by `GRID` (128) octahedral map of the
   sphere with up to `SLOTS` = 8 stars per cell, and enters each star in
   every cell its disc can reach, so the shader reads one cell per pixel
