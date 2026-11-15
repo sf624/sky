@@ -1,0 +1,19 @@
+{
+  "about": "The fixed views for stills. q is the query string; speed=0 is added unless q sets speed. A still steps frames frames of ms each (46 frames let the running mean settle). Dates are given so that the views do not depend on the day.",
+  "frames": 46,
+  "ms": 50,
+  "views": [
+    { "name": "default", "q": "" },
+    { "name": "dusk", "q": "date=80&time=17.6" },
+    { "name": "night-moon", "q": "date=180&time=23&moon=14&yaw=-5&pitch=8&cloud=0.3" },
+    { "name": "night-dark", "q": "date=80&time=1&moon=0&pitch=5" },
+    { "name": "haze4", "q": "date=300&time=13&haze=4&pitch=-10" },
+    { "name": "overcast-0.5km", "q": "date=172&time=11&cloud=1&alt=0.5&pitch=-10" },
+    { "name": "in-cloud-3km", "q": "date=172&time=13&alt=3&cloud=1&pitch=-2" },
+    { "name": "cirrus1", "q": "date=172&time=13&pitch=12&yaw=100&cirrus=1" },
+    { "name": "sea-low-sun", "q": "date=172&time=17.8&alt=0.3&cloud=0.2&yaw=115&pitch=-4" },
+    { "name": "up-cirrus-11.5km", "q": "date=172&time=14&alt=11.5&pitch=40&cirrus=0.7&yaw=270" },
+    { "name": "near-clouds-3km", "q": "date=172&time=14&alt=3&pitch=-5&yaw=60" },
+    { "name": "flight", "q": "date=172&time=15&yaw=20&pitch=-12&speed=900&heading=0&at=40,60", "frames": 40, "ms": 16 }
+  ]
+}

@@ -69,6 +69,13 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 
 ## Judging a change
 
+**The tools.** [`tools/`](../tools/README.md) does the checks below from
+the command line, in headless Chrome on a fake clock: stills of a fixed
+set of views against a base, the wrap, the loop, the drawing size, flight
+against a still, and a GL trace that shows whether a change sends the
+same commands to WebGL. For example
+`node tools/sky.mjs check --base origin/main`.
+
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
 frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
@@ -219,8 +226,8 @@ Every change goes through a pull request. The workflow
   push, about a minute behind, and is removed when the pull request
   closes. Pull requests from forks get no preview.
 
-The whole tree is published except `.git` and `.github`, so `README.md`
-and `docs/` are on the site too.
+The whole tree is published except `.git`, `.github` and `tools/`, so
+`README.md` and `docs/` are on the site too.
 
 ## Licences
 
