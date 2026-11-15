@@ -660,6 +660,14 @@ vec3 depthToTop(vec3 p, vec3 d) {
 void multiScatter(float h, float mus, out vec4 ms[3]) {
   float x = clamp((mus - MS_MU_MIN) / (1.0 - MS_MU_MIN), 0.0, 1.0) * float(NMU - 1);
   float y = sqrt(clamp(h / (RT - RG), 0.0, 1.0)) * float(NH - 1);
+#if AIRCRAFT
+  // The aircraft's view reads it through the GPU's filter (see the table of
+  // depths). The three groups lie one above the other: a read within one
+  // never reaches the next.
+  for (int k = 0; k < 3; k++) {
+    ms[k] = textureLod(uMS, (vec2(x, y + float(k * NH)) + 0.5) / vec2(NMU, 3 * NH), 0.0);
+  }
+#else
   float x0 = min(floor(x), float(NMU - 2));
   float y0 = min(floor(y), float(NH - 2));
   float fx = x - x0, fy = y - y0;
@@ -669,6 +677,7 @@ void multiScatter(float h, float mus, out vec4 ms[3]) {
     ms[k] = mix(mix(texelFetch(uMS, b, 0), texelFetch(uMS, b + ivec2(1, 0), 0), fx),
                 mix(texelFetch(uMS, b + ivec2(0, 1), 0), texelFetch(uMS, b + ivec2(1, 1), 0), fx), fy);
   }
+#endif
 }
 
 float hash3(vec3 p) {
@@ -2376,6 +2385,9 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
     }
 
+    // The aircraft's view reads its tables through the GPU's filter: full
+    // floats where it can filter them, else half floats (2.4e-4 apart).
+    const fullFloat = aircraft && !!gl.getExtension('OES_texture_float_linear');
     // The table of depthToTop (see there), on unit 5: the shader's own sum,
     // 16 midpoint steps, at each texel.
     if (aircraft) {
@@ -2397,16 +2409,13 @@ void main() {
           data.set([a, m, o, 0], (j * NM + i) * 4);
         }
       }
-      // Read through the GPU's own filter: full floats where it can filter
-      // them, else half floats (2.4e-4 apart, plenty for a depth).
-      const full = !!gl.getExtension('OES_texture_float_linear');
       gl.activeTexture(gl.TEXTURE5);
       gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
         [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
         gl.texParameteri(gl.TEXTURE_2D, k, v);
       }
-      gl.texImage2D(gl.TEXTURE_2D, 0, full ? gl.RGBA32F : gl.RGBA16F, NM, NR, 0, gl.RGBA, gl.FLOAT, data);
+      gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, NR, 0, gl.RGBA, gl.FLOAT, data);
       gl.activeTexture(gl.TEXTURE0);
     }
 
@@ -2424,7 +2433,8 @@ void main() {
     gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
     gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST],
+    const msFilter = aircraft ? gl.LINEAR : gl.NEAREST;
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, msFilter], [gl.TEXTURE_MAG_FILTER, msFilter],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
       gl.texParameteri(gl.TEXTURE_2D, k, v);
     }
@@ -2447,7 +2457,7 @@ void main() {
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
+        gl.texImage2D(gl.TEXTURE_2D, 0, aircraft && !fullFloat ? gl.RGBA16F : gl.RGBA32F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, w, h);
