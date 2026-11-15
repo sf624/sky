@@ -51,7 +51,7 @@ jobs:
           set -eu
           if [ -z "$PR" ]; then
             # main is the root of the site. The previews under pr/ stay.
-            rsync -a --delete --exclude=/.git --exclude=/.github --exclude=/pr src/ site/
+            rsync -a --delete --exclude=/.git --exclude=/.github --exclude=/tools --exclude=/pr src/ site/
             touch site/.nojekyll
             what="main at $GITHUB_SHA"
           elif [ "$ACTION" = closed ]; then
@@ -59,7 +59,7 @@ jobs:
             what="Remove the preview of #$PR"
           else
             mkdir -p "site/pr/$PR"
-            rsync -a --delete --exclude=/.git --exclude=/.github src/ "site/pr/$PR/"
+            rsync -a --delete --exclude=/.git --exclude=/.github --exclude=/tools src/ "site/pr/$PR/"
             what="Preview of #$PR at $HEAD_SHA"
           fi
           cd site
