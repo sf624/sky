@@ -505,3 +505,12 @@ The weather map draws, on 256 km: systems of some 80 km, open cells of
 down to 1 km, towers where the widest clumps are, gusts on the sea, and
 the patches and bands of cirrus. The wave map is a sum of plane waves, each
 a whole number of times across the map.
+
+Their random numbers come from one integer hash, `ihash`: Wellons'
+lowbias32 (two rounds of xor-shift and multiply, from hash-prospector, in
+the public domain). The `noise` shader hashes a lattice cell's
+coordinates, packed into one word, plus the seed; the `waves` shader the
+number of the wave. The word, and its low 21 and 10 bits moved up, are
+three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
+`ciNoise` in `fs` uses the same hash per pixel: one word per lattice point,
+which with its low half moved up is the gradient.
