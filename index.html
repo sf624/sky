@@ -423,13 +423,11 @@ uniform sampler3D uNoise;
 // Weather map, repeating. R: cloud cover, G: towers, B: gusts on the sea.
 uniform sampler2D uWeather;
 layout(location = 0) out vec4 outColor;
-#if AIRCRAFT
 // The aircraft's frames go on to the shader that joins them into a picture
 // (see there), with the distance of what each pixel shows (outAux). They are
 // kept in steps of 1 / uSteps.
 uniform float uSteps;
 layout(location = 1) out vec4 outAux;
-#endif
 
 const float PI = 3.14159265359;
 // The parameters of the air follow Bruneton's demo (2017): see THIRD_PARTY_NOTICES.md.
@@ -441,12 +439,7 @@ const float MIE_EXT = 1.11;     // extinction / scattering
 const float HR = 8.0;           // Rayleigh scale height
 const float HM = 1.2;           // Mie scale height
 const float ISUN = 20.0;
-#if AIRCRAFT
 const int NV = 20;              // view samples: the picture is within two steps of 8 bits of 40's
-#else
-const int NV = 40;              // view samples
-#endif
-const int NL = 16;              // light samples (the depth table built in makeSky repeats it)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
@@ -471,61 +464,36 @@ vec3 density(float h) {
   return vec3(exp(-h / HR), exp(-h / HM), max(0.0, 1.0 - abs(h - 25.0) / 15.0));
 }
 
-#if AIRCRAFT
 // The depths of depthToTop hang only on the height of p and the angle of d
-// to the vertical. The aircraft's view reads them from a table, the same
-// sum made once in JS: one filtered read instead of 16 steps. Its axes, as
+// to the vertical. They are read from a table, a sum of 16 steps made once
+// in JS: one filtered read instead of a march. Its axes, as
 // in Bruneton (2017): the distance to the top between its least and its
 // most at that height, and the distance to the horizon. They keep the
 // table smooth near the horizon.
 uniform sampler2D uDepth;
 const int DEPTH_MU = 512, DEPTH_R = 128;
 const float H_TOP = 1132.2544;  // distance from the ground to the top, along the horizon: sqrt(RT^2 - RG^2)
-#endif
 
 // Optical depth (per species) from p to the top of the atmosphere.
 vec3 depthToTop(vec3 p, vec3 d) {
-#if AIRCRAFT
   float r = length(p);
   float rho = sqrt(max((r - RG) * (r + RG), 0.0));
   float lo = RT - r, hi = rho + H_TOP;
   vec2 x = vec2(clamp((raySphere(p, d, RT).y - lo) / (hi - lo), 0.0, 1.0), clamp(rho / H_TOP, 0.0, 1.0));
   const vec2 N = vec2(DEPTH_MU, DEPTH_R);
   return textureLod(uDepth, (x * (N - 1.0) + 0.5) / N, 0.0).rgb;
-#else
-  float t = raySphere(p, d, RT).y;
-  float dt = t / float(NL);
-  vec3 s = vec3(0.0);
-  for (int i = 0; i < NL; i++) {
-    vec3 q = p + d * ((float(i) + 0.5) * dt);
-    s += density(length(q) - RG) * dt;
-  }
-  return s;
-#endif
 }
 
 // Bilinear lookup of the multiple-scattering table.
 void multiScatter(float h, float mus, out vec4 ms[3]) {
   float x = clamp((mus - MS_MU_MIN) / (1.0 - MS_MU_MIN), 0.0, 1.0) * float(NMU - 1);
   float y = sqrt(clamp(h / (RT - RG), 0.0, 1.0)) * float(NH - 1);
-#if AIRCRAFT
-  // The aircraft's view reads it through the GPU's filter (see the table of
-  // depths). The three groups lie one above the other: a read within one
-  // never reaches the next.
+  // It is read through the GPU's filter (see the table of depths). The
+  // three groups lie one above the other: a read within one never reaches
+  // the next.
   for (int k = 0; k < 3; k++) {
     ms[k] = textureLod(uMS, (vec2(x, y + float(k * NH)) + 0.5) / vec2(NMU, 3 * NH), 0.0);
   }
-#else
-  float x0 = min(floor(x), float(NMU - 2));
-  float y0 = min(floor(y), float(NH - 2));
-  float fx = x - x0, fy = y - y0;
-  ivec2 q = ivec2(int(x0), int(y0));
-  for (int k = 0; k < 3; k++) {
-    ivec2 b = q + ivec2(0, k * NH);
-    ms[k] = mix(mix(texelFetch(uMS, b, 0), texelFetch(uMS, b + ivec2(1, 0), 0), fx),
-                mix(texelFetch(uMS, b + ivec2(0, 1), 0), texelFetch(uMS, b + ivec2(1, 1), 0), fx), fy);
-  }
-#endif
 }
 
 // hash13 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
@@ -603,9 +571,7 @@ float ign(vec2 p) {
   return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-#if AIRCRAFT
-// The view from the aircraft: clouds below and a sea under them. The
-// skylight's shader leaves all this out.
+// The view from the aircraft: clouds below and a sea under them.
 
 // raySphere for a ray from the eye (o, at height uAlt) and the sphere at
 // height h, without its rounding. raySphere takes dot(o, o) - r * r, and at
@@ -1406,21 +1372,6 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   }
 }
 
-#else
-const float ALBEDO = 0.07;      // a dark, sea-like ground
-
-// Light from one source reflected by the ground at pg.
-void addGround(vec3 pg, vec3 n, vec3 od, float extM, vec3 dir, float gain, inout vec4 L[3]) {
-  float c = dot(n, dir);
-  if (c <= 0.0 || gain <= 0.0) return;
-  vec3 o2 = od + depthToTop(pg + n * 0.001, dir);
-  for (int k = 0; k < 3; k++) {
-    L[k] += gain * ALBEDO * c / PI * exp(-(uBR[k] * o2.x + extM * o2.y + uBO[k] * o2.z));
-  }
-}
-#endif
-
-#if AIRCRAFT
 // A distance (km; negative: infinitely far) as a number from 0 to 1, in 16
 // bits over two channels of 8.
 vec2 distanceCode(float t) {
@@ -1428,7 +1379,6 @@ vec2 distanceCode(float t) {
   float high = floor(c / 256.0);
   return vec2(high, c - 256.0 * high) / 255.0;
 }
-#endif
 
 void main() {
   vec2 uv = ((gl_FragCoord.xy + uJitter) * 2.0 - uRes) / uRes.y;
@@ -1452,7 +1402,6 @@ void main() {
   float Tc = 1.0, tBar = -1.0, Th = 1.0, tHigh = -1.0;
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
-#if AIRCRAFT
   if (uCirrus > 0.0) highCloud(o, d, tmax, extM, Th, tHigh, H);
   if (uCloud > 0.0) {
     vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
@@ -1480,13 +1429,10 @@ void main() {
     }
   }
 
-#endif
-
   // The shadow of the clouds: their depth towards the light where the ray
   // meets the sea (shadow), and how much direct light is left in the air
   // near the sea (shade).
   float shadow = 0.0, shade = 1.0;
-#if AIRCRAFT
   if (uLightI > 0.0 && (uCloud > 0.0 || uCirrus > 0.0)) {
     if (!ground) {
       // The ray runs on through far air, under all the clouds there are.
@@ -1498,7 +1444,6 @@ void main() {
       shade = exp(-shadow);
     }
   }
-#endif
 
   // March along the view ray; samples are denser near the eye. An extra
   // sample ends at each layer, the nearer one first.
@@ -1549,14 +1494,7 @@ void main() {
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
-#if AIRCRAFT
     addSea(o + d * tmax, d, tmax, od, betaM, extM, vis, shadow, L);
-#else
-    vec3 pg = o + d * tmax;
-    vec3 n = normalize(pg);
-    addGround(pg, n, od, extM, uSun, uSunI, L);
-    addGround(pg, n, od, extM, uMoon, uMoonI, L);
-#endif
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way and
     // stars, all dimmed and reddened by the air. By day the exposure hides
@@ -1614,7 +1552,6 @@ void main() {
   // Glare: light of the sun strayed inside the eye or the lens, a glow of a
   // few degrees around it (a "look", like the spikes of the stars). Clouds
   // between the eye and the sun dim it.
-#if AIRCRAFT
   if (uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0) {
     float deg = degrees(acos(min(mu, 1.0)));
     float glare = 0.3 / (deg * deg + 0.3);
@@ -1631,18 +1568,15 @@ void main() {
       L[k] += uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
     }
   }
-#endif
 
   vec3 col = ISUN * vec3(
     dot(uWR[0], L[0]) + dot(uWR[1], L[1]) + dot(uWR[2], L[2]),
     dot(uWG[0], L[0]) + dot(uWG[1], L[1]) + dot(uWG[2], L[2]),
     dot(uWB[0], L[0]) + dot(uWB[1], L[1]) + dot(uWB[2], L[2]));
   col = max(col, 0.0) * uExposure;                   // colours outside sRGB
-#if AIRCRAFT
   // A camera's white balance for daylight: sunlit cloud, a little yellow on
   // a screen whose white is D65, comes out white, and the sea a deeper blue.
   col *= vec3(0.932, 1.013, 1.074);
-#endif
   // Light far too strong for the screen turns white, as on film, instead
   // of a flat saturated colour (the glitter of a low sun would be yellow).
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -1652,7 +1586,6 @@ void main() {
   col = pow(col, vec3(uLook));
   col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
-#if AIRCRAFT
   // How far is what this pixel shows? As far as the clouds, if they hide
   // enough of what is behind or give enough of its light, or else as far
   // as the sea; the sky is infinitely far. A thin sheet counts when nothing
@@ -1678,11 +1611,6 @@ void main() {
   // would be too dark. So round up or down at random, anew each frame:
   // then the mean over the frames is right.
   outColor = vec4(floor(clamp(col, 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps, 1.0);
-#else
-  // Triangular dither of one 8-bit step removes the banding.
-  float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
-  outColor = vec4(col + n / 255.0, 1.0);
-#endif
 }
 </script>
 
@@ -1885,8 +1813,7 @@ void main() {
   const FOV = 62 * RAD;
   const EXPOSURE = 2.1;    // daytime exposure; twilight adds a metered gain
   const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
-  const MAX_PIXELS = 2.6e6;   // the skylight's limit
-  // The hero's limit, chosen in the panel (the skylight keeps MAX_PIXELS).
+  // The hero's limit, chosen in the panel.
   const HERO_PIXELS = { fhd: 1920 * 1080, wqhd: 2560 * 1440, '4k': 3840 * 2160 };
   let heroPixels = HERO_PIXELS.wqhd;
   const CRUISE = 11;       // km: 36,000 ft
@@ -2247,11 +2174,9 @@ void main() {
   // moves, relative to the canvas (for tests). Without it, the frame time sets it.
   const fixedScale = Math.min(1, Math.max(0, +new URLSearchParams(location.search).get('res') || 0));
 
-  // aircraft: with the clouds and the sea (their part of the shader, and
-  // their textures). Without, the view must keep its cloud amount at 0.
   // Returns a function that draws: render(fresh, now). fresh: something has
   // changed; now: the time of the frame, ms.
-  function makeSky(canvas, view, aircraft) {
+  function makeSky(canvas, view) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
     const compile = (type, src) => {
@@ -2270,8 +2195,7 @@ void main() {
       if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
       return prog;
     };
-    const prog = link(document.getElementById('fs').textContent.trim()
-      .replace('#version 300 es', '#version 300 es\n#define AIRCRAFT ' + (aircraft ? 1 : 0)));
+    const prog = link(document.getElementById('fs').textContent.trim());
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
@@ -2279,7 +2203,7 @@ void main() {
 
     // Cloud textures: the 3D noise on unit 2, the weather map on unit 3.
     // The noise program draws them, slice by slice.
-    if (aircraft) {
+    {
       const n = NOISE, m = WEATHER;
       const smooth = target => {
         gl.generateMipmap(target);
@@ -2323,7 +2247,7 @@ void main() {
     }
 
     // The map of the waves on the sea, on unit 4, drawn by its own program.
-    if (aircraft) {
+    {
       const n = 512;
       gl.activeTexture(gl.TEXTURE4);
       const waves = gl.createTexture();
@@ -2354,10 +2278,10 @@ void main() {
 
     // The aircraft's view reads its tables through the GPU's filter: full
     // floats where it can filter them, else half floats (rounded to within 5e-4).
-    const fullFloat = aircraft && !!gl.getExtension('OES_texture_float_linear');
-    // The table of depthToTop (see there), on unit 5: the shader's own sum,
-    // 16 midpoint steps, at each texel.
-    if (aircraft) {
+    const fullFloat = !!gl.getExtension('OES_texture_float_linear');
+    // The table of depthToTop (see there), on unit 5: a sum of 16 midpoint
+    // steps at each texel.
+    {
       const NM = 512, NR = 128, NL = 16, H = Math.sqrt(RT * RT - RG * RG);
       const data = new Float32Array(NM * NR * 4);
       for (let j = 0; j < NR; j++) {
@@ -2388,7 +2312,7 @@ void main() {
 
     gl.useProgram(prog);
     const U = n => gl.getUniformLocation(prog, n);
-    if (aircraft) gl.uniform1i(U('uDepth'), 5);
+    gl.uniform1i(U('uDepth'), 5);
     gl.uniform1i(U('uNoise'), 2);
     gl.uniform1i(U('uWeather'), 3);
     gl.uniform1i(U('uWaves'), 4);
@@ -2400,8 +2324,7 @@ void main() {
     gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
     gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-    const msFilter = aircraft ? gl.LINEAR : gl.NEAREST;
-    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, msFilter], [gl.TEXTURE_MAG_FILTER, msFilter],
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
       gl.texParameteri(gl.TEXTURE_2D, k, v);
     }
@@ -2424,7 +2347,7 @@ void main() {
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, aircraft && !fullFloat ? gl.RGBA16F : gl.RGBA32F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
+        gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, w, h);
@@ -2458,29 +2381,13 @@ void main() {
       const cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (!cw || !ch) return 0;
       let scale = Math.min(window.devicePixelRatio || 1, 2);
-      scale = Math.min(scale, Math.sqrt((aircraft ? heroPixels : MAX_PIXELS) / (cw * ch)));
+      scale = Math.min(scale, Math.sqrt(heroPixels / (cw * ch)));
       const w = Math.max(1, Math.round(cw * scale)), h = Math.max(1, Math.round(ch * scale));
       if (canvas.width === w && canvas.height === h) return 1;
       canvas.width = w;
       canvas.height = h;
       return 2;
     };
-
-    if (!aircraft) {
-      // The skylight: one pass, straight to the canvas, when something has
-      // changed. Returns false: no more frames needed.
-      let stale = true;
-      return function render(fresh) {
-        stale = stale || fresh;
-        if (!stale || !fit()) return false;
-        const v = view();
-        gl.uniform2f(uJitter, 0, 0);
-        gl.uniform1f(uPass, 0);
-        draw(v, camera(v.yaw, v.pitch), canvas.width, canvas.height);
-        stale = false;
-        return false;
-      };
-    }
 
     // The aircraft's view. Each frame is drawn into a texture, joins the
     // picture so far in a second one (the shader "mean"), and that picture
@@ -2669,7 +2576,7 @@ void main() {
   let render = null;
   try {
     render = makeSky(heroCanvas, () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV,
-      alt: state.alt, cloud: state.cloud, exposure: state.airExposure, look: AIR_LOOK }), true);
+      alt: state.alt, cloud: state.cloud, exposure: state.airExposure, look: AIR_LOOK }));
   } catch (err) {
     console.error(err);
   }
