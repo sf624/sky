@@ -8,9 +8,6 @@
   :root {
     --wall: #f3f1ec;
     --ink: #1c2330;
-    --ink-soft: #465066;
-    --sx: -10px;
-    --sy: 14px;
   }
   * { box-sizing: border-box; }
   body {
@@ -27,7 +24,6 @@
     position: relative;
     height: 100vh;
     height: 100svh;
-    min-height: 420px;
     overflow: hidden;
     color: #fff;
   }
@@ -38,7 +34,7 @@
     height: 100%;
     display: block;
     cursor: grab;
-    touch-action: pan-y;
+    touch-action: none;   /* a drag by touch looks around, as with the mouse */
     /* Fallback when WebGL is unavailable. */
     background: linear-gradient(to top,
       oklch(0.90 0.04 235) 0%, oklch(0.74 0.11 245) 30%,
@@ -119,103 +115,6 @@
   @media (max-width: 700px) {
     .panel { grid-template-columns: repeat(2, 1fr); gap: 6px 18px; padding: 12px 16px 14px; }
   }
-
-  /* ---------- Room: a wall lit by the skylight ---------- */
-  .room {
-    position: relative;
-    isolation: isolate;
-    background: var(--wall);
-    padding: clamp(56px, 10vh, 120px) clamp(16px, 5vw, 64px) clamp(72px, 12vh, 140px);
-    overflow: hidden;
-  }
-  .room-inner {
-    max-width: 1040px;
-    margin: 0 auto;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-    gap: clamp(28px, 5vw, 72px);
-    align-items: center;
-  }
-  .room h2 {
-    margin: 0 0 16px;
-    font-size: clamp(24px, 3.2vw, 38px);
-    font-weight: 300;
-    letter-spacing: .06em;
-    line-height: 1.4;
-  }
-  .room p { margin: 0; color: var(--ink-soft); }
-  /* The multiply layer: blue skylight shade with a sunlit hole. */
-  .light {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 3;
-    pointer-events: none;
-    mix-blend-mode: multiply;
-  }
-  .skylight {
-    position: relative;
-    z-index: 4; /* above the shade: the window emits light */
-    aspect-ratio: 16 / 10;
-    border: 16px solid;
-    /* Reveal: the sun (from the right) lights the left and bottom faces. */
-    border-color: #b9c6dd #a9b8d3 #fff8ea #fffaf0;
-    border-radius: 3px;
-    box-shadow:
-      0 0 0 1px rgba(40, 60, 100, .18),
-      0 0 90px rgba(120, 170, 255, .45),
-      0 0 240px rgba(120, 170, 255, .25);
-    background: #6fa0e6;
-  }
-  .skylight canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    box-shadow: inset 0 0 0 1px rgba(20, 40, 90, .25);
-  }
-  .cards {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: clamp(14px, 2vw, 24px);
-    margin-top: clamp(20px, 4vw, 48px);
-  }
-  .card {
-    background: #fff;
-    border-radius: 14px;
-    padding: 22px 22px 24px;
-    /* Shadows on a sunlit surface are filled by the sky, so they are blue. */
-    box-shadow:
-      var(--sx) var(--sy) 28px rgba(38, 78, 160, .28),
-      calc(var(--sx) * .25) calc(var(--sy) * .25) 4px rgba(38, 78, 160, .18);
-  }
-  .card h3 {
-    margin: 0 0 8px;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: .06em;
-  }
-  .card p { font-size: 14px; line-height: 1.75; }
-  .card .k {
-    display: block;
-    font-size: 12px;
-    letter-spacing: .14em;
-    color: #3c6fd0;
-    margin-bottom: 6px;
-  }
-  .note {
-    grid-column: 1 / -1;
-    font-size: 13px;
-    margin-top: 8px;
-  }
-  @media (max-width: 860px) {
-    .room-inner { grid-template-columns: 1fr; }
-    .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @media (max-width: 460px) {
-    .cards { grid-template-columns: 1fr; }
-  }
 </style>
 </head>
 <body>
@@ -276,63 +175,6 @@
       </select>
     </label>
   </form>
-</section>
-
-<section class="room" id="room">
-  <svg class="light" aria-hidden="true">
-    <defs>
-      <filter id="penumbra" x="-20%" y="-20%" width="140%" height="140%">
-        <feGaussianBlur stdDeviation="6"/>
-      </filter>
-    </defs>
-    <rect id="shade" width="100%" height="100%"/>
-    <g filter="url(#penumbra)">
-      <polygon id="patch"/>
-      <path id="bars" fill="none" stroke-width="9"/>
-    </g>
-  </svg>
-
-  <div class="room-inner">
-    <div>
-      <h2>日なたは暖かく、<br>影は青い。</h2>
-      <p>人工天窓は、青い拡散光と、暖かい直射光を別々に作ります。このページも同じ考え方です。壁全体を空の青い光で照らし、窓の形の日なただけに太陽の色を足しています。上のスライダーで時刻を動かすと、日なたの位置と色が変わります。</p>
-    </div>
-    <div class="skylight" id="skylight"><canvas id="sky2"></canvas></div>
-
-    <div class="cards">
-      <article class="card">
-        <span class="k">RAYLEIGH</span>
-        <h3>レイリー散乱</h3>
-        <p>空気の分子は、波長の4乗に反比例して光を散らします。青は赤の約5.7倍散るので、空は青く、太陽は少し黄色く見えます。</p>
-      </article>
-      <article class="card">
-        <span class="k">OZONE</span>
-        <h3>オゾンの吸収</h3>
-        <p>オゾン層は、黄色から橙の光を少し吸います。これを入れると、天頂の青が紫に転ばず、深く締まります。</p>
-      </article>
-      <article class="card">
-        <span class="k">MIE</span>
-        <h3>ミー散乱</h3>
-        <p>水滴やちりは、色を選ばず前へ散らします。少ないほど澄んだ空になり、多いと太陽のまわりと地平線が白く霞みます。</p>
-      </article>
-      <article class="card">
-        <span class="k">CLOUD</span>
-        <h3>雲</h3>
-        <p>雲の粒は、どの色もほぼ同じに、何度も散らします。だから雲は白く、厚いほど底が暗くなります。形は3次元のノイズで作り、光を雲の中までたどって、日なたと陰を分けています。高い空の薄雲は氷の粒で、光を前へ強く散らします。</p>
-      </article>
-      <article class="card">
-        <span class="k">SEA</span>
-        <h3>海</h3>
-        <p>海は空を映し、水の中からは、おもに青い光がわずかに戻ります。太陽の反射は、波の傾きのぶんだけ広がります。風が強いほど、きらめきの帯は広く、淡くなり、白波が立ちます。</p>
-      </article>
-      <article class="card">
-        <span class="k">DITHER</span>
-        <h3>ディザリング</h3>
-        <p>空はなだらかな階調です。8ビットのままでは縞が見えるので、1階調ぶんの細かいノイズを混ぜて消しています。</p>
-      </article>
-    </div>
-    <p class="note">雲の並びと波は乱数で作ったもので、実際の天気ではありません。画面で出せないものもあります。本物の空の明るさ(数千 cd/m²)、無限遠の奥行き、そして部屋そのものを照らす光です。星の位置と明るさは Hipparcos 星表によります(Credit: ESA、CC BY-NC 3.0 IGO)。</p>
-  </div>
 </section>
 
 <!-- Stars to magnitude 6.5 (V band) from Wikidata: structured data under CC0
@@ -2042,7 +1884,6 @@ void main() {
   const OBLIQUITY = 23.44 * RAD;     // tilt of the earth's axis
   const FOV = 62 * RAD;
   const EXPOSURE = 2.1;    // daytime exposure; twilight adds a metered gain
-  const LOOK_POWER = 1.4;
   const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
   const MAX_PIXELS = 2.6e6;   // the skylight's limit
   // The hero's limit, chosen in the panel (the skylight keeps MAX_PIXELS).
@@ -2093,7 +1934,6 @@ void main() {
   const yNorm = CMF.reduce((a, c, i) => a + c[1] * SOLAR[i], 0);
   const W = XYZ_TO_SRGB.map(m => CMF.map((c, i) => SOLAR[i] * (m[0] * c[0] + m[1] * c[1] + m[2] * c[2]) / yNorm));
   const WY = CMF.map((c, i) => SOLAR[i] * c[1] / yNorm);
-  const toRGB = L => W.map(w => w.reduce((a, v, i) => a + v * L[i], 0));
 
   // Optical depth from a point to the top of the atmosphere, towards the sun:
   // a table over altitude and the cosine of the sun's zenith angle.
@@ -2206,7 +2046,7 @@ void main() {
 
   // Axes: x west, y up, z south. The view starts towards the south-west.
   const state = {
-    time: 15, day: 80, moonAge: 13, haze: 0.35, yaw: 45 * RAD, pitch: -8 * RAD, exposure: EXPOSURE,
+    time: 15, day: 80, moonAge: 13, haze: 0.35, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
     alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, airExposure: EXPOSURE,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
@@ -2353,19 +2193,11 @@ void main() {
       0.4 * skyLuminance(az, 8 * RAD, S, alt),
       0.12 * skyLuminance(az, 2 * RAD, S, alt));
   }
-  const meter = () => (state.sunOn ? meterLight(state.sun) : 0)
-    + (state.moonI > 0 ? state.moonI * meterLight(state.moon) : 0);
   buildMultiScatter(state.haze);
   builtHaze = state.haze;
   const DAY_LEVEL = meterLight([0, Math.sin(42 * RAD), Math.cos(42 * RAD)]);
   // A moonless night sky is about 4e-8 times as bright as the day sky.
   const NIGHT = 4e-8 * DAY_LEVEL;
-  // Like an eye or a camera, open up as the sky darkens, but not all the way:
-  // twilight should still look dimmer than day.
-  function twilightGain() {
-    const L = meter() + 1.5 * NIGHT;
-    return Math.max(1, 0.6 * DAY_LEVEL / L) ** 0.85;
-  }
 
   // From the aircraft, meter the sky at that altitude and the sunlit cloud
   // tops, whichever is brighter.
@@ -2400,15 +2232,6 @@ void main() {
       * Math.min(1, Math.max(0, (state.cloud - 0.5) / 0.4));
     const stop = above + (0.6 - above) * under;
     return EXPOSURE * stop * Math.max(1, 0.6 * airLight(REF_SUN) / L) ** 0.85;
-  }
-
-  // Colour of direct sunlight at the ground, linear sRGB.
-  function sunColour() {
-    const ds = [0, 0, 0];
-    if (!sunDepth(RG + 0.3, Math.sin(state.elev * RAD), ds)) return [0, 0, 0];
-    const bMe = BETA_M * state.haze * MIE_EXT;
-    return toRGB(WL.map((_, w) => Math.exp(-(BR[w] * ds[0] + bMe * ds[1] + BO[w] * ds[2]))))
-      .map(v => Math.max(0, v));
   }
 
   // ---------- Drawing ----------
@@ -2734,10 +2557,6 @@ void main() {
     // Draws a frame, if the picture can still gain from one. Returns true
     // while more frames are needed.
     return function render(fresh, now) {
-      // Scrolled out of view, the picture waits (and so does the aircraft:
-      // see frame). A scroll starts the frames again.
-      const box = canvas.getBoundingClientRect();
-      if (box.bottom <= 0 || box.top >= window.innerHeight) return false;
       const fitted = fit();
       if (!fitted) return false;
       const v = view(), cam = camera(v.yaw, v.pitch);
@@ -2842,69 +2661,20 @@ void main() {
     };
   }
 
-  // ---------- The lit wall ----------
-  const room = document.getElementById('room');
-  const skylight = document.getElementById('skylight');
-  const shade = document.getElementById('shade');
-  const patch = document.getElementById('patch');
-  const bars = document.getElementById('bars');
-  const css = c => `rgb(${c.map(v => Math.round(255 * Math.min(1, Math.max(0, v) ** 0.45))).join(',')})`;
-
-  function layoutLight() {
-    const s = Math.sin(state.elev * RAD);
-    // Sunlight and skylight reaching the wall (relative units).
-    const sun = state.elev > 0 ? sunColour().map(v => v * s) : [0, 0, 0];
-    // After sunset the skylight fades, and the room dims with it (but stays readable).
-    const skyLevel = s > 0 ? 0.35 + 0.65 * s : 0.35 * Math.exp(Math.max(state.elev, -6) / 12);
-    const sky = [0.34, 0.44, 0.66].map(v => v * skyLevel);
-    // In strong sun the patch reads warm; as the sun weakens it melts into the shade.
-    const k = Math.min(1, Math.max(...sun) / 0.3);
-    const lit = sun.map((v, i) => v + (1 - 0.7 * k) * sky[i]);
-    const m = Math.max(...lit, ...sky, 0.5);
-    const e = Math.max(state.elev, 2) * RAD;           // geometry of the patch
-    shade.setAttribute('fill', css(sky.map(v => v / m)));
-    patch.setAttribute('fill', css(lit.map(v => v / m)));
-    bars.setAttribute('stroke', css(sky.map(v => v / m)));
-
-    // Project the window onto the wall: a lower sun throws it further.
-    const R = room.getBoundingClientRect(), W = skylight.getBoundingClientRect();
-    const reach = Math.min(Math.max(150 / Math.tan(e), 30), 700);
-    const side = state.sun[0] >= 0 ? 1 : -1;           // afternoon sun is in the west
-    const x = W.left - R.left - side * (40 + reach * 0.55);
-    const y = W.bottom - R.top + 40 + reach * 0.3;
-    const w = W.width, h = W.height * (1 + reach / 420), shear = side * reach * 0.35;
-    const P = [[x, y], [x + w, y], [x + w - shear, y + h], [x - shear, y + h]];
-    patch.setAttribute('points', P.map(p => p.map(v => v.toFixed(1)).join(',')).join(' '));
-    const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    const seg = (a, b) => `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`;
-    bars.setAttribute('d', seg(mid(P[0], P[1]), mid(P[3], P[2])) + seg(mid(P[0], P[3]), mid(P[1], P[2])));
-
-    document.documentElement.style.setProperty('--sx', (-side * (reach * 0.07 + 3)).toFixed(1) + 'px');
-    document.documentElement.style.setProperty('--sy', (reach * 0.05 + 6).toFixed(1) + 'px');
-  }
-
   // ---------- Wiring ----------
   // The way made stays within the weather map (the shader computes in single precision).
   const wrap = x => ((x % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
   const heroCanvas = document.getElementById('sky');
-  // Each view on its own: if one fails, the other still draws.
-  const renderers = [
-    // From the aircraft.
-    () => makeSky(heroCanvas, () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV,
-      alt: state.alt, cloud: state.cloud, exposure: state.airExposure, look: AIR_LOOK }), true),
-    // The skylight is on the ground, under a clear sky. It looks up, towards the south.
-    () => makeSky(document.getElementById('sky2'), () => ({ yaw: 0, pitch: 62 * RAD, fov: 60 * RAD,
-      alt: 0.3, cloud: 0, exposure: state.exposure, look: LOOK_POWER }), false),
-  ].map(make => {
-    try {
-      return make();
-    } catch (err) {
-      console.error(err);
-      return null;
-    }
-  }).filter(Boolean);
+  // The view from the aircraft. Without WebGL2 the canvas keeps its CSS gradient.
+  let render = null;
+  try {
+    render = makeSky(heroCanvas, () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV,
+      alt: state.alt, cloud: state.cloud, exposure: state.airExposure, look: AIR_LOOK }), true);
+  } catch (err) {
+    console.error(err);
+  }
 
-  // A change draws everything afresh. Frames follow one another while a
+  // A change draws everything afresh. Frames follow one another while the
   // view needs them: the aircraft flies, or its picture is not yet clean.
   // Then the drawing stops; and nothing is drawn in a hidden tab.
   let queued = false, changed = false, running = false, lastFrame = 0;
@@ -2922,7 +2692,6 @@ void main() {
         builtHaze = state.haze;
       }
       celestial();
-      state.exposure = EXPOSURE * twilightGain();
       state.airExposure = airExposure();
       showLabels();
     }
@@ -2933,9 +2702,7 @@ void main() {
     const step = state.speed / 3600 * dt;
     state.drift[0] = wrap(state.drift[0] + step * Math.sin(state.heading));
     state.drift[1] = wrap(state.drift[1] + step * Math.cos(state.heading));
-    let more = false;
-    for (const r of renderers) more = r(fresh, now) || more;
-    if (fresh) layoutLight();
+    const more = !!render && render(fresh, now);
     running = more;
     if (more) kick();
   }
@@ -2949,9 +2716,6 @@ void main() {
     kick();
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
-  // The hero may have come back into view.
-  window.addEventListener('scroll', kick, { passive: true });
-  if (window.IntersectionObserver) new IntersectionObserver(kick).observe(heroCanvas);
 
   const time = document.getElementById('time'), moon = document.getElementById('moon');
   const date = document.getElementById('date'), dateOut = document.getElementById('dateOut');
