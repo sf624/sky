@@ -47,12 +47,15 @@ shadows.
   The eye is at `(0, RG + uAlt, 0)`, with `RG` = 6360 km (the ground) and
   `RT` = 6460 km (the top of the air).
 - **Directions**: `yaw` 0 looks south, 90 degrees west, -90 degrees east;
-  `pitch` is positive upwards. `camera(yaw, pitch)` gives the column-major
-  `uCam`: right, up, forward. `uTan` is the tangent of half the vertical
-  field of view (`FOV` = 62 degrees for the hero).
+  a larger `yaw` turns the view to the right (clockwise seen from above),
+  and a drag to the right lowers it. `pitch` is positive upwards.
+  `camera(yaw, pitch)` gives the column-major `uCam`: right, up, forward.
+  `uTan` is the tangent of half the vertical field of view (`FOV` = 62
+  degrees for the hero).
 - **Spectra** are twelve wavelengths, 405 to 680 nm in steps of 25 (`WL`),
   stored as `vec4 X[3]`: four wavelengths per `vec4`. Loops run
-  `for (int k = 0; k < 3; k++)`. `uWL` holds the wavelengths over 550 nm.
+  `for (int k = 0; k < 3; k++)`. `uWL` holds each wavelength divided by
+  550 nm.
 - **Light** is in units of the sun's irradiance. The weights `uWR`, `uWG`,
   `uWB` turn a spectrum into linear sRGB with the solar spectrum folded in
   (`W` in the JS, from the CIE 1931 functions `CMF` and `SOLAR`); the bare
@@ -68,8 +71,8 @@ shadows.
   rounded to whole numbers per map (`rep`, `cells`), the swells with whole
   numbers of crests (`SWELL`), the cirrus frame stepping by whole numbers
   (`CI_DIR`, `CI_FREQ`, `CI_FIB`, `ciNoise` with a whole `period`), and the
-  `bend` of the cirrus written with whole-number frequencies. The `bend` sum appears twice, in `noise`
-  and in `ciDepth`: change both together.
+  `bend` of the cirrus written with whole-number frequencies. The `bend`
+  sum appears twice, in `noise` and in `ciDepth`: change both together.
 - Comments in the code are plain English sentences that say what and why.
 
 ## From the address bar to the first frame
@@ -186,7 +189,10 @@ layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
-- The table repeats `density()`: change both.
+- The table repeats the density profile. The profile is written out five
+  times: `density()` in `fs`, and in the JS `buildDepths`,
+  `buildMultiScatter`, `skyLuminance` and this table in `makeSky`. Change
+  all five.
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
 each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
@@ -268,8 +274,9 @@ found between the last two samples. For each:
 
 - `lightDepth`: six steps towards the light, growing by 1.6 each. The first
   two see the fine noise (`crisp`: the shadows of the small billows). The
-  later ones are moved sideways at random each frame (`off`, up to
-  `PENUMBRA` = 60 m): over the frames the shadows soften. It also gives
+  last three are moved sideways at random each frame (`off`, up to
+  `PENUMBRA` = 60 m): over the frames the shadows soften. The third has
+  neither. It also gives
   the slope of the field towards the light, hence `facing`.
 - The rise of the field towards the sky over `reach` gives `open`: how much
   skylight a place gets.
@@ -435,8 +442,9 @@ now was a frame ago. Clouds and sea have come nearer by the eye's way since
 (`uWay`, from the change of `state.drift` and altitude), at the same height
 over the curved ground; the sky stays (the air moves with the eye). The
 old camera (`uCamPast`) gives the old pixel. If something nearer was there
-a frame ago (the ragged edge of a cloud), the pixel looks where that
-nearer thing went instead.
+a frame ago (the ragged edge of a cloud), the pixel reads the past instead
+where a thing at that nearer distance, on this pixel's ray now, was a
+frame ago.
 
 **The read** of the past is a Catmull-Rom filter in nine bilinear reads
 (Jimenez, 2016), clamped to the four texels around, which also give the
@@ -460,9 +468,11 @@ count, capped by `uTrust`, which the JS sets per frame:
 
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
 the frames since the last change (`calm`) and stops once it reaches
-`SETTLE + RELIGHT` = 38: 39 frames in all after a change. While the
-aircraft flies, it never stops. A still picture for testing therefore
-needs `speed=0` and about 40 frames.
+`SETTLE + RELIGHT` = 38: 39 frames in all after the last change. While
+the aircraft flies, it never stops. A still picture for testing therefore
+needs `speed=0`, and from page load about 46 frames: the first frames may
+start the mean again (the first reset, and a restart if the drawing size
+grows).
 
 ## The drawing size
 
@@ -486,7 +496,8 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All for the hero, in `makeSky`, except the last two:
+All are uploaded in `makeSky`. All but the first two are for the hero
+only:
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
