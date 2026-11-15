@@ -10,8 +10,8 @@ English: [README.md](README.md)
 [![巡航高度 11 km から見た、雲と海と薄雲](docs/images/cruise.jpg)](https://sf624.github.io/sky/?date=319&at=150,90)
 
 <p>
-<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=60,20"><img src="docs/images/sunset.jpg" width="49%" alt="夕方。低い太陽と、海の照り返し"></a>
-<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3"><img src="docs/images/cloud-tops.jpg" width="49%" alt="高度 2500 m。すぐ下の雲の頂"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=200,150"><img src="docs/images/sunset.jpg" width="49%" alt="夕方。低い太陽と、海の照り返し"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3&at=150,90"><img src="docs/images/cloud-tops.jpg" width="49%" alt="高度 2500 m。すぐ下の雲の頂"></a>
 <a href="https://sf624.github.io/sky/?date=319&time=13&yaw=17&pitch=-25&cloud=0.25"><img src="docs/images/sea.jpg" width="49%" alt="太陽の方の海。波のきらめきと雲の影"></a>
 <a href="https://sf624.github.io/sky/?date=200&time=22&moon=10&yaw=34&pitch=10&cloud=0.3&cirrus=0"><img src="docs/images/night.jpg" width="49%" alt="夜。月と星、月明かりの海"></a>
 </p>
