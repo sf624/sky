@@ -51,6 +51,9 @@ These are read directly.
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
+| `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
+| `play` | none | `1` starts playing at load |
+| `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
 With `date` and no `moon`, the moon's age follows the given date.
 
