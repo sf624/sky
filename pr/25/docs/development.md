@@ -1,0 +1,243 @@
+# Developing Sky
+
+How to run the page, how to judge a change, and the rules the code keeps.
+For how a frame is made, see [design.md](design.md). Plans and known
+flaws are in the [issues](https://github.com/sf624/sky/issues), not in
+this directory: these documents describe the code as it is. A change that
+alters what they describe updates them in the same pull request.
+
+## Running the page
+
+`index.html` is the whole program. There is no build step and nothing to
+install. Open it from a file (`file://`), or serve the directory with any
+static web server, for example `python3 -m http.server`.
+
+The published page:
+
+- `main`: https://sf624.github.io/sky/
+- a pull request `N`: https://sf624.github.io/sky/pr/N/
+
+## URL parameters
+
+A view can be given in the address, for example
+`?time=17.5&cloud=0.7&yaw=120&pitch=-10`.
+
+These set the slider with the same id. The browser clamps the value to the
+slider's range and rounds it to its step. A value that is not a number
+becomes the middle of the range (`time=abc` gives 12).
+
+| Parameter | Range, step | Default | Meaning |
+|---|---|---|---|
+| `time` | 0 to 24, 0.05 | 15 | Local solar time, hours (the sun is due south at 12) |
+| `date` | 1 to 365, 1 | today | Day of the current year |
+| `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
+| `haze` | 0 to 6, 0.05 | 0.35 | Multiplier on the aerosol (Mie) density |
+| `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
+| `alt` | 0.3 to 13, 0.1 | 11 | Altitude of the aircraft, km |
+| `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
+| `cloud` | 0 to 1, 0.01 | 0.5 | Amount of low cloud |
+| `cirrus` | 0 to 1, 0.01 | 0.4 | Amount of high, thin cloud |
+
+These are read directly.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `yaw` | the sun's direction as a `yaw`, + 65 | Direction of view, degrees: 0 south, 90 west, -90 east. A larger `yaw` turns the view to the right (clockwise seen from above) |
+| `pitch` | -8 | Elevation of the view, degrees, up positive. Not clamped (a drag clamps to 89) |
+| `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
+| `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
+| `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
+| `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
+
+With `date` and no `moon`, the moon's age follows the given date.
+
+The page does not check `yaw` and `pitch`: a value that is not a number
+makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
+`heading` and the parts of `at` fall back to 0.
+
+## Judging a change
+
+**Stills.** The hero is a mean over frames, so one frame is noisy. For a
+still, set `speed=0` and let it settle: after the last change it draws 39
+frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
+page load, step about 46 frames before the screenshot: the first frames
+may start the mean again (the first reset, and a restart if the drawing
+size grows). Hide the overlays (`.title`, `.panel`,
+`.hint`) for a clean picture. The canvas is made with
+`preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
+
+**Realism.** The goal is a sky that looks real: a picture that could be a
+photograph taken from an aircraft window. Compare with real photographs,
+not with other renderers or memory. Look at several views: the default,
+low sun, near the cloud tops, under the cloud base, cirrus overhead,
+night, haze, strong wind.
+
+**In flight as well as at rest.** Fly over the change (the default speed
+is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
+(the reprojection), flicker of fine patterns, and jumps when the dynamic
+resolution changes (`?res=` fixes it, to compare). A pattern read at
+`p.xz + uDrift` must not show a seam when the way flown wraps at 256 km:
+fly across it, for example `?at=255.5,0&heading=90&speed=3000`.
+
+**More than one GPU.** GLSL compilers differ. Check that the shaders
+compile and draw the same on a software renderer as well (Chrome's
+SwiftShader, `--use-angle=swiftshader`). Look at the console: `makeSky`
+throws the compiler's log, and the page prints it.
+
+**Cost.** Measure the GPU time before and after (next section).
+
+## GPU time
+
+The GPU time is the time the GPU spends on each draw call. Measure it with
+`EXT_disjoint_timer_query_webgl2` around `drawArrays`, while the hero
+flies: at rest the page draws nothing. Fix the drawing scale with
+`?res=1`, or the dynamic resolution changes the size under you. Other work
+on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
+medians or minimums.
+
+Each frame of the hero is three draws: the scene (`fs`) into the frame
+texture, `mean`, and `show`. The scene is nearly all of it. Measured on an
+NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
+November 2026. The page had a scroll bar then, so the drawing sizes are
+those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
+row was measured again once the page stopped scrolling (it was 5.5 ms at
+1905 x 1080 too). The last was measured with `?pixels=4k`: with the
+default limit (WQHD), a 4K window is drawn at 2560 x 1440.
+
+| Drawing size | Scene (`fs`) | `mean` | `show` |
+|---|---|---|---|
+| 1920 x 1080 | 5.5 ms | 0.08 ms | 0.02 ms |
+| 2545 x 1440 | 9.3 ms | | |
+| 3825 x 2160 | 19 ms | | |
+
+At 1905 x 1080, the scene without low clouds (`cloud=0`) took 2.8 ms,
+without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
+default view the low clouds take about half of the scene; the air, the
+sea and the sky take most of the rest; the cirrus costs little. Close over
+the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
+
+On a slower GPU, when frames take longer than 40 ms (25 frames a second),
+the dynamic resolution draws a smaller picture while the view moves, down
+to 0.35 of the canvas per side (see
+[design.md](design.md#the-drawing-size)).
+
+## GLSL rules
+
+The shaders must run on any WebGL2. The code keeps these rules:
+
+- **Explicit level of detail.** Read textures with `textureLod`,
+  `textureGrad` or `texelFetch`, never `texture`. Inside loops and branches
+  the implicit derivatives that `texture` needs are undefined, and most of
+  the scene is loops and branches.
+- **No reversed `smoothstep`.** `smoothstep(edge0, edge1, x)` is undefined
+  when `edge0 >= edge1`. Write `1.0 - smoothstep(lo, hi, x)`. The rule
+  holds for new code. Two old ones remain in `main`: the sun's disc
+  (`smoothstep(0.0050, 0.0043, …)`) and the moon's edge
+  (`smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm)`).
+- **No constant-alpha blending.** Some drivers ignore the alpha of
+  `blendColor`, so `CONSTANT_ALPHA` and `ONE_MINUS_CONSTANT_ALPHA` leave the
+  picture as it was. The mean over frames is computed in a shader, with
+  two textures that take turns; keep it so, or blend by source alpha.
+- **Every extension optional, with a fallback.** The shaders use no
+  `#extension`. The JS asks for:
+  - `OES_texture_float_linear`: else the filtered tables are RGBA16F;
+  - `EXT_color_buffer_half_float` or `EXT_color_buffer_float`: else the
+    frames are RGBA8, and also if the framebuffer turns out incomplete;
+  - `EXT_texture_filter_anisotropic`: else the wave map is filtered
+    without it.
+- **Patterns repeat in 256 km.** Anything read at `p.xz + uDrift` repeats a
+  whole number of times in `WEATHER_KM` (see
+  [design.md](design.md#conventions)).
+- **Spheres at the eye's height: `eyeSphere`.** `raySphere` takes
+  `dot(o, o) - r * r`, and at 6372 km a float steps by 4 km² there. For a
+  sphere at or near the eye's own height, the crossing next to the eye
+  then lands a hair ahead or behind it, ray by ray: from the base of the
+  cirrus, rings and a disc of rays saw the whole sheet down to the sea.
+  `eyeSphere` takes `c` from the heights and the near
+  crossing from the far one. `highCloud` uses it.
+- **Facts kept twice are changed together.**
+  - The density profile, written out five times: `density()` in `fs`, and
+    in the JS `buildDepths`, `buildMultiScatter`, `skyLuminance` and the
+    depth table in `makeSky`.
+  - The phase functions, Mie `g` = 0.8 included: `phases` in `fs` and
+    `skyLuminance` in the JS.
+  - The depth table: `DEPTH_MU`, `DEPTH_R` and `H_TOP` (1132.2544, from
+    `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
+  - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
+    `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
+    `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
+    earthshine). `RG` is also in the `mean` shader.
+  - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
+    (`BASE_KM / 128.0`) and the cirrus's `T0`, `T1`, `T2`.
+  - The size of the weather map, 1024: `WEATHER` in the JS;
+    `WEATHER_KM / 1024.0` in `addSea`.
+  - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
+    the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
+  - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
+    shader and in `fs` (`CI_DIR`, `CI_UNIT`, and the `bend` in `ciDepth`).
+- **Comments** are plain English sentences that say what and why. No
+  commented-out code, no debug leftovers, no unused functions.
+
+## Publishing
+
+Every change goes through a pull request. The workflow
+`.github/workflows/pages.yml` publishes the site on GitHub Pages from the
+`gh-pages` branch:
+
+- a push to `main` updates the root, https://sf624.github.io/sky/;
+- a pull request from a branch of this repository gets a preview at
+  `pr/N/`, linked in a comment when it opens. The preview follows every
+  push, about a minute behind, and is removed when the pull request
+  closes. Pull requests from forks get no preview.
+
+The whole tree is published except `.git` and `.github`, so `README.md`
+and `docs/` are on the site too.
+
+## Licences
+
+- The project is under the MIT licence (`LICENSE`).
+- Use only material under MIT-compatible terms: MIT, BSD, Apache-2.0, CC0,
+  or the public domain.
+- Do not copy code from Shadertoy (its default licence is CC BY-NC-SA),
+  from GPL projects, or from any source without a compatible licence.
+  Write the code yourself from published ideas (papers, talks, articles),
+  and name the source in a comment, as the code does (for example
+  "after Hillaire (2020)").
+- A piece of code or data by others may come in only under such terms.
+  List it in `THIRD_PARTY_NOTICES.md`: a row of its table (the source, its
+  version, its licence, where it sits) and its licence text with the
+  copyright line, or the attribution or citation its terms ask for. Put a
+  one-line comment at the code that names the source and points there.
+  A formula or an idea from a paper or a talk needs only the comment.
+- Reference photographs are for looking at only: nothing from them goes
+  into the page.
+- `THIRD_PARTY_NOTICES.md` lists the code and data by others in the
+  repository, the star data from Wikidata (CC0) among them. Everything else
+  is under the MIT licence.
+
+### The star catalogue
+
+The `stars` block of `index.html` is built by `tools/make-stars.py` (standard
+library only):
+
+    python3 tools/make-stars.py --cache wikidata-cache --index index.html
+
+It asks the Wikidata Query Service for stars with a V magnitude of at most
+6.5, their B magnitude and their classes, keeps real stars, merges double
+entries and writes the six-byte format. The first run sends one request a
+minute (about 70 requests, so more than an hour) and keeps every answer in
+the cache directory. A second run with the same cache needs no network
+(`--offline`) and gives the same bytes. `--table FILE` writes the chosen
+stars as CSV; the column `estimate` marks the stars whose V is estimated.
+
+The rule: every value comes from Wikidata. Nothing is copied from another
+catalogue, and no star is added because another list has it. Stars that
+Wikidata gives no V magnitude get an estimate from the same item's own
+other bands (rules and tests in the script). The choices made by hand
+(classes that are not stars, items dropped or kept) are data at the top of
+the script, with their reasons.
+
+## Plans and known flaws
+
+They live in the [issues](https://github.com/sf624/sky/issues). Open one
+for a follow-up rather than writing it here or in a comment.
