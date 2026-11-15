@@ -45,7 +45,7 @@
     position: absolute;
     left: clamp(20px, 6vw, 88px);
     right: clamp(20px, 6vw, 88px);
-    top: clamp(28px, 12vh, 120px);
+    top: clamp(20px, 6vw, 88px);       /* as far from the top as from the left */
     pointer-events: none;
     text-shadow: 0 1px 24px rgba(10, 40, 110, .35);
   }
@@ -55,6 +55,13 @@
     font-weight: 200;
     letter-spacing: .04em;
     line-height: 1.05;
+    /* The line box leaves room above the capitals: without it the title
+       would stand lower than its margin says. Trim it where the browser
+       can; elsewhere, about as much by hand. */
+    text-box: trim-start cap alphabetic;
+  }
+  @supports not (text-box: trim-start cap alphabetic) {
+    .title h1 { margin-top: -.2em; }
   }
   .title p {
     margin: 14px 0 0;
@@ -81,8 +88,10 @@
     letter-spacing: .06em;
   }
   .panel label { display: block; }
-  .panel .time { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; }
-  .panel .time label { flex: 1; }
+  /* The time row: play, now, the rate, then the time slider; the slider
+     goes to a line of its own when the row is too narrow for its label. */
+  .panel .time { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+  .panel .time label { flex: 1; min-width: 260px; }
   .panel button {
     width: 38px; height: 38px; flex: none;
     border-radius: 50%;
@@ -92,6 +101,7 @@
     cursor: pointer;
   }
   .panel button:hover { background: rgba(255, 255, 255, .25); }
+  .panel button svg { display: block; width: 18px; height: 18px; margin: auto; }
   .panel .row { display: flex; justify-content: space-between; }
   .panel output { font-variant-numeric: tabular-nums; opacity: .9; }
   .panel input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #fff; }
@@ -104,6 +114,7 @@
     cursor: pointer;
   }
   .panel select option { color: #123; }
+  .panel .time select { width: auto; flex: none; margin: 0; }
   .title .hint {
     margin: 10px 0 0;
     font-size: 12px;
@@ -114,7 +125,7 @@
   .fs {
     position: absolute;
     right: 16px;
-    top: 14px;
+    top: 16px;
     width: 38px; height: 38px;
     padding: 0;
     display: grid; place-items: center;
@@ -137,7 +148,7 @@
      runs off the screen (it scrolls inside itself). */
   .panel { max-height: calc(100% - 2 * clamp(16px, 5vh, 44px)); overflow-y: auto; }
   @media (max-height: 560px) {
-    .title { top: 14px; right: 70px; }
+    .title { left: 16px; top: 16px; right: 70px; }
     .title h1 { font-size: clamp(32px, 11vh, 56px); }
     .title p { margin-top: 6px; font-size: 14px; }
     .title .hint { margin-top: 4px; }
@@ -179,6 +190,16 @@
   <form class="panel" onsubmit="return false">
     <div class="time">
       <button id="play" type="button" aria-label="時間を進める" data-t-label="play">▶</button>
+      <button id="now" type="button" aria-label="いまの日時" title="いまの日時" data-t-label="now" data-t-title="now">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M9 4.8V9l2.8 1.8"/></svg>
+      </button>
+      <select id="rate" aria-label="時間の進む速さ" title="時間の進む速さ" data-t-label="rate" data-t-title="rate">
+        <option value="1" data-t="rate1">実時間</option>
+        <option value="60" data-t="rate60">1分/秒</option>
+        <option value="600" data-t="rate600">10分/秒</option>
+        <option value="960" data-t="rate960" selected>16分/秒</option>
+        <option value="3600" data-t="rate3600">1時間/秒</option>
+      </select>
       <label>
         <span class="row"><span data-t="time">時刻</span><output id="timeOut"></output></span>
         <input id="time" type="range" min="0" max="24" step="0.05" value="15">
@@ -217,6 +238,19 @@
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
     </label>
     <label>
+      <span class="row"><span data-t="sound">音</span><output id="soundOut"></output></span>
+      <select id="sound">
+        <option value="off" data-t="soundOff">なし</option>
+        <option value="airliner" data-t="soundAirliner">旅客機</option>
+        <option value="airliner-whine" data-t="soundWhine">エンジン近く</option>
+        <option value="wind" data-t="soundWind">風</option>
+      </select>
+    </label>
+    <label>
+      <span class="row"><span data-t="volume">音量</span><output id="volumeOut"></output></span>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.5">
+    </label>
+    <label>
       <span class="row"><span data-t="pixels">解像度</span></span>
       <select id="pixels">
         <option value="fhd" data-t="fhd">フルHD</option>
@@ -235,8 +269,8 @@
 <script>
 // The text of the hero, in Japanese and English. The HTML holds the Japanese;
 // this runs as soon as the hero is parsed, before the long scripts below, so
-// an English reader does not see the Japanese first. Elements
-// name their text with data-t (contents) and data-t-label (aria-label).
+// an English reader does not see the Japanese first. Elements name their
+// text with data-t (contents), data-t-label (aria-label) and data-t-title.
 const TEXT = {
   ja: {
     title: 'Sky — レイリー散乱の空',
@@ -245,10 +279,13 @@ const TEXT = {
     hint: 'ドラッグで見回す',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
-    play: '時間を進める',
+    play: '時間を進める', now: 'いまの日時',
+    rate: '時間の進む速さ', rate1: '実時間', rate60: '1分/秒', rate600: '10分/秒', rate960: '16分/秒', rate3600: '1時間/秒',
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
     alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     lang: '言語 / Language',
+    sound: '音', soundOff: 'なし', soundAirliner: '旅客機', soundWhine: 'エンジン近く', soundWind: '風',
+    volume: '音量', soundWait: 'クリックで再生',
     // The light of the hour, by the sun's elevation (see showLabels).
     night: '夜', astronomical: '天文薄明', nautical: '航海薄明', civil: '市民薄明',
     morning: '朝', evening: '夕方', day: '昼',
@@ -266,10 +303,13 @@ const TEXT = {
     hint: 'Drag to look around',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
-    play: 'Play time-lapse',
+    play: 'Play time-lapse', now: 'Now',
+    rate: 'Speed of time', rate1: 'real time', rate60: '1 min/s', rate600: '10 min/s', rate960: '16 min/s', rate3600: '1 h/s',
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
     alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     lang: 'Language / 言語',
+    sound: 'Sound', soundOff: 'Off', soundAirliner: 'Airliner', soundWhine: 'Near engines', soundWind: 'Wind',
+    volume: 'Volume', soundWait: 'click to play',
     night: 'night', astronomical: 'astronomical twilight', nautical: 'nautical twilight', civil: 'civil twilight',
     morning: 'morning', evening: 'evening', day: 'day',
     dateText: (month, day) => day + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1],
@@ -302,6 +342,7 @@ function applyLanguage(lang) {
   document.title = T.title;
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t];
   for (const el of document.querySelectorAll('[data-t-label]')) el.setAttribute('aria-label', T[el.dataset.tLabel]);
+  for (const el of document.querySelectorAll('[data-t-title]')) el.title = T[el.dataset.tTitle];
   document.getElementById('lang').value = lang;
 }
 applyLanguage(LANG);
@@ -327,19 +368,27 @@ uniform float uZ;
 uniform float uSize;
 out vec4 outColor;
 
-// PCG hash: pcg3d of Jarzynski and Olano (2020); see THIRD_PARTY_NOTICES.md.
-uvec3 pcg(uvec3 v) {
-  v = v * 1664525u + 1013904223u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  v ^= v >> 16u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  return v;
+// An integer hash: xor-shifts and multiplies, Wellons' lowbias32
+// (hash-prospector, public domain). Inputs one apart give unrelated words.
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
 }
 
 // Three random numbers (0 to 1) for a lattice point; the lattice repeats
-// every `period` points.
+// every `period` points (at most 1024). One hash of the cell, its
+// coordinates packed into a word, plus the seed spaced by the golden ratio.
+// The numbers are the word, and its low 21 and 10 bits moved up: their
+// first 11, 11 and 10 bits are their own, finer than the 8 bits the
+// textures keep.
 vec3 rnd(vec3 cell, vec3 period, float seed) {
-  return vec3(pcg(uvec3(mod(cell, period)) + uint(seed) * 7919u)) * (1.0 / 4294967296.0);
+  uvec3 c = uvec3(mod(cell, period));
+  uint h = ihash(c.x + (c.y + c.z * 1024u) * 1024u + uint(seed) * 0x9e3779b9u + 0x632be5abu);
+  return vec3(h, h << 11u, h << 22u) * (1.0 / 4294967296.0);
 }
 
 // Worley noise, upside down: 1 at a feature point, 0 far from all of them.
@@ -465,14 +514,21 @@ out vec4 outColor;
 const float TAU = 6.28318530718;
 const float WIND = 0.4636;          // the wind blows towards (2, 1)
 
-// Three random numbers (0 to 1) for wave i (pcg3d, as in the noise; see
-// THIRD_PARTY_NOTICES.md).
+// The integer hash of the noise shader (lowbias32).
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
+// Three random numbers (0 to 1) for wave i, from one hash, as for a cell
+// of the noise.
 vec3 rnd(int i) {
-  uvec3 v = uvec3(ivec3(i, i + 977, i + 2311)) * 1664525u + 1013904223u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  v ^= v >> 16u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  return vec3(v) * (1.0 / 4294967296.0);
+  uint h = ihash(uint(i) + 0x632be5abu);
+  return vec3(h, h << 11u, h << 22u) * (1.0 / 4294967296.0);
 }
 
 void main() {
@@ -1277,20 +1333,28 @@ const vec2 CI_FREQ[3] = vec2[3](vec2(12.0, 90.0), vec2(16.0, 120.0), vec2(56.0, 
 // 1 km by 70 m, 0.3 km by 23 m, 0.1 km by 8 m.
 const vec2 CI_FIB[3] = vec2[3](vec2(80.0, 1200.0), vec2(270.0, 3600.0), vec2(810.0, 10800.0));
 
+// The integer hash of the noise shader (lowbias32).
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
 // Gradient noise on a lattice that repeats every `period` cells (whole
-// numbers). Its hash is pcg2d of Jarzynski and Olano (2020): see THIRD_PARTY_NOTICES.md.
+// numbers, below 16384). A lattice point's x plus its y times the golden
+// ratio, hashed, gives one word: the gradient is the word, and its low half
+// moved up (16 bits of its own each).
 float ciNoise(vec2 p, vec2 period) {
   vec2 i = floor(p), f = p - i;
   vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
   vec4 g[2];
   for (int k = 0; k < 2; k++) {
     uvec4 v = uvec4(floor(mod(i.xyxy + vec4(0.0, float(k), 1.0, float(k)), period.xyxy) + 0.5));
-    v = v * 1664525u + 1013904223u;
-    v.xz += v.yw * 1664525u; v.yw += v.xz * 1664525u;
-    v ^= v >> 16u;
-    v.xz += v.yw * 1664525u; v.yw += v.xz * 1664525u;
-    v ^= v >> 16u;
-    g[k] = vec4(v) * (2.0 / 4294967296.0) - 1.0;   // gradients at (0, k) and (1, k)
+    uvec2 h = uvec2(ihash(v.x + v.y * 0x9e3779b9u + 0x632be5abu), ihash(v.z + v.w * 0x9e3779b9u + 0x632be5abu));
+    g[k] = vec4(h.x, h.x << 16u, h.y, h.y << 16u) * (2.0 / 4294967296.0) - 1.0;   // gradients at (0, k) and (1, k)
   }
   return mix(mix(dot(g[0].xy, f), dot(g[0].zw, f - vec2(1.0, 0.0)), u.x),
              mix(dot(g[1].xy, f - vec2(0.0, 1.0)), dot(g[1].zw, f - vec2(1.0)), u.x), u.y);
@@ -1936,6 +2000,461 @@ void main() {
 </script>
 
 <script>
+// Background sound, made in the browser with the Web Audio API: no files, no
+// samples. Every part is noise or a tone, shaped by filters to stand for one
+// source of the real sound. SkySound.engine(ctx) builds the graph on any
+// BaseAudioContext (the tests render it offline); SkySound.attach(...) runs
+// it in the page. It never asks for a frame: the page may stop drawing while
+// the sound goes on.
+const SkySound = (() => {
+  'use strict';
+  const KINDS = ['off', 'airliner', 'airliner-whine', 'wind'];
+  // Strength of the engines' high tones in the airliner with engine whine
+  // (1: soft, the level chosen by ear; 2: 6 dB stronger).
+  const WHINE = 1;
+  // The engines run at cruise thrust whatever the sliders say: the speed
+  // slider is how fast the view goes by, not a throttle, and an airliner's
+  // engines hold a steady speed in cruise. N1, the fan's speed as a fraction
+  // of full, is 0.9; the fan shaft turns at 56 Hz.
+  const N1 = 0.9, SHAFT = 62 * N1;
+  const FADE = 0.15;          // time constant of fades and crossfades, s
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+  const between = (lo, hi) => lo + (hi - lo) * Math.random();
+  // Moves an AudioParam to a value: at once (tau 0), or gliding towards it.
+  function to(param, value, when, tau) {
+    if (tau > 0) param.setTargetAtTime(value, when, tau); else param.setValueAtTime(value, when);
+  }
+
+  // What the sound needs to know of the flight, from the altitude (km) and the
+  // speed (km/h). Density falls with a scale height of 8 km.
+  function flight(alt, speed) {
+    const sigma = Math.exp(-alt / 8), ref = Math.exp(-11 / 8);
+    // Dynamic pressure, relative to the cruise (11 km, 900 km/h), with a light
+    // wind that is there even when the aircraft stands still.
+    const q = sigma / ref * ((speed / 900) ** 2 + 0.004);
+    // The rush of air grows with the dynamic pressure, compressed (0.7 of its
+    // level in dB) and softly held below +9 dB, so that low and fast stays
+    // bearable: -17 dB standing still, -3 dB low and slow, +5 dB at 2400 km/h.
+    const db = 7 * Math.log10(q);
+    return {
+      sigma,
+      rush: 10 ** ((db > 0 ? 9 * Math.tanh(db / 9) : db) / 20),
+      // A faster flow is brighter: the frequencies of the turbulence scale
+      // with the speed.
+      bright: Math.sqrt((speed + 60) / 960),
+      // Thin air carries less of the low end: a shelf under 250 Hz, 0 dB at
+      // 11 km, up to +7 dB near the ground.
+      body: Math.min(7, Math.max(-3, 4 * Math.log2(sigma / ref))),
+    };
+  }
+
+  // Builds the sound on ctx, into ctx.destination. Returns:
+  //   play(kind, when): crossfade to a variation ('off' fades out);
+  //   fly(alt, speed, when, glide): follow the flight (glide false: at once);
+  //   volume(v, when, glide): 0 to 1;
+  //   hush(quiet, when): fade the whole output out (true) or back in;
+  //   tick(until): schedule the slow random movement (gusts, the beat of the
+  //   engines) up to the time until. In the page, a timer calls it.
+  function engine(ctx) {
+    const sr = ctx.sampleRate;
+
+    // The noise bed. Gaussian noise in a stereo buffer of 11 s (right 0.6
+    // correlated with left: some width, and safe in mono), times random signs
+    // from a mono buffer of 10.3 s. The product is Gaussian noise again, but
+    // it repeats only when both loops line up again, which is never in
+    // practice; one looped buffer alone would repeat every 11 s.
+    const bed = ctx.createGain();
+    {
+      const n = Math.round(11 * sr), m = Math.round(10.3 * sr);
+      const a = ctx.createBuffer(2, n, sr), b = ctx.createBuffer(1, m, sr);
+      const l = a.getChannelData(0), r = a.getChannelData(1), s = b.getChannelData(0);
+      for (let i = 0; i < n; i++) {
+        const u = Math.sqrt(-2 * Math.log(1 - Math.random())), w = 2 * Math.PI * Math.random();
+        l[i] = u * Math.cos(w);
+        r[i] = 0.6 * l[i] + 0.8 * u * Math.sin(w);
+      }
+      for (let i = 0; i < m; i++) s[i] = Math.random() < 0.5 ? -1 : 1;
+      const na = ctx.createBufferSource(), nb = ctx.createBufferSource();
+      na.buffer = a; nb.buffer = b; na.loop = nb.loop = true;
+      bed.gain.value = 0;
+      na.connect(bed);
+      nb.connect(bed.gain);
+      na.start();
+      nb.start();
+    }
+    // The same noise 0.1 s later: uncorrelated with the bed, for a branch that
+    // overlaps others in frequency and would otherwise add to or cancel them,
+    // as their filters shift the phase.
+    const late = ctx.createDelay(0.1);
+    late.delayTime.value = 0.1;
+    bed.connect(late);
+
+    // Output: the voices -> mix, which puts the cruise near -27 dBFS, below
+    // the compressor's knee -> a high-pass at 25 Hz (nothing below is heard,
+    // and it would only work the compressor) -> a compressor with a short
+    // look-ahead, which holds the loud states (low and fast) down -> trim ->
+    // a soft ceiling, which keeps every sample below -1.4 dBFS whatever comes
+    // in -> volume -> hush.
+    const mix = ctx.createGain(), comp = ctx.createDynamicsCompressor();
+    mix.gain.value = 0.4;
+    comp.threshold.value = -24;
+    comp.knee.value = 12;
+    comp.ratio.value = 4;
+    comp.attack.value = 0.005;
+    comp.release.value = 0.4;
+    // The compressor adds a fixed makeup gain of (1 / its gain at 0 dBFS)^0.6
+    // (Web Audio's definition): 8.2 dB for these settings, measured. With the
+    // trim, the gain below the knee is +6.7 dB, which brings the cruise to
+    // about -20 dBFS at full volume. The trim also halves the signal for the
+    // ceiling's input range.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.5 * 10 ** (-1.5 / 20);
+    // tanh with unit slope at 0, tending to 0.85: the input range -2..2 is
+    // mapped onto -1..1 by the trim's half.
+    const ceiling = ctx.createWaveShaper(), curve = new Float32Array(2049);
+    for (let i = 0; i < curve.length; i++) curve[i] = 0.85 * Math.tanh((i / 1024 - 1) * 2 / 0.85);
+    ceiling.curve = curve;
+    const level = ctx.createGain(), hushed = ctx.createGain();
+    const subsonic = ctx.createBiquadFilter();
+    subsonic.type = 'highpass';
+    subsonic.frequency.value = 25;
+    mix.connect(subsonic).connect(comp).connect(trim).connect(ceiling).connect(level).connect(hushed).connect(ctx.destination);
+
+    // A kit for one voice: its nodes, the taps it takes on the noise bed, its
+    // tones, and a release that undoes them all.
+    function kit() {
+      const out = ctx.createGain(), taps = [], tones = [];
+      out.gain.value = 0;
+      out.connect(mix);
+      const chain = (...nodes) => { for (let i = 1; i < nodes.length; i++) nodes[i - 1].connect(nodes[i]); return nodes[nodes.length - 1]; };
+      return {
+        out, chain,
+        filter(type, frequency, Q = 0.7071, gain = 0) {
+          const f = ctx.createBiquadFilter();
+          f.type = type;
+          f.frequency.value = frequency;
+          f.Q.value = Q;
+          f.gain.value = gain;
+          return f;
+        },
+        gain(v = 0) { const g = ctx.createGain(); g.gain.value = v; return g; },
+        pan(p) { const s = ctx.createStereoPanner(); s.pan.value = p; return s; },
+        // A tap on the later noise bed, undone when the voice ends.
+        late(node) { late.connect(node); taps.push([late, node]); return node; },
+        // A branch of noise through the given nodes, into the voice.
+        noise(...nodes) { bed.connect(nodes[0]); taps.push([bed, nodes[0]]); chain(...nodes, out); },
+        // A tone with the given harmonics (amplitudes, from the fundamental;
+        // none: a sine) at the given frequency.
+        tone(harmonics, frequency) {
+          const o = ctx.createOscillator();
+          o.frequency.value = frequency;
+          if (harmonics) o.setPeriodicWave(ctx.createPeriodicWave(new Float32Array([0, ...harmonics.map(() => 0)]),
+            new Float32Array([0, ...harmonics])));
+          o.start();
+          tones.push(o);
+          return o;
+        },
+        release(when) {
+          for (const o of tones) o.stop(when);
+          // A silent timer, ended when the fade is over: then the voice leaves
+          // the graph and its filters stop running.
+          const timer = ctx.createConstantSource();
+          timer.offset.value = 0;
+          timer.connect(out.gain);
+          timer.onended = () => { for (const [src, dst] of taps) src.disconnect(dst); out.disconnect(); };
+          timer.start(when);
+          timer.stop(when + 0.01);
+        },
+      };
+    }
+
+    // The high tones of two turbofans heard through the cabin wall, for the
+    // airliner with engine whine; strength scales their level. Per engine,
+    // panned as the low drone:
+    //   - the fan's blade-passing tone (24 blades: 1340 Hz) with its second
+    //     and third harmonics;
+    //   - "buzz-saw": at high power the fan's tips pass the speed of sound and
+    //     their shocks, a little unequal from blade to blade, give tones at
+    //     every multiple of the shaft's speed; here orders 8 to 40, of
+    //     irregular height, at half strength (they come in from N1 0.8 and
+    //     are full at 1);
+    //   - the high-pressure compressor's whine, on the second shaft (N2 0.96):
+    //     3.5 kHz;
+    // and, shared, a narrow band of noise around the fan tone and around the
+    // whine. The wall's mass law takes off the top: all of it is low-passed
+    // at 3.5 kHz. Each line wanders a few cents, slowly, both engines
+    // together; the second runs 0.2 to 1 cent faster, so that the fan's line
+    // beats once in 1.3 to 6.5 s (the whine at 3.5 kHz, 0.4 to 2 times a
+    // second).
+    function highTones(k, strength) {
+      const bus = k.gain(strength * N1 ** 3), wall = k.filter('lowpass', 3500, 0.5);
+      k.chain(bus, wall, k.out);
+      const whine = 3600 * (0.6 + 0.4 * N1);
+      const engines = [-0.35, 0.35].map(p => {
+        const pan = k.pan(p);
+        pan.connect(bus);
+        const fan = k.tone([1, 0.45, 0.25], 24 * SHAFT);
+        k.chain(fan, k.gain(0.02), pan);
+        const orders = Array.from({ length: 40 }, (_, i) => i < 7 ? 0 : 0.2 + 0.8 * Math.random() ** 2);
+        const buzz = k.tone(orders, SHAFT);
+        k.chain(buzz, k.filter('bandpass', 1100, 0.6), k.gain(0.015), pan);
+        const comp = k.tone(null, whine);
+        k.chain(comp, k.gain(0.004), pan);
+        return [fan, buzz, comp];
+      });
+      k.chain(k.late(k.filter('bandpass', 24 * SHAFT, 18)), k.gain(0.05), bus);
+      k.chain(k.late(k.filter('bandpass', whine, 25)), k.gain(0.05), bus);
+      return [{ every: [3, 8], at: (t, tau) => {
+        const c = 4 * gauss(), apart = between(0.2, 1);
+        engines.forEach((tones, i) => { for (const o of tones) o.detune.setTargetAtTime(c + i * apart, t, tau); });
+      } }];
+    }
+
+    // The variations. Each returns its kit, set(f, when, glide) to follow the
+    // flight, and tracks: the slow random movement, as { every: [lo, hi]
+    // seconds between knots, at(t, tau): schedule one knot }.
+    const voices = {
+      // The cabin of an airliner at cruise. whine > 0 adds the engines' high
+      // tones at that strength.
+      airliner(whine = 0) {
+        const k = kit();
+        // The rush of the boundary layer through the fuselage: most of the
+        // noise in a cabin. The wall passes the low frequencies and stops the
+        // high ones, so the noise is low-passed twice; it brightens with speed.
+        const rushLp = k.filter('lowpass', 450, 0.55), rushLp2 = k.filter('lowpass', 1500, 0.6);
+        const shelf = k.filter('lowshelf', 250), rush = k.gain(), drift = k.gain(1);
+        k.noise(k.filter('highpass', 40), rushLp, rushLp2, shelf, rush, drift);
+        // Low rumble: the airframe shaking in light turbulence, under 100 Hz,
+        // in slow swells.
+        const rumble = k.gain(), bump = k.gain(1);
+        k.noise(k.filter('lowpass', 85, 0.8), rumble, bump);
+        // The engines, under the wings behind: the fan shaft's tone and its
+        // harmonics, one per engine, panned a little to each side. They run
+        // at nearly the same speed, so they beat slowly; the beat wanders.
+        const engines = [-0.35, 0.35].map(p => {
+          const o = k.tone([1, 0.6, 0.45, 0.3, 0.2, 0.14, 0.1, 0.07, 0.05], SHAFT);
+          k.chain(o, k.filter('lowpass', 600), k.gain(0.09 * N1 ** 3), k.pan(p), k.out);
+          return o;
+        });
+        // The fans' whirr: a narrow band of noise at the blade-passing
+        // frequency (24 blades), faint through the wall.
+        k.noise(k.filter('bandpass', 24 * SHAFT, 8), k.gain(0.025 * N1 ** 4));
+        // Air conditioning: a steady hiss from the vents, 2 to 7 kHz.
+        k.noise(k.filter('highpass', 1800), k.filter('lowpass', 7000), k.gain(0.0035));
+        return {
+          k,
+          // Only the air follows the flight; the engines keep their cruise.
+          set(f, when, glide) {
+            to(rush.gain, 0.6 * f.rush, when, glide && 0.4);
+            to(rushLp.frequency, 450 * f.bright, when, glide && 0.4);
+            to(rushLp2.frequency, 1500 * f.bright, when, glide && 0.4);
+            to(shelf.gain, f.body, when, glide && 0.4);
+            to(rumble.gain, 0.9 * f.rush * Math.sqrt(f.sigma / 0.25), when, glide && 0.4);
+          },
+          tracks: [
+            // The second engine runs 8 to 22 cents faster: a beat of 0.3 to
+            // 0.8 Hz on the shaft tone, more on its harmonics. (The whine's
+            // lines keep their own, much smaller mismatch: at this one, the
+            // fan tone, 24 times higher, would flutter at 7 to 19 Hz.)
+            { every: [4, 10], at: (t, tau) => engines[1].detune.setTargetAtTime(between(8, 22), t, tau) },
+            { every: [0.8, 3], at: (t, tau) => bump.gain.setTargetAtTime(Math.exp(0.3 * gauss()), t, tau) },
+            { every: [2, 6], at: (t, tau) => drift.gain.setTargetAtTime(Math.exp(0.08 * gauss()), t, tau) },
+            ...(whine > 0 ? highTones(k, whine) : []),
+          ],
+        };
+      },
+      // The same cabin, with more of the engines' high tones.
+      'airliner-whine': () => voices.airliner(WHINE),
+
+      // No engine: only the air, as from an open window or a glider. Gusts
+      // come and go; thin and quiet high up, fuller low down.
+      wind() {
+        const k = kit();
+        // The rush past the ears and the frame, low-passed; a gust makes it
+        // both louder and brighter (the filter's detune follows the gust).
+        const thin = k.filter('highpass', 60), bodyLp = k.filter('lowpass', 800, 0.5);
+        const shelf = k.filter('lowshelf', 250), body = k.gain(), gust = k.gain(1);
+        k.noise(thin, bodyLp, shelf, body, gust);
+        // Buffeting: the low, irregular push of the wind, under 120 Hz, which
+        // rises more than the rest in a strong gust.
+        const buffet = k.gain(), heave = k.gain(1);
+        k.noise(k.filter('lowpass', 110, 0.7), buffet, heave);
+        // Whistles: air on an edge sings at a pitch set by its speed (vortex
+        // shedding); two faint narrow bands that come and go.
+        const whistles = [1, 1.62].map(r => {
+          const bp = k.filter('bandpass', 700 * r, 22), g = k.gain(), on = k.gain(0);
+          k.noise(bp, g, on);
+          return { r, bp, g, on };
+        });
+        // Gusts: a slow swell (tens of seconds) with quicker gusts on top,
+        // log-normal, so that strong ones are rare.
+        let swell = 0;
+        return {
+          k,
+          set(f, when, glide) {
+            // Standing still, a breeze remains: 15 dB under the cruise at
+            // 11 km, 9 dB under it near the ground.
+            const rush = Math.max(f.rush, 0.18 * Math.sqrt(f.sigma / Math.exp(-11 / 8)));
+            to(thin.frequency, 40 + 160 * (1 - f.sigma), when, glide && 0.6);
+            to(bodyLp.frequency, 800 * f.bright, when, glide && 0.4);
+            to(shelf.gain, f.body, when, glide && 0.6);
+            to(body.gain, 0.55 * rush, when, glide && 0.4);
+            to(buffet.gain, 1.3 * rush * f.sigma, when, glide && 0.4);
+            for (const w of whistles) {
+              to(w.bp.frequency, 700 * w.r * f.bright, when, glide && 0.6);
+              to(w.g.gain, 0.25 * rush * Math.sqrt(f.sigma), when, glide && 0.6);
+            }
+          },
+          tracks: [
+            { every: [0.8, 2.6], at: (t, tau) => {
+              swell = 0.9 * swell + 0.44 * gauss();
+              const g = 0.33 * swell + 0.45 * gauss();
+              gust.gain.setTargetAtTime(Math.exp(0.6 * g - 0.15), t, tau);
+              heave.gain.setTargetAtTime(Math.exp(0.9 * g - 0.3), t, tau);
+              bodyLp.detune.setTargetAtTime(300 * g, t, tau);
+              for (const w of whistles) w.bp.detune.setTargetAtTime(250 * g, t, tau);
+            } },
+            ...[0, 1].map(i => ({ every: [1.5, 5], at: (t, tau) =>
+              whistles[i].on.gain.setTargetAtTime(Math.random() < 0.35 ? between(0.3, 1) : 0, t, tau) })),
+          ],
+        };
+      },
+    };
+
+    let now = flight(11, 900), voice = null, current = 'off';
+    const live = new Set();
+    return {
+      get kind() { return current; },
+      play(kind, when) {
+        current = voices[kind] ? kind : 'off';
+        if (voice) {
+          // The old voice fades out, keeps its movement until it is silent,
+          // and leaves the graph.
+          to(voice.k.out.gain, 0, when, FADE);
+          voice.end = when + 8 * FADE;
+          voice.k.release(voice.end);
+          voice = null;
+        }
+        if (!voices[kind]) return;
+        voice = voices[kind]();
+        voice.set(now, when, false);
+        voice.end = Infinity;
+        for (const tr of voice.tracks) tr.t = when;
+        live.add(voice);
+        voice.k.out.gain.setValueAtTime(0, when);
+        to(voice.k.out.gain, 1, when, FADE);
+      },
+      fly(alt, speed, when, glide = true) {
+        now = flight(alt, speed);
+        if (voice) voice.set(now, when, glide);
+      },
+      volume(v, when, glide = true) { to(level.gain, v * v, when, glide && 0.05); },
+      hush(quiet, when) { to(hushed.gain, quiet ? 0 : 1, when, 0.1); },
+      tick(until) {
+        for (const v of live) {
+          const stop = Math.min(until, v.end);
+          for (const tr of v.tracks) {
+            while (tr.t < stop) {
+              const step = between(...tr.every);
+              tr.at(tr.t, step / 3);
+              tr.t += step;
+            }
+          }
+          if (v.tracks.every(tr => tr.t >= v.end)) live.delete(v);
+        }
+      },
+    };
+  }
+
+  // Runs the sound in the page. Takes
+  //   select, volume: the controls; their parents are hidden without Web Audio;
+  //   note, volumeOut: <output>s, for the note that the sound waits for a
+  //   click (waiting(): its text, in the page's language) and the volume;
+  //   params: the address's URLSearchParams; aircraft(): { alt, speed } now.
+  // Returns follow(), to call when the altitude or the speed changes, and
+  // show(), to call when the language changes.
+  function attach({ select, volume, note, volumeOut, waiting, params, aircraft }) {
+    const AC = window.AudioContext;
+    if (!AC) {
+      select.parentElement.hidden = volume.parentElement.hidden = true;
+      return { follow() {}, show() {} };
+    }
+    // The address, else the last choice, else off and half volume.
+    let stored = [null, null];
+    try { stored = [localStorage.getItem('sky.sound'), localStorage.getItem('sky.volume')]; } catch (err) {}
+    let kind = [params.get('sound'), stored[0]].find(k => KINDS.includes(k)) || 'off';
+    const v = [params.get('volume'), stored[1]].find(x => x !== null && x !== '' && isFinite(x));
+    let vol = v === undefined ? 0.5 : Math.min(1, Math.max(0, +v));
+    select.value = kind;
+    volume.value = vol;
+    let ctx = null, eng = null, timer = 0, gen = 0;
+    const show = () => {
+      note.textContent = kind !== 'off' && (!ctx || ctx.state !== 'running') && !document.hidden ? waiting() : '';
+      volumeOut.textContent = Math.round(vol * 100) + ' %';
+    };
+    const tick = () => eng.tick(ctx.currentTime + 4);
+    // Starts or resumes the context and the chosen variation. Browsers allow
+    // sound only from a user gesture: this runs from one, or waits for one.
+    function wake() {
+      if (kind === 'off' || document.hidden) return;
+      // Without a gesture yet, a new context would only be refused (and warn).
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+      const my = ++gen;
+      if (!ctx) {
+        try { ctx = new AC({ latencyHint: 'playback' }); } catch (err) { return; }
+        eng = engine(ctx);
+        eng.volume(vol, 0, false);
+        eng.fly(aircraft().alt, aircraft().speed, 0, false);
+        ctx.onstatechange = show;
+      }
+      ctx.resume().then(() => {
+        if (my !== gen) return;
+        const t = ctx.currentTime;
+        eng.hush(false, t);
+        if (eng.kind !== kind) eng.play(kind, t);
+        tick();
+        clearInterval(timer);
+        timer = setInterval(tick, 1000);
+        show();
+      }, () => {});
+    }
+    // Fades out, then suspends: nothing runs while it is off or hidden.
+    function sleep(off) {
+      const my = ++gen;
+      if (!ctx || ctx.state !== 'running') return;
+      const t = ctx.currentTime;
+      if (off) eng.play('off', t); else eng.hush(true, t);
+      setTimeout(() => {
+        if (my !== gen) return;
+        clearInterval(timer);
+        ctx.suspend();
+      }, off ? 1300 : 600);
+    }
+    for (const type of ['pointerdown', 'pointerup', 'keydown', 'click']) {
+      window.addEventListener(type, () => { if (!ctx || ctx.state !== 'running') wake(); }, { capture: true, passive: true });
+    }
+    document.addEventListener('visibilitychange', () => { if (document.hidden) sleep(false); else wake(); show(); });
+    select.addEventListener('change', () => {
+      kind = select.value;
+      try { localStorage.setItem('sky.sound', kind); } catch (err) {}
+      if (kind === 'off') sleep(true); else wake();
+      show();
+    });
+    volume.addEventListener('input', () => {
+      vol = +volume.value;
+      try { localStorage.setItem('sky.volume', vol); } catch (err) {}
+      if (eng) eng.volume(vol, ctx.currentTime);
+      show();
+    });
+    show();
+    return { follow() { if (eng) eng.fly(aircraft().alt, aircraft().speed, ctx.currentTime); }, show };
+  }
+
+  return { engine, attach };
+})();
+</script>
+
+<script>
 (() => {
   'use strict';
   const RAD = Math.PI / 180;
@@ -2109,6 +2628,10 @@ void main() {
     alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, airExposure: EXPOSURE,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
     speed: 900, heading: 0, drift: [0, 0], cirrus: 0.4,
+    // Days the sun has moved on beyond state.day while the time ran (see
+    // tick): playing past midnight then turns the sky on smoothly. 0 once the
+    // date or the time is set.
+    dayShift: 0,
   };
   let builtHaze = null;
 
@@ -2121,10 +2644,10 @@ void main() {
   const fromEcliptic = lon => [
     Math.atan2(Math.cos(OBLIQUITY) * Math.sin(lon), Math.cos(lon)),
     Math.asin(Math.sin(OBLIQUITY) * Math.sin(lon))];
-  // Where the sun, the moon and the stars are on state.day at state.time.
+  // Where the sun, the moon and the stars are on state.day (and dayShift) at state.time.
   // The time is local solar time: the sun is due south at 12:00.
   function celestial() {
-    const lon = (state.day - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
+    const lon = (state.day + state.dayShift - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
     const [sunRA, sunDec] = fromEcliptic(lon);
     const H = (state.time - 12) * 15 * RAD;                // hour angle of the sun
     const siderealTime = H + sunRA;
@@ -2767,7 +3290,8 @@ void main() {
   const cirrus = document.getElementById('cirrus'), cirrusOut = document.getElementById('cirrusOut');
   function showLabels() {
     const T = TEXT[LANG];
-    const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 0.5);
+    // Hours and minutes, as a clock shows them (the minute that has begun).
+    const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 1e-6);
     const clock = String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
     timeOut.textContent = clock + ' ' + (e < -18 ? T.night : e < -12 ? T.astronomical : e < -6 ? T.nautical
       : e < -0.4 ? T.civil : e < 6 ? (t < 12 ? T.morning : T.evening) : T.day);
@@ -2792,31 +3316,35 @@ void main() {
   };
   // A leap year has 366 days. The sun's declination takes the day number as it is.
   date.max = Math.round((new Date(YEAR + 1, 0, 1) - new Date(YEAR, 0, 1)) / 864e5);
-  if (!date.hasAttribute('value')) {
-    // Today's day of the year in local time, whatever the hour. Local midnights
-    // are a whole number of days apart only up to a clock change: round.
-    const now = new Date();
-    date.value = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(YEAR, 0, 0)) / 864e5);
-  }
+  // The day of the year of a moment, in local time, whatever the hour. Local
+  // midnights are a whole number of days apart only up to a clock change: round.
+  const dayOf = d => Math.min(+date.max,
+    Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(d.getFullYear(), 0, 0)) / 864e5));
+  if (!date.hasAttribute('value')) date.value = dayOf(new Date());
   if (!moon.hasAttribute('value')) moon.value = moonAgeOn(+date.value);
   date.addEventListener('input', () => { moon.value = moonAgeOn(+date.value); });
+  // Each slider sets its own part of the state: moving one does not round
+  // the others (while playing, the time and the moon's age run unrounded).
+  const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze', alt: 'alt',
+    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus' };
+  const read = id => {
+    state[sliders[id]] = +document.getElementById(id).value;
+    if (id === 'time' || id === 'date') state.dayShift = 0;
+  };
   function readInputs() {
-    state.time = +time.value;
-    state.day = +date.value;
-    state.moonAge = +moon.value;
-    state.haze = +haze.value;
-    state.alt = +alt.value;
-    state.cloud = +cloud.value;
-    state.wind = +wind.value;
-    state.speed = +speed.value;
-    state.cirrus = +cirrus.value;
+    for (const id in sliders) read(id);
     update();
   }
-  const sliders = [time, date, moon, haze, alt, cloud, wind, speed, cirrus];
-  for (const el of sliders) el.addEventListener('input', readInputs);
+  for (const id in sliders) {
+    document.getElementById(id).addEventListener('input', () => {
+      read(id);
+      if (id === 'date') read('moon');      // set from the date, above
+      update();
+    });
+  }
   // A view can be given in the address: ?time=17.5&cloud=0.7&yaw=120&pitch=-10
   const params = new URLSearchParams(location.search);
-  for (const el of sliders) if (params.has(el.id)) el.value = params.get(el.id);
+  for (const id in sliders) if (params.has(id)) document.getElementById(id).value = params.get(id);
   // The drawing limit of the hero: the address, else the last choice, else WQHD.
   const pixels = document.getElementById('pixels');
   let storedPixels = null;
@@ -2832,21 +3360,94 @@ void main() {
   });
   if (params.has('date') && !params.has('moon')) moon.value = moonAgeOn(+date.value);
 
-  // Play: a day in a minute and a half.
-  let playing = false, last = 0;
-  function tick(now) {
-    if (!playing) return;
-    state.time = (state.time + Math.min((now - last) / 1000, 0.1) * 24 / 90) % 24;
-    last = now;
-    time.value = state.time;
+  // Play: the time runs at a rate, a factor of real time (960, the first
+  // choice: a day in a minute and a half). It moves by the time elapsed
+  // since the last tick. Past midnight the date moves on (after the last day
+  // of the year, to the first). The moon's age runs with the time (a day of
+  // age a day), and so does the sun on the ecliptic (state.dayShift, which
+  // takes back the day the date adds): the moon and the stars do not jump
+  // at midnight.
+  const rate = document.getElementById('rate'), nowButton = document.getElementById('now');
+  // At real time the sky changes too slowly to see from frame to frame. The
+  // sky is drawn again every REAL_STEP seconds (at the default limit, WQHD,
+  // 1440 rows over 62 degrees, the sun moves less than a pixel in 10 s);
+  // in between, the picture settles and the drawing stops. The ticks then
+  // come from a timer, once a second, not with every frame.
+  const REAL_STEP = 10, LUNATION = 29.530588;
+  const atStep = t => Math.floor(t * 3600 / REAL_STEP + 1e-6) * REAL_STEP / 3600;
+  let playing = false, pace = +rate.value, last = 0, clock = 0, moonClock = 0, shiftClock = 0, shown = null, ticks = 0;
+  // The time, the date, the moon's age and the day's shift, in the state and on the sliders.
+  function setTime(t, day, age, shift) {
+    state.time = t;
+    state.day = day;
+    state.moonAge = age;
+    state.dayShift = shift;
+    time.value = t;
+    date.value = day;
+    moon.value = age;
+    shown = [t, age, shift];
     update();
-    requestAnimationFrame(tick);
   }
-  play.addEventListener('click', () => {
-    playing = !playing;
-    play.textContent = playing ? '⏸' : '▶';
-    if (playing) { last = performance.now(); requestAnimationFrame(tick); }
+  function tick() {
+    const now = performance.now();
+    // A longer gap than a quarter of a second is not a frame (the tab was
+    // hidden): real time catches up, a time-lapse does not leap.
+    const dt = Math.max(0, pace === 1 ? now - last : Math.min(now - last, 250)) / 1000;
+    last = now;
+    // A slider moved since the last tick (or before the first) sets the clock.
+    if (!shown || state.time !== shown[0]) clock = state.time;
+    if (!shown || state.moonAge !== shown[1]) moonClock = state.moonAge;
+    if (!shown || state.dayShift !== shown[2]) shiftClock = state.dayShift;
+    clock += dt * pace / 3600;
+    moonClock = (moonClock + dt * pace / 86400) % LUNATION;
+    shiftClock += dt * pace / 86400;
+    let day = state.day;
+    for (; clock >= 24; clock -= 24) {
+      day = day % +date.max + 1;
+      shiftClock -= 1;
+    }
+    const t = pace === 1 ? atStep(clock) : clock;
+    if (t !== state.time || day !== state.day) setTime(t, day, moonClock, shiftClock);
+    else shown = [state.time, state.moonAge, state.dayShift];
+  }
+  // Only the latest schedule goes on ticking.
+  function schedule() {
+    const id = ++ticks;
+    const next = () => { if (playing && id === ticks) { tick(); schedule(); } };
+    if (pace === 1) setTimeout(next, 1000);
+    else requestAnimationFrame(next);
+  }
+  function setPlaying(on) {
+    playing = on;
+    play.textContent = on ? '⏸' : '▶';
+    if (on) {
+      last = performance.now();
+      schedule();
+    }
+  }
+  play.addEventListener('click', () => setPlaying(!playing));
+  // A new rate takes over from now: the time so far runs at the old one.
+  rate.addEventListener('change', () => {
+    if (playing) tick();
+    pace = +rate.value;
+    if (playing) schedule();
   });
+  // Back in the tab, real time is the present again at once.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && playing && pace === 1) tick(); });
+  // Now: today's date, the time of the clock, the moon's age of the date (as
+  // moving the date sets it), and real time, playing.
+  function toNow() {
+    const d = new Date(), day = dayOf(d);
+    clock = d.getHours() + d.getMinutes() / 60 + (d.getSeconds() + d.getMilliseconds() / 1000) / 3600;
+    moonClock = moonAgeOn(day);
+    shiftClock = 0;
+    setTime(atStep(clock), day, moonClock, 0);
+    rate.value = pace = 1;
+    last = performance.now();
+    if (playing) schedule();
+    else setPlaying(true);
+  }
+  nowButton.addEventListener('click', toNow);
 
   // Drag to look around.
   let drag = null;
@@ -2923,6 +3524,16 @@ void main() {
   showIntro();
   wake();
 
+  // Background sound: its air follows the altitude and the speed, and it
+  // never asks for a frame.
+  const sound = SkySound.attach({
+    select: document.getElementById('sound'), volume: document.getElementById('volume'),
+    note: document.getElementById('soundOut'), volumeOut: document.getElementById('volumeOut'),
+    waiting: () => TEXT[LANG].soundWait, params, aircraft: () => state,
+  });
+  alt.addEventListener('input', sound.follow);
+  speed.addEventListener('input', sound.follow);
+
   // The language: at once, and kept for the next visit. The title and the
   // hint come back for a while, in the new language.
   langSelect.addEventListener('change', () => {
@@ -2930,6 +3541,7 @@ void main() {
     try { localStorage.setItem('sky.lang', LANG); } catch (err) {}
     showLabels();
     showFullScreen();
+    sound.show();
     showIntro();
   });
 
@@ -2957,6 +3569,14 @@ void main() {
   new ResizeObserver(update).observe(document.body);
   window.addEventListener('resize', update);
   readInputs();
+  // ?now=1 is the button; ?rate= (one of the select's) and ?play=1 are the
+  // select and the play button.
+  if (params.get('now') === '1') toNow();
+  if ([...rate.options].some(o => o.value === params.get('rate'))) {
+    rate.value = params.get('rate');
+    rate.dispatchEvent(new Event('change'));
+  }
+  if (params.get('play') === '1' && !playing) setPlaying(true);
   // Start with the sun off to one side, where it models the clouds best.
   celestial();
   state.yaw = params.has('yaw') ? params.get('yaw') * RAD : Math.atan2(state.sun[0], state.sun[2]) + 65 * RAD;

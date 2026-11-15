@@ -11,8 +11,8 @@ and the stars, from the way light scatters.
 [![Clouds, sea and thin cloud, seen from 11 km](docs/images/cruise.jpg)](https://sf624.github.io/sky/?date=319&at=150,90)
 
 <p>
-<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=60,20"><img src="docs/images/sunset.jpg" width="49%" alt="Late afternoon: a low sun and its glare on the sea"></a>
-<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3"><img src="docs/images/cloud-tops.jpg" width="49%" alt="At 2,500 m: the tops of the clouds just below"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=16.75&yaw=60&pitch=-6&at=200,150"><img src="docs/images/sunset.jpg" width="49%" alt="Late afternoon: a low sun and its glare on the sea"></a>
+<a href="https://sf624.github.io/sky/?date=319&time=10&alt=2.5&cloud=0.7&pitch=-3&at=150,90"><img src="docs/images/cloud-tops.jpg" width="49%" alt="At 2,500 m: the tops of the clouds just below"></a>
 <a href="https://sf624.github.io/sky/?date=319&time=13&yaw=17&pitch=-25&cloud=0.25"><img src="docs/images/sea.jpg" width="49%" alt="The sea towards the sun: glitter on the waves, and the shadows of clouds"></a>
 <a href="https://sf624.github.io/sky/?date=200&time=22&moon=10&yaw=34&pitch=10&cloud=0.3&cirrus=0"><img src="docs/images/night.jpg" width="49%" alt="Night: the moon, stars, and moonlight on the sea"></a>
 </p>
@@ -37,7 +37,9 @@ mouse cursor hides with them over the view, and comes back with them.
 
 The panel at the bottom changes the time and the weather.
 
-- **Play (▶)**: runs the time. A day takes a minute and a half. Press again to stop.
+- **Play (▶)**: runs the time, at the speed chosen beside it. Press again to stop. Past midnight the date moves on to the next day, and the moon's age with it.
+- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. The clock of your device is taken as the page's time, which is local solar time.
+- **Speed of time**: real time, 1 min/s, 10 min/s, 16 min/s (a day in a minute and a half; the first choice) or 1 h/s. In real time the sky is drawn again every 10 seconds and rests in between.
 - **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
 - **Moon**: the age of the moon, 0 to 29.5 days.
@@ -47,6 +49,8 @@ The panel at the bottom changes the time and the weather.
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
+- **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
+- **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
 - **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
 
 A view can also be given in the address, for example
@@ -74,7 +78,8 @@ All the parameters are listed in [docs/development.md](docs/development.md).
   When frames are slow, the page draws fewer pixels while the view moves.
   Setting the speed to 0, or the resolution to Full HD, makes it lighter.
 
-The page is a single HTML file. It loads nothing else.
+The page is a single HTML file. It loads nothing else: the sound is made in
+the browser too.
 
 ## Licence
 

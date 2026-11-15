@@ -7,17 +7,19 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and seven `<script>`
+`index.html` holds everything: the markup, the CSS and nine `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
 |---|---|---|
+| (no id) | JS | `TEXT`, the strings in Japanese and English, and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
 | (no id) | JS | Everything else, in one function that runs at load. |
 
 There is one canvas, `#sky`, the hero: the view from an aircraft. Clouds,
@@ -79,8 +81,9 @@ The JS runs once, at load:
    gradient.
 3. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
-   `readInputs()` copies the sliders into `state`. `yaw`, `pitch`, `heading`,
-   `at`, `pixels` and `res` are read directly (see
+   `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
+   then act as the now button, the select and the play button. `yaw`,
+   `pitch`, `heading`, `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -102,6 +105,34 @@ The JS runs once, at load:
 The renderer returns true while the aircraft flies or while its picture is
 still settling. So the page draws nothing at rest once the picture is
 clean, or in a hidden tab. `visibilitychange` calls `kick()` again.
+
+**Playing.** The play button runs the time at the rate of the select beside
+it (`pace`, a factor of real time; 960 at first, a day in a minute and a
+half). Each `tick()` moves the time by the time elapsed since the last tick
+(`performance.now()`) times the rate. A gap longer than a quarter of a second
+is not a frame (the tab was hidden): at real time the time catches up with
+it, at the faster rates it counts as 0.25 s, so the time does not leap. A
+new rate applies from the moment it is chosen. Past 24:00 the date moves
+on by a day, and from the last day of the year to the first. The moon's age
+runs on with the time, a day of age a day, and so does the sun on the
+ecliptic (`state.dayShift`, see below): nothing jumps at midnight. At the
+faster rates, ticks come with the frames (`requestAnimationFrame`), and
+every frame is drawn again.
+
+**Real time.** The sun moves a quarter of a degree a minute. At the default
+drawing limit (WQHD, 1440 rows over the 62 degrees of the view) that is
+less than a pixel in 10 s. So at real time the ticks come from a timer,
+once a second, and the time that is drawn (`state.time`) moves in steps of
+10 s (`REAL_STEP`): each step draws the picture again and lets it settle
+(39 frames), and nothing is drawn in between, about 6 % of the frames.
+The panel's clock shows the minute, which changes only on a step. In a
+hidden tab the timer runs on (the browser slows it); `visibilitychange`
+brings the time to the present at once. In flight every frame is drawn
+anyway.
+
+**Now.** The now button sets the date to today, the time to the device's
+clock (taken as local solar time), the moon's age as moving the date does,
+the rate to real time, and plays.
 
 ## Sun, moon and sky in the JS
 
@@ -127,6 +158,12 @@ date (`moonAgeOn`: the mean lunation, from the new moon of 6 January 2000)
 and is set again whenever the date slider moves; the moon slider then
 changes it alone. With `date` and no `moon` in the address, it follows the
 given date.
+
+The sun's place on the ecliptic comes from the day number, one step a day.
+While the time plays past midnight, `state.dayShift` (in days) holds the
+sun where the time has carried it: it grows with the time and loses a day
+when the date moves on, so the sun and the stars turn on smoothly. Setting
+the date or the time sets it back to 0.
 
 ## The air
 
@@ -462,7 +499,9 @@ count, capped by `uTrust`, which the JS sets per frame:
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
 the frames since the last change (`calm`) and stops once it reaches
 `SETTLE + RELIGHT` = 38: 39 frames in all after the last change. While
-the aircraft flies, it never stops. A still picture for testing therefore
+the aircraft flies, it never stops. Playing at real time, each step of 10 s
+starts the count again (see [Playing](#from-the-address-bar-to-the-first-frame)).
+A still picture for testing therefore
 needs `speed=0`, and from page load about 46 frames: the first frames may
 start the mean again (the first reset, and a restart if the drawing size
 grows).
@@ -505,3 +544,79 @@ The weather map draws, on 256 km: systems of some 80 km, open cells of
 down to 1 km, towers where the widest clumps are, gusts on the sea, and
 the patches and bands of cirrus. The wave map is a sum of plane waves, each
 a whole number of times across the map.
+
+Their random numbers come from one integer hash, `ihash`: Wellons'
+lowbias32 (two rounds of xor-shift and multiply, from hash-prospector, in
+the public domain). The `noise` shader hashes a lattice cell's
+coordinates, packed into one word, plus the seed; the `waves` shader the
+number of the wave. The word, and its low 21 and 10 bits moved up, are
+three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
+`ciNoise` in `fs` uses the same hash per pixel: one word per lattice point,
+which with its low half moved up is the gradient.
+
+## Sound
+
+`SkySound`, in its own script block, makes the background sound with the
+Web Audio API. Nothing is loaded: every part is noise or a tone, filtered
+to stand for one source of the real sound. `engine(ctx)` builds the graph
+on any `BaseAudioContext`, so that a test can render it in an
+`OfflineAudioContext`. `attach({...})` runs it in the page: the controls,
+the address, `localStorage`, and the `AudioContext`.
+
+**The noise bed.** One source of noise feeds every branch: Gaussian noise
+in a stereo buffer of 11 s (the right channel 0.6 correlated with the
+left, for some width that stays safe in mono), multiplied by random signs
+from a mono buffer of 10.3 s. The product is Gaussian noise again, and it
+repeats only when both loops line up, which is never in practice. A branch
+that overlaps others in frequency takes the same noise 0.1 s later
+(`late`), so that it neither adds to them nor cancels them.
+
+**The output.** The voices are mixed (cruise near -27 dBFS), high-passed
+at 25 Hz, compressed (threshold -24 dB, ratio 4, a look-ahead of a few
+ms), trimmed, and held below -1.4 dBFS by a tanh curve; then the volume
+(its square) and a fader for the hidden page. At volume 1 the cruise is
+near -21 dBFS and the loudest state peaks near -6 dBFS.
+
+**The variations.**
+
+| Variation | Branch | Stands for |
+|---|---|---|
+| airliner | noise, low-passed twice (450 and 1500 Hz, times `bright`), low shelf | the boundary layer's rush, through the fuselage wall |
+| | noise under 85 Hz | the airframe shaking in light turbulence |
+| | two tones of 56 Hz with 9 harmonics, panned ±0.35 | the engines' fan shafts; the second 8 to 22 cents faster, so they beat |
+| | noise, band-pass at 1340 Hz | the fans' whirr (24 blades) |
+| | noise, 1.8 to 7 kHz | the air conditioning |
+| airliner-whine | all of the above, and per engine: | |
+| | a tone of 1340 Hz with its 2nd and 3rd harmonics | the fan's blade-passing tone |
+| | orders 8 to 40 of the shaft, irregular, around 1.1 kHz | buzz-saw: shocks at the fan's tips |
+| | a tone of 3.46 kHz | the high-pressure compressor's whine |
+| | narrow noise at the fan tone and at the whine; all low-passed at 3.5 kHz | their broadband part; the cabin wall |
+| wind | noise, high-pass at 45 to 170 Hz (higher in thinner air), low-pass at 800 Hz times `bright` | the rush past the ears and the frame |
+| | noise under 110 Hz | buffeting |
+| | two narrow bands (Q 22) at 700 and 1130 Hz times `bright` | whistles on edges |
+
+**What follows the sliders.** Only the air. `flight(alt, speed)` gives the
+density (`sigma`, scale height 8 km), the rush's level from the dynamic
+pressure (density times speed squared, with a light breeze at speed 0;
+0.7 of its change in dB, held softly under +9 dB), `bright` (the square
+root of the speed: the rush's low-pass cutoffs and the whistles' pitch
+rise with it) and `body` (a low shelf from the density: thin air has less
+low end). The engines do not follow the speed: the slider is how fast the
+view goes by, not a throttle, and in cruise an airliner's engines hold a
+steady speed. They stay at N1 0.9 (`N1`, `SHAFT`), at the level of cruise,
+whatever the speed and the altitude. The wind variation has no engine and
+follows both sliders. Changes glide (`setTargetAtTime`, 0.4 to 0.6 s).
+
+**Slow movement.** Gusts, swells of turbulence and the wander and beat of
+the engines are knots of random values, each voice's `tracks`.
+`tick(until)` schedules them on the audio clock; in the page a timer calls
+it every second for the next 4 s. It does not depend on the drawing loop,
+which stops at rest, and it never asks for a frame.
+
+**In the page.** No `AudioContext` exists before the first click or key
+press: a sound chosen in the address or on an earlier visit waits for it,
+and the panel says so. Switching variations crossfades (0.15 s time
+constant). Off fades out and suspends the context; so does hiding the
+page, and showing it again resumes. Without `window.AudioContext` the two
+controls are hidden.
+
