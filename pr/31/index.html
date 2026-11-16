@@ -1799,20 +1799,24 @@ void main() {
   // a screen whose white is D65, comes out white, and the sea a deeper blue.
   col *= vec3(0.932, 1.013, 1.074);
   // Light far too strong for the screen turns white, as on film, instead
-  // of a flat saturated colour (the sun, its glitter on the sea). A band of
-  // glow a few times too bright keeps its colour (see below).
+  // of a flat saturated colour (the sun, its glitter on the sea). At dusk,
+  // as the long shoulder comes in (dusk: 0 by day, when uShoulder is 0
+  // exactly, and 1 from a quarter of a stop of it), only far stronger light
+  // does, and a band of glow a few times too bright keeps its colour (see
+  // below).
+  float dusk = smoothstep(0.0, 0.25, uShoulder);
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(col, vec3(lum), 0.85 * smoothstep(3.0, 30.0, lum));
+  col = mix(col, vec3(lum), 0.85 * smoothstep(mix(1.0, 3.0, dusk), mix(6.0, 30.0, dusk), lum));
 
   // A "look", not physics: a per-channel power deepens the colour, as film does.
   col = pow(col, vec3(uLook));
-  // Tone mapping, 1 - exp(-x). Channel by channel in the darker part; but
-  // there a bright colour would run to white as its strongest channel
-  // fills, and the others catch up. So in the shoulder the strongest
+  // Tone mapping, 1 - exp(-x), channel by channel: a bright colour runs to
+  // white as its strongest channel fills and the others catch up, as the
+  // sun's glitter does by day. At dusk, in the shoulder, the strongest
   // channel follows the curve and the others keep their share of it: a
   // band of glow too bright for the screen stays orange.
   float top = max(col.r, max(col.g, col.b));
-  col = mix(1.0 - exp(-col), col * ((1.0 - exp(-top)) / max(top, 1e-6)), smoothstep(0.5, 2.5, top));
+  col = mix(1.0 - exp(-col), col * ((1.0 - exp(-top)) / max(top, 1e-6)), dusk * smoothstep(0.5, 2.5, top));
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
   // enough of what is behind or give enough of its light, or else as far
