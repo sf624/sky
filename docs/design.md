@@ -539,15 +539,17 @@ At the end of `main`:
    not white, and one curve serves the whole picture: no halos. By day
    `uShoulder` is 0.
 2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
-3. Light far too strong for the screen (3 to 30 times white: the sun,
-   its glitter) turns towards white, as on film.
+3. Light far too strong for the screen turns towards white, as on film:
+   from 1 to 6 times white by day (the sun, its glitter, white-yellow as
+   on `main`). At dusk, as the long shoulder comes in (`dusk` =
+   smoothstep(0, 0.25, `uShoulder`)), the range moves smoothly to 3 to 30.
 4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
-5. Tone mapping `1 - exp(-col)`: channel by channel where the strongest
-   channel is below 0.5; above 2.5 the strongest channel follows the
-   curve and the others keep their share of it, so that a colour too
-   bright for the screen keeps its hue (a band of glow stays orange
-   instead of running to white); smoothly between. Then the display
-   power `1 / 2.2`.
+5. Tone mapping `1 - exp(-col)`, channel by channel. At dusk, by `dusk`,
+   the strongest channel follows the curve and the others keep their
+   share of it above 0.5 to 2.5, so that a colour too bright for the
+   screen keeps its hue (a band of glow stays orange instead of running
+   to white). By day, where `uShoulder` is 0, this does not act: a bright
+   glitter runs to white as before. Then the display power `1 / 2.2`.
 6. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames
