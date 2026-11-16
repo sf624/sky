@@ -131,7 +131,7 @@ canvas sky, frame 1, call 113 of 133 in A, 113 of 133 in B:
             ["size", 800, 600], ["frames", 2], ["sleep", 100], ["shot", "b.png", {"x": 0, "y": 0, "width": 200, "height": 100}]] }
 ```
 
-`step` takes frames and ms; `shot` a file and an optional clip; `eval` prints the value of a JavaScript expression in the page; `draws` prints the draw calls so far per canvas (to the screen, offscreen, and the size of the last offscreen draw); `mouse` sends a DevTools `Input.dispatchMouseEvent`; `size` changes the viewport; `frames` waits for real browser frames; `sleep` waits real ms. Optional: `dpr`, `seed`, `realDate` (true: the real `Date`).
+`step` takes frames and ms; `shot` a file and an optional clip; `eval` prints the value of a JavaScript expression in the page; `draws` prints the draw calls so far per canvas (to the screen, offscreen, and the size of the largest offscreen draw since the last draw to the screen: the size the picture is drawn at); `mouse` sends a DevTools `Input.dispatchMouseEvent`; `size` changes the viewport; `frames` waits for real browser frames; `sleep` waits real ms. Optional: `dpr`, `seed`, `realDate` (true: the real `Date`).
 
 ## Environment
 
@@ -184,8 +184,8 @@ The limits, from `main` and from copies of it broken on purpose (8-bit levels; "
 |---|---|---|---|---|---|
 | `wrap`: worst tile of stills across the wrap (elsewhere) | 0.93 (1.24) | 0.61 (0.77) | 4.07 | 4.07 | 1.5 x elsewhere + 1 |
 | `wrap`: worst tile at frame 27 of a flight, across (elsewhere) | 2.84 (2.80) | 3.46 (3.50) | 6.21 | 6.52 | 1.5 x elsewhere + 1 |
-| `res`: settled picture against the still, mean | 0.63 | 0.61 | 1.03 | 1.15 | 0.8 |
-| `flight`: cruise, mean | 1.13 | 1.16 | 2.79 | 2.10 | 1.6 |
+| `res`: settled picture against the still, mean | 0.63 (0.84 with the exposure meter) | 0.61 | 1.03 | 1.15 | 0.9 |
+| `flight`: cruise, mean | 1.13 (1.62 with the exposure meter) | 1.16 | 2.79 | 2.10 | 1.8 |
 | `flight`: near the clouds, mean | 1.09 | 1.34 | 4.73 | 4.53 | 1.6 (GPU), 1.9 (SwiftShader) |
 
 The broken copies: for `wrap`, the sea's gusts read at `x / 250.0` instead of `x / WEATHER_KM` (a seam on the sea only); for `res`, the mean at rest trusting 3 frames instead of 63; for `flight`, `uWay` always 0 (no reprojection). With a base, `flight` also fails above 1.1 times the base's mean plus 0.03.

@@ -641,6 +641,9 @@ uniform float uLook;    // power of the "look" curve
 // The frame's alpha holds the luminance before exposure, for the meter: log2
 // of it, from uLogRange.x (0) to uLogRange.y (1).
 uniform vec2 uLogRange;
+// How many stops above white the shoulder of the tone curve takes in (0
+// by day; see main).
+uniform float uShoulder;
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -1832,17 +1835,42 @@ void main() {
   col = max(col, 0.0);                               // colours outside sRGB
   float level = (log2(max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
+  // A long shoulder, at dusk: the band of glow on the horizon stands up to
+  // uShoulder stops above white when the rest of the view is exposed as
+  // the eye would. Above KNEE the strongest channel is pressed together in
+  // stops, smoothly (slope 1 at KNEE, y / (1 + c y)), and the colour is
+  // scaled as a whole: the band keeps its hue and its gradation. What
+  // stood uShoulder stops above TOP (all but white) ends DIM_TOP stops
+  // below it for each stop taken in: the brightest part of a dim view is
+  // not white either, and the band does not brighten the view as dusk
+  // deepens. By day uShoulder is 0 and nothing changes. One curve for the
+  // whole picture: no halos.
+  if (uShoulder > 0.0) {
+    const float KNEE = 0.5, TOP = 2.585, DIM_TOP = 0.25;   // TOP: log2(3 / KNEE)
+    float y = log2(max(max(col.r, max(col.g, col.b)), 1e-30) / KNEE);
+    if (y > 0.0) {
+      float span = TOP + uShoulder, c = (span / (TOP - DIM_TOP * uShoulder) - 1.0) / span;
+      col *= exp2(y / (1.0 + c * y) - y);
+    }
+  }
   // A camera's white balance for daylight: sunlit cloud, a little yellow on
   // a screen whose white is D65, comes out white, and the sea a deeper blue.
   col *= vec3(0.932, 1.013, 1.074);
   // Light far too strong for the screen turns white, as on film, instead
-  // of a flat saturated colour (the glitter of a low sun would be yellow).
+  // of a flat saturated colour (the sun, its glitter on the sea). A band of
+  // glow a few times too bright keeps its colour (see below).
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(col, vec3(lum), 0.85 * smoothstep(1.0, 6.0, lum));
+  col = mix(col, vec3(lum), 0.85 * smoothstep(3.0, 30.0, lum));
 
   // A "look", not physics: a per-channel power deepens the colour, as film does.
   col = pow(col, vec3(uLook));
-  col = 1.0 - exp(-col);                             // tone mapping
+  // Tone mapping, 1 - exp(-x). Channel by channel in the darker part; but
+  // there a bright colour would run to white as its strongest channel
+  // fills, and the others catch up. So in the shoulder the strongest
+  // channel follows the curve and the others keep their share of it: a
+  // band of glow too bright for the screen stays orange.
+  float top = max(col.r, max(col.g, col.b));
+  col = mix(1.0 - exp(-col), col * ((1.0 - exp(-top)) / max(top, 1e-6)), smoothstep(0.5, 2.5, top));
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
   // enough of what is behind or give enough of its light, or else as far
@@ -2564,16 +2592,18 @@ const SkySound = (() => {
   // "meter"). Levels are log2 of the luminance before exposure.
   const METER = [64, 36];        // blocks of the picture the meter reads
   const LOG_RANGE = [-34, 18];   // the levels the frames' alpha codes from 0 to 1
-  const METER_MS = 100;          // the meter is read at most this often
+  const METER_MS = 100;          // the meter is read at most this often...
+  const METER_LAG = 3;           // ...this many frames after its blocks are drawn
   const LOW_SHARE = 0.25;        // the darker quarter of the picture sets the key...
   const KEY = -1.3;              // ...the exposure is KEY - EYE * its level...
   const EYE = 0.85;              // ...opening EYE stops for each stop darker...
   const NIGHT_LEVEL = -25.5;     // ...down to a moonless night sky
   const HIGH_SHARE = 0.03;       // the brightest 3 % of the picture...
   const WHITE = 0.3;             // ...end at this level after exposure (just below white)...
-  const DAY_HIGH = 0;            // ...when they are this bright or more (daylight),
-  const DIM = 0.3;               // ...and DIM stops lower for each stop dimmer
-  const SPAN = 4, GLOW = 2;      // how far highlights may stop down (exposureFor)
+  const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
+  const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
+  const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
+  const GLOW = 5;                         // the most stops above white the shoulder takes in
   const ADAPT_FAST = 0.2, ADAPT_SLOW = 0.5;  // s: towards less exposure, towards more
   const ADAPT_STOP = 0.01, ADAPT_START = 0.03;   // stops
 
@@ -2834,12 +2864,20 @@ const SkySound = (() => {
   // - white: it stops down so that the brightest HIGH_SHARE of the picture
   //   ends at WHITE in daylight, and DIM stops lower for each stop that
   //   they are dimmer: the brightest parts of a dim view are not white
-  //   either, and dusk shows darker than day;
-  // - it takes the lesser; but the highlights may not stop down so far that
-  //   the darker quarter shows darker than the night's, except by up to
-  //   GLOW stops as far as they stand more than SPAN stops above it: a band
-  //   of glow at dusk keeps its colour, and facing away from it the sky
-  //   does not fall below the night's.
+  //   either, and dusk shows darker than day (from the side away from the
+  //   sun, the sky at sunset is the brightest part of the view: without
+  //   this it would show brighter than the day's);
+  // - it takes the lesser; but not less than a floor, which lets the
+  //   median go only DEEP of the way from the key down to the night's
+  //   level (MID_GAP: in a night sky the median stands about half a stop
+  //   above the darker quarter), so that dusk darkens steadily into the
+  //   night instead of reaching the night's level early and staying there.
+  //   The median, not the darker quarter: after sunset the sea and the
+  //   clouds below darken sooner than the sky, and a floor on them would
+  //   brighten the sky again;
+  // - where the floor holds the exposure above white's, the highlights
+  //   (the band of glow at dusk) stand above white: the shader's shoulder
+  //   takes in that many stops, up to GLOW, keeping their hue.
   function exposureFor(v) {
     const q = Float64Array.from(v).sort();
     const share = k => {
@@ -2847,10 +2885,13 @@ const SkySound = (() => {
       return q[i0] + (q[Math.min(i0 + 1, q.length - 1)] - q[i0]) * (i - i0);
     };
     const low = Math.max(share(LOW_SHARE), NIGHT_LEVEL), high = share(1 - HIGH_SHARE);
+    const mid = Math.max(share(0.5), NIGHT_LEVEL);
     const key = KEY - EYE * low;
     const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
-    const most = (1 - EYE) * (low - NIGHT_LEVEL) + Math.min(GLOW, Math.max(0, high - low - SPAN));
-    return Math.max(Math.min(key, white), key - most);
+    const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
+    const exposure = Math.max(Math.min(key, white), floor);
+    // The exposure, and the stops for the shoulder.
+    return [exposure, Math.min(GLOW, Math.max(0, exposure + high - WHITE))];
   }
 
   // ---------- Drawing ----------
@@ -3120,9 +3161,11 @@ const SkySound = (() => {
     const uLight = U('uLight'), uLightI = U('uLightI');
     const uJitter = U('uJitter'), uPass = U('uPass');
     gl.uniform2fv(U('uLogRange'), LOG_RANGE);
+    const uShoulder = U('uShoulder');
     let tableHaze = null;
-    // The exposure, log2; null until the first picture has been metered.
-    let logE = null;
+    // The exposure, log2 (null until the first picture has been metered),
+    // and the stops for the shoulder.
+    let logE = null, shoulder = 0;
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
@@ -3187,11 +3230,12 @@ const SkySound = (() => {
     gl.uniform1i(gl.getUniformLocation(show, 'uPicture'), 6);
     const uSize = gl.getUniformLocation(show, 'uSize'), uDither = gl.getUniformLocation(show, 'uDither');
     gl.useProgram(prog);
-    // The meter: METER blocks of the picture, drawn into a small target. Its
-    // answer is read once the GPU has passed a fence after it, so that the
-    // read never waits for the GPU's work; it still costs a round trip to
-    // the GPU process (about 2 ms here), so the meter is read at most every
-    // METER_MS of the page's time.
+    // The meter: METER blocks of the picture, drawn into a small target, and
+    // read back METER_LAG frames later, by which time the GPU has long drawn
+    // them: the read does not wait for the GPU's work, only for a round trip
+    // to the GPU process (about 2 ms here), so the meter is read at most every
+    // METER_MS of the page's time. Counting frames rather than polling a fence
+    // keeps the page's frames the same from run to run under a stepped clock.
     gl.useProgram(meter);
     gl.uniform1i(gl.getUniformLocation(meter, 'uPicture'), 6);
     gl.uniform2fv(gl.getUniformLocation(meter, 'uBlocks'), METER);
@@ -3207,18 +3251,18 @@ const SkySound = (() => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const meterBytes = new Uint8Array(METER[0] * METER[1] * 4);
     const levels = new Float64Array(METER[0] * METER[1]);
-    // The exposure the meter last asked for (log2), and the fence after the
-    // blocks being drawn, if any.
-    let target = null, fence = null;
+    // The exposure the meter last asked for (log2) and its stops for the
+    // shoulder; the frames since the blocks were drawn (null: none waiting).
+    let target = null, targetShoulder = 0, waiting = null;
     const readMeter = () => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.readPixels(0, 0, METER[0], METER[1], gl.RGBA, gl.UNSIGNED_BYTE, meterBytes);
       for (let i = 0; i < levels.length; i++) {
         levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
       }
-      target = exposureFor(levels);
+      [target, targetShoulder] = exposureFor(levels);
     };
-    // Meters the picture p; with wait, at once, else when the fence has passed (poll).
+    // Meters the picture p; with wait, at once, else METER_LAG frames later (poll).
     const meterPicture = (p, wait) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.viewport(0, 0, METER[0], METER[1]);
@@ -3228,15 +3272,11 @@ const SkySound = (() => {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.useProgram(prog);
       if (wait) readMeter();
-      else {
-        fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        gl.flush();
-      }
+      else waiting = 0;
     };
     const poll = () => {
-      if (!fence || gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) return;
-      gl.deleteSync(fence);
-      fence = null;
+      if (waiting === null || ++waiting < METER_LAG) return;
+      waiting = null;
       readMeter();
     };
     // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
@@ -3305,10 +3345,17 @@ const SkySound = (() => {
       if (target !== null && logE !== null) {
         // Fast towards less light (a brighter view), slower towards more. It
         // stops within ADAPT_STOP stops and starts again beyond ADAPT_START,
-        // so that the noise of the picture does not keep it moving.
-        const d = target - logE;
-        adapting = Math.abs(d) > (adapting ? ADAPT_STOP : ADAPT_START);
-        if (adapting) logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
+        // so that the noise of the picture does not keep the drawing going
+        // at rest; in flight, which draws anyway, it keeps within
+        // ADAPT_STOP, so that it does not lag the place by up to
+        // ADAPT_START. The shoulder follows in the same way (more of it is
+        // less light).
+        const d = target - logE, ds = targetShoulder - shoulder;
+        adapting = Math.max(Math.abs(d), Math.abs(ds)) > (adapting || state.speed > 0 ? ADAPT_STOP : ADAPT_START);
+        if (adapting) {
+          logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
+          shoulder += ds * (1 - Math.exp(-dt / (ds > 0 ? ADAPT_FAST : ADAPT_SLOW)));
+        }
       }
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
       // Start again without a past: at first, when the canvas has changed,
@@ -3355,6 +3402,7 @@ const SkySound = (() => {
       gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
       gl.uniform1f(uPass, pass);
       gl.uniform1f(uSteps, steps);
+      gl.uniform1f(uShoulder, shoulder);
       draw(v, cam, w, h);
 
       // The picture: the mean so far, and this frame.
@@ -3393,11 +3441,12 @@ const SkySound = (() => {
       if (logE === null) {
         meterPicture(cur, true);
         logE = target;
+        shoulder = targetShoulder;
         restart = true;
         turn = 1 - turn;
         return true;
       }
-      if (!fence && now - meteredAt >= METER_MS) {
+      if (waiting === null && now - meteredAt >= METER_MS) {
         meterPicture(cur, false);
         meteredAt = now;
       }

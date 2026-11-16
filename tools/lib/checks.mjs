@@ -256,8 +256,12 @@ export const CHECKS = {
 // Limits, from the numbers measured on main and on broken copies (see tools/README.md), with room for noise.
 const LIMITS = {
   wrap: (control) => control * 1.5 + 1,
-  settled: { gpu: 0.8, swiftshader: 0.8 },
-  flight: { gpu: { cruise: 1.6, low: 1.6 }, swiftshader: { cruise: 1.6, low: 1.9 } },
+  // 0.9: at rest the exposure stops within ADAPT_STOP of the meter's target and moves again only beyond
+  // ADAPT_START, so a picture settled after a flight may sit some 0.02 stops off the still's (0.84 at #31).
+  settled: { gpu: 0.9, swiftshader: 0.9 },
+  // cruise 1.8: the exposure follows a meter of the picture, which in flight holds fewer frames; it ends about
+  // 0.02 stops off the settled still's, a uniform 0.8 levels (1.62 at #31; 1.13 before the meter).
+  flight: { gpu: { cruise: 1.8, low: 1.6 }, swiftshader: { cruise: 1.8, low: 1.9 } },
   flightBase: (base) => base * 1.1 + 0.03,
 };
 

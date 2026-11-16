@@ -111,16 +111,24 @@ function install(cfg, hashBytes) {
     return s;
   };
   // window.__draws[canvas] = { screen, offscreen, size }: draw calls to the canvas, to framebuffers, and the
-  // viewport of the last offscreen draw (the size the picture is drawn at).
+  // largest viewport of the offscreen draws since the last draw to the canvas (the size the picture is drawn at;
+  // the largest, so that a small pass after the picture, such as the page's exposure meter, does not count).
   const draws = window.__draws = {};
+  const areas = new Map();   // per canvas name: the largest offscreen area since the last screen draw (0: none yet)
   const countDraw = (gl) => {
     const s = st(gl), name = nameOf(gl.canvas);
     const d = draws[name] || (draws[name] = { screen: 0, offscreen: 0, size: '' });
     if (s.drawFb) {
       d.offscreen++;
       const vp = s.vp || [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight];
-      d.size = vp[2] + 'x' + vp[3];
-    } else d.screen++;
+      if (vp[2] * vp[3] >= (areas.get(name) || 0)) {
+        areas.set(name, vp[2] * vp[3]);
+        d.size = vp[2] + 'x' + vp[3];
+      }
+    } else {
+      d.screen++;
+      areas.set(name, 0);
+    }
   };
 
   // errors: what the trace could not record faithfully (a texture it cannot read back); the trace then fails.
