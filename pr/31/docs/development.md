@@ -69,6 +69,13 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 
 ## Judging a change
 
+**The tools.** [`tools/`](https://github.com/sf624/sky/blob/main/tools/README.md) (in the repository, not on the site) does the checks below from
+the command line, in headless Chrome on a fake clock: stills of a fixed
+set of views against a base, the wrap, the loop, the drawing size, flight
+against a still, and a GL trace that shows whether a change sends the
+same commands to WebGL. For example
+`node tools/sky.mjs check --base origin/main`.
+
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
 frames and stops (`SETTLE + RELIGHT`, and the frame of the change), or
@@ -79,13 +86,11 @@ overlays (`.title`, `.panel`, `.hint`, `.fs`) for a clean picture. The
 canvas is made with `preserveDrawingBuffer`, so `canvas.toDataURL()`
 reads what is shown.
 
-**The exposure in tests.** The exposure follows the meter, which is read
-back after a fence. A browser lets a fence pass only between tasks, after
-real time has gone by: a harness that steps many frames in one task on a
-fake clock sees the meter stand still. Pause briefly (some 40 ms) between
-groups of frames when a test changes the view or the light and waits for
-the exposure. A still from page load needs no pause: its first frame is
-metered at once.
+**The exposure in tests.** The exposure follows the meter. Its blocks are
+read back a fixed number of frames after they are drawn (`METER_LAG`),
+not when a fence has passed, and the exposure adapts by the page's clock.
+So a harness on a fake clock that steps frames gets the same exposure,
+and the same frames, run after run, with no pause between frames.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
 photograph taken from an aircraft window. Compare with real photographs,
@@ -229,8 +234,8 @@ Every change goes through a pull request. The workflow
   push, about a minute behind, and is removed when the pull request
   closes. Pull requests from forks get no preview.
 
-The whole tree is published except `.git` and `.github`, so `README.md`
-and `docs/` are on the site too.
+The whole tree is published except `.git`, `.github` and `tools/`, so
+`README.md` and `docs/` are on the site too.
 
 ## Licences
 
