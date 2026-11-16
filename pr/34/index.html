@@ -1329,10 +1329,12 @@ const float CI_UNIT = WEATHER_KM / 3.1623;
 const vec2 CI_CELL = vec2(5.0, 40.0);
 const float CI_GAIN = 1.3;                 // the density of a streak
 // The fibres: octaves of noise, frequencies along and across per unit, from
-// 8 by 2 km to 100 by 8 m (whole numbers, and their halves along and fifths
-// across too), and their strength.
-const vec2 CI_FIB[6] = vec2[6](vec2(10.0, 40.0), vec2(20.0, 120.0), vec2(46.0, 360.0),
-                               vec2(108.0, 1080.0), vec2(270.0, 3240.0), vec2(810.0, 9720.0));
+// 8 by 2 km to 200 by 8 m (whole numbers, and their halves along and fifths
+// across too), and their strength. The threads are 15 to 40 times longer
+// than wide: drawn out less, the lines of noise wiggle like flames; more,
+// they look combed.
+const vec2 CI_FIB[6] = vec2[6](vec2(10.0, 40.0), vec2(20.0, 120.0), vec2(24.0, 360.0),
+                               vec2(54.0, 1080.0), vec2(136.0, 3240.0), vec2(404.0, 9720.0));
 const float CI_FIBG[6] = float[6](0.15, 0.2, 0.5, 0.55, 0.55, 0.5);
 
 // The integer hash of the noise shader (lowbias32).
@@ -1385,7 +1387,8 @@ void ciCell(vec2 g, out vec4 a, out vec4 b, out vec4 c) {
 // footprint across in cells, widens a streak and lowers it alike, up to a
 // point. Returns the sum of their densities, and how far (cells) they move
 // their fibres across, with its weight: the fibres follow each streak's
-// bend, and spread from its head as it widens.
+// tilt and bend. (Following its spread too made the fine threads kink
+// where streaks overlap.)
 vec3 ciStreaks(vec2 q, float cov, vec2 grad, float fy) {
   vec2 c0 = floor(q);
   vec3 s = vec3(0.0);
@@ -1397,7 +1400,7 @@ vec3 ciStreaks(vec2 q, float cov, vec2 grad, float fy) {
     ciCell(cell, a, b, c);
     vec2 h = vec2(0.1 + 0.9 * a.x, 0.3 + 0.4 * a.y);   // the head, in the cell
     vec2 dc = q - cell - h;                       // from the head, cells
-    float there = smoothstep(0.8 * a.w - 0.15, 0.8 * a.w + 0.1, cov - dot(grad, dc / CI_CELL));
+    float there = smoothstep(0.8 * a.w - 0.05, 0.8 * a.w + 0.15, cov - dot(grad, dc / CI_CELL));
     float len = mix(0.5, 1.8, a.z * a.z);         // cells
     float t = dc.x / len;
     if (there > 0.0 && dc.x >= -0.1 && t <= 1.0) {
@@ -1411,13 +1414,13 @@ vec3 ciStreaks(vec2 q, float cov, vec2 grad, float fy) {
       // A dense head (or none: a plain fibre), then the trail.
       float head = c.x * c.x * 0.6 * exp(-(t - 0.03) * (t - 0.03) / 0.004);
       // The cells searched end here.
-      float win = there * smoothstep(-0.1, 0.0, dc.x)
+      float win = there * smoothstep(-0.2, 0.05, dc.x)
                 * smoothstep(0.0, 0.25, 2.0 - h.y - dc.y) * smoothstep(0.0, 0.25, 1.0 + h.y + dc.y);
-      float e = win * sqrt(wt * wt / we2) * exp(-n * n / we2) * pow(1.0 - tc, 0.6) * (0.5 + 0.5 * c.y + head);
-      // The fibres' shift is weighed over twice the width, so that it
-      // changes gently at the sides.
-      float v = win * exp(-0.25 * n * n / we2) * (1.0 - tc);
-      s += vec3(e, v * (off + 0.5 * n * (1.0 - w0 / wt)), v);
+      float e = win * sqrt(wt * wt / we2) * exp(-n * n / we2) * (1.0 - smoothstep(0.55, 1.0, tc)) * (1.0 - 0.35 * tc) * (0.5 + 0.5 * c.y + head);
+      // The fibres' shift is weighed over three times the width, and
+      // fades where few streaks are, so that it changes gently.
+      float v = win * exp(-0.12 * n * n / we2) * (1.0 - tc);
+      s += vec3(e, v * off, v);
     }
   }
   return s;
@@ -1434,7 +1437,10 @@ float ciDepth(vec2 x, float foot, vec2 fp) {
   ciBody = 0.0;
   vec2 uv = x / WEATHER_KM;
   float lod = log2(max(foot / 0.25, 1.0));
-  float thr = 0.62 - 0.8 * uCirrus;
+  // The level the weather must pass: the slider gives about the share of
+  // the sky that the cirrus of before (a smooth envelope) covered; a streak
+  // reaches 8 to 29 km beyond its head, so the level is higher at the low end.
+  float thr = 0.844 - 1.16 * uCirrus;
   // The weather over some 16 km: where it gives too little, no streak
   // reaches (most of the sky, at little cost).
   float near = smoothstep(thr - 0.3, thr - 0.2, textureLod(uWeather, uv, max(lod, 6.0)).a);
@@ -1458,36 +1464,52 @@ float ciDepth(vec2 x, float foot, vec2 fp) {
   // The streaks; from afar, where the footprint is more than a fraction of
   // a cell, their mean.
   const vec2 KM = CI_UNIT / CI_CELL;                // a cell, km
-  vec2 fc = fp / KM;                                // the footprint, cells
+  vec2 fc = fp / KM, fu = fp / CI_UNIT;             // the footprint, cells and units
   float far = smoothstep(0.12, 0.35, max(fc.y, 0.25 * fc.x));
-  vec3 s = far < 1.0 ? ciStreaks(al * CI_CELL, cov, grad, min(fc.y, 0.35)) : vec3(0.0);
-  float mean = 0.27 * smoothstep(-0.1, 0.95, cov);
+  // The lattice of the streaks is pushed about by noise of 10 by 2 km, so
+  // that their heads and ends do not line up and the gaps between them are
+  // not clean ovals. It fades out before it gets finer than the footprint.
+  vec2 wq = af * vec2(8.0, 40.0) + 0.61;
+  float kw = 1.0 - smoothstep(0.15, 0.5, max(fu.y * 40.0, 0.3 * fu.x * 8.0));
+  vec2 warp = kw * vec2(1.9, 0.45) * vec2(ciNoise(wq, vec2(8.0, 40.0)), ciNoise(wq + 3.7, vec2(8.0, 40.0)));
+  vec3 s = far < 1.0 ? ciStreaks(al * CI_CELL + warp, cov, grad, min(fc.y, 0.35)) : vec3(0.0);
+  // Their mean, and the sheet, follow the weather's cover pushed about by
+  // noise drawn out like the streaks (16 by 2 and 7 by 0.7 km), so that
+  // seen from afar the edges and the holes are ragged and streaky, not the
+  // smooth outlines of the map. Each octave fades out before it gets finer
+  // than the footprint.
+  const vec2 R1 = vec2(5.0, 40.0), R2 = vec2(12.0, 120.0);
+  float rag = (1.0 - smoothstep(0.15, 0.5, max(fu.y * R1.y, 0.3 * fu.x * R1.x))) * ciNoise(af * R1 + 0.2, R1)
+            + 0.6 * (1.0 - smoothstep(0.15, 0.5, max(fu.y * R2.y, 0.3 * fu.x * R2.x))) * ciNoise(af * R2 + 0.73, R2);
+  float cr = cov + 1.5 * rag;
+  float mean = 0.27 * smoothstep(-0.1, 0.95, cr);
   // Where the weather gives much, a sheet; more of it as the slider goes up.
-  float veil = (0.1 + 0.5 * uCirrus * uCirrus) * smoothstep(0.2, 1.2, cov);
+  float veil = (0.1 + 0.7 * uCirrus * uCirrus * uCirrus) * smoothstep(0.2, 1.2, cr);
   float dens = near * (CI_GAIN * mix(s.x, mean, far) + veil);
   if (dens <= 0.0) return 0.0;
   float body = dens;
-  // The fibres: noise drawn out along the streaks, as they bend and spread,
-  // from 8 by 2 km down to 100 by 8 m, longer and thinner as they get finer.
+  // The fibres: noise drawn out along the streaks, as they bend, from 8 by
+  // 2 km down to 200 by 8 m, longer and thinner as they get finer.
   // A cascade: each octave scales what the coarser ones left. The two
   // coarsest are soft lumps; the finer ones threads, which come and go
   // along their length. Each octave fades out before it gets finer than
   // the footprint, and the mean of each factor is 1.
   float tangle = smoothstep(-0.3, 0.4, ciNoise(af * vec2(20.0, 60.0) + 0.9, vec2(20.0, 60.0)));
-  vec2 aw = vec2(af.x, af.y - 0.5 * (1.0 - far) * s.y / (s.z + 0.3) / CI_CELL.y);
-  // They wander: the frame is pushed about by noise of 1.5 km, more in some
-  // places (tangled) than in others.
-  vec2 p1 = af * 54.0;
-  aw += (0.4 + tangle) * 1.5e-3 * vec2(ciNoise(p1 + 0.3, vec2(54.0)), ciNoise(p1 + 5.1, vec2(54.0)));
-  vec2 fu = fp / CI_UNIT;
+  vec2 aw = vec2(af.x, af.y - 0.5 * (1.0 - far) * s.y / (s.z + 1.0) / CI_CELL.y);
+  // They wander: the frame is pushed about by noise of 4.5 km, more in some
+  // places (tangled) than in others; gently, so that the threads curve
+  // without kinks.
+  vec2 p1 = af * 18.0;
+  aw += (0.4 + tangle) * 2.0e-3 * vec2(ciNoise(p1 + 0.3, vec2(18.0)), ciNoise(p1 + 5.1, vec2(18.0)));
   // The threads stand out most where the cloud is thin; in a thick sheet
   // they are a sheen.
-  float m = 1.0, seen = 0.0, thin = 1.0 - 0.6 * smoothstep(0.3, 1.5, dens);
+  float m = 1.0, seen = 0.0, thin = 1.0 - 0.45 * smoothstep(0.3, 1.5, dens);
   for (int i = 0; i < 6 && fu.y * CI_FIB[0].y < 0.5; i++) {
     vec2 fr = CI_FIB[i];
     // Footprint over size: along, the threads are long, and a long footprint
-    // hides them less.
-    float k = 1.0 - smoothstep(0.15, 0.5, max(fu.y * fr.y, 0.3 * fu.x * fr.x));
+    // hides them less (but they still go where it is twice their length's
+    // twentieth: from afar, aslant, they cost much and show little).
+    float k = 1.0 - smoothstep(0.15, 0.5, max(fu.y * fr.y, (i < 2 ? 0.3 : 0.6) * fu.x * fr.x));
     if (k <= 0.0) break;
     if (i == 2) seen = k;
     vec2 p = aw * fr + float(i) * 0.37;
@@ -1495,9 +1517,10 @@ float ciDepth(vec2 x, float foot, vec2 fp) {
     if (i < 2) {
       m *= max(1.0 + CI_FIBG[i] * k * 5.75 * n, 0.4);
     } else {
-      // A thread no thinner than the footprint; its mean is 1 / (1 + sharp / 3).
-      float sharp = clamp(1.5 / max(fu.y * fr.y, 0.01), 2.0, 4.0);
-      float r = pow(clamp(1.0 - 1.8 * abs(n), 0.0, 1.0), sharp) * (1.0 + 0.33 * sharp);
+      // A soft strand where the noise is above a level, of varied width
+      // (the mean of the smoothstep over the noise is 0.326). Ridges of
+      // |n| drew sharp lines that kinked.
+      float r = smoothstep(-0.12, 0.3, n) / 0.326;
       float on = smoothstep(-0.35, 0.35, ciNoise(p * vec2(0.5, 0.2) + 0.71, fr * vec2(0.5, 0.2)));
       m *= 1.0 + k * CI_FIBG[i] * thin * (r * (0.3 + 1.4 * on) - 1.0);
     }

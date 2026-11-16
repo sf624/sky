@@ -365,24 +365,38 @@ behind, ray by ray (see [development.md](development.md#glsl-rules)). From
   three parts.
   - **The weather.** A of the weather map, against a level set by
     `uCirrus`, gives how much cirrus there is (`cov`), and its slope along
-    and across the wind. Over some 16 km (a coarse level of the map), it
+    and across the wind. The level is set so that each step of the slider
+    covers about as much sky as the cirrus before the streaks did (a
+    smooth envelope), averaged over places and pitches: streaks reach out
+    beyond their heads, so the level is higher at the low end. Place by
+    place the two differ, since a streak lies downwind of where the
+    weather put its head. Over some 16 km (a coarse level of the map), it
     tells where no streak can reach, and most of the sky costs little.
   - **Streaks** (`ciStreaks`): fall streaks, each a small head with a
     trail drawn out down the wind, wider and fainter as it goes, a little
     off the wind and bent into a hook. One in each cell of 16 by 2 km
-    (`CI_CELL`) at a random place, 8 to 29 km long. A streak is there if the
+    (`CI_CELL`) at a random place, 8 to 29 km long; the lattice is pushed
+    about by noise of 10 by 2 km, so that heads and ends do not line up
+    and the gaps between streaks are not clean ovals. A streak is there if the
     cover at its head is above its own rank, so a thin patch has a few
     whole streaks with sky between them, and a dense one many, overlapping;
     and streaks reach out of a patch into clear sky. There is no outline:
     the edge of a patch is the ends of its streaks. A sheet joins them where
-    the weather gives much, more of it as the slider goes up.
+    the weather gives much, more of it as the slider goes up. The sheet,
+    and the streaks' mean from afar, read the cover pushed about by noise
+    drawn out like the streaks, so that their edges are ragged, not the
+    smooth outlines of the map.
   - **Fibres**: six octaves of noise (`CI_FIB`), from 8 by 2 km down to
-    100 by 8 m, longer and thinner as they get finer, in a frame that
-    follows the streaks (half their bend and spread from the head) and is
-    pushed about by noise of 1.5 km, more in some places than in others.
-    A cascade: each octave scales what the coarser ones left. The two
-    coarsest are soft lumps; the finer ones threads that come and go along
-    their length, clearest where the cloud is thin. Where it is thin, a
+    200 by 8 m, longer and thinner as they get finer, in a frame that
+    follows the streaks' tilt and bend and is pushed gently about by noise
+    of 4.5 km, more in some places than in others. A cascade: each octave
+    scales what the coarser ones left. The two coarsest are soft lumps;
+    the finer ones soft strands of varied width, 15 to 40 times longer
+    than wide, that come and go along their length, clearest where the
+    cloud is thin. Drawn out less, or as sharp ridges, the threads wiggled
+    and kinked and dense patches looked like flames; drawn out more, they
+    looked combed. Following the streaks' spread from the head kinked them
+    where streaks overlap. Where it is thin, a
     little is also taken off, so that the threads part and the sky shows
     between them.
   - **The footprint.** `highCloud` gives the pixel's footprint along and
