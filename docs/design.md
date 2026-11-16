@@ -475,10 +475,12 @@ colour, so the picture's level is as clean as its colours.
 **The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
 texels (`METER`): each is a block of the picture and holds the mean level
 of 4 by 4 points in it, in 16 bits over two 8-bit channels. The JS reads
-it back after a fence (`fenceSync`), once the GPU has drawn it, so that
-the read never waits for the GPU's work. A read still costs a round trip
-to the GPU process (about 2 ms on the test machine), so the meter is read
-at most every `METER_MS` = 100 ms of the page's time. The first frame of
+it back `METER_LAG` = 3 frames later, when the GPU has long drawn it, so
+that the read does not wait for the GPU's work. Counting frames, not
+polling a fence, keeps the page's frames the same from run to run on a
+stepped clock (the tools' fake clock). A read still costs a round trip to
+the GPU process (about 2 ms on the test machine), so the meter is read at
+most every `METER_MS` = 100 ms of the page's time. The first frame of
 the page is metered at once (the one read that waits), not shown, and
 drawn again at its exposure: the page starts adapted.
 
@@ -494,20 +496,31 @@ drawn again at its exposure: the page starts adapted.
   a night is darker than a day and dusk is in between, and black sea at night is exposed as
   the night sky, not lifted into noise;
 - `white` brings `high` to `WHITE` (2^0.3 before the tone curve: just
-  below white) in daylight (`high` at `DAY_HIGH` = 0 or more), and `DIM`
-  = 0.3 stops lower for each stop that `high` is below that: the
+  below white) in daylight (`high` at `DAY_HIGH` = 0.5 or more), and `DIM`
+  = 0.6 stops lower for each stop that `high` is below that: the
   brightest parts of a dim view are not white either, and dusk shows
-  darker than day;
-- the exposure is the lesser of `key` and `white`; but the highlights may
-  not stop it down so far that the darker quarter shows darker than at
-  night, except by up to `GLOW` = 2 stops more as far as they stand more
-  than `SPAN` = 4 stops above the darker quarter. So the band of glow at
-  dusk keeps its colour (to about 8 degrees of the sun below the horizon;
-  beyond, it is many stops above the rest of the sky and burns out), and
-  facing away from it the sky does not fall below the night's level.
+  darker than day. Facing away from the sun, the sky at sunset is the
+  brightest part of the view, where by day the sunlit clouds were: with
+  a weaker `DIM` it showed brighter than the day's sky;
+- `mid`, the median level, but at least `NIGHT_LEVEL`;
+- the exposure is the lesser of `key` and `white`, but not less than a
+  floor: the exposure that takes `mid` only `DEEP` = 0.8 of the way from
+  the key's level down to the night's (`MID_GAP` = 0.5: in a night sky the
+  median stands about half a stop above the darker quarter), and never
+  more than `key`. So dusk darkens steadily into the night, rather than
+  reaching the night's level early and staying there. The floor is on the
+  median, not on the darker quarter: after sunset the sea and the clouds
+  below darken sooner than the sky, and a floor on them brightened the
+  sky again for some ten minutes;
+- where the floor holds the exposure above white's, the highlights (the
+  band of glow at dusk, 7 to 9 stops above the sky over it) stand above
+  white: `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` =
+  5, which the tone curve's shoulder takes in (below).
 
-**Adaptation.** Each frame the exposure moves towards that target by the
-page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
+`exposureFor` returns the exposure and `shoulder`.
+
+**Adaptation.** Each frame the exposure, and `shoulder` on its own, move
+towards their targets by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
 a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
 view) and `ADAPT_SLOW` = 0.5 s towards more. It starts when the target is
 `ADAPT_START` = 0.03 stops away and stops within `ADAPT_STOP` = 0.01, so
@@ -517,10 +530,24 @@ At the end of `main`:
 
 1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
    taken here; then times `uExposure`.
+   Then, where `uShoulder` (the adapted `shoulder`) is not 0, a long
+   shoulder: above `KNEE` = 0.5 the strongest channel is pressed together
+   in stops (y / (1 + c y), slope 1 at the knee) and the colour is scaled
+   as a whole, so that what stood `uShoulder` stops above 3 (all but white)
+   ends `DIM_TOP` = 0.25 stops below it for each stop taken in. The band
+   keeps its hue and its gradation, the brightest part of a dim view is
+   not white, and one curve serves the whole picture: no halos. By day
+   `uShoulder` is 0.
 2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
-3. Light far too strong for the screen turns towards white (as on film).
+3. Light far too strong for the screen (3 to 30 times white: the sun,
+   its glitter) turns towards white, as on film.
 4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
-5. Tone mapping `1 - exp(-col)`, then the display power `1 / 2.2`.
+5. Tone mapping `1 - exp(-col)`: channel by channel where the strongest
+   channel is below 0.5; above 2.5 the strongest channel follows the
+   curve and the others keep their share of it, so that a colour too
+   bright for the screen keeps its hue (a band of glow stays orange
+   instead of running to white); smoothly between. Then the display
+   power `1 / 2.2`.
 6. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames

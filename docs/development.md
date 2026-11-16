@@ -86,13 +86,11 @@ overlays (`.title`, `.panel`, `.hint`, `.fs`) for a clean picture. The
 canvas is made with `preserveDrawingBuffer`, so `canvas.toDataURL()`
 reads what is shown.
 
-**The exposure in tests.** The exposure follows the meter, which is read
-back after a fence. A browser lets a fence pass only between tasks, after
-real time has gone by: a harness that steps many frames in one task on a
-fake clock sees the meter stand still. Pause briefly (some 40 ms) between
-groups of frames when a test changes the view or the light and waits for
-the exposure. A still from page load needs no pause: its first frame is
-metered at once.
+**The exposure in tests.** The exposure follows the meter. Its blocks are
+read back a fixed number of frames after they are drawn (`METER_LAG`),
+not when a fence has passed, and the exposure adapts by the page's clock.
+So a harness on a fake clock that steps frames gets the same exposure,
+and the same frames, run after run, with no pause between frames.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
 photograph taken from an aircraft window. Compare with real photographs,
