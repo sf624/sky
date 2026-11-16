@@ -267,10 +267,11 @@ tile is read through the GPU's filter, and its facets would show on a
 surface as smooth as a base). The cloud is the lesser of the two fields.
 
 `cloudDetail` gives the fine noise: `DETAIL` = 7 tiles per tile, billows
-of 300 m down to about 20 m. Each size stands out about a third of its
-width (the octaves' weights fall with their size), so that small billows
-sit on large ones. Nothing finer: light spreads over tens of metres in a
-cloud, and near the eye a cloud is a fog. `cloudField` adds it near the
+of 300 m down to about 20 m. The 300 m billows stand out about a third of
+their width, the smaller ones up to a half, so that small billows sit on
+large ones: a cauliflower (equal weights made a foam). Nothing finer:
+light spreads over tens of metres in a cloud, and near the eye a cloud is
+a fog. `cloudField` adds it near the
 surface only (`min(f, base) > -0.25 * RELIEF`), more strongly on thin
 cloud:
 
@@ -284,10 +285,11 @@ line of them, seen from their own height.
 
 `cloudExtinction` turns the field into extinction: `SIGMA` = 90 per km
 once the field is past the edge, with more water higher up and in thicker
-clouds. The edge (`edge`, from `cloudField`) is 25 m deep on hard,
-growing turrets and `EDGE` = 60 m on older, softer cloud; the extinction
+clouds. The edge (`edge`, from `cloudField`) is 10 m deep on hard,
+growing turrets and `EDGE` = 30 m on older, softer cloud; the extinction
 rises with the square of the depth there, so the outer part is a thin,
-translucent fringe. Where the field is smoothed over a pixel wider than
+translucent fringe. Billows smaller than the edge melt into it: with
+edges of 25 to 60 m every near top looked like cotton wool. Where the field is smoothed over a pixel wider than
 the edge, the smoothing sets the width and the rise is linear.
 
 **The march** (`clouds`) runs from where the ray enters the shell (`ta`) to
@@ -295,11 +297,18 @@ where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
 leaves it at the cloud base; from under the base, such a ray has no
 clouds.
 
-- The steps grow with the distance: `ds = max(DS_MIN, rel * t)`, with
-  `DS_MIN` = 20 m and `rel` at least `DS_REL` = 0.0045. On a long path
-  `rel` grows so that the march ends within its budget (`COARSE * 80`
-  steps' worth); the near steps stay fine. At most `CLOUD_STEPS` = 160
-  steps, and the march stops when less than 1 % gets through.
+- The steps grow with the distance: `ds = max(DS_MIN, t * min(DS_REL *
+  (1 + t / L), rel))`, with `DS_MIN` = 20 m and `DS_REL` = 0.0045. On a
+  long path the march must end within its budget (`COARSE * 80` steps'
+  worth). `rel` is the one rate for the whole ray that does so; `L` the
+  distance past which steps of `DS_REL * t` grow by `1 + t / L` and do so
+  too (the sum of `dt / ds` from `max(ta, DS_MIN / DS_REL)` to the end has
+  a closed form). The lesser of the two keeps the steps fine near the eye
+  and as before far off. With `rel` alone, clouds 2 to 5 km off were
+  marched in steps of 100 to 200 m on rays that end far away, and their
+  edges came out as thin dark squiggles and a hatch. At most
+  `CLOUD_STEPS` = 160 steps, and the march stops when less than 1 % gets
+  through.
 - The plan must not jump where the end of the ray does: a ray that meets
   the sea is planned as if the sea were a mirror and the ray went on up to
   `CT`. So a cloud in front of the horizon looks the same above and below
@@ -328,11 +337,21 @@ found between the last two samples. For each:
   `PENUMBRA` = 60 m), each a third of a turn from the one before, at an
   angle from interleaved gradient noise: over the frames the shadows
   soften (white noise there leaves a grain in the settled picture). The
-  third step has neither. It gives the slope of the field without the
-  fine noise towards the light, hence `facing`.
+  third step is not moved, and sees the fine noise smoothed over its own
+  level (40 m or more). From the field at the surface with the fine noise
+  smoothed as much (`fm`: `mid` is what that noise adds there) to the
+  third step's, the slope towards the light gives `facing`: the billows
+  of 100 to 300 m each turn a lit side to the sun, and their small creases
+  do not show (unsmoothed, they came out as thin dark lines).
+- `hollow` dims the hollows between those billows (where `mid` is
+  negative) to 55 %, and lifts their tops a little: soft, grey hollows.
+  On a surface that faces down it also shows the cells of a deck: Worley
+  cells of the noise read at 3.5 times the tile's frequency (some 600 m
+  across, and texels of 18 m, whose facets do not show; the tile's own
+  62 m texels showed as blocks), darker in the thick middle of a cell and
+  lighter at its thin rim, by up to 40 %.
 - The rise of the field without the fine noise towards the sky over
-  `reach` gives `open`: how much skylight a place gets. Neither follows
-  the fine noise: its creases would come out as thin dark lines.
+  `reach` gives `open`: how much skylight a place gets.
 - Five phase terms stand for the orders of scattering: `p0` (scattered
   once: two Henyey-Greenstein lobes, dimmed by the whole depth) and `p1` to
   `p4` (scattered many times: wider lobes that go deeper). `white` makes
