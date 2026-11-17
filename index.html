@@ -727,7 +727,7 @@ const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands o
 const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
 const float MILKY_EYE = 6.5;    // the Milky Way raised at night (see main)...
 const vec2 MILKY_SEEN = vec2(0.08, 0.8);   // ...over this range of its contrast with the sky behind it
-const float ZODI_FLOOR = 200.0; // S10: the zodiacal light raised at night only above this (see main)
+const float ZODI_SEEN = 0.22;   // the zodiacal cone's contrast over the sky, to the rods, where the eye starts to see it (zodiacalSeen)
 const float S10 = 6.61e-12;     // radiance of one star of the 10th magnitude per square degree, of the sun's light (V = -26.74)
 const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
 const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
@@ -844,13 +844,33 @@ float milkyWay(vec3 c) {
 // sky brightness", A&AS 127, 1, Table 16: from the Earth, at 500 nm), within
 // 4.5 % rms and 13 % at most of its 182 values and the pole's 60: a cone that
 // falls off as the power -2.46 of the angle from the sun, flattened towards
-// the ecliptic as seen around the sun, over a floor, and the gegenschein
-// (some 13 degrees across) on a wider glow at the point opposite the sun.
-float zodiacal(float x, float y) {
+// the ecliptic as seen around the sun (x of the result), over a floor and
+// the gegenschein (some 13 degrees across) on a wider glow at the point
+// opposite the sun (y).
+vec2 zodiacal(float x, float y) {
   float e = max(acos(clamp(x, -1.0, 1.0)), 0.035);  // from the sun, radians (at least 2 degrees)
   float s = min(abs(y) * inversesqrt(max(1.0 - x * x * step(0.0, x), 1e-6)), 1.0);   // 0 on the ecliptic, 1 square to it
   float across = 0.252 + 0.748 * exp(-pow(s / 0.419, 1.34));
-  return (345.0 * pow(e, -2.46) + 78.6) * across + 19.3 * exp(-(1.0 + x) / 0.01) + 62.3 * exp(-(1.0 + x) / 0.511);
+  return vec2(345.0 * pow(e, -2.46) * across,
+              78.6 * across + 19.3 * exp(-(1.0 + x) / 0.01) + 62.3 * exp(-(1.0 + x) / 0.511));
+}
+
+// The zodiacal cone's contrast as drawn at night, from c, its contrast over
+// the sky behind it as the rods see it (the moon's glare in the eye and the
+// rest of the zodiacal light included). The eye starts to see so large and
+// soft a glow only ZODI_SEEN = s over the sky; below that the cone is not
+// drawn, so that the screen does not show what the eye would not (under a
+// full moon, under a quarter moon from near the sea). Above, the drawn
+// contrast d rises smoothly from 0 and soon as (8 / 9) c / s - 1: well over
+// the cone's own contrast where it is well seen, as the Milky Way is raised.
+// Its slope is (1 + d) / c times 1 - (s / c)^8, never more than (1 + d) / c,
+// so that where the sky behind brightens faster than the cone itself (the
+// last twilight at the horizon, the moon's glare, the Milky Way) the sum
+// still brightens: a steeper rise left a dark rim along the horizon.
+float zodiacalSeen(float c) {
+  float r = ZODI_SEEN / max(c, 1e-9);
+  float r4 = r * r * r * r;
+  return c > ZODI_SEEN ? uNightEye * (8.0 / (9.0 * r) - 1.0 + r4 * r4 / 9.0) : 0.0;
 }
 
 // The faintest star the dark-adapted eye can see against a sky of b cd/m2
@@ -2142,13 +2162,6 @@ void main() {
     vec3 c = d * uSky;                               // equatorial direction (J2000)
     float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
     float milky = milkyWay(c), raise = 1.0;
-    // The zodiacal light, of the sun's colour. At night its cone is raised as
-    // the Milky Way is, but only by what it stands above ZODI_FLOOR (smoothly:
-    // (z - f)^2 / z): the faint band elsewhere is part of the dark sky's
-    // brightness, which sets the faintest star seen, and raised it hid them.
-    float zl = zodiacal(dot(d, uSun), dot(c, uEcliptic));
-    float zUp = max(zl - ZODI_FLOOR, 0.0);
-    float zodi = S10 * (zl + 2.0 * uNightEye * zUp * zUp / zl) * (1.0 - moonMask);
     vec4 tk[3];
     vec4 tg[3];                                      // ...and for the airglow at night (below)
     for (int k = 0; k < 3; k++) {
@@ -2159,13 +2172,18 @@ void main() {
     }
     // The stars as the eye sees them at night (see starsSeen): the faintest
     // it can see against this sky, and the faintest whose colour it sees.
+    // The zodiacal light (zodiacal), of the sun's colour, only at night: its
+    // floor and the gegenschein as they are, its cone as the eye sees it
+    // (zodiacalSeen). By day and in twilight until the night eye comes in,
+    // the sky hides it.
     vec2 seen = vec2(0.0);
+    float zodi = 0.0;
     if (uNightEye > 0.0) {
       float y = 0.0, ym = 0.0;
       for (int k = 0; k < 3; k++) {
         vec4 lw = 0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k];
         vec4 g = tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0));
-        y += dot(lw, L[k] + g * vanRhijn + tg[k] * zodi);
+        y += dot(lw, L[k] + g * vanRhijn);
         ym += dot(lw, g * milky);
       }
       // The moon's glare in the eye veils the sky around it: 10 E / theta^2
@@ -2173,7 +2191,20 @@ void main() {
       // the moon is uMoonI of the sun's 133000 lux).
       float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
       float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
-      float back = CD * ISUN * y + veil;
+      // The zodiacal cone's contrast to the rods, over the sky, the Milky Way
+      // and the rest of the zodiacal light behind it (the moon's glare is
+      // sunlight, the same to the rods as to the cones; the airglow, bluer
+      // than the zodiacal light, is brighter to them).
+      vec2 z = zodiacal(dot(d, uSun), dot(c, uEcliptic)) * (1.0 - moonMask);
+      float ys = 0.0, yz = 0.0, yzs = 0.0;
+      for (int k = 0; k < 3; k++) {
+        ys += dot(uWS[k], L[k] + tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0)) * (vanRhijn + milky));
+        yz += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], tg[k]);
+        yzs += dot(uWS[k], tg[k]);
+      }
+      float cz = S10 * z.x * yzs / max(ys + S10 * z.y * yzs + veil / (CD * ISUN), 1e-30);
+      zodi = S10 * (z.y + z.x * zodiacalSeen(cz) / max(cz, 1e-9));
+      float back = CD * ISUN * (y + zodi * yz) + veil;
       seen = starsSeen(back + CD * ISUN * ym);
       // The dark-adapted eye sees the Milky Way plainly where it stands well
       // over the sky and the moon's veil behind it, and not where its
@@ -2220,8 +2251,8 @@ void main() {
     float stars = uNight * STAR_GAIN * (1.0 - moonMask) * (1.0 - uNightEye);
     for (int k = 0; k < 3; k++) {
       G[k] = tk[k] * sun;
-      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
-      else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + zodi + stars * st[k]);
+      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0)) + tg[k] * zodi;
+      else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
     }
     // At night as the eye sees them: a star at the faintest magnitude the
     // eye can see against this sky (seen.x) is drawn just visible, and each
