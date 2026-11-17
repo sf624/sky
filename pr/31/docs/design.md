@@ -94,8 +94,10 @@ The JS runs once, at load:
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed, runs
-  `celestial()` and sets the panel's labels;
+- if something changed: rebuilds `msData` when the haze has changed (it
+  takes about a quarter of a second: while the haze slider moves, it is
+  built `HAZE_WAIT` = 250 ms after the last move; the first frame builds
+  it at once), runs `celestial()` and sets the panel's labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
@@ -185,8 +187,17 @@ Phase functions (`phases`): Rayleigh, and the Cornette-Shanks form for Mie
 with `g` = 0.8.
 
 **The march.** `NV` = 20 samples at
-`t = tmax * f * f`: denser near the eye. Each sample adds, for the sun and
-for the moon, `addLight`:
+`t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
+through the planet's shadow: in parallel light, a cylinder of radius `RG`
+behind the planet (`shadowSpan`). Then the march has three runs, each
+denser at its start: `NV` samples from the eye to the shadow, `NSHADE` = 8
+in it, and `NFAR` = 16 in the lit air beyond (a run of no length is
+skipped). The light scattered once rises steeply from the shadow's edge;
+20 samples over the whole ray left layers of colour above the band of
+glow that came and went with the angle (a purple one at 7 degrees with the
+sun 14 degrees down). A ray that misses the shadow is marched as before,
+so the day's picture is unchanged. Each sample adds, for the sun and for
+the moon, `addLight`:
 
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
@@ -215,16 +226,50 @@ layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
 each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
-zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the light
-scattered twice is gathered over the sphere as if scattering were
-isotropic (8 by 4 directions over half the sphere, mirrored; 14 steps
-each), with sunlight bounced off the ground (`ALBEDO` = 0.07); the higher
-orders follow as a geometric series. One value per wavelength, per unit of
-scattering coefficient. The texture is `NMU` by `3 * NH`: the three groups
-of four wavelengths stacked in y. It depends on the haze, so `frame`
-rebuilds it when the haze changes, and the renderer uploads it again.
-`fs` reads it through the GPU's filter (`textureLod`; RGBA16F when full
-floats cannot be filtered).
+zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the mean light
+that reaches a point, to be times the scattering coefficient there:
+
+- The light scattered once is gathered over the sphere as if scattering
+  were isotropic, with sunlight bounced off the ground (`ALBEDO` = 0.07):
+  16 bands of height, narrower near the horizon (edges at `x |x|` for
+  even `x`), each counted by its share of the sphere, times 4 directions
+  over half the sphere, mirrored; 14 steps each. In twilight that light
+  comes from the lit air low on the horizon: 8 even bands, the nearest
+  3.6 degrees off it, missed most of it, and the sky of nautical twilight
+  came out 3 to 5 times too dark.
+- The higher orders follow as a geometric series (Hillaire).
+- Then, while the sun stands lower than 17 degrees (blended in down to
+  9), one more gathering of that field itself, an order computed rather
+  than guessed. The series keeps the colour of the light scattered twice;
+  in deep twilight that is the red glow on the horizon, and the air came
+  out orange where the sky above is blue. One more order is enough: a
+  second changes the table by less than 1 %.
+
+A second table holds the sky's light on the low clouds (`cloudSky`): as
+bright as the mean light, but in the colour of the light from above on a
+level surface (gathered over the upper half of the sphere times the
+cosine, all orders), relative to that of the mean light with the sun at
+30 degrees at the same height. It is the mean light itself while the sun
+stands higher than 6 degrees, and fully the light from above from -3
+degrees down. The mean light holds the glow on the horizon and the dark
+sea below: in deep twilight the clouds came out mauve and brown under a
+blue sky.
+
+One value per wavelength. The texture is `NMU` by `6 * NH`: the three
+groups of four wavelengths of the air stacked in y, then those of the
+clouds. It depends on the haze, so `frame` rebuilds it when the haze
+changes, and the renderer uploads it again. `fs` reads it through the
+GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
+
+**Against measurements.** Integrated over the sky at sea level (haze
+0.35, 128 klx of sunlight outside the air), the model gives, against the
+horizontal illuminance table in Schlyter, "Radiometry and photometry in
+astronomy": sun at 0 degrees, 996 lx (measured 759); -6, 6.8 lx (3.4);
+-12, 0.018 lx (0.008). The zenith, against a fit to sky quality meter
+readings (hnsky.org, "SQM twilight"): 0 degrees, 157 cd/m2 (216); -6, 0.95
+(0.63); -10, 0.015 (0.013); -14, 5.6e-4 (4.7e-4). Within a factor of two
+throughout. Before the bands, the extra order and the shadow's runs, the
+zenith at -10 and -14 degrees was 3 and 6 times too dark.
 
 ## Low clouds
 
@@ -306,7 +351,8 @@ scattered once (`sOne`) and many times (`sMany`), per unit of skylight
 (`sAmb`), and the mean distance it comes from (`tBar`). `main` turns them
 into the spectrum `C` at `tBar`: sunlight through the air above (and
 through the cirrus, `cirrusShadow`), plus skylight from the
-multiple-scattering table, plus airglow.
+table of the sky's light on the clouds (`cloudSky`, see
+[The air](#the-air)), plus airglow.
 
 **Shadows.** `shadowDepth` sums the clouds' depth towards the light from a
 point under their tops (ten samples, denser low down). `main` uses it for
@@ -444,12 +490,10 @@ drawn again at its exposure: the page starts adapted.
 - `white` brings `high` to `WHITE` (2^0.3 before the tone curve: just
   below white) in daylight (`high` at `DAY_HIGH` = 0.5 or more), and `DIM`
   = 0.6 stops lower for each stop that `high` is below that: the
-  brightest parts of a dim view are not white either, and dusk shows
-  darker than day. Facing away from the sun, the sky at sunset is the
-  brightest part of the view, where by day the sunlit clouds were: with
-  a weaker `DIM` it showed brighter than the day's sky;
+  brightest parts of a dim view are not white either (the moonlit clouds
+  of a night);
 - `mid`, the median level, but at least `NIGHT_LEVEL`;
-- the exposure is the lesser of `key` and `white`, but not less than a
+- by day and by night, the exposure is the lesser of `key` and `white`, but not less than a
   floor: the exposure that takes `mid` only `DEEP` = 0.8 of the way from
   the key's level down to the night's (`MID_GAP` = 0.5: in a night sky the
   median stands about half a stop above the darker quarter), and never
@@ -458,10 +502,27 @@ drawn again at its exposure: the page starts adapted.
   median, not on the darker quarter: after sunset the sea and the clouds
   below darken sooner than the sky, and a floor on them brightened the
   sky again for some ten minutes;
-- where the floor holds the exposure above white's, the highlights (the
-  band of glow at dusk, 7 to 9 stops above the sky over it) stand above
-  white: `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` =
-  5, which the tone curve's shoulder takes in (below);
+- in twilight another exposure takes over, blended in as the sun goes
+  from `DUSK` = 2.5 to -0.5 degrees (a smoothstep, times `sunOn`): one set by the
+  median alone, so that the view is shown as the eye sees it and not held
+  down by its highlights. At sunset and in civil twilight the sky is
+  light and pastel, its clouds lit, and the band of glow its brightest
+  part; then the view darkens steadily into the night. The median is
+  shown at `DUSK_SHOWN` = -2.2 (log2 after exposure) when it stands at
+  `DUSK_MID` = -3 (about sunset: as by day), and at the night's level
+  (the key's, `KEY - EYE * NIGHT_LEVEL + NIGHT_LEVEL + MID_GAP`, -4.6)
+  when it stands at the night's (`NIGHT_LEVEL + MID_GAP`); in between
+  along the power `DUSK_POW` = 0.7 of its distance from the night's, so
+  that it darkens slowly at first: through civil and nautical twilight
+  the eye still sees colours. White gives way: the highlights may stand
+  up to `ABOVE` = 4 stops above white. The median, not the darker
+  quarter, again: a key on the clouds and the sea below, which darken
+  sooner than the sky, brightened the sky by half a stop for a few
+  minutes;
+- where the exposure stands above white's, the highlights (the band of
+  glow at dusk, 7 to 9 stops above the sky over it) stand above white:
+  `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` = 5,
+  which the tone curve's shoulder takes in (below);
 - `drop`: the band itself dims as the sun goes down. The shoulder's top
   ends `DIM_BAND` = 0.2 stops below white for each stop that `high` is
   below `DAY_HIGH`, at most `DROP` = 2.5 stops, so that deep in the
@@ -607,7 +668,7 @@ All are uploaded in `makeSky`:
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
-| `uMS` | 0 | 40 x 36, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering |
+| `uMS` | 0 | 40 x 72, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering; the sky's light on the clouds |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
