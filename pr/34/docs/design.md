@@ -441,10 +441,18 @@ plumes, another bands or flocks:
   have none, their ice fading in from a narrow root: a fan of 6 to 12
   strands to a half width that spreads by 20 to 40 degrees (a spray of
   fibres, cirrus fibratus). Their strengths vary from 0.4 to 2.4 and
-  gather in groups. The trails are 1.5 times the drift (some 24 km); each
-  head turns the common way by up to 0.12 rad and makes it up to 10 %
-  longer or shorter, so the trails of a region are near parallel without
-  being copies.
+  gather in groups. The trails are 1.5 times the drift (some 24 km). Each
+  plume reads its own way at its head (`icePlumes`, `iceHooked`): groups
+  of plumes (noise of some 20 km) are turned by up to 0.3 rad from the
+  common way, and each head by up to 0.1 rad more, with a drift up to
+  10 % longer or shorter; the ice leaves a head turned by up to 80
+  degrees either way (up to 23 for a fan) and comes round to the shear
+  within 1 to 3 km (a comma, the hook of cirrus uncinus, larger for a
+  large head); after that each trail turns by its own amount
+  (`ICE_VEER` = 0.35 rad over a life, give or take 0.9: most the common
+  way, some hardly, a quarter the other way). With one way and one turn
+  for the whole tile (round 8), every trail of a deck was parallel and
+  the streaks converged on one vanishing point like ruled rays.
 - **Large plumes** (A): the same with 3 cells to a side (13.5 km), heads
   1.8 times as large, trails twice the drift (up to 45 km), 2.5 times as
   strong: the broad fans and sheets.
@@ -461,7 +469,10 @@ plumes, another bands or flocks:
   of 3.4 km, gathered in flocks with wide gaps by two octaves of noise
   (20 and 8 km), each with a short trail of threads (cirrus floccus).
   Half have died out and left their trail. A flock's head grows with age
-  and wobbles in time.
+  and wobbles in time. It is lumpy, not a round puff: knots of a third
+  and a tenth of its size (value noise, squared), so that the floor the
+  scene takes off leaves a ragged little cloud; 1.6 times as dense as in
+  round 8.
 - **Strands** (`iceStrands`). A plume's ice falls in strands along its
   trail: value noise across it (squared, so that there are gaps between
   the strands), at 3 to 12 strands to the trail's half width, and thin
@@ -469,13 +480,18 @@ plumes, another bands or flocks:
   units of the trail's width at that age, so the strands fan out with
   the trail. Each strand has a life of its own, the outer ones shorter:
   the strands end one by one, so that a trail tapers and frays out
-  instead of ending round. The head itself is a plain puff.
+  instead of ending round. The strands wander from side to side (by about
+  a strand's width, each group of two or three its own way), so that they
+  cross and braid, and near the end of its life a strand curls off to
+  one side or the other. Along the trail they change over some 5 km (4.5
+  to a life; 2 before, which drew straight hairs 12 km long). The head
+  itself is a plain puff.
 - **The trail.** The shear draws the ice away from its head, slowly at
   first (a dense head), then at full speed, along a way that turns with
-  age (a hook): `iceDrift`, in closed form (an arc). The shear runs one
-  way over the tile (`ICE_TH`, turning by `ICE_VEER` = 0.7 rad over a
-  life, `ICE_REACH` = 16 km of drift); each head and each row turns it a
-  little, as above. It used to change over the tile (slow noise), read at
+  age: `iceDrift`, in closed form (an arc, `iceArc`). The common shear
+  runs one way over the tile (`ICE_TH`, turning by `ICE_VEER` = 0.35 rad
+  over a life, `ICE_REACH` = 16 km of drift); each plume and each row has
+  its own way and turn, as above. It used to change over the tile (slow noise), read at
   each texel: a trail then took the way of every place it crossed, and
   every trail bent into regular waves as long as the noise (S-shaped
   ribbons). Only the strength of the eddies changes over the tile. Each
@@ -488,12 +504,16 @@ plumes, another bands or flocks:
   gradient of the middle size, as the ice spreads and gathers where the
   air rises and sinks.
 - **How.** For each texel, the eddies are followed back in time
-  (`ICE_STEPS` = 28 steps over a life of the ice; the method of
+  (`ICE_STEPS` = 20 steps over a life of the ice, 28 before: the same
+  picture; the method of
   characteristics). At each age, the ice of that age at the texel came from
   where the eddies bring it from, less each kind's drift; a head there made
   it then. Each step is a segment, and each head's puff is integrated along
   it (with `erf`, `icePuff`), so that no step shows. A plume reaches no
-  further than 1.2 cells, so the nine cells nearest are enough; a row's
+  further than 1.2 cells from where the common way puts its head, so the
+  nine cells nearest are enough (four to a side, for the heads whose own
+  way takes them farther, drew the same picture at nearly twice the cost
+  on SwiftShader); a row's
   head no further than 0.8 of a cell, a flock's 0.3: four cells and one.
   Nothing is resampled step after step, so nothing blurs, and each texel
   is computed by itself: the field does not depend on the order of the
@@ -531,8 +551,8 @@ scene adds the finest streaks itself:
   320 m: round a head the gradient runs round, and the streaks would ring
   it. They are read like the ice (`textureGrad`, mipmaps, the anisotropic
   filter), so from afar they average out by themselves.
-- **The finest streaks** (`ciFibres`): three octaves from 24 m down to
-  3 m, 20 times as long as wide, the zeros of gradient noise drawn out
+- **The finest streaks** (`ciFibres`): two octaves, 24 and 8 m (the
+  second fades out below some 10 m), 20 times as long as wide, the zeros of gradient noise drawn out
   along the way (thin bright lines on a mean of 1). Noise turned to
   follow the way would shear its streaks apart far from the centre of the
   turn, so they are drawn on `CI_WAYS` = 16 fixed ways that repeat with
@@ -542,8 +562,10 @@ scene adds the finest streaks itself:
   side. An octave fades out before it gets narrower than the footprint
   across it, or than most of the footprint's length: seen aslant, the
   streaks that point at the eye would otherwise outlast the others and
-  fan out towards the horizon; and when it is many times (12 to 40) wider
-  than the footprint, where the finer ones carry the streaks. Wider
+  fan out towards the horizon; and when it is 4 to 10 times wider than a
+  pixel (`ciPixT`, without the blur through the deck). Seen from within a
+  few km of the shell, streaks of 3 to 8 m stood as hard, ruled hairs
+  that crossed where the decks did; there the texture is the ice's own. Wider
   streaks than these are the ice's own strands, which bend with the
   trails: straight ones of 70 m and more, tried, looked ruled.
 
@@ -553,8 +575,8 @@ stay milky with a sheen of fibres.
 
 From just under the shell (11.9 km), aslant, the streaks of the deck
 overhead converge on the horizon, as the lines of any ceiling do: that is
-perspective of the patch overhead, not a direction shared by the whole
-sky (at another place the streaks run another way).
+perspective of the patch overhead. Since each plume runs its own way and
+the two decks run 27 degrees apart, they do not share one vanishing point.
 
 `ciDensity` gives a deck's share of the vertical optical depth at a place
 on the map.
@@ -602,7 +624,8 @@ on the map.
 - `ciBody` is the depth of the ice over some 0.4 km (or four footprints if
   that is wider): the light inside the sheet feels it. `ciVeil` is the
   share of the veil: it draws the halo. `ciMean` is the depth over some
-  2.5 km: a share of the glow next to the sun and the moon is drawn from it.
+  2.5 km, and `ciWide` over some 10 km, from which the glow round the sun
+  and the moon is drawn.
 - **The depth of a deck.** Seen from near the shell, a ray crosses a
   deck aslant over hundreds of metres, and the ice at its top and its
   bottom does not line up: the footprint grows by 0.08 of the way through
@@ -610,13 +633,25 @@ on the map.
   of distant plumes averaged out to smooth patches), so that from just
   under a deck its fine threads soften instead of standing as long ruled
   lines; from the ground the blur is about a pixel.
+- **A deck seen from near** (within 1.5 to 4 km of the point read) is a
+  volume: it is read at two heights, a quarter of its thickness above and
+  below its middle, the lower one 0.3 km back along the shear and 0.12 km
+  across (its ice has fallen further and drifted on). From near the two
+  stand apart and move against each other in flight (parallax), and the
+  strands of one fill the gaps of the other; farther off they close up
+  into one read, smoothly. There the strands of tens to hundreds of
+  metres would fill the view as long stripes: the depth is mixed towards
+  the ice over some 0.4 km (`ciBody`), up to 0.6 of the way, so the deck
+  is a milky body with its strands as a gentler modulation, as
+  photographs taken at cruise level next to cirrostratus show.
 - Light: forward scattering by ice (a narrow diffraction peak within a
   degree or two of the sun, so that the glow round the sun stays small;
-  it follows the ice in front of the light, so that the glow keeps the
-  cloud's texture and grows with its thickness, with 0.3 of it taken from
-  the sheet's depth over some 2.5 km (`ciMean`), the light's own glare
-  spreading it: all of it from the mean drew the blurred plume round the
-  light as a smooth bright lens; a
+  it is a round aureole: it follows the sheet's depth over some 10 km
+  (`ciWide`), and the ice just in front of the light only by a quarter,
+  and it is drawn where there is ice around even if there is none in the
+  pixel. Drawn from the ice in front, a plume round the moon lit up as a
+  bright patch of its own shape; from the depth over 2.5 km, as a smooth
+  bright lens; a
   broad refraction lobe; and a flat part to the side and back, some 0.3 of
   the mean, as ray tracing of ice crystals gives it), the 22-degree halo
   with the dispersion of ice (faint, 0.025, and soft, some 1.4 degrees
@@ -628,8 +663,19 @@ on the map.
   with a quarter of the depth, as ice sends most of it on forward: with
   the full depth, thick ice towards a low sun went darker than the sky
   behind it),
-  skylight from the multiple-scattering table, and light from the low
-  clouds below, at the mean distance of the decks seen. A fibre in a thick
+  skylight from the multiple-scattering table (less the share `CI_FWD`,
+  below), and light from the low clouds below, at the mean distance of
+  the decks seen.
+- **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
+  extinction is diffraction by its crystals: light turned by less than a
+  degree, which goes on as if not scattered. The march through the air
+  keeps a second transmittance for what is wide (`visX`: the air, the
+  sea, the clouds): through the cirrus it is `Th + CI_FWD (1 - Th)`,
+  while the sun, the moon and the stars get `Th` (their diffracted light
+  is the aureole). So the blue of the sky behind thin ice, and the sea
+  under it, show through, softened; at dusk away from the sun the ice
+  keeps some of the blue of the upper sky behind it as well as the
+  reddened sunlight on it. A fibre in a thick
   body of ice is lit through the body (`ciBody`), so dense patches are grey
   inside and their thin edges bright. Sunlight reaches the shell through
   the air above it (`ciDepthToTop`): at a low sun it is reddened.
@@ -663,7 +709,9 @@ and `uIceFib` (as wide as the ice, R8; `uZ` = -5, in pieces). Both decks
 read the same textures, each in its own frame. They are built during the
 loading, in batches, if the page starts with cirrus; else when cirrus is
 first shown (`buildIce`, called by `render`, all at once), so that a sky
-without cirrus never pays for them. On an RTX 3090 they take some 0.25 s
+without cirrus never pays for them. The ice program itself is compiled at
+start only if the page starts with cirrus; else `buildIce` compiles it and
+waits for it, so the first move of the slider from 0 takes that long once. On an RTX 3090 they take some 0.25 s
 of GPU time, and the first picture comes about 0.9 s later than without
 cirrus (see [development.md](development.md#gpu-time)). A renderer without
 a GPU (its name says SwiftShader, llvmpipe, softpipe, software or Basic
