@@ -164,10 +164,12 @@ on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
 Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`; and at most every 100 ms a fourth, the
+texture, `mean`, and `show`; at most every 100 ms a fourth, the
 exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
 November 2026; reading it back costs about 2 ms of the main thread here,
-none of the GPU's). The scene is nearly all of it. Measured on an
+none of the GPU's); and a frame that needs a new map of the clouds'
+shadow draws it first (see
+[design.md](design.md#the-clouds-shadow)). The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The page had a scroll bar then, so the drawing sizes are
 those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
@@ -186,6 +188,41 @@ without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
+
+The clouds' shadow, measured on the same GPU at 2560 x 1440 (`res=1`,
+flying) in November 2026, after the exposure and haze of round 10: three
+runs each, alternated with main, medians of the scene's GPU time:
+
+| View | Scene before | Scene after | Shadow map, per draw |
+|---|---|---|---|
+| Cruise (the defaults) | 12.4 to 12.7 ms | 13.0 to 13.2 ms (+0.55) | 0.71 ms |
+| 4 km, low sun (`alt=4&cloud=0.6&date=320&time=16.5&yaw=61.2&pitch=-5`) | 10.2 to 10.4 ms | 11.5 to 11.6 ms (+1.2) | 1.44 ms |
+| Under the base (`alt=0.3&cloud=0.7&date=320&time=15.5&yaw=51.2&pitch=4`) | 15.5 to 15.7 ms | 15.9 to 16.0 ms (+0.35) | 1.27 ms |
+| `cloud=0` | | the same picture and the same draws | not drawn |
+
+Of that, the soft shadow on the sea (`seaShadow`, eight reads of the map
+per pixel of sea) is about 0.12 ms in the 4 km view.
+
+In flight the map is drawn every 0.5 km (every 2 s at 900 km/h): it adds
+next to nothing to the mean. A frame whose light, altitude or cloud
+amount changes draws it, so a time-lapse or a moving slider pays it on
+every frame. Its cost follows `SHADOW` squared and its steps (24 to 96,
+more for a low light); the scene's share is the `SHAFTS` samples.
+
+The numbers to tune, all in `index.html`:
+
+| Name | Value | What it sets |
+|---|---|---|
+| `SHADOW` (JS) | 1024 | texels per side of the map: its cost and sharpness |
+| `SHADOW_STALE` (JS) | 0.5 km | how far the aircraft flies before the map is drawn again |
+| `SHADOW_K` (`fs`) | 40 km | where the map's texels are four times as wide as at the eye |
+| `SHADOW_H` (`fs`) | 0.6, 1.3, 2.3, 3.5 km | the heights the map keeps a depth for |
+| `SHADOW_DS` (`fs`) | 0.2 km | the length of a step along a line of the map (24 to 96 steps) |
+| `SHADOW_ENC` (`fs`) | 4 | the depth at which the stored value is one half |
+| `SHAFTS` (`fs`) | 16 | samples of the map along a view ray below the tops |
+| `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
+| `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
+| `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -213,7 +250,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `#extension`. The JS asks for:
   - `OES_texture_float_linear`: else the filtered tables are RGBA16F;
   - `EXT_color_buffer_half_float` or `EXT_color_buffer_float`: else the
-    frames are RGBA8, and also if the framebuffer turns out incomplete;
+    frames and the clouds' shadow map are RGBA8, and also if their
+    framebuffer turns out incomplete;
   - `EXT_texture_filter_anisotropic`: else the wave map is filtered
     without it.
 - **Patterns repeat in 256 km.** Anything read at `p.xz + uDrift` repeats a
@@ -246,6 +284,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
   - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
     shader and in `fs` (`CI_DIR`, `CI_UNIT`, and the `bend` in `ciDepth`).
+- **`fs` is two programs.** `makeSky` compiles it a second time with
+  `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
+  same cloud field. A change to the field changes both. The program's
+  uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
+  field reads must be set there too.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

@@ -1066,21 +1066,113 @@ float lightDepth(vec3 p, vec3 dir, float ds, float lod, float fc, float ff, vec3
   return tau;
 }
 
-// Optical depth of the clouds from a point on the sea, or anywhere under
-// their tops, towards the light.
-float shadowDepth(vec3 ps, vec3 dir) {
-  const int N = 10;
-  float t0 = max(raySphere(ps, dir, RG + CB).y, 0.0), len = raySphere(ps, dir, RG + CT).y - t0;
-  if (len <= 0.0) return 0.0;
-  float tau = 0.0, prev = 0.0;
-  for (int i = 0; i < N; i++) {                      // most clouds are low: denser samples there
-    float s1 = len * pow((float(i) + 1.0) / float(N), 1.5);
-    float ds = s1 - prev;
-    float lod = max(log2(0.5 * ds / TEXEL_KM), 0.0);
-    tau += cloudDensity(ps + dir * (t0 + prev + 0.5 * ds), lod, false) * ds;
-    prev = s1;
+// ---------- The clouds' shadow ----------
+// One map says, for everything outside the clouds, how deep in their shadow
+// a point is: the optical depth of the clouds towards the light. It lies on
+// a plane across the light, through the eye; each texel is a line of light,
+// marched once through the shell of the clouds. The same shader draws it,
+// with SHADOW_MAP defined, before a frame that needs it (see makeSky). After the
+// opacity shadow maps of Kim and Neumann (2001), with the depths kept at
+// heights instead of along the light.
+// The plane is warped so that its texels are fine near the eye and grow far
+// off, with no edge: x / (SHADOW_K + |x|) per axis, so SHADOW_K km away a
+// texel is four times as wide as at the eye, and the far edge is infinitely
+// far. A sun low in the sky lays its long shadows along few texels.
+// Along each line the depth is kept at the four heights SHADOW_H: all of it
+// below the base, less higher up; it is 0 at the tops. A point in between
+// takes the depth at its height, linearly.
+// Stored as tau / (tau + SHADOW_ENC): 8 bits keep both thin shadows and deep
+// ones apart.
+// The map is drawn again only when the aircraft has flown some way: it is
+// read where a point was when it was drawn, uShadowShift (km) away.
+uniform sampler2D uShadow;
+uniform vec2 uShadowShift;
+const float SHADOW_K = 40.0;
+const vec4 SHADOW_H = vec4(CB, 1.3, 2.3, 3.5);
+const float SHADOW_ENC = 4.0;
+// The map's axes across the light, set by main.
+vec3 shX, shY;
+void shadowAxes() {
+  shX = normalize(cross(uLight, abs(uLight.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  shY = cross(uLight, shX);
+}
+
+// The optical depth of the clouds from p towards the light.
+float cloudShadow(vec3 p) {
+  if (uCloud <= 0.0) return 0.0;
+  vec3 x = p + vec3(uShadowShift.x, -RG - uAlt, uShadowShift.y);
+  vec2 v = vec2(dot(x, shX), dot(x, shY));
+  vec4 u = textureLod(uShadow, 0.5 + 0.5 * v / (SHADOW_K + abs(v)), 0.0);
+  vec4 tau = SHADOW_ENC * u / max(1.0 - u, 1e-4);
+  float h = length(p) - RG;
+  if (h <= SHADOW_H.x) return tau.x;
+  if (h < SHADOW_H.y) return mix(tau.x, tau.y, (h - SHADOW_H.x) / (SHADOW_H.y - SHADOW_H.x));
+  if (h < SHADOW_H.z) return mix(tau.y, tau.z, (h - SHADOW_H.y) / (SHADOW_H.z - SHADOW_H.y));
+  if (h < SHADOW_H.w) return mix(tau.z, tau.w, (h - SHADOW_H.z) / (SHADOW_H.w - SHADOW_H.z));
+  return tau.w * max(1.0 - (h - SHADOW_H.w) / (CT - SHADOW_H.w), 0.0);
+}
+
+// The same on the sea, with soft edges. The sun is a disc, and the light
+// that comes through the thin edge of a cloud is spread around it by the
+// droplets' forward scattering; so a cloud's shadow fades over a width that
+// grows with the way from the cloud down to the sea: SHADOW_PEN radians,
+// from clouds about SHADOW_OCC km high (a radius of some 60 m under a high
+// sun, 400 m under a low one; along the light it is longer on the sea, by
+// 1 / sin of the light's height). Read once, the map's contour was the
+// edge of the glitter: so bright that it shows white down to a hundredth
+// of the light, the glitter was cut along that contour, hard, and with a
+// low sun into blocks (a texel is drawn out along the light on the sea).
+// The light is averaged across the light instead, SHADOW_TAPS reads at new
+// places each frame (jitter), spaced evenly out from the middle (denser
+// there: a uniform disc left round blots), and only then made a depth.
+const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
+const int SHADOW_TAPS = 8;
+float seaShadow(vec3 p, float jitter) {
+  if (uCloud <= 0.0) return 0.0;
+  float r = min(SHADOW_PEN * SHADOW_OCC / max(uLight.y, 0.05), 0.75);
+  float lit = 0.0;
+  for (int i = 0; i < SHADOW_TAPS; i++) {
+    float a = 6.2832 * jitter + 2.39996 * float(i);   // the golden angle
+    float ri = r * (float(i) + jitter) / float(SHADOW_TAPS);
+    lit += exp(-cloudShadow(p + ri * (cos(a) * shX + sin(a) * shY)));
   }
-  return tau;
+  return -log(max(lit / float(SHADOW_TAPS), 1e-6));
+}
+
+// One texel of the map: the line of light through it, from where it rises
+// through the base (or its lowest point, if that is higher) to the tops.
+// The steps are about SHADOW_DS km long, as many as the light's height
+// asks for, between 24 and 96: a low sun's lines climb the shell over tens
+// of km, and with fewer steps they missed most clouds. Half a step, or the
+// texel, sets how much the field is smoothed. A line that climbs the shell
+// under a sun on the horizon is some 240 km long: its shadows are as long,
+// and as smooth along the light.
+const float SHADOW_DS = 0.2;
+vec4 shadowTexel(vec2 w) {
+  vec2 v = SHADOW_K * w / (1.0 - abs(w));
+  vec3 q = vec3(0.0, RG + uAlt, 0.0) + v.x * shX + v.y * shY;
+  float top = raySphere(q, uLight, RG + CT).y;
+  vec4 s;                                            // where the line rises through each height
+  for (int k = 0; k < 4; k++) {
+    vec2 c = raySphere(q, uLight, RG + SHADOW_H[k]);
+    s[k] = c.y > c.x ? c.y : -dot(q, uLight);
+  }
+  if (top <= s.x) return vec4(0.0);
+  vec2 texel = (SHADOW_K + abs(v)) * (SHADOW_K + abs(v)) / SHADOW_K * 2.0 / uRes;
+  int steps = int(clamp((CT - CB) / max(uLight.y, 0.01) / SHADOW_DS, 24.0, 96.0));
+  float ds = (top - s.x) / float(steps);
+  float lod = max(log2(0.5 * max(0.5 * ds, max(texel.x, texel.y)) / TEXEL_KM), 0.0);
+  // The depth from the start to each height (below), and in all (sum).
+  float sum = 0.0;
+  vec4 below = vec4(0.0);
+  for (int i = 0; i < steps; i++) {
+    float a = s.x + float(i) * ds;
+    float den = cloudDensity(q + uLight * (a + 0.5 * ds), lod, false);
+    below += den * clamp(s - a, 0.0, ds);
+    sum += den * ds;
+  }
+  vec4 tau = sum - below;
+  return tau / (tau + SHADOW_ENC);
 }
 
 float hg(float mu, float g) {
@@ -1714,7 +1806,15 @@ vec2 distanceCode(float t) {
   return vec2(high, c - 256.0 * high) / 255.0;
 }
 
+#ifdef SHADOW_MAP
+// The map of the clouds' shadow, uRes texels square.
 void main() {
+  shadowAxes();
+  outColor = shadowTexel(gl_FragCoord.xy / uRes * 2.0 - 1.0);
+}
+#else
+void main() {
+  shadowAxes();
   vec2 uv = ((gl_FragCoord.xy + uJitter) * 2.0 - uRes) / uRes.y;
   vec3 d = normalize(uCam * vec3(uv * uTan, 1.0));
   vec3 o = vec3(0.0, RG + uAlt, 0.0);
@@ -1763,21 +1863,29 @@ void main() {
     }
   }
 
-  // The shadow of the clouds: their depth towards the light where the ray
-  // meets the sea (shadow), and how much direct light is left in the air
-  // near the sea (shade).
-  float shadow = 0.0, shade = 1.0;
-  if (uLightI > 0.0 && (uCloud > 0.0 || uCirrus > 0.0)) {
-    if (!ground) {
-      // The ray runs on through far air, under all the clouds there are.
-      shade = mix(1.0, 0.2, smoothstep(0.4, 1.0, uCloud));
-    } else if (Tc > 0.0) {
-      vec3 pg = o + d * tmax;
-      if (uCloud > 0.0) shadow = shadowDepth(pg + 0.001 * normalize(pg), uLight);
-      shadow += cirrusShadow(pg);                      // the thin cloud shades the sea too
-      shade = exp(-shadow);
-    }
+  // The clouds shade the air below their tops (see cloudShadow). Light
+  // scattered once by the air there is sampled more finely than the march
+  // below: SHAFTS samples of the shadow over that part of the ray, ca to
+  // cb, denser near the eye, at new places each frame. Each step of the
+  // march takes the mean light of those that fall in it (weighed by the
+  // air's scattering there), or reads the map once if none does.
+  const int SHAFTS = 16;
+  float ca = 0.0, cb = -1.0;
+  if (uCloud > 0.0 && uLightI > 0.0) {
+    vec2 ct = eyeSphere(o, d, CT);
+    if (uAlt < CT) cb = ct.y;
+    else if (ct.x >= 0.0 && ct.x < 1e8) { ca = ct.x; cb = ct.y; }
+    cb = min(cb, tmax);
   }
+  float shaftJitter = ign(gl_FragCoord.xy + 3.137 * uPass + 11.0);
+  int shaft = 0;
+  // The thin cloud is not in the map: its shadow (cirrusShadow) where the
+  // ray meets the sea dims the air near the sea.
+  float ciShade = 1.0;
+  if (uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0) ciShade = exp(-cirrusShadow(o + d * tmax));
+  // The map is the light's: in twilight the sun still lights the air
+  // while the moon lights the clouds and the sea.
+  bool sunLight = dot(uLight, uSun) > 0.999;
 
   // March along the view ray; samples are denser near the eye. An extra
   // sample ends at each layer, the nearer one first.
@@ -1827,10 +1935,26 @@ void main() {
     for (int k = 0; k < 3; k++) {
       Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     }
-    // Under a cloud the air near the sea is in its shadow too.
-    float direct = mix(1.0, shade, 1.0 - smoothstep(0.6, 2.0, h));
-    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * vis, direct, phaseSun, d, Tv, L);
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * vis, direct, phaseMoon, d, Tv, L);
+    float direct = 1.0;
+    if (prev - dt < cb && prev > ca) {
+      float lit = 0.0, sum = 0.0;
+      for (int m = shaft; m < SHAFTS; m++) {
+        float f = (float(m) + shaftJitter) / float(SHAFTS);
+        float ts = ca + (cb - ca) * f * f;
+        if (ts >= prev) break;
+        shaft++;
+        if (ts < prev - dt) continue;
+        vec3 ps = o + d * ts;
+        vec3 w = density(length(ps) - RG);
+        float wt = uBR[1].z * w.x + betaM * w.y;
+        lit += wt * exp(-cloudShadow(ps));
+        sum += wt;
+      }
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
+    }
+    direct *= mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h));
+    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * vis, sunLight ? direct : 1.0, phaseSun, d, Tv, L);
+    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * vis, sunLight ? 1.0 : direct, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
     if (atLayer) {
       bool isClouds = (layer == 0) == cloudsFirst;
@@ -1847,7 +1971,10 @@ void main() {
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
-    addSea(o + d * tmax, d, tmax, od, betaM, extM, vis, shadow, L, G);
+    // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
+    vec3 pg = o + d * tmax;
+    float shadow = uLightI > 0.0 ? seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + cirrusShadow(pg) : 0.0;
+    addSea(pg, d, tmax, od, betaM, extM, vis, shadow, L, G);
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way and
     // stars, all dimmed and reddened by the air. By day the exposure hides
@@ -1909,7 +2036,7 @@ void main() {
   if (uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0) {
     float deg = degrees(acos(min(mu, 1.0)));
     float glare = 0.3 / (deg * deg + 0.3);
-    if (uCloud > 0.0 && uAlt < CT) glare *= exp(-shadowDepth(o, uSun));
+    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
       float hc = max(0.5 * (CI_LO + CI_HI), uAlt);
@@ -1993,6 +2120,7 @@ void main() {
   // then the mean over the frames is right. The same for the level.
   outColor = floor(clamp(vec4(col, level), 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps;
 }
+#endif
 </script>
 
 <script id="mean" type="x-shader/x-fragment">
@@ -3304,10 +3432,13 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
-    const link = id => {
+    // `defs`: lines put after the #version line of the fragment shader.
+    const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
+      let fsrc = document.getElementById(id).textContent.trim();
+      if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
-        [gl.FRAGMENT_SHADER, document.getElementById(id).textContent.trim()]]) {
+        [gl.FRAGMENT_SHADER, fsrc]]) {
         shaders.push(compile(type, src));
         gl.attachShader(prog, shaders[shaders.length - 1]);
       }
@@ -3323,6 +3454,8 @@ const SkySound = (() => {
     };
     const prog = link('fs'), noiseProgram = link('noise'), wavesProgram = link('waves');
     const mean = link('mean'), show = link('show'), meter = link('meter');
+    // fs again, as the map of the clouds' shadow (see cloudShadow).
+    const shadowProg = link('fs', '#define SHADOW_MAP');
     gl.flush();
 
     // Waits, a frame at a time, until the GPU has done all that it was
@@ -3665,6 +3798,41 @@ const SkySound = (() => {
       waiting = null;
       readMeter();
     };
+
+    // The map of the clouds' shadow (see cloudShadow in fs), on unit 10,
+    // SHADOW texels square. fs itself draws it (shadowProg),
+    // before a frame whose light, altitude or clouds have changed, or once
+    // the aircraft has flown SHADOW_STALE km since; until then the frames
+    // read it where things were (uShadowShift). Half floats where the GPU
+    // can draw to them, else 8 bits.
+    const SHADOW = 1024, SHADOW_STALE = 0.5;
+    const S = {};
+    gl.useProgram(shadowProg);
+    for (const n of ['uRes', 'uAlt', 'uLight', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
+    gl.uniform2f(S.uRes, SHADOW, SHADOW);
+    const shadowTarget = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowTarget);
+    gl.activeTexture(gl.TEXTURE10);
+    for (const format of fine ? [gl.RGBA16F, gl.RGBA8] : [gl.RGBA8]) {
+      const map = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, map);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, format, SHADOW, SHADOW);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+        [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
+        gl.texParameteri(gl.TEXTURE_2D, k, v);
+      }
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, map, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) break;
+      gl.deleteTexture(map);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(prog);
+    gl.uniform1i(U('uShadow'), 10);
+    const uShadowShift = U('uShadowShift');
+    let shadowFor = '', shadowAt = [0, 0];
     // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
     const picture = (old, w, h) => {
       if (old && old.w === w && old.h === h) return old;
@@ -3788,6 +3956,25 @@ const SkySound = (() => {
       gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
       gl.uniform1f(uPass, pass);
       gl.uniform1f(uSteps, steps);
+      // The shadow map, for this frame's light and clouds, and a place near enough.
+      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
+      let shift = [wrapped(state.drift[0] - shadowAt[0]), wrapped(state.drift[1] - shadowAt[1])];
+      if (shade && (shade !== shadowFor || Math.hypot(shift[0], shift[1]) > SHADOW_STALE)) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowTarget);
+        gl.viewport(0, 0, SHADOW, SHADOW);
+        gl.useProgram(shadowProg);
+        gl.uniform1f(S.uAlt, v.alt);
+        gl.uniform3fv(S.uLight, state.light);
+        gl.uniform2fv(S.uDrift, state.drift);
+        gl.uniform1f(S.uCloud, v.cloud);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.useProgram(prog);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+        shadowFor = shade;
+        shadowAt = [state.drift[0], state.drift[1]];
+        shift = [0, 0];
+      }
+      gl.uniform2fv(uShadowShift, shift);
       draw(v, cam, w, h);
 
       // The picture: the mean so far, and this frame.

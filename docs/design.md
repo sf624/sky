@@ -16,7 +16,7 @@ blocks. It loads no other file.
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. With `SHADOW_MAP` defined, the map of the clouds' shadow. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
@@ -167,7 +167,8 @@ which asks for one `requestAnimationFrame(frame)`.
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
-- calls the renderer;
+- calls the renderer, which draws the clouds' shadow map first when it
+  is out of date (see [The clouds' shadow](#the-clouds-shadow));
 - asks for another frame only if the renderer returned true.
 
 The renderer returns true while the aircraft flies, while its picture is
@@ -318,8 +319,8 @@ the moon, `addLight`:
 
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
-  (`depthToTop`) times the phase functions, times `direct`,
-  which the shadow of the clouds lowers near the sea;
+  (`depthToTop`) times the phase functions, times `direct`: the share of
+  the light that the clouds let through there (below);
 - light scattered many times: the multiple-scattering table times the
   local scattering coefficient, times the transmittance to the eye; and
   for the aerosol, which sends light on forwards, `MIE_LEAN` = 4 times the
@@ -339,6 +340,17 @@ round 8 the air was so clean that this light came through deep red, and
 a cut (`grazeCut`) removed light that passed lower than 1 km; with the
 real boundary layer the reference and the page agree without it (to 2 %
 in the planet's shadow), so it is gone.
+
+**Shafts.** Below the tops of the clouds, `direct` comes from the clouds'
+shadow map (`cloudShadow`), sampled more finely than the march: `SHAFTS`
+= 16 samples over the part of the ray below `CT` (`ca` to `cb`), denser
+near the eye (`f * f`), at new places each frame (`ign`). Each step of the
+march takes the mean of `exp(-tau)` over the samples that fall in it,
+weighed by the air's scattering there (Rayleigh at 550 nm and Mie), or
+reads the map once at its middle if none does. Lit and shaded air
+alternate along the ray: shafts of light between the clouds, and the
+clouds' shadows in the haze. Above the tops `direct` is 1. Without low
+clouds, or without a light, nothing is sampled.
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
@@ -534,10 +546,78 @@ through the cirrus, `cirrusShadow`), plus skylight from the
 table of the sky's light on the clouds (`cloudSky`, see
 [The air](#the-air)), plus airglow.
 
-**Shadows.** `shadowDepth` sums the clouds' depth towards the light from a
-point under their tops (ten samples, denser low down). `main` uses it for
-the sea's shadow and the glare. Where the ray meets no sea, the air near
-the sea is dimmed by the cloud amount alone (`shade`).
+The clouds' own light is worked out inside them, as above. Everything
+outside them (the air, the sea, the glare) reads their shadow from one
+map: the next section.
+
+## The clouds' shadow
+
+One map holds, for everything outside the clouds, how deep in their shadow
+a point is: the optical depth of the clouds towards the light (`uLight`:
+the sun, or the moon at night). It is drawn by `fs` itself, compiled a
+second time with `SHADOW_MAP` defined (`shadowProg` in `makeSky`), into a
+`SHADOW` = 1024 texel square texture on unit 10 (`uShadow`). After the
+opacity shadow maps of Kim and Neumann (2001).
+
+- **The plane.** The map lies on a plane across the light, through the
+  eye, with axes `shX` and `shY` (`shadowAxes`). Each texel is a line of
+  light. The plane is warped, `x / (SHADOW_K + |x|)` per axis with
+  `SHADOW_K` = 40 km: a texel is 78 m wide at the eye, 310 m at 40 km,
+  1.25 km at 120 km, and the map's edge is infinitely far. So the map has no
+  edge to fade at: far shadows blur into a mean shade. Across the light, a
+  low sun's long shadows take few texels: a shadow 100 km long on the sea
+  under a sun 3 degrees high is 5 km long on the plane.
+- **A texel** (`shadowTexel`) marches its line from where it rises
+  through the base `CB` (or its lowest point, if that is higher) to the
+  tops `CT`, in equal steps of `cloudDensity` without the fine noise:
+  about `SHADOW_DS` = 0.2 km each, as many as the light's height asks for,
+  between 24 and 96. The field is smoothed to half a step or to the
+  texel, whichever is larger. Under a sun on the horizon a line climbs
+  the shell over some 240 km; its steps are then 2.5 km long, and the
+  shadows as smooth along the light.
+- **Heights.** Each texel keeps the depth from four heights along its line
+  to the light (`SHADOW_H`: 0.6, 1.3, 2.3 and 3.5 km): all of it below the
+  base, less higher up. It is 0 at `CT`. `cloudShadow(p)` takes the depth
+  at `p`'s height, linearly between them. A line that passes its lowest
+  point in the air (a sun below the horizon of a point) is read as if it
+  only rose: the clouds on its way down are left out.
+- **Storage**: `tau / (tau + SHADOW_ENC)`, `SHADOW_ENC` = 4, in RGBA16F
+  where the GPU can draw to half floats, else RGBA8: 8 bits keep thin
+  shadows and deep ones apart. It is read through the GPU's filter.
+- **When it is drawn.** Before a frame whose light, altitude or cloud
+  amount has changed, and once the aircraft has flown `SHADOW_STALE` =
+  0.5 km since it was last drawn: every 2 s at 900 km/h, every 0.6 s at
+  3000. Drawn again, the map is centred on the eye anew; its texels near
+  the eye are fine for a few km. In between, the frames read it where each point was when it
+  was drawn (`uShadowShift`, wrapped like the way flown), so the shadows
+  stay fixed to the clouds. At rest it is drawn once. Without low clouds
+  or without a light it is not drawn, and `cloudShadow` returns 0.
+
+What reads it:
+
+- the air: `direct` in the march (see [Shafts](#the-air)). The cirrus is
+  not in the map: as before, its shadow where the ray meets the sea
+  (`ciShade`) dims the air below 2 km;
+- the sea: the shadow passed to `addSea`, with the cirrus's
+  (`cirrusShadow`). The sea reads it through `seaShadow`, with soft
+  edges: the light `exp(-tau)` is averaged over `SHADOW_TAPS` = 8 points
+  across the light, out to a radius of `SHADOW_PEN` (0.035) times the way
+  along the light from clouds `SHADOW_OCC` = 1.5 km high (at most 0.75 km),
+  spaced evenly out from the middle and turned by a new angle each frame
+  (`ign`), and only then made a depth again. That is about 60 m under a
+  high sun and 500 m under a sun 6 degrees high; on the sea the edge is
+  longer along the light by 1 / sin of its height. The sun is a disc, and
+  the light through a cloud's thin edge is spread around it by the
+  droplets' forward scattering: a real shadow on the sea fades over tens to
+  hundreds of metres. Read once, the map's contour was the edge of the
+  glitter, which shows white down to a hundredth of its light: the glitter
+  was cut out along it, hard, and with a low sun into blocks (one texel is
+  drawn out along the light on the sea). Points spaced evenly over a disc
+  left round blots; spaced evenly out from the middle, they weigh it more;
+- the glare: the clouds towards the sun dim it (`cloudShadow(o)`).
+
+The clouds' own light march (`lightDepth`) does not read it: it sees the
+cloud around each sample in finer detail than the map can hold.
 
 ## The sea
 
@@ -566,8 +646,10 @@ the sea is dimmed by the cloud amount alone (`shade`).
   sharp from near, averaged from far.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
-depth of the clouds (`shadowDepth`) and of the cirrus (`cirrusShadow`)
-towards the light.
+depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
+(`cirrusShadow`) towards the light. It hides the glitter and the direct
+light on the water; the light that a cloud lets through diffusely
+(`soft`) falls more slowly.
 
 ## Cirrus
 
@@ -631,7 +713,8 @@ all dimmed and reddened by the air:
   fixed to the screen.
 
 **Glare**: a glow of a few degrees around the sun, as strayed
-light in a lens, dimmed by the clouds and the cirrus towards the sun.
+light in a lens, dimmed by the clouds (the shadow map at the eye) and the
+cirrus towards the sun.
 
 ## Exposure and the tone curve
 
@@ -933,7 +1016,9 @@ All are made during the loading, in `makeSky`:
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-and `meter` read unit 6.
+and `meter` read unit 6. Unit 10 holds the clouds' shadow map
+(`uShadow`, `SHADOW` texels square, RGBA16F or RGBA8, linear), drawn
+while the page runs (see [The clouds' shadow](#the-clouds-shadow)).
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
