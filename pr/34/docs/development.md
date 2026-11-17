@@ -176,12 +176,14 @@ default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
-The cirrus's ice is built once, during the loading (or when cirrus is
-first shown, if the page starts without it): 0.1 to 0.3 s of GPU time
-on the RTX 3090 (and the `noise` shader compiles in some 1.6 s, 0.4 s more
-than before it held the ice), about two minutes on SwiftShader. So on
-SwiftShader every view with cirrus loads two minutes longer; views with
-`cirrus=0` do not build it.
+The cirrus's ice, the way of its fibres and the fibres are built once,
+during the loading (or when cirrus is first shown, if the page starts
+without it): 0.4 to 0.5 s of GPU time on the RTX 3090. A renderer without
+a GPU builds them a quarter as wide (see
+[design.md](design.md#cirrus)): on SwiftShader a view with cirrus loads
+about as fast as one without (36 s against 36 s for a still at 480 x 270;
+at full size it took two minutes longer). Views with `cirrus=0` build
+nothing.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -234,8 +236,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
-  - The integer hash `ihash` (lowbias32): in the `noise` and `waves`
-    shaders.
+  - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
+    `fs` shaders.
+  - The layout of the cirrus's way (RG the upper deck, BA the lower, the
+    gradient at twice its angle): `iceWay` and `iceFibres` in the `noise`
+    shader, `ciDensity` in `fs`.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
     (`BASE_KM / 128.0`).
   - The size of the weather map, 1024: `WEATHER` in the JS;
