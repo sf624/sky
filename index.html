@@ -651,8 +651,9 @@ uniform vec4 uBO[3];    // ozone absorption per km
 uniform vec4 uWR[3];    // spectrum -> linear sRGB (solar spectrum folded in)
 uniform vec4 uWG[3];
 uniform vec4 uWB[3];
-// Multiple scattering per unit of scattering coefficient: NMU x (3 * NH)
-// texels, the three wavelength groups stacked in y.
+// Multiple scattering per unit of scattering coefficient: NMU x (6 * NH)
+// texels, the three wavelength groups stacked in y; then the same for the
+// light of the sky on the low clouds (cloudSky).
 uniform sampler2D uMS;
 uniform vec4 uWL[3];    // wavelength / 550 nm
 uniform float uNight;   // radiance of the moonless night sky (airglow)
@@ -692,6 +693,8 @@ const float HR = 8.0;           // Rayleigh scale height
 const float HM = 1.2;           // Mie scale height
 const float ISUN = 20.0;
 const int NV = 20;              // view samples: the picture is within two steps of 8 bits of 40's
+const int NSHADE = 8;           // more samples in twilight: in the planet's shadow...
+const int NFAR = 16;            // ...and in the lit air beyond it (see shadowSpan)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
@@ -736,17 +739,21 @@ vec3 depthToTop(vec3 p, vec3 d) {
   return textureLod(uDepth, (x * (N - 1.0) + 0.5) / N, 0.0).rgb;
 }
 
-// Bilinear lookup of the multiple-scattering table.
-void multiScatter(float h, float mus, out vec4 ms[3]) {
+// Bilinear lookup of the multiple-scattering table: the groups from `first`.
+void msTable(float h, float mus, int first, out vec4 ms[3]) {
   float x = clamp((mus - MS_MU_MIN) / (1.0 - MS_MU_MIN), 0.0, 1.0) * float(NMU - 1);
   float y = sqrt(clamp(h / (RT - RG), 0.0, 1.0)) * float(NH - 1);
   // It is read through the GPU's filter (see the table of depths). The
-  // three groups lie one above the other: a read within one never reaches
-  // the next.
+  // groups lie one above the other: a read within one never reaches the
+  // next.
   for (int k = 0; k < 3; k++) {
-    ms[k] = textureLod(uMS, (vec2(x, y + float(k * NH)) + 0.5) / vec2(NMU, 3 * NH), 0.0);
+    ms[k] = textureLod(uMS, (vec2(x, y + float((first + k) * NH)) + 0.5) / vec2(NMU, 6 * NH), 0.0);
   }
 }
+// The light scattered many times that reaches a point of the air.
+void multiScatter(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 0, ms); }
+// The light of the sky on the low clouds there (see buildMultiScatter).
+void cloudSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 3, ms); }
 
 // hash13 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
 float hash3(vec3 p) {
@@ -807,6 +814,30 @@ void addLight(vec3 p, float r, float h, vec3 od, vec3 dens, float scM, float ext
     }
     L[k] += gain * a;
   }
+}
+
+// The planet's shadow along the view ray o + t d (t from 0 to tmax), for
+// light from s: the shadow of a sphere in parallel light is a cylinder of
+// radius RG behind it. True, with the span [sa, sb], when the ray passes
+// through it; else sa and sb are left as they were. In twilight the march spends samples of their own on the span
+// and on the lit air beyond: the light scattered once there rises steeply
+// from the shadow's edge, and 20 samples spread over the whole ray left
+// layers of colour that came and went with the angle.
+bool shadowSpan(vec3 o, vec3 d, float tmax, vec3 s, inout float sa, inout float sb) {
+  float ds = dot(d, s), os = dot(o, s);
+  vec3 a = d - ds * s, b = o - os * s;
+  float A = dot(a, a), B = dot(a, b), C = dot(b, b) - RG * RG;
+  float D = B * B - A * C;
+  if (A < 1e-12 || D <= 0.0) return false;
+  D = sqrt(D);
+  float t0 = (-B - D) / A, t1 = (-B + D) / A;
+  if (os + ds * 0.5 * (t0 + t1) >= 0.0) return false;   // the half towards the light: not a shadow
+  t0 = max(t0, 0.0);
+  t1 = min(t1, tmax);
+  if (t1 <= t0) return false;
+  sa = t0;
+  sb = t1;
+  return true;
 }
 
 // hash12 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
@@ -1680,8 +1711,8 @@ void main() {
       vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
       float dim = lit ? exp(-cirrusShadow(pc)) : 1.0;   // the thin cloud above shades them
       vec4 msS[3], msM[3];
-      multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
-      multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
+      cloudSky(rc - RG, dot(pc, uSun) / rc, msS);
+      cloudSky(rc - RG, dot(pc, uMoon) / rc, msM);
       for (int k = 0; k < 3; k++) {
         C[k] = sAmb * (2.0 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
         if (lit) C[k] += uLightI * (sOne + sMany) * dim * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z));
@@ -1716,11 +1747,29 @@ void main() {
   float tSecond = cloudsFirst ? tHigh : tBar;
   float tLayer = cloudsFirst ? tBar : tHigh;         // the next layer; negative: none
   if (tLayer < 0.0) tLayer = 1e9;
-  int layer = 0, j = 0;
-  for (int i = 0; i < NV + 2; i++) {
-    if (j >= NV) break;
-    float f = (float(j) + 1.0) / float(NV);
-    float t1 = tmax * f * f;
+  // Without the planet's shadow on the ray, NV samples from the eye to the
+  // end. With it, NV up to the shadow, NSHADE in it and NFAR beyond, each
+  // run denser at its start; a run of no length is skipped.
+  float sa = tmax, sb = tmax;
+  int n = NV, j = 0;
+  if (uSunI > 0.0 && shadowSpan(o, d, tmax, uSun, sa, sb)) {
+    n = sb < tmax ? NV + NSHADE + NFAR : NV + NSHADE;
+    if (sa <= 0.0) j = NV;
+  }
+  int layer = 0;
+  for (int i = 0; i < NV + NSHADE + NFAR + 2; i++) {
+    if (j >= n) break;
+    float t1;
+    if (j < NV) {
+      float f = (float(j) + 1.0) / float(NV);
+      t1 = sa * f * f;
+    } else if (j < NV + NSHADE) {
+      float f = (float(j - NV) + 1.0) / float(NSHADE);
+      t1 = sa + (sb - sa) * f * f;
+    } else {
+      float f = (float(j - NV - NSHADE) + 1.0) / float(NFAR);
+      t1 = sb + (tmax - sb) * f * f;
+    }
     bool atLayer = tLayer < t1;
     if (atLayer) t1 = tLayer; else j++;
     float dt = t1 - prev;
@@ -2602,6 +2651,10 @@ const SkySound = (() => {
   const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
   const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
+  const DUSK = [2.5, -0.5];      // twilight's exposure takes over as the sun goes from 2.5 to -0.5 degrees:
+  const DUSK_MID = -3, DUSK_SHOWN = -2.2;   // ...the median, at DUSK_MID at sunset, is shown at DUSK_SHOWN...
+  const DUSK_POW = 0.7;          // ...falling to the night's along a power of its distance from the night's
+  const ABOVE = 4;               // ...and the highlights may stand ABOVE stops above white, in the shoulder
   const GLOW = 5;                         // the most stops above white the shoulder takes in...
   const DIM_BAND = 0.2, DROP = 2.5;       // ...and its top: DIM_BAND stops lower per stop dimmer, at most DROP
   const ADAPT_FAST = 0.2, ADAPT_SLOW = 0.5;  // s: towards less exposure, towards more
@@ -2683,61 +2736,143 @@ const SkySound = (() => {
 
   // Multiple scattering, after Hillaire (2020): light scattered twice is
   // gathered over the sphere as if scattering were isotropic, and the higher
-  // orders follow as a geometric series. One value per wavelength, per unit of
-  // scattering coefficient, over altitude and sun angle. Depends on the haze.
+  // orders follow as a geometric series. Then one more gathering of that
+  // field itself (an order computed, not guessed): in deep twilight the
+  // series kept the colour of the light scattered twice, the red glow low
+  // on the horizon, and the air came out orange where the sky over it is
+  // blue. One value per wavelength: the mean light that reaches a point, to
+  // be times the scattering coefficient there; over altitude and sun angle.
+  // Depends on the haze.
+  // A second table, for the low clouds (cloudSky in the shader): the light
+  // of the sky on them. As bright as the mean light, but coloured as the
+  // sky above, the light falling on a level surface: the mean light holds
+  // the glow on the horizon and the dark sea below, and in twilight the
+  // clouds came out mauve and brown under a blue sky. By day, where the two
+  // colours stand in a fixed ratio, it is the mean light itself.
   const NMU = 40, NH = 12, MS_MU_MIN = -0.35;
-  const msData = new Float32Array(NMU * NH * 3 * 4);   // RGBA texels, NMU x (3 * NH)
+  const msData = new Float32Array(NMU * NH * 6 * 4);   // RGBA texels, NMU x (6 * NH): the air, then the clouds
+  const msIndex = (j, i, w) => (((w >> 2) * NH + j) * NMU + i) * 4 + (w & 3);
+  const cloudIndex = (j, i, w) => msIndex(j, i, w) + 3 * NH * NMU * 4;
   function* buildMultiScatter(haze) {
     const bM = BETA_M * haze, bMe = bM * MIE_EXT;
-    const NT = 8, NP = 4, NS = 14;
-    const L2 = new Float64Array(NW), F = new Float64Array(NW), ds = [0, 0, 0];
-    for (let j = 0; j < NH; j++) {
-      const r = RG + Math.min(Math.max((RT - RG) * (j / (NH - 1)) ** 2, 0.01), RT - RG - 0.01);
-      for (let i = 0; i < NMU; i++) {
-        const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), sx = Math.sqrt(1 - mus * mus);
-        L2.fill(0); F.fill(0);
-        for (let a = 0; a < NT; a++) {
-          const dy = -1 + 2 * (a + 0.5) / NT, st = Math.sqrt(1 - dy * dy);
-          for (let b = 0; b < NP; b++) {           // half the sphere; the rest mirrors it
-            const phi = Math.PI * (b + 0.5) / NP, dx = st * Math.cos(phi), dz = st * Math.sin(phi);
-            const bq = r * dy, dg = bq * bq - (r * r - RG * RG);
-            const hit = dy < 0 && dg >= 0;
-            const tmax = hit ? -bq - Math.sqrt(dg) : -bq + Math.sqrt(bq * bq - (r * r - RT * RT));
-            let o0 = 0, o1 = 0, o2 = 0, prev = 0;
-            for (let s = 0; s < NS; s++) {
-              const f = (s + 1) / NS, t1 = tmax * f * f, dt = t1 - prev, t = prev + 0.5 * dt;
-              prev = t1;
-              const px = dx * t, py = r + dy * t, pz = dz * t, rr = Math.hypot(px, py, pz);
-              const h = Math.max(0, rr - RG);
-              const dR = Math.exp(-h / HR) * dt, dM = Math.exp(-h / HM) * dt;
-              const dO = Math.max(0, 1 - Math.abs(h - 25) / 15) * dt;
-              o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
-              const lit = sunDepth(rr, (px * sx + py * mus) / rr, ds);
-              for (let w = 0; w < NW; w++) {
-                const sc = BR[w] * dR + bM * dM;
-                F[w] += Math.exp(-(BR[w] * o0 + bMe * o1 + BO[w] * o2)) * sc;
-                if (lit) {
-                  L2[w] += Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
-                         * sc / (4 * Math.PI);
-                }
-              }
-              o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
-            }
-            if (hit) {                             // sunlight bounced off the ground
-              const c = (dx * tmax * sx + (r + dy * tmax) * mus) / RG;
-              if (c > 0 && sunDepth(RG, c, ds)) {
+    // NT bands of the sphere's height, narrower near the horizon (x |x|):
+    // in twilight the light comes from the lit air low on the horizon, and
+    // 8 even bands, the nearest 3.6 degrees off, missed most of it (the sky
+    // of nautical twilight came out 3 to 5 times too dark). Each band counts
+    // by its share of the sphere (wa).
+    const NT = 16, NP = 4, NS = 14, n = NT * NP;
+    const band = k => { const x = -1 + 2 * k / NT; return x * Math.abs(x); };
+    const L2 = new Float64Array(NW), F = new Float64Array(NW), G = new Float64Array(NW), ds = [0, 0, 0];
+    const U = new Float64Array(NW);                // the same, from above only, times the cosine
+    const once = new Float64Array(NMU * NH * NW), prev = new Float64Array(NMU * NH * NW);
+    const upOnce = new Float64Array(NMU * NH * NW), series = new Float64Array(NMU * NH * NW);
+    const all = new Float64Array(NMU * NH * NW), upAll = new Float64Array(NMU * NH * NW);
+    // The first table's light at height h and sun cosine mus, read as the
+    // shader reads it (multiScatter): bilinear, clamped. Into here, by wavelength.
+    const here = new Float64Array(NW);
+    const readPrev = (h, mus) => {
+      const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+      const y = Math.sqrt(Math.min(1, Math.max(0, h / (RT - RG)))) * (NH - 1);
+      const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
+      const k00 = (j0 * NMU + i0) * NW, k01 = k00 + NW, k10 = k00 + NMU * NW, k11 = k10 + NW;
+      const w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy;
+      for (let w = 0; w < NW; w++) here[w] = prev[k00 + w] * w00 + prev[k01 + w] * w01 + prev[k10 + w] * w10 + prev[k11 + w] * w11;
+    };
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = 0; j < NH; j++) {
+        const r = RG + Math.min(Math.max((RT - RG) * (j / (NH - 1)) ** 2, 0.01), RT - RG - 0.01);
+        for (let i = 0; i < NMU; i++) {
+          const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), sx = Math.sqrt(1 - mus * mus);
+          // The series is right within 2 % while the sun stands higher than
+          // 17 degrees: there the second gathering is left out, and it is
+          // blended in down to 9 degrees.
+          const order = Math.min(1, Math.max(0, (0.3 - mus) / 0.15));
+          if (pass === 1 && order === 0) continue;
+          L2.fill(0); F.fill(0); G.fill(0); U.fill(0);
+          for (let a = 0; a < NT; a++) {
+            const dy = band(a + 0.5), st = Math.sqrt(1 - dy * dy), wa = (band(a + 1) - band(a)) * NT / 2;
+            const up = Math.max(dy, 0);
+            for (let b = 0; b < NP; b++) {           // half the sphere; the rest mirrors it
+              const phi = Math.PI * (b + 0.5) / NP, dx = st * Math.cos(phi), dz = st * Math.sin(phi);
+              const bq = r * dy, dg = bq * bq - (r * r - RG * RG);
+              const hit = dy < 0 && dg >= 0;
+              const tmax = hit ? -bq - Math.sqrt(dg) : -bq + Math.sqrt(bq * bq - (r * r - RT * RT));
+              let o0 = 0, o1 = 0, o2 = 0, last = 0;
+              for (let s = 0; s < NS; s++) {
+                const f = (s + 1) / NS, t1 = tmax * f * f, dt = t1 - last, t = last + 0.5 * dt;
+                last = t1;
+                const px = dx * t, py = r + dy * t, pz = dz * t, rr = Math.hypot(px, py, pz);
+                const h = Math.max(0, rr - RG), cs = (px * sx + py * mus) / rr;
+                const dR = Math.exp(-h / HR) * dt, dM = Math.exp(-h / HM) * dt;
+                const dO = Math.max(0, 1 - Math.abs(h - 25) / 15) * dt;
+                o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
+                const lit = pass === 0 && sunDepth(rr, cs, ds);
+                if (pass === 1) readPrev(h, cs);
                 for (let w = 0; w < NW; w++) {
-                  L2[w] += Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
-                         * c * ALBEDO / Math.PI;
+                  const sc = BR[w] * dR + bM * dM;
+                  const tr = wa * Math.exp(-(BR[w] * o0 + bMe * o1 + BO[w] * o2)) * sc;
+                  if (pass === 0) {
+                    F[w] += tr;
+                    if (lit) {
+                      const v = wa * Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
+                              * sc / (4 * Math.PI);
+                      L2[w] += v;
+                      U[w] += v * up;
+                    }
+                  } else {
+                    G[w] += tr * here[w];
+                    U[w] += tr * here[w] * up;
+                  }
+                }
+                o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
+              }
+              if (hit && pass === 0) {               // sunlight bounced off the ground
+                const c = (dx * tmax * sx + (r + dy * tmax) * mus) / RG;
+                if (c > 0 && sunDepth(RG, c, ds)) {
+                  for (let w = 0; w < NW; w++) {
+                    L2[w] += wa * Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
+                           * c * ALBEDO / Math.PI;
+                  }
                 }
               }
             }
           }
+          for (let w = 0; w < NW; w++) {
+            const k = (j * NMU + i) * NW + w;
+            if (pass === 0) {
+              series[k] = 1 / (1 - Math.min(F[w] / n, 0.95));
+              once[k] = L2[w] / n;
+              upOnce[k] = U[w] / n;
+              prev[k] = once[k] * series[k];
+            } else {
+              all[k] = prev[k] + order * (once[k] + G[w] / n - prev[k]);
+              upAll[k] = upOnce[k] * series[k] + order * (upOnce[k] + U[w] / n - upOnce[k] * series[k]);
+            }
+          }
           yield;
         }
+      }
+      if (pass === 0) {
+        all.set(prev);
+        for (let k = 0; k < upAll.length; k++) upAll[k] = upOnce[k] * series[k];
+      }
+    }
+    // The clouds' table: by day the mean light; from 6 degrees down to -3
+    // the light from above, in the colour it has relative to the mean light
+    // at a high sun (IDAY, at the same height), as bright as the mean light.
+    const IDAY = Math.round((0.5 - MS_MU_MIN) / (1 - MS_MU_MIN) * (NMU - 1));
+    const lum = (a, k) => { let y = 0; for (let w = 0; w < NW; w++) y += WY[w] * a[k + w]; return y; };
+    const c = new Float64Array(NW);
+    for (let j = 0; j < NH; j++) {
+      const ref = (j * NMU + IDAY) * NW;
+      for (let i = 0; i < NMU; i++) {
+        const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), k = (j * NMU + i) * NW;
+        const cw = Math.min(1, Math.max(0, (0.1 - mus) / 0.15));
+        for (let w = 0; w < NW; w++) c[w] = upAll[k + w] * all[ref + w] / Math.max(upAll[ref + w], 1e-30);
+        const y = lum(c, 0), scale = y > 0 ? lum(all, k) / y : 0;
         for (let w = 0; w < NW; w++) {
-          const n = NT * NP;
-          msData[(((w >> 2) * NH + j) * NMU + i) * 4 + (w & 3)] = (L2[w] / n) / (1 - Math.min(F[w] / n, 0.95));
+          msData[msIndex(j, i, w)] = all[k + w];
+          msData[cloudIndex(j, i, w)] = all[k + w] + cw * (c[w] * scale - all[k + w]);
         }
       }
     }
@@ -2863,10 +2998,8 @@ const SkySound = (() => {
   //   and black sea at night is not lifted into noise;
   // - white: it stops down so that the brightest HIGH_SHARE of the picture
   //   ends at WHITE in daylight, and DIM stops lower for each stop that
-  //   they are dimmer: the brightest parts of a dim view are not white
-  //   either, and dusk shows darker than day (from the side away from the
-  //   sun, the sky at sunset is the brightest part of the view: without
-  //   this it would show brighter than the day's);
+  //   they are dimmer: the brightest parts of a dim view (the moonlit
+  //   clouds of a night) are not white either;
   // - it takes the lesser; but not less than a floor, which lets the
   //   median go only DEEP of the way from the key down to the night's
   //   level (MID_GAP: in a night sky the median stands about half a stop
@@ -2881,7 +3014,20 @@ const SkySound = (() => {
   //   white point does, it ends DIM_BAND stops lower for each stop that
   //   they are dimmer than daylight's, so the band dims as dusk deepens
   //   (but by no more than DROP stops, so a faint glow stays), also late in
-  //   the twilight, when it no longer stands above white.
+  //   the twilight, when it no longer stands above white;
+  // - in twilight (the sun from DUSK[0] down to DUSK[1] degrees, and as
+  //   long as it lights the air, sunOn) the exposure above gives way to
+  //   one set by the median alone: the view is shown as the eye sees it,
+  //   not held down by its highlights. At sunset and in civil twilight the
+  //   sky is light and pastel and the band of glow its brightest part
+  //   (standing up to ABOVE stops above white, in the shoulder); then the
+  //   view darkens steadily into the night. The median is shown at
+  //   DUSK_SHOWN when it is at DUSK_MID (sunset: about the day's), and at
+  //   the night's level when it is at the night's, along a power DUSK_POW
+  //   of its distance from the night's: slowly at first, as the eye keeps
+  //   its colours through civil and nautical twilight. The median, not the
+  //   darker quarter: the sea and the clouds below darken sooner than the
+  //   sky, and a key on them brightened the sky again.
   function exposureFor(v) {
     const q = Float64Array.from(v).sort();
     const share = k => {
@@ -2893,7 +3039,16 @@ const SkySound = (() => {
     const key = KEY - EYE * low;
     const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
-    const exposure = Math.max(Math.min(key, white), floor);
+    const byDay = Math.max(Math.min(key, white), floor);
+    // Twilight's: the median's level shown, from the night's (nightMid
+    // shown at nightShown) up to DUSK_SHOWN at DUSK_MID.
+    const nightMid = NIGHT_LEVEL + MID_GAP, nightShown = KEY - EYE * NIGHT_LEVEL + nightMid;
+    const far = Math.max(0, (mid - nightMid) / (DUSK_MID - nightMid));
+    const shown = nightShown + (DUSK_SHOWN - nightShown) * far ** DUSK_POW;
+    const byDusk = Math.min(shown - mid, WHITE - high + ABOVE);
+    const x = Math.min(1, Math.max(0, (DUSK[0] - state.elev) / (DUSK[0] - DUSK[1])));
+    const dusk = x * x * (3 - 2 * x) * state.sunOn;
+    const exposure = byDay + (byDusk - byDay) * dusk;
     // The exposure, and the shoulder's stops above white and below it.
     // The top's drop is for the band of twilight: the sun below the
     // horizon but still lighting the air (not the moonlit clouds of a night,
@@ -3178,7 +3333,7 @@ const SkySound = (() => {
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 3 * NH, 0, gl.RGBA, gl.FLOAT, msData);
+        gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 6 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, w, h);
@@ -3271,8 +3426,9 @@ const SkySound = (() => {
       }
       [target, targetShoulder, targetDrop] = exposureFor(levels);
     };
-    // Meters the picture p; with wait, at once, else METER_LAG frames later (poll).
-    const meterPicture = (p, wait) => {
+    // Meters the picture p. The meter is read at once (when: 'now'),
+    // METER_LAG frames later ('later': poll), or by prime.
+    const meterPicture = (p, when) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.viewport(0, 0, METER[0], METER[1]);
       gl.useProgram(meter);
@@ -3280,8 +3436,8 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.useProgram(prog);
-      if (wait) readMeter();
-      else waiting = 0;
+      if (when === 'now') readMeter();
+      else if (when === 'later') waiting = 0;
     };
     const poll = () => {
       if (waiting === null || ++waiting < METER_LAG) return;
@@ -3323,6 +3479,8 @@ const SkySound = (() => {
     // read while the next is drawn.
     let shot = null, turn = 0, drawn = 0;
     const pictures = [null, null];
+    // What the first frame was drawn from when prime drew it (see there).
+    let primed = null;
     const bind = (unit, texture) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -3438,18 +3596,19 @@ const SkySound = (() => {
       altPast = v.alt;
       lookPast = look;
 
-      // Prime's probe ends here, before the canvas, with the program and the
-      // texture unit put back as the canvas's step leaves them.
-      if (probe) {
-        gl.useProgram(prog);
-        gl.activeTexture(gl.TEXTURE0);
-        return true;
-      }
-
-      // The first picture is metered at once (the only frame that waits for
-      // the GPU), and begun again at that exposure: it is not shown.
+      // The first picture is metered, and begun again at that exposure: it is
+      // not shown. Prime has drawn it before and read its meter; if what it
+      // is drawn from has not changed since, that reading stands. Else the
+      // meter is read at once: the only frame that waits for the GPU.
       if (logE === null) {
-        meterPicture(cur, true);
+        const from = [w, h, cam, v.fov, v.alt, v.cloud, v.look, state.sun, state.sunOn, state.moon, state.moonI,
+          state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, builtHaze, fine].join();
+        meterPicture(cur, probe || from === primed ? null : 'now');
+        if (probe) {
+          primed = from;
+          return true;
+        }
+        primed = null;
         logE = target;
         shoulder = targetShoulder;
         drop = targetDrop;
@@ -3458,7 +3617,7 @@ const SkySound = (() => {
         return true;
       }
       if (waiting === null && now - meteredAt >= METER_MS) {
-        meterPicture(cur, false);
+        meterPicture(cur, 'later');
         meteredAt = now;
       }
 
@@ -3500,15 +3659,26 @@ const SkySound = (() => {
     };
 
     // The first frame, drawn before it is asked for, as it will be drawn
-    // (render as a probe, which then leaves its state as it was), up to the
-    // canvas, and waited for: drivers that finish a program at its first
-    // draw do so during the loading, not while the first picture waits.
-    // The first frame starts afresh: it draws over all that the probe drew.
+    // (render as a probe, which then leaves its state as it was), and its
+    // meter read once the GPU has drawn it: so the first frame need not
+    // wait for the GPU. On drivers that finish a program at its first draw,
+    // this also gets that out of the way before the first frame.
     const prime = async () => {
-      const kept = [lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast];
+      const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn];
       const drew = render(true, performance.now(), true);
-      [lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast] = kept;
-      if (drew) await settle();              // else the canvas has no place on the page yet
+      [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
+      if (!drew) return;                     // the canvas has no place on the page yet
+      // And show, which only the second frame draws: into the meter's
+      // blocks (8 bits, as the canvas), without a pixel (the scissor).
+      gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
+      gl.useProgram(show);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, 0, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.useProgram(prog);
+      await settle();
+      readMeter();
     };
     await prime();
     done(1);
@@ -3528,6 +3698,11 @@ const SkySound = (() => {
   // Then the drawing stops; and nothing is drawn in a hidden tab, nor
   // before the loading has ended.
   let queued = false, changed = false, running = false, lastFrame = 0;
+  // The table of multiple scattering takes about a quarter of a second to
+  // build: while the haze slider moves it waits, and is built HAZE_WAIT ms
+  // after the last move (the first frame builds it at once).
+  const HAZE_WAIT = 250;
+  let seenHaze = null, hazeAt = -Infinity;
   function frame(now) {
     queued = false;
     if (document.hidden) {
@@ -3537,9 +3712,17 @@ const SkySound = (() => {
     const fresh = changed;
     changed = false;
     if (fresh) {
+      if (state.haze !== seenHaze) {
+        if (seenHaze !== null) hazeAt = now;
+        seenHaze = state.haze;
+      }
       if (render && builtHaze !== state.haze) {
-        finish(buildMultiScatter(state.haze));
-        builtHaze = state.haze;
+        if (now - hazeAt >= HAZE_WAIT) {
+          finish(buildMultiScatter(state.haze));
+          builtHaze = state.haze;
+        } else {
+          setTimeout(update, HAZE_WAIT - (now - hazeAt));
+        }
       }
       celestial();
       showLabels();
