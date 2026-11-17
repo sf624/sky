@@ -16,7 +16,7 @@ blocks. It loads no other file.
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. With `SHADOW_MAP` defined, the map of the clouds' shadow. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
@@ -167,7 +167,8 @@ which asks for one `requestAnimationFrame(frame)`.
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
-- calls the renderer;
+- calls the renderer, which draws the clouds' shadow map first when it
+  is out of date (see [The clouds' shadow](#the-clouds-shadow));
 - asks for another frame only if the renderer returned true.
 
 The renderer returns true while the aircraft flies, while its picture is
@@ -318,8 +319,8 @@ the moon, `addLight`:
 
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
-  (`depthToTop`) times the phase functions, times `direct`,
-  which the shadow of the clouds lowers near the sea;
+  (`depthToTop`) times the phase functions, times `direct`: the share of
+  the light that the clouds let through there (below);
 - light scattered many times: the multiple-scattering table times the
   local scattering coefficient, times the transmittance to the eye; and
   for the aerosol, which sends light on forwards, `MIE_LEAN` = 4 times the
@@ -339,6 +340,17 @@ round 8 the air was so clean that this light came through deep red, and
 a cut (`grazeCut`) removed light that passed lower than 1 km; with the
 real boundary layer the reference and the page agree without it (to 2 %
 in the planet's shadow), so it is gone.
+
+**Shafts.** Below the tops of the clouds, `direct` comes from the clouds'
+shadow map (`cloudShadow`), sampled more finely than the march: `SHAFTS`
+= 16 samples over the part of the ray below `CT` (`ca` to `cb`), denser
+near the eye (`f * f`), at new places each frame (`ign`). Each step of the
+march takes the mean of `exp(-tau)` over the samples that fall in it,
+weighed by the air's scattering there (Rayleigh at 550 nm and Mie), or
+reads the map once at its middle if none does. Lit and shaded air
+alternate along the ray: shafts of light between the clouds, and the
+clouds' shadows in the haze. Above the tops `direct` is 1. Without low
+clouds, or without a light, nothing is sampled.
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
@@ -381,12 +393,15 @@ that reaches a point, to be times the scattering coefficient there:
 A second table holds the sky's light on the low clouds (`cloudSky`): as
 bright as the mean light, but in the colour of the light from above on a
 level surface (gathered over the upper half of the sphere times the
-cosine, all orders), relative to that of the mean light with the sun at
-30 degrees at the same height. It is the mean light itself while the sun
-stands higher than 6 degrees, and fully the light from above from -3
-degrees down. The mean light holds the glow on the horizon and the dark
-sea below: in deep twilight the clouds came out mauve and brown under a
-blue sky.
+cosine, all orders). It is the mean light itself while the sun stands
+higher than 6 degrees, and fully the light from above from -3 degrees
+down. By day the mean light stands for all that lights a cloud besides
+the sun, the sunlit cloud and sea around it among them; once the sun is
+down only the sky is left. The colour was taken relative to that of the
+mean light with the sun at 30 degrees: it kept the day's warm share into
+the twilight, and a deck after sunset came out grey-brown where
+photographs show it blue-grey. With the mean light alone, the clouds
+were mauve and brown under a blue sky.
 
 A third and fourth hold the mean light's lean (`msLean`): the light
 gathered times the direction it comes from (pass 0 and the computed
@@ -482,10 +497,13 @@ as a sum:
   cube of `top`), thicker where the map is higher. `top` follows G: each
   heap of the map is a dome 0.5 to 1.2 km over a deck between heaps and
   up to 1.9 km over its base on the highest heaps; the tallest (G over
-  0.55) are towers, a kilometre higher still. A tower stands on the whole
-  middle of its heap (G from 0.48 to 0.62), 70 to 100 % as high as the
-  heap's G says: when its top rose with G across its width, towers were
-  cones, like mountains. So a field of cloud is a
+  0.55) are towers, a kilometre higher still. A tower rises over its
+  heap as a dome, `t (2 - t)` of its height with `t` going from 0 to 1 as G
+  goes from 0.46 to 0.76, 70 to 100 % as high as the heap's G says: when
+  its top rose with G in a straight line, towers were cones, like
+  mountains; on the whole middle of the heap at once (G from 0.48 to
+  0.62), they were columns with flat tops and upright walls, like
+  tombstones. So a field of cloud is a
   field of domes of many sizes even where the cover is whole; before,
   the top was one height wherever the cover was whole, and the noise of
   the tile made all the forms: one size of lumps with pits in them, like
@@ -499,15 +517,38 @@ as a sum:
 - plus the noise of the tile (`uNoise`, one tile per `BASE_KM` = 8 km),
   read at a depth that drifts from place to place (`far`) so that no two
   tiles look alike. Worley values are rounded into domes (`v (2 - v)`).
-  Its billows (`lump`: Worley cells of 2 km, 1 km and 500 m, weighed
-  0.9, 0.7 and 0.35, the big ones most: with the 500 m ones first, the
-  tops from above were a carpet of lumps of one size, where photographs
-  show smooth billows of a kilometre or more) are as large as the heap is
-  high (`0.7 + 1.3 G`), bulge out more than they dent in (dents count
-  0.6, by a smooth curve: a kink at nought showed as ridges) and fade to
-  30 % deep in a body (over the field's first 0.6 inside), so that they
-  shape its outside and cannot punch holes through it: with full
-  billows everywhere, the forms from 4 km had dark pits.
+  Its billows (`lump`: Worley cells of 2 km, 1 km and 500 m) weigh 0.9,
+  0.7 and 0.35 on a sheet, the big ones most (with the 500 m ones first,
+  the tops of a deck from above were a carpet of lumps of one size, where
+  photographs show smooth billows of a kilometre or more), and 0.35, 0.75
+  and 0.9 on heaps that stand alone and on walls (with the big ones first
+  there, heaps were smooth domes, like balls of putty; in photographs a
+  heap is turrets on turrets, a third of its width and less). They are as
+  large as the heap is high (`0.7 + 1.3 G`), bulge out more than they
+  dent in (dents count 0.6, by a smooth curve: a kink at nought showed as
+  ridges) and fade to 30 % deep in a body (over the first 0.6 of the
+  field inside, as `steep` scales it), so that they shape its outside and
+  cannot punch holes through it: with full billows everywhere, the forms
+  from 4 km had dark pits.
+- **`steep`**: the billows, and the fine noise below, are scaled by how
+  steep the heap's field is where its surface over that place stands
+  (at `yt = top rise^(1/3)`, `rise` = `thick + swell`), against the top
+  of a whole dome (where it rises by `4.8 / top` per unit of `y`): about
+  1 over a top, up to 6 on a wall. So they move the surface by as many
+  metres on a steep wall as on a top. Added to the field alone, they moved
+  the walls of towers and big heaps, where the field is four to eight
+  times as steep, by a few metres, and those were smooth pillars. The
+  slope across comes from the slope of the weather map (`uSlope`, a
+  texture made from it at start: R and G per km along x and z), through
+  the derivatives of `thick` and `top`. Taken at the place's own height,
+  the slope grew with the height over a wall's foot (the field goes with
+  `y` cubed), and billows scaled by it stood above the walls as spikes.
+  It costs 2 ms of the frame at 1440p among the tops (a register-heavy
+  part of every read of the field): reads that sum a depth over long steps
+  (the shadow map, the depth overhead, the light's later steps and far
+  shadows, the hollows, the sky's reach, `coarse`) leave it at 1, which
+  saves another 2 ms; they smooth the billows over far more than a wall's
+  anyway.
   Where a pixel is finer than 16 m, the reads that see the fine noise (of
   the march and of the normals) move by up to half a texel each frame
   (`shake`): the GPU's
@@ -520,7 +561,8 @@ as a sum:
   march shakes them where a pixel is finer than 1 m (to 16 m, it cost
   2.4 ms more at 2 km of altitude).
   `lump` says how far a place stands out of the billows; `body` how thick
-  the cloud is there; `q.w` how rough.
+  the cloud is there; `q.w` how rough; `thin` how near the edge of its
+  heap's foot (`rise` under 0.4; nought on a sheet).
 
 **The sheet.** With much cloud the heaps stand on a sheet
 (stratocumulus): from below a closed deck, from above cells. How much
@@ -565,7 +607,8 @@ smaller billows still, each only where a pixel is fine enough to show it
 the tile). The weights fall by about 0.26 for each eighth of the size.
 Without them, clouds 0.3 to 3 km away had nothing smaller than 20 m, a
 texture blown up 20 to 60 times: soft mounds. `cloudField` adds it near the
-surface only (`min(f, base) > -0.25 * RELIEF`), more strongly on thin
+surface only (`min(f, base) > -0.25 * RELIEF * steep`), scaled by `steep`
+on the sides and tops as the billows are, more strongly on thin
 cloud:
 
 - on the sides and tops; not on the base, which is flat and shows its
@@ -584,8 +627,16 @@ clouds. The edge (`edge`, from `cloudField`) is 10 m deep on hard,
 growing turrets and `EDGE` = 30 m on older, softer cloud; the extinction
 rises with the square of the depth there, so the outer part is a thin,
 translucent fringe. Billows smaller than the edge melt into it: with
-edges of 25 to 60 m every near top looked like cotton wool. Where the field is smoothed over a pixel wider than
-the edge, the smoothing sets the width and the rise is linear.
+edges of 25 to 60 m every near top looked like cotton wool. Thin cloud
+(`thin`: the edge of a heap's foot, and the fragments beside it) frays: its
+edge is up to 0.4 of the field deep, some 100 m on a small heap's side,
+from 4 to 10 km away on (nearer, a fringe that deep is many pixels wide,
+the march and the light crossed it in many steps, 18 ms of the frame among
+the heaps at 2 km, and near heaps in photographs have crisp edges). From
+11 km, scattered cumulus were cut out of the sea with hard outlines; in
+photographs their edges are thin and ragged. Where the field is
+smoothed over a pixel wider than the edge, the smoothing sets the width
+and the rise is linear.
 
 **The march** (`clouds`) runs from where the ray enters the shell (`ta`) to
 where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
@@ -739,6 +790,17 @@ found between the last two samples. For each:
   `crease` dims the light of a crease by up to `CREASE` = 25 %, and `open`
   takes half its value from the normal's tilt towards the sky. Together
   they give each billow a lit top and a grey underside, as cotton wool.
+- `lean`: with the sun low (`low`), the sky's light comes more from the
+  sun's side, the glow, than from the other. `main` adds to a face twice
+  the lean of the mean light towards the sun's side (`msLean`), times how
+  far the whole billow's normal faces that way. This is a first moment: a
+  face towards the glow gets 1.4 times the mean at +2 degrees, 1.7 at -4
+  and 2.0 at -6, as a Monte Carlo study found. A face turned away gets
+  less, the blue of the sky above, but at least a quarter, where the first
+  moment would leave no red. It does not apply through a deck, nor by
+  day, where the sky's gains were set with the mean light alone. The
+  sky's light was the same on every side: at dusk the shade of a heap was
+  as warm as its top.
 - `hollow` dims the hollows between those billows (where `mid`, what the
   fine noise smoothed over a few first steps adds at the surface, is
   negative) towards 75 %, and lifts their tops towards 110 %, by a smooth
@@ -834,19 +896,88 @@ found between the last two samples. For each:
 
 `clouds` returns what gets through (`Tc`), the light per unit of sunlight
 scattered once (`sOne`) and many times (`sMany`), per unit of skylight
-(`sAmb`), and the mean distance it comes from (`tBar`). `main` turns them
+(`sAmb`; `sLean`: its part on faces towards the sun's side), and the mean distance it comes from (`tBar`). `main` turns them
 into the spectrum `C` at `tBar`: sunlight through the air above (and
 through the cirrus, `cirrusShadow`), plus skylight from the
 table of the sky's light on the clouds (`cloudSky`, see
 [The air](#the-air)), plus airglow.
 
-**Shadows.** `shadowDepth` sums the clouds' depth towards the light from a
-point under their tops (ten samples, denser low down). `main` uses it for
-the sea's shadow and the glare. Where the ray meets no sea, the air near
-the sea is dimmed by the cloud amount alone (`shade`). The light of the
-sky in the air below 2 km is dimmed by the cloud amount too, to `UNDER` =
-30 % under a full deck: else the air under a deck, a hundred km of it
-towards the horizon, glowed as a pale-blue band.
+The clouds' own light is worked out inside them, as above. Everything
+outside them (the air, the sea, the glare) reads their shadow from one
+map: the next section.
+
+## The clouds' shadow
+
+One map holds, for everything outside the clouds, how deep in their shadow
+a point is: the optical depth of the clouds towards the light (`uLight`:
+the sun, or the moon at night). It is drawn by `fs` itself, compiled a
+second time with `SHADOW_MAP` defined (`shadowProg` in `makeSky`), into a
+`SHADOW` = 1024 texel square texture on unit 14 (`uShadow`). After the
+opacity shadow maps of Kim and Neumann (2001).
+
+- **The plane.** The map lies on a plane across the light, through the
+  eye, with axes `shX` and `shY` (`shadowAxes`). Each texel is a line of
+  light. The plane is warped, `x / (SHADOW_K + |x|)` per axis with
+  `SHADOW_K` = 40 km: a texel is 78 m wide at the eye, 310 m at 40 km,
+  1.25 km at 120 km, and the map's edge is infinitely far. So the map has no
+  edge to fade at: far shadows blur into a mean shade. Across the light, a
+  low sun's long shadows take few texels: a shadow 100 km long on the sea
+  under a sun 3 degrees high is 5 km long on the plane.
+- **A texel** (`shadowTexel`) marches its line from where it rises
+  through the base `CB` (or its lowest point, if that is higher) to the
+  tops `CT`, in equal steps of `cloudDensity` without the fine noise:
+  about `SHADOW_DS` = 0.2 km each, as many as the light's height asks for,
+  between 24 and 96. The field is smoothed to half a step or to the
+  texel, whichever is larger. Under a sun on the horizon a line climbs
+  the shell over some 240 km; its steps are then 2.5 km long, and the
+  shadows as smooth along the light.
+- **Heights.** Each texel keeps the depth from four heights along its line
+  to the light (`SHADOW_H`: 0.6, 1.3, 2.3 and 3.5 km): all of it below the
+  base, less higher up. It is 0 at `CT`. `cloudShadow(p)` takes the depth
+  at `p`'s height, linearly between them. A line that passes its lowest
+  point in the air (a sun below the horizon of a point) is read as if it
+  only rose: the clouds on its way down are left out.
+- **Storage**: `tau / (tau + SHADOW_ENC)`, `SHADOW_ENC` = 4, in RGBA16F
+  where the GPU can draw to half floats, else RGBA8: 8 bits keep thin
+  shadows and deep ones apart. It is read through the GPU's filter.
+- **When it is drawn.** Before a frame whose light, altitude or cloud
+  amount has changed, and once the aircraft has flown `SHADOW_STALE` =
+  0.5 km since it was last drawn: every 2 s at 900 km/h, every 0.6 s at
+  3000. Drawn again, the map is centred on the eye anew; its texels near
+  the eye are fine for a few km. In between, the frames read it where each point was when it
+  was drawn (`uShadowShift`, wrapped like the way flown), so the shadows
+  stay fixed to the clouds. At rest it is drawn once. Without low clouds
+  or without a light it is not drawn, and `cloudShadow` returns 0.
+
+What reads it:
+
+- the air: `direct` in the march (see [Shafts](#the-air)). The cirrus is
+  not in the map: as before, its shadow where the ray meets the sea
+  (`ciShade`) dims the air below 2 km;
+- the sea: the shadow passed to `addSea`, with the cirrus's
+  (`cirrusShadow`). The sea reads it through `seaShadow`, with soft
+  edges: the light `exp(-tau)` is averaged over `SHADOW_TAPS` = 8 points
+  across the light, out to a radius of `SHADOW_PEN` (0.035) times the way
+  along the light from clouds `SHADOW_OCC` = 1.5 km high (at most 0.75 km),
+  spaced evenly out from the middle and turned by a new angle each frame
+  (`ign`), and only then made a depth again. That is about 60 m under a
+  high sun and 500 m under a sun 6 degrees high; on the sea the edge is
+  longer along the light by 1 / sin of its height. The sun is a disc, and
+  the light through a cloud's thin edge is spread around it by the
+  droplets' forward scattering: a real shadow on the sea fades over tens to
+  hundreds of metres. Read once, the map's contour was the edge of the
+  glitter, which shows white down to a hundredth of its light: the glitter
+  was cut out along it, hard, and with a low sun into blocks (one texel is
+  drawn out along the light on the sea). Points spaced evenly over a disc
+  left round blots; spaced evenly out from the middle, they weigh it more;
+- the glare: the clouds towards the sun dim it (`cloudShadow(o)`).
+
+The clouds' own light march (`lightDepth`) does not read it: it sees the
+cloud around each sample in finer detail than the map can hold.
+
+The light of the sky in the air below 2 km is dimmed by the cloud amount,
+to `UNDER` = 30 % under a full deck: else the air under a deck, a hundred
+km of it towards the horizon, glowed as a pale-blue band.
 
 ## The sea
 
@@ -895,8 +1026,10 @@ towards the horizon, glowed as a pale-blue band.
   sharp from near, averaged from far.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
-depth of the clouds (`shadowDepth`) and of the cirrus (`cirrusShadow`)
-towards the light.
+depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
+(`cirrusShadow`) towards the light. It hides the glitter and the direct
+light on the water; the light that a cloud lets through diffusely
+(`soft`) falls more slowly.
 
 ## Cirrus
 
@@ -960,7 +1093,8 @@ all dimmed and reddened by the air:
   fixed to the screen.
 
 **Glare**: a glow of a few degrees around the sun, as strayed
-light in a lens, dimmed by the clouds and the cirrus towards the sun.
+light in a lens, dimmed by the clouds (the shadow map at the eye) and the
+cirrus towards the sun.
 
 ## Exposure and the tone curve
 
@@ -1263,9 +1397,13 @@ All are made during the loading, in `makeSky`:
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: cirrus |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
+| `uSlope` | 13 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-and `meter` read unit 6.
+and `meter` read unit 6. Units 10 to 12 hold the first stage of the
+clouds' light (see Low clouds). Unit 14 holds the clouds' shadow map
+(`uShadow`, `SHADOW` texels square, RGBA16F or RGBA8, linear), drawn
+while the page runs (see [The clouds' shadow](#the-clouds-shadow)).
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
