@@ -552,6 +552,7 @@ uniform float uZ;
 uniform vec2 uSize;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outAge;
+layout(location = 2) out vec4 outPhase;
 
 // An integer hash: Wellons' lowbias32, as in the noise shader.
 uint ihash(uint x) {
@@ -702,6 +703,25 @@ vec4 iceHooked(float a, float th, float v, float hook, float ab, float reach) {
   return vec4(1.015 * reach * D, cos(ang), sin(ang));
 }
 
+// The strands' phase (see icePhase): their phasor summed over the ice (xy)
+// and the ice summed (z), each kind weighed by iceKind, as the scene
+// mostly mixes them.
+vec3 icePh = vec3(0.0);
+float iceKind = 0.0;
+// Adds ice val whose strands lie at whole numbers of v, sp km apart: as a
+// phasor of v, so that the scene can draw hairs along them (ciHair),
+// weighed by the square of the ice, so that where trails of several ages
+// or heads meet, the densest leads (summed evenly, the phase wavered from
+// texel to texel and the hairs drawn along it stood as worms). Where
+// they lie closer than four texels, every m-th (m not whole: the phase runs
+// on smoothly), so that the phase never changes by more than a quarter of
+// a turn from a texel to the next.
+void icePhase(float val, float v, float sp) {
+  float m = max(1.0, 4.0 * ICE_KM / uSize.x / sp), th = 6.2831853 * v / m, w = iceKind * val;
+  w *= w;
+  icePh += vec3(w * cos(th), w * sin(th), w);
+}
+
 // The strands of a trail: its ice falls in streaks along it. u: the place
 // across the trail in units of its half width there, which grows with age,
 // so that the strands fan out; al: the place along it; n: strands to a
@@ -709,7 +729,7 @@ vec4 iceHooked(float a, float th, float v, float hook, float ab, float reach) {
 // life that the strand there lives: the strands end one by one, the outer
 // ones first, so that a trail tapers and frays out instead of ending
 // round.
-vec2 iceStrands(float u, float a, float al, float n, uint seed) {
+vec2 iceStrands(float u, float a, float al, float n, uint seed, out float vs) {
   float v = u * n;
   float life = (0.4 + 0.75 * iceValue(vec2(0.8 * v, 0.5), seed + 4u)) * (1.0 - 0.12 * min(u * u, 5.0));
   // The strands wander from side to side, each group of two or three its
@@ -719,7 +739,11 @@ vec2 iceStrands(float u, float a, float al, float n, uint seed) {
   float wob = 2.0 * iceValue(vec2(0.37 * v + 3.0, 2.5 * al), seed + 6u) - 1.0;
   float curl = 2.0 * iceValue(vec2(0.6 * v, 7.5), seed + 8u) - 1.0;
   float end = smoothstep(0.35 * life, life, a);
-  v += (0.6 + 0.6 * a) * wob + 2.5 * curl * end * end;
+  v += (0.6 + 0.6 * a) * wob;
+  // (The hairs follow the strands without their curl: drawn crisp along
+  // it, the curls of the thin tails stood as a net of loops.)
+  vs = v;
+  v += 2.5 * curl * end * end;
   float band = iceValue(vec2(v, al), seed);
   float thr = 1.0 - abs(2.0 * iceValue(vec2(2.7 * v, 3.0 * al) + 5.0, seed + 2u) - 1.0);
   thr *= thr;
@@ -796,7 +820,8 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     if (dot(pn, pn) > 12.25 * sig * sig) continue;
     float str = 3.0 * (0.15 + r2.y * r2.y) * mix(0.5, 0.2 + 1.2 * smoothstep(-0.3, 0.3, group), gate) * far;
     float u = dot(pn, vec2(-eh.y, eh.x)) / sig;
-    vec2 st = iceStrands(u, a, tr * 4.5 + 31.0 * r.x, fan ? 6.0 + 6.0 * r2.z : 3.0 + 6.0 * r2.w, seed + 201u);
+    float ns = fan ? 6.0 + 6.0 * r2.z : 3.0 + 6.0 * r2.w, vs;
+    vec2 st = iceStrands(u, a, tr * 4.5 + 31.0 * r.x, ns, seed + 201u, vs);
     float life = (0.25 + 0.75 * r.w) * st.y;
     float keep = 1.0 - smoothstep(0.45 * life, life, a);
     float head = r2.w > 0.5 ? 1.0 + 2.0 * (r2.w - 0.5) * exp(-a / 0.06) : smoothstep(0.0, 0.12, a - 0.1 * r.w);
@@ -808,7 +833,9 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
       lump = 0.65 * iceValue(pn / (0.3 * r0) + 17.0 * r.xy, seed + 107u) + 0.35 * iceValue(pn / (0.1 * r0) + 5.0 * r.yx, seed + 109u);
       lump = mix(1.0, 0.2 + 1.6 * lump * lump, exp(-a / 0.12));
     }
-    sum += str * head * keep * fib * lump * pow(r0 / sig, 0.6) * icePuff(rel, seg, sig * sig);
+    float val = str * head * keep * fib * lump * pow(r0 / sig, 0.6) * icePuff(rel, seg, sig * sig);
+    sum += val;
+    icePhase(val, vs, sig / ns);
   }
   return sum;
 }
@@ -863,7 +890,9 @@ float iceRows(vec2 p0, vec2 p1, float a0, float a, float reach, uint seed) {
       float fn = iceValue(yf, seed + 301u);
       float life = (0.4 + 0.6 * rr.w) * (0.6 + 0.8 * fn);
       float keep = 1.0 - smoothstep(0.4 * life, life, a);
-      sum += str * keep * (0.2 + 1.6 * fn * fn) * (r0 / sig) * icePuff(rel, q1 - q0, sig * sig);
+      float val = str * keep * (0.2 + 1.6 * fn * fn) * (r0 / sig) * icePuff(rel, q1 - q0, sig * sig);
+      sum += val;
+      icePhase(val, yf.x, 0.03 + 0.04 * r.z);
     }
   }
   return sum;
@@ -904,7 +933,9 @@ float iceFlock(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
   // little cloud.
   float lump = 0.65 * iceValue(pn / (0.35 * r0) + 17.0 * r.xy, seed + 107u) + 0.35 * iceValue(pn / (0.12 * r0) + 5.0 * r.yx, seed + 109u);
   lump = 0.1 + 2.4 * lump * lump * lump;
-  return 2.5 * str * (0.3 + 1.4 * r.z * r.z) * keep * fib * lump * (r0 * r0 / sig2) * icePuff(rel, q1 - q0, sig2);
+  float val = 2.5 * str * (0.3 + 1.4 * r.z * r.z) * keep * fib * lump * (r0 * r0 / sig2) * icePuff(rel, q1 - q0, sig2);
+  icePhase(val, yf.x, 0.04 + 0.08 * r2.w);
+  return val;
 }
 
 // The four fields of ice at x (km in the tile). The shear runs one way
@@ -933,9 +964,16 @@ vec4 iceField(vec2 x, uint seed, out vec4 ages) {
     vec2 D1 = iceDrift(a, ICE_TH, ICE_VEER, ICE_REACH);
     vec2 e = vec2(cos(ICE_TH + ICE_VEER * a), sin(ICE_TH + ICE_VEER * a));
     // Each kind falls at its own speed: its trails are as many times as long.
-    vec4 f = DA * vec4(icePlumes(p0, p, a0, a, 0.6, seed, 9.0, 1.25, 1.0), iceRows(p0, p, a0, a, ICE_REACH, seed),
-                       iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a, e, seed),
-                       2.5 * icePlumes(p0, p, a0, a, 1.1, seed + 50u, 4.0, 1.4, 0.0));
+    // (One at a time, each with its weight for the strands' phase.)
+    vec4 f;
+    iceKind = DA;
+    f.x = icePlumes(p0, p, a0, a, 0.6, seed, 9.0, 1.25, 1.0);
+    f.y = iceRows(p0, p, a0, a, ICE_REACH, seed);
+    iceKind = 0.5 * DA;
+    f.z = iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a, e, seed);
+    iceKind = 2.5 * DA;
+    f.w = 2.5 * icePlumes(p0, p, a0, a, 1.1, seed + 50u, 4.0, 1.4, 0.0);
+    f *= DA;
     sum += f;
     ages += a * f;
     p0 = p;
@@ -1016,6 +1054,7 @@ void main() {
     vec4 ag, f = iceField(uv * ICE_KM, 1000u, ag);
     outColor = sqrt(clamp(f / ICE_STORE, 0.0, 1.0));
     outAge = iceAge(f, ag);
+    outPhase = vec4(icePh.z > 1e-6 ? 0.5 + 0.5 * icePh.xy / icePh.z : vec2(0.5), 0.0, 1.0);
   } else {
     outColor = ciMap(uv);
   }
@@ -2316,6 +2355,22 @@ vec2 ciTile(vec2 uv, int k, out mat2 J) {
   return tc - floor(tc);
 }
 
+// Deck k's tile at x on the map (km): its coordinates there (ciTile), and
+// J, them over km on the map. The last place asked about is kept: the
+// hairs, the ice and its age are often read at the same place.
+vec3 ciPlaceKey = vec3(1e9);
+vec2 ciPlaceTc = vec2(0.0);
+mat2 ciPlaceJ = mat2(0.0);
+vec2 ciPlace(vec2 x, int k, out mat2 J) {
+  vec3 key = vec3(x, float(k));
+  if (key != ciPlaceKey) {
+    ciPlaceTc = ciTile(x / WEATHER_KM, k, ciPlaceJ);
+    ciPlaceKey = key;
+  }
+  J = ciPlaceJ;
+  return ciPlaceTc;
+}
+
 // The veil's thickness at tc (tile units of deck k's frame, where x runs
 // with the wind), seen over a footprint of gl: noise at eight sizes, as
 // the exponent of the depth, so that the depth spreads as cloud depths do
@@ -2343,120 +2398,103 @@ float ciVeilNoise(vec2 tc, float gl, uint seed) {
 }
 
 // ---- The hairs ----
-// Cirrus is made of fine, nearly parallel filaments: combed hair, with
-// bright cores and thin dark gaps, which curve together along the trails.
-// The ice's 10 m texels hold only its coarser strands, and magnified from
+// Cirrus is made of fine filaments: streaks of falling ice that run along
+// the trails and curve with them, so that neighbouring hairs bend
+// together, fan out from a head and sweep on in a tail, braid and part.
+// The ice's 10 m texels hold its strands only softly, and magnified from
 // near the shell they stood as rows of beads; so the scene draws the hairs
-// itself, as explicit strands at the place it reads: in each of three
-// octaves (CI_HAIR: the spacing of the hairs, km) the plane is cut into
-// slots across the hairs' way, each slot holding at most one hair at a
-// random place across it, of a random width (0.08 to 0.28 of the spacing
-// each side) and brightness, in pieces of some 60 spacings along it (30
-// for the finest) that
-// start and end with a taper. A hair is a Gaussian across, blurred over
-// the footprint across it in closed form (its width grows and its peak
-// falls, the area kept), so that it never aliases: it fades into its mean
-// instead.
-// The hairs run along CI_WAYS fixed ways that repeat with the tile (whole-
-// number steps across it, such as (2, 1) or (1, 4)): a way turned to
-// follow the ice would shear the hairs apart far from its centre. Where
-// the local way lies between two of them, each piece of hair belongs to one
-// or the other by chance, in the share of the angle: no hair is faded, and
-// none crosses its twin. The hairs of a way wave together (combed) by some
-// 130 m over 3 km and 30 m over 0.8 km.
-const int CI_WAYS = 16;
-const vec2 CI_WAY[CI_WAYS + 1] = vec2[CI_WAYS + 1](vec2(1.0, 0.0), vec2(4.0, 1.0), vec2(2.0, 1.0), vec2(3.0, 2.0),
-  vec2(1.0, 1.0), vec2(2.0, 3.0), vec2(1.0, 2.0), vec2(1.0, 4.0), vec2(0.0, 1.0), vec2(-1.0, 4.0), vec2(-1.0, 2.0),
-  vec2(-2.0, 3.0), vec2(-1.0, 1.0), vec2(-3.0, 2.0), vec2(-2.0, 1.0), vec2(-4.0, 1.0), vec2(-1.0, 0.0));
-const vec3 CI_HAIR = vec3(0.02, 0.06, 0.18);
-// The hairs' mean in a slot (0.7 bright, 0.85 present, 0.6 of a piece,
-// sqrt(pi) 0.18 wide), and the light between them.
-const float CI_HAIR_MEAN = 0.114, CI_HAIR_BASE = 0.25;
+// itself, at the place it reads, along the strands the ice was built with:
+// the ice program stores their phase (uIcePhase: a phasor whose angle is
+// the place across the strands, one turn to a strand, see icePhase), and
+// the hairs are thin stripes of that angle and of three times it
+// (finer hairs within each strand). Read from the texture, the angle runs
+// on smoothly as the strands turn; drawn on fixed ways (round 12) the
+// hairs stood as straight needles. Where strands of different trails
+// cross, their phasors cancel and the hairs fade. The stripes' spacing
+// and way come from the angle's change over a texel (or a footprint).
+// A hair is a Gaussian across, blurred over the footprint across it in
+// closed form (its width grows and its peak falls, the area kept), so that
+// it never aliases: it fades into its mean instead.
+uniform sampler2D uIcePhase;
+// The light between the hairs, against their mean.
+const float CI_HAIR_BASE = 0.12;
 
-// The hairs along way j at tc (tile units), seen over fa km across them,
-// in each octave (x, y, z): the sum of the pieces whose lot is at least t
-// (first) or under it (not first), each piece fading in over 0.15 of t.
-vec3 ciHairsAlong(vec2 tc, int j, float fa, uint seed, float t, bool first) {
-  vec2 a = CI_WAY[j];
-  float len = length(a), u2km = ICE_KM / len;
-  // Across and along, in units of u2km km: whole numbers of anything per
-  // unit repeat with the tile.
-  vec2 q = vec2(dot(tc, vec2(-a.y, a.x)), dot(tc, a));
-  vec2 pw = floor(u2km / vec2(0.5, 3.0) + 0.5), pv = floor(u2km / vec2(0.15, 0.8) + 0.5);
-  q.x += (0.18 * ciNoise(q * pw, pw, seed + 997u + uint(j)) + 0.04 * ciNoise(q * pv, pv, seed + 991u + uint(j))) / u2km;
-  vec3 hs3 = vec3(0.0);
-  for (int o = 0; o < CI_N(3); o++) {
-    float s = CI_HAIR[o];
-    if (fa > 0.7 * s) continue;
-    float ns = max(floor(u2km / s + 0.5), 1.0), sp = u2km / ns;
-    float nal = max(floor(u2km / ((o == 0 ? 30.0 : 60.0) * s) + 0.5), 1.0);
-    float y = q.x * ns, i0 = floor(y), h = 0.0;
-    uint so = seed + uint(o) * 7919u + uint(j) * 104729u;
-    for (int m = -1; m < CI_N(2); m++) {
-      float si = i0 + float(m), wi = si - ns * floor(si / ns);
-      uint hs = ihash(uint(wi) * 0x9e3779b9u + so);
-      vec4 r = vec4(uvec4(hs, hs >> 8u, hs >> 16u, hs >> 24u) & 255u) / 255.0;
-      float hw = sp * (0.08 + 0.2 * r.y);
-      float dy = (y - si - (0.25 + 0.5 * r.x)) * sp;
-      float xa = q.y * nal + 13.0 * r.z, ci = floor(xa), fx = xa - ci;
-      ci -= nal * floor(ci / nal);
-      uint hc = ihash(hs ^ (uint(ci) * 0x85ebca6bu + 0x27d4eb2du));
-      vec4 r2 = vec4(uvec4(hc, hc >> 8u, hc >> 16u, hc >> 24u) & 255u) / 255.0;
-      // Its lot, within 0.15 to 0.85, so that a way at its own angle keeps
-      // every piece on both sides; a piece fades in over 0.15 of the angle.
-      float lot = smoothstep(-0.15, 0.15, 0.15 + 0.7 * r2.w - t);
-      lot = first ? lot : 1.0 - lot;
-      if (lot <= 0.0) continue;
-      float x0 = 0.1 * r2.x, x1 = 0.6 + 0.4 * r2.y;
-      float env = step(r2.z, 0.85) * smoothstep(x0, x0 + 0.15, fx) * (1.0 - smoothstep(x1 - 0.2, x1, fx));
-      float hwE = sqrt(hw * hw + 0.25 * fa * fa);
-      h += (0.4 + 0.6 * r.w) * lot * env * (hw / hwE) * exp(-dy * dy / (hwE * hwE));
-    }
-    hs3[o] = h;
-  }
-  return hs3;
+// The angle of the phasor b against a's (radians).
+float ciTurn(vec2 a, vec2 b) {
+  return atan(a.x * b.y - a.y * b.x, dot(a, b));
 }
 
-// The hairs of deck k at x on the map (km), seen over the footprint h1, h2
-// (km on the map, a pixel's: the hairs are drawn at the place read, with
-// no blur through the deck); sheet: which set of hairs (the march near
-// the eye reads one at each of the fixed heights of a deck, so that a ray
-// through the deck crosses several, each crisp). Around 1: dark gaps some
-// 0.7, a hair's core up to 3, for each octave, the octaves multiplied.
-float ciHair(vec2 x, int k, vec2 h1, vec2 h2, uint sheet) {
-  mat2 J;
-  vec2 tc = ciTile(x / WEATHER_KM, k, J), g1 = J * h1, g2 = J * h2;
-  // The way: the ice's own (smoothed over some 0.2 to 0.6 km, so that the
-  // hairs run long and smooth), and in the bands and the veil, along the
-  // wind (the deck's frame runs with it).
-  float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
-  vec2 way = textureLod(uIceWay, tc, max(lw + 1.0, 2.5)).rg * 2.0 - 1.0 + 0.5 * (textureLod(uIceWay, tc, max(lw + 4.0, 4.0)).rg * 2.0 - 1.0);
-  float sl = ciBend(tc, 2.0, 2.0, (k == 0 ? 600u : 700u) + 50u).y;
-  way = -way + 0.25 * vec2(1.0 - sl * sl, 2.0 * sl) / (1.0 + sl * sl);
-  float coh = length(way);
-  if (coh < 0.1) return 1.0;
-  // The hairs run at an angle phi from 0 to pi.
-  float phi = 0.5 * atan(way.y, way.x);
-  phi += phi < 0.0 ? PI : 0.0;
-  int j = 0;
-  for (int i = 1; i < CI_WAYS; i++) j += phi >= atan(CI_WAY[i].y, CI_WAY[i].x) ? 1 : 0;
-  float a0 = atan(CI_WAY[j].y, CI_WAY[j].x), a1 = atan(CI_WAY[j + 1].y, CI_WAY[j + 1].x);
-  float t = clamp((phi - a0) / (a1 - a0), 0.0, 1.0);
-  // The footprint across the hairs (km); seen aslant a pixel covers many
-  // hairs along its length too, and those that point at the eye would fan
-  // out towards the horizon: half of its length counts.
-  vec2 e = vec2(-sin(phi), cos(phi));
+// The hairs of deck k at tc (its flow, tile units; J: tc over km on the
+// map; see ciPlace), seen over the footprint h1, h2 (km on the map, a
+// pixel's: the hairs are drawn at the place read, with no blur through the
+// deck); sheet: which set of hairs (the march near the eye reads one at
+// each of the fixed heights of a deck, so that a ray through the deck
+// crosses several, each crisp). Around 1: the light between the hairs
+// some 0.3 to 0.8 of the mean, a hair's core 2 to 4 times it, for each
+// octave, the octaves multiplied.
+float ciHair(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2, uint sheet) {
+  vec2 g1 = J * h1, g2 = J * h2;
+  // The phase is read over two texels at least: within a texel it wavers
+  // where trails of several ages meet, and its multiples drew worms.
+  float tx = 1.0 / float(textureSize(uIcePhase, 0).x);
+  vec2 r1 = g1 * max(1.0, 2.0 * tx / max(length(g1), 1e-9)), r2 = g2 * max(1.0, 2.0 * tx / max(length(g2), 1e-9));
+  vec2 P = textureGrad(uIcePhase, tc, r1, r2).rg * 2.0 - 1.0;
+  float coh = length(P);
+  if (coh < 0.35) return 1.0;
+  // The angle's gradient (radians per tile unit), from its change over a
+  // texel, or over the footprint if that is wider.
+  float dl = max(2.0 * tx, max(length(g1), length(g2)));
+  vec2 Px = textureGrad(uIcePhase, tc + vec2(dl, 0.0), r1, r2).rg * 2.0 - 1.0;
+  vec2 Py = textureGrad(uIcePhase, tc + vec2(0.0, dl), r1, r2).rg * 2.0 - 1.0;
+  vec2 gp = vec2(ciTurn(P, Px), ciTurn(P, Py)) / dl;
+  float gl = length(gp);
+  if (gl < 1e-3) return 1.0;
+  // The strands' spacing (km) and the footprint across them (km); seen
+  // aslant a pixel covers many hairs along its length too: half of its
+  // length counts.
+  vec2 e = gp / gl;
+  float sp = 2.0 * PI / gl * ICE_KM;
   float fa = ICE_KM * max(max(length(vec2(dot(g1, e), dot(g2, e))), 0.5 * max(length(g1), length(g2))), 1e-9);
-  if (fa > 0.7 * CI_HAIR.z) return 1.0;
+  if (fa > 0.7 * sp) return 1.0;
+  // Seen from close by (a pixel under some half a texel of the phase, 5 m)
+  // the hairs fade into the soft ice: photographs taken next to cirrus
+  // show soft streaks, no hairs, and the phase magnified drew zigzags,
+  // nets and ladders.
+  float near = smoothstep(0.15, 0.6, fa / (ICE_KM * tx));
+  if (near <= 0.0) return 1.0;
+  // Hairs that run across the ice's own way there (uIceWay, smoothed over
+  // some 0.2 km and more) fade: where the strands of two trails meet, the
+  // denser takes over within a texel, and its hairs, bent sharply there,
+  // stood as zigzags; where thin tails curl, as a net.
+  float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
+  vec2 wv = textureLod(uIceWay, tc, max(lw + 1.0, 2.5)).rg * 2.0 - 1.0;
+  float wc = length(wv), agree = dot(vec2(e.x * e.x - e.y * e.y, 2.0 * e.x * e.y), wv) / max(wc, 1e-3);
+  float align = mix(1.0, smoothstep(0.35, 0.85, agree), smoothstep(0.1, 0.35, wc));
+  if (align <= 0.0) return 1.0;
+  float ph = atan(P.y, P.x) + 2.4 * float(sheet);
   uint seed = (k == 0 ? 3000u : 4000u) + 131u * sheet;
-  vec3 h = vec3(0.0);
-  for (int w = 0; w < CI_N(2); w++) h += ciHairsAlong(tc, (j + w) % CI_WAYS, fa, seed, t, w == 0);
+  // Bundles some 0.6 km wide and 3 km long (along the wind) where a set of
+  // hairs shows, gaps where it does not; and the hairs' width, which
+  // changes over a few km.
+  vec2 pb = floor(ICE_KM / vec2(3.0, 0.6) + 0.5), pw = floor(ICE_KM / vec2(4.0, 2.0) + 0.5);
+  float wid = 0.07 + 0.2 * smoothstep(-0.4, 0.4, ciNoise(tc * pw, pw, seed + 979u));
   float F = 1.0;
-  for (int o = 0; o < 3; o++) {
-    float s = CI_HAIR[o], vis = 1.0 - smoothstep(0.25 * s, 0.7 * s, fa);
-    F *= mix(1.0, (CI_HAIR_BASE + h[o]) / (CI_HAIR_BASE + CI_HAIR_MEAN), vis * (o == 0 ? 0.45 : o == 1 ? 0.75 : 0.7));
+  for (int o = 0; o < CI_N(2); o++) {
+    float m = o == 0 ? 1.0 : 3.0, s = sp / m;
+    float vis = 1.0 - smoothstep(0.25 * s, 0.7 * s, fa);
+    if (vis <= 0.0) break;
+    float bun = clamp(0.5 + 1.8 * ciNoise(tc * pb * (o == 0 ? 1.0 : 2.0), pb * (o == 0 ? 1.0 : 2.0), seed + 977u + uint(o)), 0.0, 1.0);
+    // The nearest hair of this octave (km), its width and its peak, blurred.
+    float q = m * ph / (2.0 * PI);
+    float dy = (q - floor(q + 0.5)) * s;
+    // At least 8 m each side: seen from close by, cirrus is soft streaks,
+    // not wires. Hairs that wide for their spacing are left out.
+    float hw = max(s * wid * (o == 0 ? 0.7 : 1.0), 0.008), hwE = sqrt(hw * hw + 0.25 * fa * fa);
+    vis *= 1.0 - smoothstep(0.2 * s, 0.35 * s, hw);
+    float h = bun * (hw / hwE) * exp(-dy * dy / (hwE * hwE)), mean = bun * 1.7725 * hw / s;
+    F *= mix(1.0, (CI_HAIR_BASE + h) / (CI_HAIR_BASE + mean), vis * near * align * smoothstep(0.35, 0.75, coh) * (o == 0 ? 0.7 : 0.75));
   }
-  return mix(1.0, F, smoothstep(0.3, 0.7, coh));
+  return F;
 }
 
 // How much veil (cirrostratus) the slider c and the map m make: from c =
@@ -2531,7 +2569,7 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fi
   // The ice in the deck's frame. The footprint's axes go along, through
   // the mipmaps and the anisotropic filter.
   mat2 J;
-  vec2 tc = ciTile(uv, k, J), g1 = J * f1, g2 = J * f2;
+  vec2 tc = ciPlace(x, k, J), g1 = J * f1, g2 = J * f2;
   vec4 si = textureGrad(uIce, tc, g1, g2);
   // A tuft of a flock is crisp: its thin edge is cut off and its core
   // made denser, so that it stands as a small, bright, ragged cell.
@@ -2541,8 +2579,9 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fi
   // How dense the ice is, from 0 to 1, for the fibres' strength.
   float dense = 1.0 - exp(-7.0 * ice);
   // The hairs (ciHair, read by the caller at the place it chose): thin
-  // ice breaks up into them; dense cores stay milky with a sheen of hairs.
-  F = mix(1.0, hairIn, 1.0 - 0.6 * smoothstep(0.3, 0.9, dense));
+  // ice breaks up into them; dense cores stay soft and milky, with a faint
+  // sheen of hairs.
+  F = mix(1.0, hairIn, 1.0 - 0.85 * smoothstep(0.25, 0.75, dense));
   // The optical depth follows the ice: thin almost everywhere (some 0.05
   // to 0.5 seen straight up), the cores 1 to 2. Little cirrus is the same
   // ice less a floor: the weak plumes and the thin edges go first, and
@@ -2616,7 +2655,7 @@ float ciPhi(float z) {
 // life. Where there is no ice, 0.3.
 float ciAge(vec2 x, int k, float foot) {
   mat2 J;
-  vec2 tc = ciTile(x / WEATHER_KM, k, J);
+  vec2 tc = ciPlace(x, k, J);
   vec2 v = textureLod(uIceWay, tc, log2(max(foot * length(J[0]) * float(textureSize(uIceWay, 0).x), 1.0))).ba;
   return v.y > 0.02 ? v.x / v.y : 0.3;
 }
@@ -2626,19 +2665,6 @@ float ciAge(vec2 x, int k, float foot) {
 float cirrusDepth(vec2 x, float foot) {
   vec2 f1 = vec2(foot, 0.0), f2 = vec2(0.0, foot);
   return 0.5 * (ciDensity(x, 0, f1, f2, false, true, vec2(-1.0), 1.0) + ciDensity(x, 1, f1, f2, false, true, vec2(-1.0), 1.0));
-}
-
-// depthToTop in fewer steps, denser near p: enough for the light of one
-// sheet, and it halves the cost.
-vec3 ciDepthToTop(vec3 p, vec3 d) {
-  float t = raySphere(p, d, RT).y, prev = 0.0;
-  vec3 s = vec3(0.0);
-  for (int i = 0; i < 8; i++) {
-    float f = (float(i) + 1.0) / 8.0, t1 = t * f * f;
-    s += density(length(p + d * (0.5 * (prev + t1))) - RG) * (t1 - prev);
-    prev = t1;
-  }
-  return s;
 }
 
 // The depth of the thin cloud between a point under it and the light, as
@@ -2733,7 +2759,9 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
     vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
     vec2 f1 = dn * max(pix * t / max(cv, 1e-3) + 0.08 * (s1 - s0) * lh, CI_MINF);
     vec2 f2 = vec2(-dn.y, dn.x) * max(pix * t, CI_MINF);
-    float hr = ciHair(p.xz + uDrift, k, dn * (pix * t / max(cv, 1e-3)), vec2(-dn.y, dn.x) * (pix * t), 0u);
+    mat2 Jp;
+    vec2 tcp = ciPlace(p.xz + uDrift, k, Jp);
+    float hr = ciHair(tcp, Jp, k, dn * (pix * t / max(cv, 1e-3)), vec2(-dn.y, dn.x) * (pix * t), 0u);
     float rho = ciDensity(p.xz + uDrift, k, f1, f2, true, false, vec2(-1.0), hr), way = (s1 - s0) / th;
     float cBody = ciBody, cVeil = ciVeil, cMean = ciMean, cWide = ciWide;
     fieldsK[k] = ciFieldsOut;
@@ -2794,7 +2822,9 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
       vec2 dhs = d.xz - us.xz * cs;
       float lhs = length(dhs);
       vec2 dns = lhs > 1e-6 ? dhs / lhs : vec2(1.0, 0.0);
-      hairS[n] = ciHair(ps.xz + uDrift, k, dns * (pix * tsh / max(abs(cs), 1e-3)), vec2(-dns.y, dns.x) * (pix * tsh), 1u + uint(n));
+      mat2 Js;
+      vec2 tcs = ciPlace(ps.xz + uDrift, k, Js);
+      hairS[n] = ciHair(tcs, Js, k, dns * (pix * tsh / max(abs(cs), 1e-3)), vec2(-dns.y, dns.x) * (pix * tsh), 1u + uint(n));
     }
     for (int i = 0; i <= CI_STEPS; i++) {
       float ta = i == 0 ? t0 : t0 + dt * (float(i - 1) + jit), tb = i == CI_STEPS ? tE : t0 + dt * (float(i) + jit);
@@ -2874,7 +2904,7 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   float th = acos(clamp(mu, -1.0, 1.0));
   float mus = dot(up, uLight);
   bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
-  vec3 ol = lit ? ciDepthToTop(pc, uLight) : vec3(0.0);
+  vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
   // Sunlight dims on its way into the sheet (less the forward peak, which
   // goes on as if not scattered): its depth ts there, against te along
   // the view. Scattered once, the sheet sends to the eye te times the mean
@@ -2897,6 +2927,9 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   float onceW = ciOnce(wideT, 0.6 * wideT / max(abs(mus), 0.15), sameSide);
   // Along a long path most light is scattered more than once, which
   // spreads the peak and the halo out; a thicker sheet sends more back.
+  // Scattered twice or more, the light still goes mostly forward (as by a
+  // narrower lobe, g 0.5 for ice's 0.7): next to the moon or the sun dense
+  // ice glows, and does not stand dark against thinner ice.
   float many = 1.0 - exp(-0.3 * tau), spread = 0.15 * tauV / (tauV + 0.3);
   // The light scattered many times has mostly gone forward at each step: on
   // its way in it fades with a quarter of the depth that the light
@@ -2914,18 +2947,20 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   float rc = length(pc);
   if (uSunI > 0.0) multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
   if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
-  // The halo needs crystals that fall flat and smooth, as in a thin, even
-  // veil (cirrostratus): it shows where the veil is, faint and soft.
-  float haloW = 0.05 * smoothstep(0.03, 0.3, veilT) * (1.0 - many);
+  // The halo needs smooth hexagonal crystals, which thin cirrus has: it
+  // shows faintly in thin fibrous cirrus (as in photographs of halos in
+  // cirrus fibratus), more in a thin, even veil (cirrostratus), and fades
+  // where the ice is thick enough to scatter the light again.
+  float haloW = (0.03 + 0.04 * smoothstep(0.03, 0.3, veilT)) * smoothstep(0.02, 0.15, tau) * (1.0 - many);
   vec4 F[3];
   for (int k = 0; k < 3; k++) {
     vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
     vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
     vec4 halo = haloW * mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
     vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z)) : vec4(0.0);
-    H[k] = a * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0))
+    H[k] = a * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k] + uNight * pow(uWL[k], vec4(-3.0)))
                 + uLightI * sun * wBelow * below);
-    F[k] = uLightI * sun * ((ph + halo) * (1.0 - many) * once + spread * many * onceD + peak * exp(-0.3 * wideT) * mix(onceW, once, 0.4));
+    F[k] = uLightI * sun * ((ph + halo) * (1.0 - many) * once + (spread + 0.3 * hg(mu, 0.5)) * many * onceD + peak * exp(-0.3 * wideT) * mix(onceW, once, 0.4));
   }
   // Towards the sun the sheet sends far more light than the sky round it
   // (thirty to fifty times, ten degrees off), more than the screen can
@@ -3193,12 +3228,18 @@ void main() {
         for (int k = 0; k < 3; k++) st[k] += w * pow(uWL[k], vec4(tilt));
       }
     }
+    // The glow of the night sky (and the zodiacal light) is wide: thin
+    // cloud scatters it on forward and lets it through by CI_FWD of what
+    // it takes, as it does the air behind it (visX), and adds the rest as
+    // its own light (H); taken out whole, dense ice stood as dark streaks
+    // across the moonlit sky.
+    float vg = visX / max(vis, 1e-6);
     // The stars: the core of a star of magnitude 6.5 is STAR_GAIN times the
     // airglow's radiance, each magnitude brighter STAR_LN_MAG brighter.
     float stars = uNight * STAR_GAIN * free;
     for (int k = 0; k < 3; k++) {
       G[k] = tk[k] * sun;
-      L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
+      L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
   }
   // Glare: light of the sun strayed inside the eye or the lens, a glow of a
@@ -4916,15 +4957,24 @@ const SkySound = (() => {
             gl.bindTexture(gl.TEXTURE_2D, age);
             gl.texStorage2D(gl.TEXTURE_2D, Math.log2(iceSize) + 1, gl.RG8, iceSize, iceSize);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, age, 0);
-            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+            // The phase of the ice's strands, a third target (unit 12),
+            // which the scene draws its hairs along.
+            gl.activeTexture(gl.TEXTURE12);
+            gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+            gl.texStorage2D(gl.TEXTURE_2D, Math.log2(iceSize) + 1, gl.RG8, iceSize, iceSize);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, gl.getParameter(gl.TEXTURE_BINDING_2D), 0);
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
             target(10, gl.RGBA8, iceSize);
           }],
           ...pieces(-3, iceSize),
           [0, () => {
             sharp();
+            gl.activeTexture(gl.TEXTURE12);
+            sharp();
             gl.activeTexture(gl.TEXTURE15);
             smooth(gl.TEXTURE_2D);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, null, 0);
             gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
             target(11, gl.RGBA8, iceSize / 4);
             gl.uniform1i(gl.getUniformLocation(draw, 'uIceIn'), 10);
@@ -5062,6 +5112,7 @@ const SkySound = (() => {
     gl.uniform1i(U('uWaves'), 4);
     gl.uniform1i(U('uIce'), 10);
     gl.uniform1i(U('uIceWay'), 11);
+    gl.uniform1i(U('uIcePhase'), 12);
     gl.uniform1i(U('uCiMap'), 13);
     gl.uniform4fv(U('uBR'), new Float32Array(BR));
     gl.uniform4fv(U('uBO'), new Float32Array(BO));

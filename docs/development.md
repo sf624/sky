@@ -233,23 +233,23 @@ The numbers to tune, all in `index.html`:
 The cirrus's map, ice and way are built once, by their own program
 (`ice`), during the loading (or when cirrus is first shown, if the page
 starts without it). Measured with `perf` at 1920 x 1080 on the RTX 3090 on
-2026-11-18 (round 12 of the cirrus), three runs each, alternated: the
-first picture came 5.7 to 6.1 s after navigation with `cirrus=0.5`,
-against 5.4 to 5.5 s for round 11 and 3.5 to 3.8 s for `main`; with
-`cirrus=0`, 4.7 s against round 11's 4.1 to 4.4 s (the ice program is
-then not compiled, but the scene's program holds the cirrus's code). The
-machine's times drift by several tenths from run to run and with other
-work on the GPU. Round 12's hairs and bends cost some 0.3 s of that as
-code the driver finishes, after their loops were kept from being
-unrolled (`CI_N`; unrolled, some 0.6 s more); dropping the texture of
-fibres saved its build (15 ms of GPU time). Each call of `ciDensity` is
-a copy, so the march, the second read of a long crossing and the depth
-the sun's light feels (`cirrusDepth`) read it `lite`; the mean age is
-drawn as a second target of the ice's own pass. The scene takes 9.1 ms a
-frame at 1920 x 1080 with `cirrus=0.5` at the default view (round 11:
-8.7; `main` 7.7), and 14.2 ms just under the shell looking up
-(`alt=11.9&pitch=28&cirrus=0.6`; round 11: 7.6): the hairs of the march,
-read once for each of the 8 sheets. Most of the rest is not the building
+2026-11-18 (round 13 of the cirrus), two runs each, alternated: the first
+picture came 5.25 to 5.33 s after navigation with `cirrus=0.5`, as round
+12 (5.25 to 5.32 s), against 3.69 to 3.84 s for `main`; with `cirrus=0`,
+4.33 to 4.39 s against round 12's 4.47 to 4.53 s and `main`'s 3.59 to
+3.77 s (the ice program is then not compiled, but the scene's program
+holds the cirrus's code). The machine's times drift by several tenths
+from run to run and with other work on the GPU. The cirrus's loops are
+kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
+more to finish the scene's program). Each call of `ciDensity` is a copy,
+so the march, the second read of a long crossing and the depth the sun's
+light feels (`cirrusDepth`) read it `lite`; the mean age and the strands'
+phase are drawn as further targets of the ice's own pass. The scene takes
+8.8 ms a frame at 1920 x 1080 with `cirrus=0.5` at the default view
+(round 12: 9.1; `main` 7.7), and 9.0 ms just under the shell looking up
+(`alt=11.9&pitch=28&cirrus=0.6`; round 12: 14.3, round 11: 7.6): the
+hairs are three reads of a texture (`uIcePhase`) where round 12 drew
+explicit strands on two ways in three octaves. Most of the rest is not the building
 (some 0.25 s of GPU time for the ice) but the driver finishing the large
 ice program at its first draw (about 0.3 s); it was 1.7 s while the ice
 was part of the `noise` program, which every page draws. A renderer
