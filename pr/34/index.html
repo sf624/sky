@@ -667,9 +667,17 @@ float icePuff(vec2 rel, vec2 s, float sig2) {
   return exp(-0.5 * dp2 / sig2) * 1.2533141 * sqrt(sig2) * (iceErf((t0 + len) * k2) - iceErf(t0 * k2)) / len;
 }
 
-// The point of the way from q0 to q0 + s nearest the head, from the head.
-vec2 iceNearest(vec2 rel, vec2 s) {
-  return rel + s * clamp(-dot(rel, s) / max(dot(s, s), 1e-12), 0.0, 1.0);
+// Where along the way from q0 to q0 + s, or along its line beyond, it
+// passes nearest the head (0 at q0, 1 at q0 + s). The strands a texel
+// shows are taken there: the age, the trail's width and the place along
+// it at that point, and the place across from it. Several steps of ages
+// overlap at a texel (a step's way is shorter than the head is wide), and
+// then all of them find the same point and draw the same strands. Taken
+// at each step's own end, the strands, threads and bursts of the steps
+// differed a little, and summed they stood as fine ripples across the
+// trails (round 13's g3).
+float iceAt(vec2 rel, vec2 s) {
+  return -dot(rel, s) / max(dot(s, s), 1e-12);
 }
 
 // The way along an arc from age b0 to b1 (in units of a life), leaving at
@@ -722,16 +730,27 @@ void icePhase(float val, float v, float sp) {
   icePh += vec3(w * cos(th), w * sin(th), w);
 }
 
+// How much of a pattern of period sp (km) the ice's texels can hold: 0
+// where the period is under k texels, 1 over twice that. Strands and
+// threads finer than that are drawn as their mean: sampled once a texel,
+// they aliased into moire that no filter of the scene could take out
+// (ripples across soft bands from the ground, round 13's g3). The hairs
+// (ciHair, in the scene) draw the fine strands instead.
+float iceFine(float sp, float k) {
+  return smoothstep(k, 2.0 * k, sp * uSize.x / ICE_KM);
+}
+
 // The strands of a trail: its ice falls in streaks along it. u: the place
 // across the trail in units of its half width there, which grows with age,
 // so that the strands fan out; al: the place along it; n: strands to a
-// half width. Returns their weight (around 1) and the share of the head's
+// half width; sp: the strands' spacing (km). Returns their weight (around
+// 1) and the share of the head's
 // life that the strand there lives: the strands end one by one, the outer
 // ones first, so that a trail tapers and frays out instead of ending
 // round.
-vec2 iceStrands(float u, float a, float al, float n, uint seed, out float vs) {
+vec2 iceStrands(float u, float a, float al, float n, float sp, uint seed, out float vs) {
   float v = u * n;
-  float life = (0.4 + 0.75 * iceValue(vec2(0.8 * v, 0.5), seed + 4u)) * (1.0 - 0.12 * min(u * u, 5.0));
+  float life = (0.75 + 0.3 * iceValue(vec2(0.8 * v, 0.5), seed + 4u)) * (1.0 - 0.12 * min(u * u, 5.0));
   // The strands wander from side to side, each group of two or three its
   // own way, so that they cross and braid; and towards the end of its life
   // a strand curls off to one side or the other, as the ice that falls
@@ -753,7 +772,10 @@ vec2 iceStrands(float u, float a, float al, float n, uint seed, out float vs) {
   // (bands across the streaks), with gaps between.
   float burst = iceValue(vec2(0.12 * v + 11.0, 1.1 * al), seed + 10u);
   burst = 0.15 + 2.2 * burst * burst;
-  return vec2((0.08 + 1.5 * band * band + 2.5 * thr) * burst, life);
+  // Strands closer than some three texels, and threads closer than six,
+  // are their mean (0.30 and 0.22): see iceFine.
+  float b2 = mix(0.30, band * band, iceFine(sp, 2.5)), t6 = mix(0.22, thr, iceFine(sp / 2.7, 5.0));
+  return vec2((0.08 + 1.5 * b2 + 2.5 * t6) * burst, life);
 }
 
 // Plumes, `cells` to a side of the tile, a quarter of the cells empty: a
@@ -771,7 +793,7 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
   // Where the common way puts the head of the ice of this age.
   vec2 q1 = p1 - k * iceDrift(a, ICE_TH, ICE_VEER, ICE_REACH);
   vec2 base = floor(q1 / CELL) - 1.0;
-  float sum = 0.0, tr = 1.0 - a;
+  float sum = 0.0;
   for (int c = 0; c < 9; c++) {
     vec2 cell = base + vec2(float(c % 3), float(c / 3));
     vec2 wc = cell - cells * floor((cell + 0.5) / cells);
@@ -790,7 +812,6 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     // strands from a narrow root, spreading by 20 to 40 degrees.
     bool fan = r2.w <= 0.5;
     float r0 = size * (0.3 + 1.0 * s) * (fan ? 1.0 : 0.5);
-    float sig = (fan ? 0.4 : 1.0) * r0 + size * (k / 1.5) * (fan ? 2.5 + 2.5 * r2.z : 0.5 + 3.0 * r2.z * r2.z) * (0.6 + 0.6 * s) * a;
     // Each head's trail runs its own way: groups of plumes (some 20 km)
     // turned by up to 0.3 rad from the common way, and each head by up to
     // 0.1 rad more, 10 % longer or shorter. Its ice leaves the head turned
@@ -806,7 +827,7 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     float hook = (fan ? 0.4 : 2.0) * (2.0 * r3.w - 1.0), ab = 0.1 + 0.15 * s;
     float reach = k * ICE_REACH * (0.9 + 0.2 * r3.y);
     vec4 h0 = iceHooked(a0, th, v, hook, ab, reach), h1 = iceHooked(a, th, v, hook, ab, reach);
-    vec2 q0h = p0 - h0.xy, q1h = p1 - h1.xy, eh = h1.zw;
+    vec2 q0h = p0 - h0.xy, q1h = p1 - h1.xy;
     // Most heads move against the air around them while they make ice (0.15
     // to 0.5 of the reach over a life, at 35 to 80 degrees from the
     // shear): the head's track is a spine, and the trails leave it aslant
@@ -816,22 +837,25 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     vec4 r4 = iceRandom(h ^ 0x9e3779b9u);
     float vang = th + sign(r4.y - 0.5) * (0.6 + 0.8 * r4.z);
     vec2 V = (r4.x < 0.15 ? 0.0 : reach * (0.15 + 0.35 * (r4.x - 0.15) / 0.85)) * vec2(cos(vang), sin(vang));
-    vec2 rel = q0h - hp + V * a0, seg = q1h - q0h + V * (a - a0), pn = iceNearest(rel, seg);
+    vec2 rel = q0h - hp + V * a0, seg = q1h - q0h + V * (a - a0);
+    float at = iceAt(rel, seg), aN = clamp(mix(a0, a, at), 0.0, 1.0);
+    vec2 pn = rel + seg * clamp(at, 0.0, 1.0), pf = rel + seg * at, eh = normalize(mix(h0.zw, h1.zw, clamp(at, 0.0, 1.0)));
+    float sig = (fan ? 0.4 : 1.0) * r0 + size * (k / 1.5) * (fan ? 2.5 + 2.5 * r2.z : 0.5 + 3.0 * r2.z * r2.z) * (0.6 + 0.6 * s) * aN;
     if (dot(pn, pn) > 12.25 * sig * sig) continue;
     float str = 3.0 * (0.15 + r2.y * r2.y) * mix(0.5, 0.2 + 1.2 * smoothstep(-0.3, 0.3, group), gate) * far;
-    float u = dot(pn, vec2(-eh.y, eh.x)) / sig;
+    float u = dot(pf, vec2(-eh.y, eh.x)) / sig;
     float ns = fan ? 6.0 + 6.0 * r2.z : 3.0 + 6.0 * r2.w, vs;
-    vec2 st = iceStrands(u, a, tr * 4.5 + 31.0 * r.x, ns, seed + 201u, vs);
+    vec2 st = iceStrands(u, aN, (1.0 - aN) * 4.5 + 31.0 * r.x, ns, sig / ns, seed + 201u, vs);
     float life = (0.25 + 0.75 * r.w) * st.y;
-    float keep = 1.0 - smoothstep(0.45 * life, life, a);
-    float head = r2.w > 0.5 ? 1.0 + 2.0 * (r2.w - 0.5) * exp(-a / 0.06) : smoothstep(0.0, 0.12, a - 0.1 * r.w);
-    float fib = mix(1.0, st.x, (0.7 + 0.3 * smoothstep(0.5, 1.8, abs(u))) * smoothstep(0.0, 0.2, a));
+    float keep = 1.0 - smoothstep(0.45 * life, life, aN);
+    float head = r2.w > 0.5 ? 1.0 + 2.0 * (r2.w - 0.5) * exp(-aN / 0.06) : smoothstep(0.0, 0.12, aN - 0.1 * r.w);
+    float fib = mix(1.0, st.x, (0.7 + 0.3 * smoothstep(0.5, 1.8, abs(u))) * smoothstep(0.0, 0.2, aN));
     // A dense head is lumpy, not a round puff: knots of a third and a tenth
     // of its size.
     float lump = 1.0;
-    if (a < 0.35 && !fan) {
+    if (aN < 0.35 && !fan) {
       lump = 0.65 * iceValue(pn / (0.3 * r0) + 17.0 * r.xy, seed + 107u) + 0.35 * iceValue(pn / (0.1 * r0) + 5.0 * r.yx, seed + 109u);
-      lump = mix(1.0, 0.2 + 1.6 * lump * lump, exp(-a / 0.12));
+      lump = mix(1.0, 0.2 + 1.6 * lump * lump, exp(-aN / 0.12));
     }
     float val = str * head * keep * fib * lump * pow(r0 / sig, 0.6) * icePuff(rel, seg, sig * sig);
     sum += val;
@@ -852,7 +876,7 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
 const vec2 ICE_ROWS = vec2(40.0, 5.0);
 float iceRows(vec2 p0, vec2 p1, float a0, float a, float reach, uint seed) {
   const vec2 CELL = ICE_KM / ICE_ROWS;
-  float sum = 0.0, tr = 1.0 - a, row0 = floor(p1.y / CELL.y) - 1.0;
+  float sum = 0.0, row0 = floor(p1.y / CELL.y) - 1.0;
   for (int jr = 0; jr < 3; jr++) {
     float ry = row0 + float(jr), wy = ry - ICE_ROWS.y * floor((ry + 0.5) / ICE_ROWS.y);
     vec4 rr = iceRandom(iceWord(uvec3(0u, uint(wy + 0.5), 14u), seed)), rq = iceRandom(iceWord(uvec3(0u, uint(wy + 0.5), 15u), seed));
@@ -865,7 +889,6 @@ float iceRows(vec2 p0, vec2 p1, float a0, float a, float reach, uint seed) {
     vec2 q0 = p0 - D0, q1 = p1 - D1;
     // A head lies within 2 km of its row's middle.
     if (abs(q1.y - (ry + 0.5) * CELL.y) > 3.6) continue;
-    vec2 e = vec2(cos(th + v * a), sin(th + v * a));
     float bx = floor(q1.x / CELL.x - 0.5);
     for (int c = 0; c < 2; c++) {
       vec2 cell = vec2(bx + float(c), ry);
@@ -879,18 +902,20 @@ float iceRows(vec2 p0, vec2 p1, float a0, float a, float reach, uint seed) {
       vec2 hp = vec2(x, (cell.y + 0.5) * CELL.y + wig + width * (r.y - 0.5));
       vec2 d = abs(hp - q1) / CELL;
       float far = 1.0 - smoothstep(0.65, 0.8, max(d.x, d.y));
-      float r0 = 0.05 + 0.08 * r.z, sig = r0 + (0.03 + 0.07 * rr.y) * a;
-      vec2 rel = q0 - hp, pn = iceNearest(rel, q1 - q0);
+      vec2 rel = q0 - hp;
+      float at = iceAt(rel, q1 - q0), aN = clamp(mix(a0, a, at), 0.0, 1.0);
+      vec2 pn = rel + (q1 - q0) * clamp(at, 0.0, 1.0), pf = rel + (q1 - q0) * at, e = vec2(cos(th + v * aN), sin(th + v * aN));
+      float r0 = 0.05 + 0.08 * r.z, sig = r0 + (0.03 + 0.07 * rr.y) * aN;
       if (dot(pn, pn) > 12.25 * sig * sig || far <= 0.0) continue;
       float act = iceNoise(vec2(x * (4.0 / ICE_KM), wc.y + 0.5), vec2(4.0, ICE_ROWS.y), 0.0, seed + 33u, g)
                 + 0.5 * iceNoise(vec2(x * (9.0 / ICE_KM), wc.y + 0.5), vec2(9.0, ICE_ROWS.y), 0.0, seed + 35u, g);
       float str = smoothstep(-0.3 + 0.3 * rr.z, 0.05 + 0.3 * rr.z, act) * (0.5 + 1.0 * r.w) * far;
       // Threads across each trail.
-      vec2 yf = vec2(dot(pn, vec2(-e.y, e.x)) / (0.03 + 0.04 * r.z), tr * 6.0 + 57.0 * r.y);
+      vec2 yf = vec2(dot(pf, vec2(-e.y, e.x)) / (0.03 + 0.04 * r.z), (1.0 - aN) * 6.0 + 57.0 * r.y);
       float fn = iceValue(yf, seed + 301u);
       float life = (0.4 + 0.6 * rr.w) * (0.6 + 0.8 * fn);
-      float keep = 1.0 - smoothstep(0.4 * life, life, a);
-      float val = str * keep * (0.2 + 1.6 * fn * fn) * (r0 / sig) * icePuff(rel, q1 - q0, sig * sig);
+      float keep = 1.0 - smoothstep(0.4 * life, life, aN);
+      float val = str * keep * (0.2 + 1.6 * mix(0.30, fn * fn, iceFine(0.03 + 0.04 * r.z, 2.5))) * (r0 / sig) * icePuff(rel, q1 - q0, sig * sig);
       sum += val;
       icePhase(val, yf.x, 0.03 + 0.04 * r.z);
     }
@@ -905,17 +930,20 @@ float iceRows(vec2 p0, vec2 p1, float a0, float a, float reach, uint seed) {
 // that grows with age and wobbles in time, and makes a short trail of
 // fibres (a tuft, cirrus floccus).
 const float ICE_FLOCK = 12.0;
-float iceFlock(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
+float iceFlock(vec2 q0, vec2 q1, float a0, float a, vec2 e, uint seed) {
   const float CELL = ICE_KM / ICE_FLOCK;
   vec2 cell = floor(q1 / CELL);
   vec2 wc = cell - ICE_FLOCK * floor((cell + 0.5) / ICE_FLOCK);
   uint h = iceWord(uvec3(uvec2(wc + 0.5), 7u), seed);
   vec4 r = iceRandom(h);
-  float tr = 1.0 - a, r0 = 0.07 + 0.15 * r.z;
-  vec2 hp = (cell + 0.3 + 0.4 * r.xy) * CELL
-          + 0.25 * r0 * vec2(sin(6.2831853 * (1.3 + 2.0 * r.w) * tr + 9.0 * r.z), sin(6.2831853 * (1.1 + 2.3 * r.z) * tr + 7.0 * r.w));
-  float sig2 = r0 * r0 + (0.02 + 0.05 * r.w) * a;
-  vec2 rel = q0 - hp, pn = iceNearest(rel, q1 - q0);
+  float r0 = 0.07 + 0.15 * r.z;
+  // The head wobbles: where it was when it made the ice of age a0 and a.
+  vec2 hc = (cell + 0.3 + 0.4 * r.xy) * CELL, wf = 6.2831853 * vec2(1.3 + 2.0 * r.w, 1.1 + 2.3 * r.z), wp = vec2(9.0 * r.z, 7.0 * r.w);
+  vec2 hp0 = hc + 0.25 * r0 * sin(wf * (1.0 - a0) + wp), hp = hc + 0.25 * r0 * sin(wf * (1.0 - a) + wp);
+  vec2 rel = q0 - hp0, seg = q1 - hp - rel;
+  float at = iceAt(rel, seg), aN = clamp(mix(a0, a, at), 0.0, 1.0), tr = 1.0 - aN;
+  vec2 pn = rel + seg * clamp(at, 0.0, 1.0), pf = rel + seg * at;
+  float sig2 = r0 * r0 + (0.02 + 0.05 * r.w) * aN;
   float far = 1.0 - smoothstep(0.22 * CELL, 0.3 * CELL, length(hp - q1));
   if (dot(pn, pn) > 12.25 * sig2 || far <= 0.0) return 0.0;
   vec4 r2 = iceRandom(h ^ 0x5bd1e995u);
@@ -923,18 +951,19 @@ float iceFlock(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
   float group = iceNoise(hp * (2.0 / ICE_KM), vec2(2.0), 0.0, seed + 15u, g)
               + 0.5 * iceNoise(hp * (5.0 / ICE_KM), vec2(5.0), 0.0, seed + 17u, g);
   float str = smoothstep(0.1, 0.4, r2.x) * smoothstep(-0.05, 0.3, group) * far;
-  vec2 yf = vec2((dot(pn, vec2(-e.y, e.x)) + (r2.y - 0.5) * 2.0 * tr) / (0.04 + 0.08 * r2.w), tr * (8.0 + 12.0 * r2.y) + 97.0 * r.x);
+  float spf = 0.04 + 0.08 * r2.w;
+  vec2 yf = vec2((dot(pf, vec2(-e.y, e.x)) + (r2.y - 0.5) * 2.0 * tr) / spf, tr * (8.0 + 12.0 * r2.y) + 97.0 * r.x);
   float fn = iceValue(yf, seed + 101u), fr = 1.0 - abs(2.0 * iceValue(yf * vec2(1.6, 1.3) + 3.0, seed + 103u) - 1.0);
-  float fib = 0.2 + 0.9 * smoothstep(0.3, 0.7, fn) + 1.6 * fr * fr * fr * fr;
+  float fib = 0.2 + mix(0.45 + 1.6 * 0.30, 0.9 * smoothstep(0.3, 0.7, fn) + 1.6 * fr * fr * fr * fr, iceFine(spf / 1.6, 4.0));
   float life = (0.4 + 0.5 * r2.y) * (0.55 + 0.9 * fn);
-  float keep = 1.0 - smoothstep(0.4 * life, life, a);
+  float keep = 1.0 - smoothstep(0.4 * life, life, aN);
   // A tuft is lumpy, not a round puff: knots of a third and a tenth of its
   // size, so that the floor the scene takes off leaves a ragged, dense
   // little cloud.
   float lump = 0.65 * iceValue(pn / (0.35 * r0) + 17.0 * r.xy, seed + 107u) + 0.35 * iceValue(pn / (0.12 * r0) + 5.0 * r.yx, seed + 109u);
   lump = 0.1 + 2.4 * lump * lump * lump;
-  float val = 2.5 * str * (0.3 + 1.4 * r.z * r.z) * keep * fib * lump * (r0 * r0 / sig2) * icePuff(rel, q1 - q0, sig2);
-  icePhase(val, yf.x, 0.04 + 0.08 * r2.w);
+  float val = 2.5 * str * (0.3 + 1.4 * r.z * r.z) * keep * fib * lump * (r0 * r0 / sig2) * icePuff(rel, seg, sig2);
+  icePhase(val, yf.x, spf);
   return val;
 }
 
@@ -970,7 +999,7 @@ vec4 iceField(vec2 x, uint seed, out vec4 ages) {
     f.x = icePlumes(p0, p, a0, a, 0.6, seed, 9.0, 1.25, 1.0);
     f.y = iceRows(p0, p, a0, a, ICE_REACH, seed);
     iceKind = 0.5 * DA;
-    f.z = iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a, e, seed);
+    f.z = iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a0, a, e, seed);
     iceKind = 2.5 * DA;
     f.w = 2.5 * icePlumes(p0, p, a0, a, 1.1, seed + 50u, 4.0, 1.4, 0.0);
     f *= DA;
@@ -2298,27 +2327,29 @@ float ciHair(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2, uint sheet) {
   float sp = 2.0 * PI / gl * ICE_KM;
   float fa = ICE_KM * max(max(length(vec2(dot(g1, e), dot(g2, e))), 0.5 * max(length(g1), length(g2))), 1e-9);
   if (fa > 0.7 * sp) return 1.0;
-  // Seen from close by (a pixel under some half a texel of the phase, 5 m)
-  // the hairs fade into the soft ice: photographs taken next to cirrus
-  // show soft streaks, no hairs, and the phase magnified drew zigzags,
-  // nets and ladders.
-  float near = smoothstep(0.15, 0.6, fa / (ICE_KM * tx));
+  // Seen from close by (a pixel under some 8 to 15 m, a texel of the
+  // phase) half of the hairs fade and the rest are wide (20 m, below),
+  // down to some 0.3 m a pixel: read between the phase's texels, thin
+  // hairs bent from texel to texel and stood as ladders and broken dashes
+  // (round 13, from 9 km looking up); wide and faint, they are the soft
+  // streaks that photographs taken next to cirrus show, at several depths.
+  float nr = fa / (ICE_KM * tx), near = 0.5 * smoothstep(0.03, 0.15, nr) + 0.5 * smoothstep(0.8, 1.5, nr);
   if (near <= 0.0) return 1.0;
   // Hairs that run across the ice's own way there (uIceWay, smoothed over
-  // some 0.2 km and more) fade: where the strands of two trails meet, the
+  // some 0.1 km and more; where the way is clear) fade: where the strands of two trails meet, the
   // denser takes over within a texel, and its hairs, bent sharply there,
   // stood as zigzags; where thin tails curl, as a net.
   float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
-  vec2 wv = textureLod(uIceWay, tc, max(lw + 1.0, 2.5)).rg * 2.0 - 1.0;
+  vec2 wv = textureLod(uIceWay, tc, max(lw + 0.5, 0.5)).rg * 2.0 - 1.0;
   float wc = length(wv), agree = dot(vec2(e.x * e.x - e.y * e.y, 2.0 * e.x * e.y), wv) / max(wc, 1e-3);
-  float align = mix(1.0, smoothstep(0.35, 0.85, agree), smoothstep(0.1, 0.35, wc));
+  float align = mix(1.0, smoothstep(0.5, 0.9, agree), smoothstep(0.05, 0.25, wc));
   if (align <= 0.0) return 1.0;
   float ph = atan(P.y, P.x) + 2.4 * float(sheet);
   uint seed = (k == 0 ? 3000u : 4000u) + 131u * sheet;
   // Bundles some 0.6 km wide and 3 km long (along the wind) where a set of
   // hairs shows, gaps where it does not; and the hairs' width, which
   // changes over a few km.
-  vec2 pb = floor(ICE_KM / vec2(3.0, 0.6) + 0.5), pw = floor(ICE_KM / vec2(4.0, 2.0) + 0.5);
+  vec2 pb = floor(ICE_KM / vec2(3.0, 0.6) + 0.5), pw = floor(ICE_KM / vec2(4.0, 2.0) + 0.5), pq = floor(ICE_KM / vec2(0.6, 0.12) + 0.5);
   float wid = 0.07 + 0.2 * smoothstep(-0.4, 0.4, ciNoise(tc * pw, pw, seed + 979u));
   float F = 1.0;
   for (int o = 0; o < CI_N(2); o++) {
@@ -2329,11 +2360,16 @@ float ciHair(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2, uint sheet) {
     // The nearest hair of this octave (km), its width and its peak, blurred.
     float q = m * ph / (2.0 * PI);
     float dy = (q - floor(q + 0.5)) * s;
-    // At least 8 m each side: seen from close by, cirrus is soft streaks,
-    // not wires. Hairs that wide for their spacing are left out.
-    float hw = max(s * wid * (o == 0 ? 0.7 : 1.0), 0.008), hwE = sqrt(hw * hw + 0.25 * fa * fa);
+    // Neighbouring hairs differ in strength (0.15 to 1, some 0.575 on
+    // average; noise of some 0.6 km along the wind and 0.12 km across):
+    // drawn alike, the hairs of a strand stood evenly spaced, as the teeth
+    // of a comb, and seen from some 3 km, as the bars of a ladder.
+    float hs = clamp(0.575 + 1.3 * ciNoise(tc * pq, pq, seed + 981u + uint(o)), 0.15, 1.0);
+    // At least 8 m each side (20 m seen from close by, above): cirrus is
+    // soft streaks, not wires. Hairs that wide for their spacing are left out.
+    float hw = max(s * wid * (o == 0 ? 0.7 : 1.0), mix(0.02, 0.008, smoothstep(0.8, 1.5, nr))), hwE = sqrt(hw * hw + 0.25 * fa * fa);
     vis *= 1.0 - smoothstep(0.2 * s, 0.35 * s, hw);
-    float h = bun * (hw / hwE) * exp(-dy * dy / (hwE * hwE)), mean = bun * 1.7725 * hw / s;
+    float h = bun * hs * (hw / hwE) * exp(-dy * dy / (hwE * hwE)), mean = bun * 0.575 * 1.7725 * hw / s;
     F *= mix(1.0, (CI_HAIR_BASE + h) / (CI_HAIR_BASE + mean), vis * near * align * smoothstep(0.35, 0.75, coh) * (o == 0 ? 0.7 : 0.75));
   }
   return F;
@@ -2422,8 +2458,10 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fi
   float dense = 1.0 - exp(-7.0 * ice);
   // The hairs (ciHair, read by the caller at the place it chose): thin
   // ice breaks up into them; dense cores stay soft and milky, with a faint
-  // sheen of hairs.
-  F = mix(1.0, hairIn, 1.0 - 0.85 * smoothstep(0.25, 0.75, dense));
+  // sheen of hairs. Where there is next to no ice (the faint ends of old
+  // tails, under 0.01), there are none: there they gathered ice that does
+  // not show into lone straight lines across the clear sky (round 13's c2).
+  F = mix(1.0, hairIn, (1.0 - 0.85 * smoothstep(0.25, 0.75, dense)) * smoothstep(0.002, 0.012, ice));
   // The optical depth follows the ice: thin almost everywhere (some 0.05
   // to 0.5 seen straight up), the cores 1 to 2. Little cirrus is the same
   // ice less a floor: the weak plumes and the thin edges go first, and
@@ -2434,14 +2472,24 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fi
   float floor0 = 0.1 * pow(1.0 - c, 6.0) + 0.02 * (1.0 - m), knee = 0.5 * floor0 + 0.004;
   float gain = CI_TAU * (0.6 + 0.8 * c) * (0.3 + 0.7 * m);
   float fine = ice * F, y = max(fine - floor0, 0.0);
-  float d = gain * y * y / (y + knee);
+  // Dense cores up to twice as deep (from 0.04 to 0.3 of ice above the
+  // floor): a tuft has a dense white body under its feathered edges, as
+  // photographs show; the edges, and so the cover, are as before.
+  float d = gain * y * y / (y + knee) * (1.0 + smoothstep(0.04, 0.3, y));
   // The veil (cirrostratus), and in the bands a body of ice (from 0.2):
   // both have the veil's banded noise as the exponent of their depth, so
   // that a band is long and continuous with streaks along it, and tufts
   // in it, not a row of separate dabs.
   float vn = fibres && (veilOn0(c, m) > 0.0 || banded > 0.0) ? ciVeilNoise(tc, max(max(length(g1), length(g2)), 1e-7), k == 0 ? 600u : 700u) : 0.0;
   float body = CI_BAND * smoothstep(0.2, 0.6, c) * fields * fields * m * exp(2.2 * vn - 0.4);
-  float sheet0 = (veilOn0(c, m) * (0.1 + 1.5 * fields * fields) * max(exp(2.2 * vn - 0.4) - 6.0 * pow(1.0 - c, 1.5) * (1.2 - fields), 0.0) + body) * mix(1.0, F, 0.7);
+  // Much cirrus (from 0.55 to 0.9) closes up into an even veil: it fills
+  // the lanes between the bands and its patches even out, so that the
+  // moon shines through one milky sheet with its ring, and a deck seen
+  // from under it is grey all over, as in photographs of cirrostratus;
+  // with lanes, much cirrus at night stood as dark lanes across the
+  // moonlit veil, and the ring had no even sheet to show on.
+  float even = smoothstep(0.55, 0.9, c);
+  float sheet0 = (veilOn0(c, m) * (0.1 + 1.2 * even + 1.5 * fields * fields) * max(exp((2.2 - 1.0 * even) * vn - 0.4) - 6.0 * pow(1.0 - c, 1.5) * (1.2 - fields), 0.0) + body) * mix(1.0, F, 0.7 - 0.4 * even);
   if (lite) return d + sheet0;
   // The ice over some 0.4 km (or four footprints, if that is wider): the
   // body that the light inside the sheet feels.
@@ -2494,12 +2542,15 @@ float ciPhi(float z) {
 
 // The mean age of the ice of deck k at x on the map, seen over some foot
 // km (see iceWay in the ice shader): 0 at its head, 1 at the end of a
-// life. Where there is no ice, 0.3.
+// life. Where there is little ice, it tends to 0.3.
 float ciAge(vec2 x, int k, float foot) {
   mat2 J;
   vec2 tc = ciPlace(x, k, J);
   vec2 v = textureLod(uIceWay, tc, log2(max(foot * length(J[0]) * float(textureSize(uIceWay, 0).x), 1.0))).ba;
-  return v.y > 0.02 ? v.x / v.y : 0.3;
+  // A blend, not a threshold: cut where the weight passed 0.02, the age
+  // jumped, and with it the ice's height, which drew hard stepped edges
+  // across the decks from just under the shell (round 13's k5).
+  return (v.x + 0.3 * 0.03) / (v.y + 0.03);
 }
 
 // The depth as the light of the sun feels it, the ice seen over `foot`
@@ -2793,7 +2844,11 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // shows faintly in thin fibrous cirrus (as in photographs of halos in
   // cirrus fibratus), more in a thin, even veil (cirrostratus), and fades
   // where the ice is thick enough to scatter the light again.
-  float haloW = (0.03 + 0.04 * smoothstep(0.03, 0.3, veilT)) * smoothstep(0.02, 0.15, tau) * (1.0 - many);
+  // (The light scattered more than once loses it: F takes the halo by
+  // 1 - many, as the rest of the light scattered once. Taken by it twice,
+  // as before, the ring did not show through a veil at night, where the
+  // photographs show it.)
+  float haloW = (0.05 + 0.12 * smoothstep(0.03, 0.3, veilT)) * smoothstep(0.02, 0.15, tau);
   vec4 F[3];
   for (int k = 0; k < 3; k++) {
     vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
