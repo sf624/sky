@@ -644,6 +644,7 @@ uniform vec2 uLogRange;
 uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
 uniform float uNightEye;    // how far the eye's night vision has come in, 0 by day to 1 (nightEyeFor)
+uniform float uNightGrey;   // how far the night's wider grey has come in, 0 to 1 (nightGreyFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -719,10 +720,16 @@ const int NFAR = 16;            // ...and in the lit air beyond it (see shadowSp
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
-const float STAR_GAIN = 5.0;
-const float STAR_LIFT = 100.0;  // the most a star is raised against a bright sky (see main)
+const float STAR_GAIN = 3.0;
+const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
+const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands over the sky, shown (0 to 1)
+const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
+const float MILKY_EYE = 2.0;    // the Milky Way raised at night (see main)
 const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
-const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones (see main)
+const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
+const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
+const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
+const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
 const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
 const int GRID = 128;
@@ -822,6 +829,19 @@ float milkyWay(vec3 c) {
   float near = 0.5 + 0.5 * dot(c, CENTRE);
   float clouds = 0.5 * noise3(c * 5.0) + 0.3 * noise3(c * 11.0) + 0.2 * noise3(c * 23.0);
   return (0.8 + 3.0 * near * near) * exp(-b * b / (0.02 + 0.03 * near)) * (0.25 + 1.5 * clouds * clouds);
+}
+
+// The faintest star the dark-adapted eye can see against a sky of b cd/m2
+// (x), and the faintest its cones alone can see (y), in magnitudes. After
+// Schaefer (1990): the threshold illuminance grows as (1 + sqrt(k b))^2,
+// with one pair of constants for the rods and one for the cones; the eye
+// takes the lower. A dark sky (2e-4 cd/m2) gives 6.6, a moonlit sky at
+// 0.005 about 4.2, twilight at 1 cd/m2 about 3, the day sky -4.
+vec2 starsSeen(float b) {
+  float nl = 3.1416e5 * b;                           // nanolamberts
+  float cones = 4.305 - 5.0 * log(1.0 + sqrt(1.259e-6 * nl)) / log(10.0);
+  float rods = 7.93 - 5.0 * log(1.0 + sqrt(0.01259 * nl)) / log(10.0);
+  return vec2(max(rods, cones), cones);
 }
 
 float cornetteShanks(float g, float mu) {
@@ -1378,6 +1398,58 @@ const vec4 SWELL[SWELLS] = vec4[SWELLS](
   vec4(-827.0, 187.0, -0.0112, 0.0025), vec4(-794.0, 212.0, -0.0118, 0.0031),
   vec4(-775.0, -1975.0, -0.0036, -0.0091), vec4(-468.0, -1475.0, -0.0031, -0.0098));
 
+// The glitter at night as the eye sees it: separate sparkles, not their
+// mean. The sea is cut into facets of FACET km, each with its own slope
+// drawn from the slopes the glitter leaves to the ripples (variance s2r);
+// a facet sparkles where its slope is within FACET_TOL (of that variance)
+// of the one that mirrors the light to the eye (zh), as a spot of SPOT
+// facets at a place of its own in the facet. Divided by the mean of that
+// over all facets, so that the glitter keeps its light. The spot is read
+// over the pixel's footprint (fa, fc; as the foam's breakers), so that it
+// shows as a point however far. Where the footprint is wider than a facet,
+// the facets are taken four at a time, level by level, as one that
+// sparkles four times as often: from far the sparkles merge into their
+// mean, as the eye sees them. The facets stay put on the sea: a still
+// holds still; in flight zh moves and they twinkle.
+const float FACET = 0.0005;
+const float FACET_TOL = 0.02;
+const float SPOT = 0.1;
+float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
+  float tau2 = tol * s2r;
+  float mean = tau2 / (s2r + tau2) * exp(-dot(zh, zh) / (s2r + tau2));
+  float n = round(WEATHER_KM / size);                // facets to the map's side (a power of 2 times 1000)
+  vec2 g = x / size, g0 = floor(g);
+  vec2 ha = 0.5 * fa / size, hc = 0.5 * fc / size;
+  vec3 cov = vec3(ha.x * ha.x + hc.x * hc.x, ha.x * ha.y + hc.x * hc.y, ha.y * ha.y + hc.y * hc.y) + vec3(SPOT * SPOT, 0.0, SPOT * SPOT);
+  float det = cov.x * cov.z - cov.y * cov.y;
+  float sum = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 c = mod(g0 + vec2(i, j), n);
+      vec2 lo = mod(c, 1000.0), hi = floor(c / 1000.0);
+      vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
+      float u1 = hash3(h + 0.37), u2 = hash3(h + 0.71);
+      vec2 sf = sqrt(-s2r * log(max(u1, 1e-7))) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2));
+      float w = exp(-dot(zh - sf, zh - sf) / tau2);
+      if (w > 1e-3) {
+        vec2 e = g0 + vec2(i, j) + vec2(hash3(h + 0.13), hash3(h + 0.53)) - g;
+        sum += w * exp(-0.5 * (cov.z * e.x * e.x - 2.0 * cov.y * e.x * e.y + cov.x * e.y * e.y) / det) / (2.0 * PI * sqrt(det));
+      }
+    }
+  }
+  return sum / max(mean, 1e-6);
+}
+float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
+  float level = max(log2(length(fa) / FACET), 0.0);
+  float k = floor(level), f = level - k;
+  float tol = FACET_TOL * exp2(2.0 * k);
+  float many = smoothstep(2.0, 32.0, FACET_TOL * exp2(2.0 * level));   // so many facets: their mean
+  if (many >= 1.0) return 1.0;
+  float s = mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc),
+                sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc), f);
+  return mix(s, 1.0, many);
+}
+
 // The sea at pg, at distance t along d, behind air of depth od and under
 // clouds of depth tau towards the light: the glitter of the sun on the
 // waves, the mirrored sky, and the blue light from below.
@@ -1510,6 +1582,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     float glint = F * exp(-dot(zh, zh) / s2r)
                 / (4.0 * PI * s2r * max(cv, 1e-3) * ch * ch * ch * ch)
                 / (1.0 + waveShade(max(cv, 1e-3), s2) + waveShade(c, s2));
+    if (uNightEye > 0.0) glint *= mix(1.0, sparkle(x, zh, s2r, fa, fc), uNightEye);
     float direct = exp(-tau);
     for (int k = 0; k < 3; k++) {
       lit[k] = uLightI * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
@@ -1899,6 +1972,7 @@ void main() {
   vec4 L[3], G[3];
   L[0] = vec4(0.0); L[1] = vec4(0.0); L[2] = vec4(0.0);
   G[0] = vec4(0.0); G[1] = vec4(0.0); G[2] = vec4(0.0);
+  vec3 starCol = vec3(0.0);                          // the stars at night, added after the exposure
   vec4 Tv[3];
   float prev = 0.0, vis = 1.0;
   bool cloudsFirst = tHigh < 0.0 || (tBar > 0.0 && tBar <= tHigh);
@@ -2000,8 +2074,31 @@ void main() {
       moonMask = smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm);
     }
     vec3 c = d * uSky;                               // equatorial direction (J2000)
-    vec4 st[3];
-    st[0] = vec4(0.0); st[1] = vec4(0.0); st[2] = vec4(0.0);
+    float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
+    float glow = uNight * (vanRhijn + (1.0 + MILKY_EYE * uNightEye) * milkyWay(c)) * (1.0 - moonMask);
+    vec4 tk[3];
+    vec4 tg[3];                                      // ...and for the airglow at night (below)
+    for (int k = 0; k < 3; k++) {
+      tk[k] = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
+      // The air dims the airglow and the Milky Way, but scatters much of
+      // that light back towards the eye: at night count half the loss.
+      tg[k] = mix(tk[k], vis * exp(-0.5 * (uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z)), uNightEye);
+    }
+    // The stars as the eye sees them at night (see starsSeen): the faintest
+    // it can see against this sky, and the faintest whose colour it sees.
+    vec2 seen = vec2(0.0);
+    if (uNightEye > 0.0) {
+      float y = 0.0;
+      for (int k = 0; k < 3; k++) y += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], L[k] + tg[k] * glow * pow(uWL[k], vec4(-3.0)));
+      // The moon's glare in the eye veils the sky around it: 10 E / theta^2
+      // cd/m2 at theta degrees from a light of E lux (Stiles and Holladay;
+      // the moon is uMoonI of the sun's 133000 lux).
+      float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
+      float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
+      seen = starsSeen(CD * ISUN * y + veil);
+    }
+    vec4 st[3], sn[3];
+    for (int k = 0; k < 3; k++) { st[k] = vec4(0.0); sn[k] = vec4(0.0); }
     ivec2 cell = starCell(c);
     for (int s = 0; s < SLOTS; s++) {
       vec4 t = texelFetch(uStars, ivec2(cell.x * SLOTS + s, cell.y), 0);
@@ -2023,27 +2120,39 @@ void main() {
       }
       if (w > 1e-3) {
         float tilt = floor(t.w) / 63.0 * 8.0 - 4.0;  // blue to red
-        for (int k = 0; k < 3; k++) st[k] += w * pow(uWL[k], vec4(tilt));
+        // The eye sees the colour of a star only well above what its
+        // cones can just see (seen.y): the brightest few.
+        float hue = smoothstep(STAR_HUE.x, STAR_HUE.y, seen.y - (6.5 - lf / STAR_LN_MAG));
+        for (int k = 0; k < 3; k++) {
+          vec4 tint = pow(uWL[k], vec4(tilt));
+          st[k] += w * tint;
+          sn[k] += w * mix(vec4(1.0), tint, hue);
+        }
       }
     }
-    float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
-    float glow = uNight * (vanRhijn + milkyWay(c)) * (1.0 - moonMask);
-    float stars = uNight * STAR_GAIN * (1.0 - moonMask);
-    // At night a star is seen against a brighter sky better than a screen
-    // shows it: the eye's threshold for a point grows with the square root
-    // of the sky's luminance (the de Vries-Rose law), a screen's in
-    // proportion. So as the night eye comes in, a star is raised by the
-    // square root of how much brighter the sky behind it is than the
-    // moonless sky (up to STAR_LIFT): under a quarter moon about as many
-    // stars show as the eye sees, not only the brightest few.
-    if (uNightEye > 0.0) {
-      float back = glow + dot(uWS[0], L[0]) + dot(uWS[1], L[1]) + dot(uWS[2], L[2]);
-      stars *= 1.0 + uNightEye * (sqrt(clamp(back / uNight, 1.0, STAR_LIFT * STAR_LIFT)) - 1.0);
-    }
+    // By day the stars are drawn in proportion to the airglow; the exposure
+    // hides them.
+    float stars = uNight * STAR_GAIN * (1.0 - moonMask) * (1.0 - uNightEye);
     for (int k = 0; k < 3; k++) {
-      vec4 t = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
-      G[k] = t * sun;
-      L[k] += t * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
+      G[k] = tk[k] * sun;
+      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0));
+      else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
+    }
+    // At night as the eye sees them: a star at the faintest magnitude the
+    // eye can see against this sky (seen.x) is drawn just visible, and each
+    // magnitude brighter STAR_LN_MAG brighter (in ln), dimmed by the air and
+    // the clouds before it. Added after the exposure (in main): the eye's
+    // threshold, not the exposure, says which stars show.
+    if (uNightEye > 0.0) {
+      float k0 = (1.0 - moonMask) * exp(STAR_LN_MAG * (seen.x - 6.5));
+      // The air and the clouds dim a star by some magnitudes; drawn on the
+      // same compressed scale, that is the power STAR_LN_MAG / 0.921 of
+      // their transmission.
+      for (int k = 0; k < 3; k++) sn[k] *= pow(tk[k], vec4(STAR_LN_MAG / 0.921));
+      starCol = k0 * vec3(
+        dot(uWR[0], sn[0]) + dot(uWR[1], sn[1]) + dot(uWR[2], sn[2]),
+        dot(uWG[0], sn[0]) + dot(uWG[1], sn[1]) + dot(uWG[2], sn[2]),
+        dot(uWB[0], sn[0]) + dot(uWB[1], sn[1]) + dot(uWB[2], sn[2]));
     }
   }
 
@@ -2078,16 +2187,20 @@ void main() {
   // the grey of what the rods see, which favours blue-green over red (the
   // Purkinje shift): moonlit clouds and the moon's glitter are grey to the
   // eye, and the moonlit sky a dark grey-blue, where a long exposure shows
-  // them in the colours of sunlight. The rods' share is ROD_HALF / (ROD_HALF
-  // + the pixel's luminance in cd/m2), as the night eye comes in (the
-  // paper's 0.04 greyed the sky of nautical twilight, which the eye still
-  // sees blue). Their grey is a little blue, as the night looks (the "blue
-  // shift" of Jensen et al., 2001), but less: neutral grey read as a black
-  // and white photograph.
+  // them in the colours of sunlight. The rods' share falls from 1 to 0 as
+  // the pixel's luminance goes from MESOPIC.x to MESOPIC.y cd/m2 (a
+  // smoothstep in its log: the eye's mesopic range), as the night eye
+  // comes in. So the full moon's clouds (about 0.07 cd/m2) are mostly
+  // grey, not tan. Their grey is a little blue, as the night looks (the
+  // "blue shift" of Jensen et al., 2001), but less: neutral grey read as a
+  // black and white photograph.
+  float rodShare = 0.0;
   if (uNightEye > 0.0) {
     float rods = ISUN * (dot(uWS[0], L[0]) + dot(uWS[1], L[1]) + dot(uWS[2], L[2]));
     float cd = CD * dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col = mix(col, max(rods, 0.0) * ROD_TINT, uNightEye * ROD_HALF / (ROD_HALF + cd));
+    float wide = 1.0 - smoothstep(log(MESOPIC.x), log(MESOPIC.y), log(max(cd, 1e-12)));
+    rodShare = uNightEye * mix(ROD_HALF / (ROD_HALF + cd), wide, uNightGrey);
+    col = mix(col, max(rods, 0.0) * ROD_TINT, rodShare);
   }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
@@ -2102,6 +2215,17 @@ void main() {
   float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * max(glintY, 0.0);
   float level = (log2(max(metered, 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
+  // The stars at night (starCol), as the eye sees them: one at the eye's
+  // threshold against this sky stands STAR_SEEN over it on the screen,
+  // whatever the exposure. A dark sky does not hide stars that the eye sees.
+  if (uNightEye > 0.0 && max(starCol.r, max(starCol.g, starCol.b)) > 0.0) {
+    // The tone curve below, on the luminance: x^n p^(look - n), then 1 - exp.
+    float n = mix(uLook, NIGHT_LOOK, rodShare), p = pow(LOOK_PIVOT, uLook - n);
+    float back = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    float shown = pow(1.0 - exp(-p * pow(back, n)), 1.0 / 2.2) + STAR_SEEN;
+    float need = pow(-log(1.0 - pow(min(shown, 0.99), 2.2)) / p, 1.0 / n) - back;
+    col += uNightEye * need * starCol;
+  }
   // No shoulder that keeps the hue: each channel meets the curve below on
   // its own, as on a camera's sensor. A bright orange band of twilight
   // then runs into white at its strongest channel first, and comes out
@@ -2124,7 +2248,18 @@ void main() {
   col = mix(col, vec3(lum), 0.85 * smoothstep(1.0, 6.0, lum));
 
   // A "look", not physics: a per-channel power deepens the colour, as film does.
-  col = pow(col, vec3(uLook));
+  // What the rods see takes the power on its luminance alone: the look
+  // deepens the tones but adds no colour that the eye does not see. And it
+  // is steeper (NIGHT_LOOK, the same at LOOK_PIVOT, about the moonlit
+  // clouds): the night eye's view has black in it, the dark sea and the
+  // sky away from the moon, where the gentler curve left a grey veil.
+  vec3 looked = pow(col, vec3(uLook));
+  if (rodShare > 0.0) {
+    float yl = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30);
+    float n = mix(uLook, NIGHT_LOOK, rodShare);
+    looked = mix(looked, col * pow(yl, n - 1.0) * pow(LOOK_PIVOT, uLook - n), rodShare);
+  }
+  col = looked;
   col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
@@ -3316,12 +3451,19 @@ const SkySound = (() => {
   const DAY_SATURATION = 1.3;
   const saturationFor = () => 1 + (DAY_SATURATION - 1) * smooth01((state.elev - DUSK[1]) / (DUSK[0] - DUSK[1]));
 
-  // The eye at night (uNightEye): the rods' grey and the stars raised against a
-  // bright sky (see main in fs) come in as the sun goes from NIGHT_EYE[0] to
+  // The eye at night (uNightEye): the rods' grey, the night's tone curve, the
+  // stars the eye sees, the Milky Way raised and the moon's glitter as
+  // sparkles (see main and addSea in fs) come in as the sun goes from NIGHT_EYE[0] to
   // NIGHT_EYE[1] degrees. None by day; at -3 degrees the sky is still some 30
   // cd/m2, too bright for the rods to matter.
   const NIGHT_EYE = [-3, -6];
   const nightEyeFor = () => smooth01((NIGHT_EYE[0] - state.elev) / (NIGHT_EYE[0] - NIGHT_EYE[1]));
+  // The eye's colours fade over a wider range of luminance (MESOPIC in fs) only
+  // in the night proper, as the sun goes from NIGHT_GREY[0] to NIGHT_GREY[1]
+  // degrees: through nautical twilight the sky, as dim as a full moon's
+  // clouds, still looks blue to the eye.
+  const NIGHT_GREY = [-10, -14];
+  const nightGreyFor = () => smooth01((NIGHT_GREY[0] - state.elev) / (NIGHT_GREY[0] - NIGHT_GREY[1]));
 
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
@@ -3730,7 +3872,7 @@ const SkySound = (() => {
     const uLight = U('uLight'), uLightI = U('uLightI');
     const uJitter = U('uJitter'), uPass = U('uPass');
     gl.uniform2fv(U('uLogRange'), LOG_RANGE);
-    const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye');
+    const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye'), uNightGrey = U('uNightGrey');
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
@@ -3767,6 +3909,7 @@ const SkySound = (() => {
       gl.uniform3fv(uBalance, balanceFor());
       gl.uniform1f(uSaturation, saturationFor());
       gl.uniform1f(uNightEye, nightEyeFor());
+      gl.uniform1f(uNightGrey, nightGreyFor());
       gl.uniform1f(uAlt, v.alt);
       gl.uniform1f(uCloud, v.cloud);
       gl.uniform1f(uWind, state.wind);
