@@ -234,9 +234,17 @@ air, or to the sea. The air is three species, with densities from
 
 - Rayleigh: `exp(-h / HR)`, `HR` = 8 km; scattering `uBR` = 13.558e-3 per km
   at 550 nm, falling with the fourth power of the wavelength (`BR`).
-- Mie (aerosol): `exp(-h / HM)`, `HM` = 1.2 km; scattering `BETA_M` =
+- Mie (aerosol): `exp(-h / HM)`, `HM` = 1.2 km, the haze of the lowest
+  kilometres, plus two thin layers above it (`AERO_FREE`, `AERO_STRAT` in
+  `fs`, `AERO_UP` and `mieDensity` in the JS): 0.7 of the sea level's
+  density at 6 km (half-width 5 km, the free troposphere) and 0.05 at
+  20 km (half-width 8 km, the stratosphere). Scattering `BETA_M` =
   3.996e-3 per km times `uHaze`, extinction `MIE_EXT` = 1.11 times that.
-  Grey: the same at every wavelength.
+  Grey: the same at every wavelength. The layers matter in twilight: their
+  forward scattering of the sun's light, from below the horizon, makes
+  the glow over the sunset a taller warm gradient (orange, yellow, pale,
+  then blue) instead of a thin orange line under a blue sky; by day they
+  widen the sun's aureole a little.
 - Ozone: a triangle from 10 to 40 km, peaking at 25 km; absorption `uBO`
   from the Chappuis cross-sections (`OZONE`) for 300 Dobson units.
 
@@ -277,9 +285,10 @@ layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
-- The table repeats the density profile. The profile is written out four
-  times: `density()` in `fs`, and in the JS `buildDepths`,
-  `buildMultiScatter` and this table in `makeSky`. Change all four.
+- The table repeats the density profile. The profile is written out twice:
+  `density()` in `fs`, and in the JS (`mieDensity` for the aerosol, used
+  by `buildDepths`, `buildMultiScatter` and this table in `makeSky`).
+  Change both.
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
 each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
@@ -318,7 +327,7 @@ clouds. It depends on the haze, so `frame` rebuilds it when the haze
 changes, and the renderer uploads it again. `fs` reads it through the
 GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
 
-**Against measurements.** Integrated over the sky at sea level (haze
+**Against measurements** (made before the thin aerosol layers were added). Integrated over the sky at sea level (haze
 0.35, 128 klx of sunlight outside the air), the model gives, against the
 horizontal illuminance table in Schlyter, "Radiometry and photometry in
 astronomy": sun at 0 degrees, 996 lx (measured 759); -6, 6.8 lx (3.4);
@@ -564,22 +573,28 @@ itself, the one read that waits.
   below darken sooner than the sky, and a floor on them brightened the
   sky again for some ten minutes;
 - in twilight another exposure takes over, blended in as the sun goes
-  from `DUSK` = 2.5 to -0.5 degrees (a smoothstep, times `sunOn`): one set by the
-  median alone, so that the view is shown as the eye sees it and not held
-  down by its highlights. At sunset and in civil twilight the sky is
-  light and pastel, its clouds lit, and the band of glow its brightest
-  part; then the view darkens steadily into the night. The median is
-  shown at `DUSK_SHOWN` = -2.2 (log2 after exposure) when it stands at
+  from `DUSK` = 2.5 to -0.5 degrees (a smoothstep, times `sunOn`): one set
+  by the sky, the level that the brighter third of the picture passes
+  (`DUSK_SHARE` = 0.65), so that the view is shown as the eye sees it and
+  not held down by its highlights. At sunset and in civil twilight the
+  sky is light and pastel, its clouds lit, and the band of glow its
+  brightest part; then the view darkens steadily into the night. That
+  level is shown at `DUSK_SHOWN` = -2.2 (log2 after exposure) when it stands at
   `DUSK_MID` = -3 (about sunset: as by day), and at the night's level
   (the key's, `KEY - EYE * NIGHT_LEVEL + NIGHT_LEVEL + MID_GAP`, -4.6)
   when it stands at the night's (`NIGHT_LEVEL + MID_GAP`); in between
   along the power `DUSK_POW` = 0.7 of its distance from the night's, so
   that it darkens slowly at first: through civil and nautical twilight
   the eye still sees colours. White gives way: the highlights may stand
-  up to `ABOVE` = 4 stops above white. The median, not the darker
-  quarter, again: a key on the clouds and the sea below, which darken
-  sooner than the sky, brightened the sky by half a stop for a few
-  minutes;
+  up to `ABOVE` = 3.5 stops above white, an allowance that grows over
+  `ABOVE_SPAN` = 5 degrees after the blend, so that it does not let the
+  exposure leap as the sun sets. The sky, not the median nor the darker
+  quarter: the clouds and the sea below darken sooner than the sky after
+  sunset, and an exposure that followed them brightened the sky through
+  sunset. In a time-lapse at 0.3 km the sky now falls steadily (it rose
+  by about 20 levels of 255 with the median); at 11 km, where the sun's
+  disc sets later and holds the exposure down until then, it still rises
+  by about 30 levels between 2 and -3 degrees;
 - where the exposure stands above white's, the highlights (the band of
   glow at dusk, 7 to 9 stops above the sky over it) stand above white:
   `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` = 5,
@@ -614,7 +629,18 @@ At the end of `main`:
    towards white at its strongest channel (up to 40 %), as on film and
    to the eye, which softens the small changes of hue within the band.
    One curve serves the whole picture: no halos. By day `uShoulder` is 0.
-2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
+2. The white balance `uBalance` (`balanceFor`). By day a camera's for
+   daylight, `DAY_BALANCE` = (0.932, 1.013, 1.074). In twilight it goes
+   `BALANCE_ADAPT` = 0.5 of the way (in log) towards the colour of the
+   light on the level ground (the sky's from above, `upData`, kept by
+   `buildMultiScatter`, and the sun's while it is up), relative to that
+   light with the sun at 30 degrees, as an automatic white balance does
+   and as the eye adapts. Blended in as twilight's exposure is (`DUSK`),
+   and out again as the sun goes from 4 to 9 degrees down
+   (`BALANCE_OUT`). Without it the sky away from the sun came out
+   lavender and the Belt of Venus magenta, where photographs show a pale
+   blue sky and a pink belt; held into the deeper twilight, it turned the
+   blue sky grey and the clouds brown.
 3. Light far too strong for the screen (1 to 6 times white) turns towards
    white, as on film.
 4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
