@@ -163,16 +163,17 @@ the scene in ms at 1920 x 1080 and at 2560 x 1440 (main in brackets):
 
 | View | 1920 x 1080 | 2560 x 1440 |
 |---|---|---|
-| Default (cruise) | 8.9 (4.9) | 14.5 (8.1) |
-| `alt=2&cloud=0.7` | 24.5 (5.1) | 41 |
-| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 13.2 (3.5) | 23.0 (5.9) |
-| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 19.9 (5.1) | 34.2 (7.4) |
-| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 19.2 (5.8) | 32.8 (10.0) |
-| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 15.5 (4.7) | 26.7 (6.4) |
+| Default (cruise) | 7.3 (4.9) | 12.1 (8.1) |
+| `alt=2&cloud=0.7` | 20.7 (5.1) | 35.3 |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 10.9 (3.5) | 19.5 (5.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 17.6 (5.1) | 30.3 (7.4) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 28.6 (5.8) | 49.6 (10.0) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 13.7 (4.7) | 23.5 (6.4) |
 
 Where clouds fill the view from near, the scene costs three to five times
-what it did; at WQHD the slowest views come near the 40 ms at which the
-drawing size drops in flight.
+what it did. The view from under broken cloud at 0.6 km is the slowest:
+there the rays pass between heaps and meet several, each lit; at WQHD it
+passes the 40 ms at which the drawing size drops in flight.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down

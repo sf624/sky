@@ -433,6 +433,31 @@ float perlinFbm(vec3 p, vec3 freq, int octaves, float seed) {
   return sum;
 }
 
+// Heaps: single clouds, each a dome round a point of a jittered grid of
+// freq cells across the map, of its own width (0.3 to 0.75 of a cell) and
+// strength. The highest dome wins where two meet: a cluster, not a sum.
+float heaps(vec2 uv, float freq, float seed) {
+  vec2 p = uv * freq, id = floor(p), f = p - id;
+  float m = 0.0;
+  for (int x = -1; x <= 1; x++) {
+    for (int y = -1; y <= 1; y++) {
+      vec2 g = vec2(x, y);
+      vec3 r = rnd(vec3(id + g, 0.0), vec3(freq, freq, 1.0), seed);
+      vec3 s = rnd(vec3(id + g, 1.0), vec3(freq, freq, 2.0), seed);
+      vec2 c = g + 0.15 + 0.7 * r.xy - f;
+      float d = length(c) / mix(0.3, 0.75, r.z);
+      // A smooth max: where two meet they merge without a sharp crease.
+      // A dome, round all over (a bell, hollow in its flanks, looked like a
+      // hill), whose foot meets the others without a kink: its slope falls
+      // to nought at the rim (else a crease showed where two met).
+      float u = max(1.0 - d * d, 0.0), v = mix(0.35, 1.0, s.x) * sqrt(u) * smoothstep(0.0, 0.3, u);
+      float k = clamp(0.5 + 2.0 * (v - m), 0.0, 1.0);
+      m = mix(m, v, k) + 0.25 * k * (1.0 - k);
+    }
+  }
+  return m;
+}
+
 // The same with a chosen gain: nearer 1, more of the small sizes.
 float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   float sum = 0.0, amp = 1.0;
@@ -466,12 +491,16 @@ void main() {
     vec3 s = vec3(4.0 * uv.x + uv.y, 4.0 * uv.y - uv.x, 0.37);
     float streets = fbm(s, vec3(12.0, 3.0, 1.0), 3, 0.7, 90.0);
     float clumps = fbm(p, vec3(40.0, 40.0, 1.0), 4, 0.75, 60.0);
-    float cover = 0.5 + 0.18 * systems + 0.15 * (walls - 0.5) + 0.3 * streets + 0.5 * clumps;
+    float heap = max(heaps(uv, 64.0, 120.0), 0.8 * heaps(uv, 160.0, 130.0) * smoothstep(-0.4, 0.3, clumps + 0.3 * systems));
+    float cover = 0.5 + 0.18 * systems + 0.15 * (walls - 0.5) + 0.3 * streets + 0.2 * clumps + 0.6 * (heap * heap - 0.23);
     // Towers: the widest clumps, where the weather lets them grow; some
     // grow taller than others.
     float tall = smoothstep(0.4, 0.55, 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0))
                * smoothstep(0.15, 0.4, fbm(p, vec3(20.0, 20.0, 1.0), 3, 0.6, 65.0))
                * (0.7 + 0.6 * perlin(p, vec3(11.0, 11.0, 1.0), 75.0));
+    // G: how high the heap stands here (a dome over each heap), taller
+    // where towers grow.
+    tall = clamp(heap * mix(0.6, 1.1, clamp(tall, 0.0, 1.0)), 0.0, 1.0);
     // Wind on the sea, which blows towards (2, 1): gusts and calms some
     // 7 km across and twice as long down the wind, with finer ones inside
     // them.
@@ -890,17 +919,23 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   y = (h - level) / (CT - CB);
   base = 2.0 * (h - level);
   // The cloud amount sets the level of the map above which clouds stand.
-  // Towers grow where the map says so, unless the clouds are few.
-  float tower = w.g * smoothstep(0.1, 0.5, uCloud);
+  // Each heap of the map is a dome: its top stands as high as the map's G
+  // says (higher in the middle of a heap, and on some heaps more than on
+  // others), so that a field of cloud is a field of domes even where the
+  // cover is whole. The tallest heaps are towers, unless the clouds are few.
+  float tower = smoothstep(0.55, 0.95, w.g) * smoothstep(0.1, 0.5, uCloud);
   float e = 3.0 * (w.r - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud))) + 1.5 * tower;
   // A dome over a flat base, with steep sides: a height costs its cube.
   // Wider clouds are thicker, up to a point; a deck swells where the map
   // is high.
-  float top = 0.28 + 0.4 * sqrt(tower);
+  // Where the cover is thick all round, the heaps flatten into a deck of
+  // small cells (stratocumulus).
+  float deck = smoothstep(2.6, 3.6, e);
+  float top = 0.12 + 0.32 * w.g * (1.0 - 0.6 * deck) + 0.25 * tower;
   float thick = 1.0 - exp(-e / 1.6);
   float cube = top * top * top;
-  float swell = 0.022 * max(e - 1.0, 0.0) / cube;
-  float f = 1.6 * (thick - y * y * y / cube) + 1.2 * swell - 4.0 * max(y - 0.85, 0.0);
+  float swell = 0.25 * max(e - 1.0, 0.0);
+  float f = 1.6 * (thick + swell - y * y * y / cube) - 4.0 * max(y - 0.85, 0.0);
   // The cube costs nothing near the base: there the thin edge of a cloud,
   // where the map is barely over its level, would reach out sideways as a
   // wide, flat sheet. Round off the lowest 180 m, so that a base ends under
@@ -908,7 +943,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float rim = max(1.0 - y / 0.04, 0.0);
   f -= 0.2 * rim * rim;
   // A thicker cloud has bigger lumps, and a tower bigger still.
-  float lumps = LUMPS * mix(0.8, 2.0, clamp(thick, 0.0, 1.0)) * (1.0 + 0.6 * swell) * (1.0 + sqrt(tower));
+  float lumps = LUMPS * (0.7 + 1.3 * w.g) * (1.0 - 0.2 * deck) * (1.0 + 0.3 * swell) * (1.0 + sqrt(tower));
   if (f < -0.6 * lumps) return f;                    // no noise could make a cloud here
   // The noise repeats every few km. Read it at a depth that drifts from
   // place to place, so that no two tiles show the same clouds.
@@ -927,10 +962,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // the numbers are the means of the noise). lump: how far this place
   // stands out of them.
   n.gba *= 2.0 - n.gba;
-  lump = 0.5 * (n.r - 0.571) + 0.5 * (n.g - 0.712) + 0.5 * (n.b - 0.715) + 0.4 * (n.a - 0.715);
-  float billows = lumps * lump;
+  lump = 0.4 * (n.g - 0.712) + 0.6 * (n.b - 0.715) + 0.7 * (n.a - 0.715);
+  lump = mix(lump, 0.4 * (n.b - 0.715) + 1.4 * (n.a - 0.715), deck);
+  // Billows bulge out more than they dent in (smoothly: a kink where
+  // lump is nought showed as a ridge along it), and they shape the outside
+  // of a cloud: deep in a body they fade, so that they cannot punch holes
+  // through it.
+  float billows = lumps * (0.8 * lump + 0.2 * sqrt(lump * lump + 0.004)) * mix(1.0, 0.3, smoothstep(0.0, 0.6, f));
   // How high the top stands over this place, as the field has it here.
-  body = pow(max(thick + (billows + 1.2 * swell) / 1.6, 0.0), 1.0 / 3.0) * top / 0.28;
+  body = pow(max(thick + swell + billows / 1.6, 0.0), 1.0 / 3.0) * top / 0.28;
   // The base is up to 120 m lower under the thick middle of a cloud and
   // under the swells of a deck (e, smooth: from the weather map) and a little
   // higher or lower from place to place (n.r, lump: the noise of the tile
@@ -1118,7 +1158,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // terms stand for the orders of scattering; a thick cloud top that faces
   // the light comes out with an albedo near 0.7.
   float mu = dot(d, uLight);
-  float p0 = 0.8 * hg(mu, 0.8) + 0.2 * hg(mu, -0.25);
+  // With the sun on the horizon, the thin fringes towards it glowed like
+  // red-hot wire against clouds near black; in photographs at sunset the
+  // rims are pink or gold and faint. Their forward peak is halved then.
+  float p0 = mix(0.8, 0.4, 1.0 - smoothstep(-0.02, 0.12, uLight.y)) * hg(mu, 0.8) + 0.2 * hg(mu, -0.25);
   float p1 = 0.6 * hg(mu, 0.4), p2 = 1.4 * hg(mu, 0.1), p3 = 1.6 / (4.0 * PI), p4 = 0.3 / (4.0 * PI);
   float ds = max(DS_NEAR, ta * min(DS_REL * (1.0 + ta / L), rel)), dsAir = max(DS_MIN, ds);
   float t = ta + jitter * COARSE * dsAir, wsum = 0.0, tsum = 0.0;
@@ -1131,7 +1174,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // share it.
   float one = 0.0, many = 0.0, amb = 0.0;
   bool lit = false;
-  float TcLit = 1.0;
+  float TcLit = 1.0, column = -1.0;
   for (int i = 0; i < CLOUD_STEPS; i++) {
     if (t >= tb || Tc < 0.01) break;
     ds = max(DS_NEAR, t * min(DS_REL * (1.0 + t / L), rel));
@@ -1162,9 +1205,13 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // seventh of the light, up to dsAir.
       next = clamp(0.5 * f, FINE * dsIn, max(mix(dsAir, dsIn, smoothstep(0.1, 0.6, Tc)), min(dsAir, 0.15 / max(den, 1e-3))));
       float a = 1.0 - exp(-den * next);
-      // Not at every fine step near the eye: once more when a fifth more
-      // of the light has gone.
-      if (!lit || (Tc > 0.4 && TcLit - Tc > 0.2)) {
+      // Not at every fine step near the eye: once more when 30 % more of
+      // the light has gone (a fifth cost 3 ms more under a deck and
+      // looked the same).
+      // A cloud seen through others that already hide more than 85 % of
+      // what lies behind takes their light: it would show little of its
+      // own, and the light is most of the cost.
+      if ((!lit && (Tc > 0.15 || TcLit > 0.99)) || (Tc > 0.4 && TcLit - Tc > 0.3)) {
         lit = true;
         TcLit = Tc;
         // Light the cloud where the ray met its surface, not where the
@@ -1206,11 +1253,6 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // the field is steep).
         float y0, b0, c0, e0;
         float h = 1.5 * step;
-        float f0 = cloudField(ps, lm, true, y0, b0, c0, e0);
-        vec3 grad = vec3(cloudField(ps + h * uLight, lm, true, y0, b0, c0, e0),
-                         cloudField(ps + h * side, lm, true, y0, b0, c0, e0),
-                         cloudField(ps + h * cross(uLight, side), lm, true, y0, b0, c0, e0)) - f0;
-        float glen = max(length(grad), 1e-6);
         // The same at the size of whole billows (at least 120 m, from the
         // field without the fine noise: with it the picture barely changed,
         // at 4 ms more near the tops): in photographs the light falls off over a
@@ -1224,13 +1266,31 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
                        cloudField(ps + hL * side, lmL, false, y0, b0, c0, e0),
                        cloudField(ps + hL * cross(uLight, side), lmL, false, y0, b0, c0, e0)) - fL;
         float facingL = clamp((0.4 - gL.x / max(length(gL), 1e-6)) / 1.4, 0.0, 1.0);
-        float shapeL = mix(SHAPE, 1.1, facingL * facingL * (3.0 - 2.0 * facingL));
+        // With the sun low, a side turned from it is lit by the sky more than
+        // by sunlight that went through the cloud: blue-grey against the warm
+        // sunlit side, as in photographs at a low sun.
+        float low = 1.0 - smoothstep(0.05, 0.35, uLight.y);
+        float shapeL = mix(SHAPE * (1.0 - 0.5 * low), 1.1, facingL * facingL * (3.0 - 2.0 * facingL));
+        // Which way the surface faces, from the field smoothed as for mid:
+        // its gradient, normalised, so that each billow turns from the light
+        // by degrees (the slope towards the light alone was lit or not, as
+        // the field is steep). Beyond 8 km, where the light's first step is
+        // 50 m and a pixel some 10 m, the billows' normal is nearly the
+        // whole billows' one: that one serves (four reads of the fine noise
+        // fewer).
+        bool far = step >= 0.05;
+        float f0 = far ? fL : cloudField(ps, lm, true, y0, b0, c0, e0);
+        vec3 grad = far ? gL : vec3(cloudField(ps + h * uLight, lm, true, y0, b0, c0, e0),
+                                    cloudField(ps + h * side, lm, true, y0, b0, c0, e0),
+                                    cloudField(ps + h * cross(uLight, side), lm, true, y0, b0, c0, e0)) - f0;
+        if (far) h = hL;
+        float glen = max(length(grad), 1e-6);
         float facing = clamp((0.3 - grad.x / glen) / 1.3, 0.0, 1.0);
         // The normal; out along it, the field falls as fast as it rises
         // here on a billow in the open, and less in a crease between
         // billows (occ: 1 where it does not fall at all).
         vec3 nrm = -(grad.x * uLight + grad.y * side + grad.z * cross(uLight, side)) / glen;
-        float fo = cloudField(ps + 2.0 * h * nrm, lm, true, y0, b0, c0, e0);
+        float fo = cloudField(ps + 2.0 * h * nrm, far ? lmL : lm, !far, y0, b0, c0, e0);
         float occ = clamp((fo - f0) / (2.0 * glen) + 1.0, 0.0, 1.0);
         // The sky lights what faces up, the higher the better. This
         // follows the field without the fine noise: light spreads over
@@ -1271,14 +1331,16 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // times on the way (the sky's, and the sun's that went deep): what
         // a slab of that depth lets through (two streams, g = 0.85). Under
         // a deck its thick cells are darker than the thin gaps between them.
-        float column = 1.0 / (1.0 + COLUMN * max(shadowDepth(ps + eye(), normalize(ps + eye()), 5) - 5.0, 0.0));
+        // (Once per cloud the ray enters: it changes little within one,
+        // and costs five reads of the field.)
+        if (column < 0.0 || fPrev < 0.0) column = 1.0 / (1.0 + COLUMN * max(shadowDepth(ps + eye(), normalize(ps + eye()), 5) - 5.0, 0.0));
         open = mix(open, 0.55 + 0.35 * dot(nrm, normalize(ps + eye())), 0.5);
         // SUNLIT: the gain of the light scattered many times, and SKYLIT that
         // of the sky's: a sunlit top keeps room below white for its
         // gradients, and a side in shadow is a luminous blue-grey, lit by
         // the sky, not a dark grey.
         many = shapeL * crease * hollow * billow * white * (SUNLIT * mix(0.15, 1.0, facing) * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft))
-                                 + column * (SUNLIT * mix(DEEP, 1.0, facing) * p3 * exp(-0.05 * soft)
+                                 + column * (SUNLIT * mix(DEEP * (1.0 - 0.5 * low), 1.0, facing) * p3 * exp(-0.05 * soft)
                                  + p4 * exp(-0.012 * soft)) + 0.02 * bounce);
         amb = SKYLIT * crease * hollow * billow * (column * open * mix(1.0, white, 0.5) + 0.15 * bounce);
       }

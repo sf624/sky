@@ -243,7 +243,8 @@ a metre, and the finest noise showed those steps as terraces.
 rising by about 1 per km of depth under the surface. `cloudShape` builds it
 as a sum:
 
-- the weather map `uWeather` at `p.xz + uDrift` (R: cover, G: towers),
+- the weather map `uWeather` at `p.xz + uDrift` (R: cover, G: how high
+  the heap stands),
   against a level set by `uCloud` (a cubic in `uCloud`). `weather` reads
   it: through the GPU's filter, which bends where the map's texels meet
   (every 250 m). Near the eye (where a pixel is finer than 8 m) the place
@@ -253,13 +254,30 @@ as a sum:
   streaks. Where a pixel is finer than 4 m it is read through a cubic
   B-spline (four filtered reads, Sigg and Hadwiger, GPU Gems 2 ch. 20);
 - less what height costs: a dome over a flat base (`y` cubed over the
-  cube of `top`), thicker where the map is higher; the lowest 180 m
+  cube of `top`), thicker where the map is higher. `top` follows G: each
+  heap of the map is a dome 0.5 to 1.2 km over a deck between heaps and
+  up to 1.9 km over its base on the highest heaps; the tallest (G over
+  0.55) are towers, a kilometre higher still. So a field of cloud is a
+  field of domes of many sizes even where the cover is whole; before,
+  the top was one height wherever the cover was whole, and the noise of
+  the tile made all the forms: one size of lumps with pits in them, like
+  crumpled paper. Where the cover is thickest (`deck`) the domes flatten
+  to a third of their height and the noise's 500 m cells take over
+  (stratocumulus). A deck swells a little where the map is high
+  (`swell`, a share of the height, not a fixed one); the lowest 180 m
   rounded off (`rim`). `y` counts from the base's `level`: 150 to 300 m
   over `CB`, higher or lower across tens of km (it follows the gusts'
   map, B, as a slow pattern);
 - plus the noise of the tile (`uNoise`, one tile per `BASE_KM` = 8 km),
   read at a depth that drifts from place to place (`far`) so that no two
   tiles look alike. Worley values are rounded into domes (`v (2 - v)`).
+  Its billows (`lump`: Worley cells of 2 km, 1 km and 500 m, weighed
+  0.4, 0.6 and 0.7, the 500 m ones most) are as large as the heap is
+  high (`0.7 + 1.3 G`), bulge out more than they dent in (dents count
+  0.6, by a smooth curve: a kink at nought showed as ridges) and fade to
+  30 % deep in a body (over the field's first 0.6 inside), so that they
+  shape its outside and cannot punch holes through it: with full
+  billows everywhere, the forms from 4 km had dark pits.
   Where a pixel is finer than 16 m, the reads that see the fine noise
   (the surface, not the shadows) go through a cubic B-spline
   (`noiseSpline`, eight filtered reads): the GPU's filter bends where its
@@ -360,9 +378,11 @@ clouds.
   places frame after frame, and clouds 3 to 5 km off showed ripples.
 
 **The light** is worked out at the first sample of each cloud the ray
-enters, and again while more than 40 % of the light still gets through,
-each time a fifth more of it has gone (not at every step); deeper
-samples share the last result. At a
+enters, unless the clouds in front already hide more than 85 % of what
+lies behind (it then keeps their light: it would show little of its own,
+and the light is most of the cost), and again while more than 40 % of the
+light still gets through, each time 30 % more of it has gone (not at
+every step); deeper samples share the last result. At a
 sample just past the surface it is worked out on the surface itself,
 found between the last two samples. For each:
 
@@ -380,13 +400,18 @@ found between the last two samples. For each:
   picture).
 - `facing` comes from the normal: the gradient of the field with the fine
   noise smoothed as for `mid` (below), over 1.5 first steps along the light and two
-  axes across it, normalised. The slope towards the light alone was lit or
+  axes across it, normalised. Beyond 8 km, where the first step is 50 m,
+  the normal of whole billows (below) serves instead: four reads of the
+  fine noise fewer, and a mean difference under a level. The slope towards the light alone was lit or
   dark and nothing between, as the field is steep: flat white with blue
   patches, like snow. A wrap of 0.3 lets a side turned a little away still
   catch some light. The same normal at the size of whole billows (the
   field without the fine noise, over at least 120 m) gives `shapeL`: the light scattered
   many times falls from 110 % on a billow's lit top to `SHAPE` = 45 % on
-  its side turned away, by a smooth curve. In photographs the light falls
+  its side turned away, by a smooth curve; with the sun under 20 degrees
+  (`low`), to half that, and `DEEP` (below) is halved too: at a low sun a
+  side turned away is lit by the sky, blue-grey against the warm lit side,
+  not by sunlight that went through the cloud. In photographs the light falls
   off over a whole billow and its small bumps are only faintly shaded; the
   normal of the small bumps alone made the clouds white all over, with
   small dark creases.
@@ -410,12 +435,16 @@ found between the last two samples. For each:
 - `column`: light that comes down through the cloud above, the sky's and
   the sun's that went deep, is what a slab of that depth lets through:
   `1 / (1 + COLUMN (tau - 5))`, with `COLUMN` = 0.11 ((1 - g) 0.75 for
-  g = 0.85) and `tau` the depth straight up (`shadowDepth`, five samples).
+  g = 0.85) and `tau` the depth straight up (`shadowDepth`, five samples),
+  once per cloud the ray enters (once per pixel left grey patches with
+  sharp outlines on the sides of towers).
   Under a deck
   its thick cells are darker than the thin gaps between them; a base under
   a kilometre of cloud gets a tenth of the light of a top.
 - Five phase terms stand for the orders of scattering: `p0` (scattered
-  once: two Henyey-Greenstein lobes, dimmed by the whole depth) and `p1` to
+  once: two Henyey-Greenstein lobes, dimmed by the whole depth; the
+  forward one halved with the sun on the horizon, where thin fringes
+  towards it glowed like red-hot wire) and `p1` to
   `p4` (scattered many times: wider lobes that go deeper). On a side turned
   from the light, `p3` keeps `DEEP` = 50 % (light that went deep forgets
   where it came from); `p3`, `p4` and the sky's light are dimmed by
@@ -661,7 +690,7 @@ All are uploaded in `makeSky`:
 | `uMS` | 0 | 40 x 36, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile |
-| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
+| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: cirrus |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 
@@ -670,7 +699,12 @@ reads unit 6.
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
-down to 1 km, towers where the widest clumps are, gusts on the sea, and
+down to 1 km, and heaps (`heaps`): single clouds, each a dome round a
+point of a jittered grid of 4 km and of 1.6 km cells (the small ones where
+the clumps are), of its own width (0.3 to 0.75 of a cell) and strength;
+where two meet, a smooth max merges them without a crease. Cover (R)
+takes the heaps squared; G is the heap's height, higher where towers
+grow (the old map of towers). Then gusts on the sea, and
 the patches and bands of cirrus. The wave map is a sum of plane waves, each
 a whole number of times across the map.
 
