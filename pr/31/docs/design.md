@@ -248,25 +248,27 @@ air, or to the sea. The air is three species, with densities from
   stratosphere). The haze of the lowest kilometres, the boundary layer,
   is well mixed up to `BL` = 1.5 km and falls off over about 0.3 km above
   it (`boundaryLayer`: a logistic step, 1 at sea level); above it two thin
-  layers (`AERO_FREE`, `AERO_STRAT` in `fs`, `AERO_UP` and `mieDensity` in
+  layers (`AERO_FREE`, `AERO_STRAT` in `fs`, `AERO_UP` and `mieUp` in
   the JS): 0.048 of the sea level's density at 6 km (half-width 5 km, the
   free troposphere) and 0.004 at 20 km (half-width 8 km, the
-  stratosphere). Scattering `BETA_M` = 0.063 per km at sea level times
-  `uHaze` (the haze slider, 1 by default), extinction `MIE_EXT` = 1.11
-  times that (a single-scattering albedo of 0.9, continental aerosol).
-  Grey: the same at every wavelength (an Angstrom exponent of 1.3 changed
-  the colours by a few levels only). At the default haze the optical
-  depth at 550 nm is 0.11 in the boundary layer, 0.023 in the free
-  troposphere and 0.0045 in the stratosphere (its quiet background, 0.004
-  to 0.01), 0.14 in all (a visibility of 48 km at sea level): about the mean of continental and maritime air.
-  The slider scales all three: 0.3 is clean maritime air (0.04), 3 to 6
-  hazy (0.4 to 0.8). The default is 1.5 times what was first tried (0.09):
-  beside photographs from cruise and from the coast (a pale band along
-  the horizon, distant clouds and sea fading), 1.5 to 2 times looked
-  alike, 1 too crisp; more turned the Belt of Venus grey. Twice the
-  stratospheric layer (0.008) made a white dome of forward-scattered
-  sunlight over the set sun from cruise, where photographs show a level
-  band.
+  stratosphere). Scattering `BETA_M` = 0.044 per km at sea level times
+  `uHaze` (the haze slider, 1 by default), extinction `MIE_EXT` = 1.05
+  times that (a single-scattering albedo of 0.95: between maritime air,
+  0.99, and continental, 0.92). By wavelength, times
+  `(550 nm / wavelength)^ANGSTROM`, `ANGSTROM` = 1.3 (`MA` in the JS,
+  `uMA` in `fs`): a little bluer. At the default haze the optical depth
+  at 550 nm is 0.070 in the boundary layer, 0.019 in the free troposphere
+  and 0.0026 in the stratosphere, 0.091 in all: a clear day of fair
+  weather (0.05 to 0.15 over the sea and the coast; a visibility of about
+  65 km at sea level). The slider scales all three: 0.3 is very clean air
+  (0.03), 3 to 6 hazy (0.3 to 0.55).
+  The default was chosen from a series of haze values beside photographs
+  of clear days, from the sea and from the air, by day and at dusk
+  (round 10). Round 9 had 0.14 in all, and with the phase function
+  of the time the sky near a sun at 30 degrees, seen from near the sea,
+  was a milky beige column from the top of the picture down to the
+  horizon, and a sun 2 degrees up dimmed so much that its glitter was
+  nearly gone.
   Before (round 8), the boundary layer was `exp(-h / 1.2)` with 0.0014 per
   km: an optical depth of 0.002, some 50 times less than real air; the
   horizon was crisp, distant clouds and sea did not fade, and at dusk the
@@ -275,10 +277,31 @@ air, or to the sea. The air is three species, with densities from
 - Ozone: a triangle from 10 to 40 km, peaking at 25 km; absorption `uBO`
   from the Chappuis cross-sections (`OZONE`) for 300 Dobson units.
 
-Phase functions (`phases`): Rayleigh, and the Cornette-Shanks form for Mie
-with `g` = `MIE_G` = 0.7 (an asymmetry of 0.76, that of sulphate and
-continental aerosol, 0.6 to 0.75; `g` = 0.8 gave 0.84, a narrower and
-stronger aureole).
+Phase functions (`phases`): Rayleigh, and for the aerosol the
+Cornette-Shanks form (`cornetteShanks`), by height:
+
+- In the boundary layer, two lobes: a sharp one, `MIE_PHASE` = (0.149,
+  0.932, 0.609) — 0.149 of the light with parameter 0.932, from the
+  larger particles (sea salt, dust) — and a broad one with 0.609. Fitted
+  to Mie theory (computed for this, from Bohren and Huffman's
+  recurrences) for humid maritime and continental aerosol after OPAC: the
+  mean of the two is matched within 8 % from 2.5 to 90 degrees off the
+  light. The asymmetry is 0.715. The sun's aureole is round and bright
+  within a few degrees and falls off fast: 2 to 4 times the single
+  lobe's (`g` = 0.7) within 2.5 degrees of the sun, 0.8 of it from 10
+  to 20 degrees. The
+  single lobe of round 9 made the sky from 10 to 30 degrees off the sun
+  too bright, and as bright near the horizon as up by the sun: from near
+  the sea it drew a pale column under a high sun, with a nearly vertical
+  edge.
+- Above it (`MIE_G_UP` = 0.6, an asymmetry of 0.66), one broad lobe: the
+  free troposphere and the stratosphere hold small sulphate particles,
+  whose Mie phase function has no sharp peak (fitted the same way). With
+  the boundary layer's lobes there, the stratospheric layer drew a small
+  white core over the set sun from cruise.
+- `densities(h)` gives the boundary layer's share of the aerosol at `h`
+  (its `w`), and `addLight` mixes the two by it. `buildMultiScatter`
+  does the same (`phaseM`, `phaseUp`).
 
 **The march.** `NV` = 20 samples at
 `t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
@@ -296,8 +319,7 @@ the moon, `addLight`:
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
   (`depthToTop`) times the phase functions, times `direct`,
-  which the shadow of the clouds lowers near the sea, and times
-  `grazeCut`;
+  which the shadow of the clouds lowers near the sea;
 - light scattered many times: the multiple-scattering table times the
   local scattering coefficient, times the transmittance to the eye; and
   for the aerosol, which sends light on forwards, `MIE_LEAN` = 4 times the
@@ -326,8 +348,9 @@ in the planet's shadow), so it is gone.
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
 - The table repeats the density profile. The profile is written out twice:
-  `density()` in `fs`, and in the JS (`mieDensity` for the aerosol, used
-  by `buildDepths`, `buildMultiScatter` and this table in `makeSky`).
+  `densities()` in `fs`, and in the JS (`boundaryLayer`, `mieUp` and
+  `mieDensity` for the aerosol, used by `buildDepths`, `buildMultiScatter`
+  and this table in `makeSky`).
   Change both.
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
@@ -336,7 +359,7 @@ zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the mean light
 that reaches a point, to be times the scattering coefficient there:
 
 - The light scattered once is gathered over the sphere, with the phase
-  functions of the air and the aerosol for the sun's light scattered
+  functions of the air and the aerosol (each layer's) for the sun's light scattered
   towards the point, and with sunlight bounced off the ground (`ALBEDO` =
   0.07). In twilight that light comes from the lit air towards the sun,
   scattered forwards; gathered as if isotropic, the table held 0.65 to
@@ -372,7 +395,7 @@ directions, but the aerosol scatters forwards: below the band of glow,
 seen from cruise, the reference's light (scattered many times by the
 boundary layer, coming from the glow) was twice the table's and
 brown-orange where the table's was blue. The lean's first moment would
-weigh it by 3 times the asymmetry (2.28); with the forward peak sharper
+weigh it by 3 times the asymmetry (2.1 in the boundary layer); with the forward peak sharper
 than that, 4 fits the reference best, and taking it only where it is
 positive keeps the views away from the light as they were (the first
 moment taken there too left the sky away from the sun 0.65 of the
@@ -398,29 +421,31 @@ zenith at -10 and -14 degrees was 3 and 6 times too dark.
 
 **Against a reference** (November 2026). A Monte Carlo solver of the same
 atmosphere (spherical shells, the twelve wavelengths, Rayleigh, the
-aerosol profile above, ozone, a ground of albedo 0.07, every order; the
-light scattered once by a fine march, the rest by paths with a
-track-length estimate of the sun's light on each segment and the hero
-wavelength scheme of Wilkie et al., 2014), against a float64 copy of
-`fs`'s march with the page's own tables, over elevations -30 to 60
-degrees at 0, 90 and 180 degrees from the sun, from 0.3, 4 and 11 km,
-the sun at 30, 2, -2, -4, -6 and -10 degrees (round 9, the default
-haze). Medians over each set of rays:
+aerosol profile above with its phase functions by height, ozone, a ground
+of albedo 0.07, every order; the light scattered once by a fine march,
+the rest by paths with a track-length estimate of the sun's light on each
+segment and the hero wavelength scheme of Wilkie et al., 2014), against a
+float64 copy of `fs`'s march with the page's own tables, over elevations
+-10 to 60 degrees at 0, 90 and 180 degrees from the sun, from 0.3, 4 and
+11 km, the sun at 30, 2, -2, -4, -6 and -10 degrees (round 10, the
+default haze, 4096 paths a ray). Medians over each set of rays:
 
 - The light scattered once agrees within 3 % (1.00 almost everywhere).
-- The sky (from the horizon up): 0.88 to 1.0 of the reference by day and
-  towards and away from the sun in twilight, with its colour (the
-  r-chromaticity within 0.02). The anti-twilight arch and the planet's
-  shadow away from the sun follow the reference closely: the pink band
-  is a narrow one in the reference too (warm from 0 to 5 degrees, at its
-  warmest at 3).
-- To the side in deep twilight the page is too bright: 1.1 to 1.3 at -6,
-  1.4 to 1.7 at -10 (the table's light gathered as a mean).
+- The sky (from the horizon up): 0.90 to 1.0 of the reference by day and
+  towards and away from the sun in twilight (0.97 to 1.0 from 4 and
+  11 km), with its colour (the r-chromaticity within 0.02). The
+  anti-twilight arch and the planet's shadow away from the sun follow the
+  reference closely: the pink band is a narrow one in the reference too
+  (warm from 0 to 5 degrees, at its warmest at 3). Away from the sun in
+  deep twilight from 0.3 and 4 km, 1.2 to 1.35.
+- To the side in deep twilight the page is too bright: 1.1 to 1.2 at -6,
+  1.6 to 1.8 at -10 (the table's light gathered as a mean).
 - Below the horizon towards the sun in twilight (the haze over the ground
-  under the band of glow): 0.6 to 0.8 of the reference, and still bluer
-  (r-chromaticity 0.06 to 0.13 lower); before the lean, 0.44 and blue
-  where the reference is brown-orange. By day below the horizon, 0.84 to
-  0.97 (the sea there is the page's own, not the reference's grey ground).
+  under the band of glow): 0.7 to 1.0 of the reference (0.96 to 0.98 from
+  11 km), a little bluer (r-chromaticity up to 0.06 lower); before the
+  lean, 0.44 and blue where the reference is brown-orange. By day below
+  the horizon, 0.8 to 0.96 (the sea there is the page's own, not the
+  reference's grey ground).
 
 So the light of the sky is the page's atmosphere's; what still differs
 from photographs is mostly how much aerosol there is, and the exposure
@@ -617,7 +642,14 @@ glitter and the inside of a cloud alike.
 **The level.** `fs` writes, in the alpha of each frame, the level of the
 pixel: log2 of its luminance before exposure, coded from 0 to 1 over
 `LOG_RANGE` (-34 to 18, `uLogRange`). `mean` carries it along with the
-colour, so the picture's level is as clean as its colours.
+colour, so the picture's level is as clean as its colours. The sun's
+disc and glare and its glitter on the sea (and the moon's glitter) count
+in it at only `METER_GLINT` = 0.15 of their light (`G` in `main` and
+`addSea`): a camera lets the sun and its mirror image run into white and
+exposes for the rest. Photographs from cruise keep the sky as light
+facing the sun as away from it (h11-vueling01 and 03); counted in full,
+the glitter held the view towards the sun 1.5 to 2.4 stops below the
+view away, and the sky there was navy (round 10).
 
 **The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
 texels (`METER`): each is a block of the picture and holds the mean level
@@ -666,7 +698,7 @@ itself, the one read that waits.
   by the sky, the level that the brighter third of the picture passes
   (`DUSK_SHARE` = 0.65), so that the view is shown as the eye sees it and
   not held down by its highlights. That level is shown at `DUSK_SHOWN` =
-  -1.2 (log2 after exposure) when it stands at `DUSK_MID` = -3 (about
+  -0.8 (log2 after exposure) when it stands at `DUSK_MID` = -3 (about
   sunset), and at the night's level (the key's, `KEY - EYE * NIGHT_LEVEL
   + NIGHT_LEVEL + MID_GAP`, -4.6) when it stands at the night's
   (`NIGHT_LEVEL + MID_GAP`); in between along the power `DUSK_POW` = 0.7
@@ -698,13 +730,25 @@ itself, the one read that waits.
 - and as the sun goes down the picture never grows brighter. The
   exposure is at most what the same view would get with the sun higher,
   at every `MONO_STEP` = 0.25 degrees up to the start of the blend: the
-  same view with all its levels raised by `MONO_RATE` = 0.8 times the
+  same view with all its levels raised by `MONO_RATE` times the
   stops that the air's mean light at the eye's height (`airLevel`, from
   `msData`) is brighter there, and its exposure lowered as much. The
   meter's statistics are sorted once, so this costs some 60 evaluations
   of a few lines. With a uniform darkening the shown picture is then
-  monotone; 0.8, as the sky darkens more slowly than the mean light
-  through sunset (the sea and the clouds below darker sooner). Before
+  monotone. `MONO_RATE` is 1 through civil twilight and 0.8 from the sun
+  6 degrees down (`MONO_DEEP`, -3 to -6, a smoothstep): at 0.8 throughout
+  (round 9) the sky away from the sun after sunset was held near the
+  late afternoon's level, darker and deeper blue than photographs from
+  cruise show it (r3, A3f: pale blue); 1 throughout lifted deep twilight
+  near the sea by up to a stop. The picture as a whole still never
+  brightens after sunset; the sky part of a view away from the sun does
+  rise (80 to 138 of 255 at 11 km between 8 degrees up and 2.4 down), as
+  the deck below darkens sooner than the sky. Not seen by the envelope:
+  facing a sun that is still up from near the sea, the view brightens
+  by 3 to 9 levels per 0.4 degrees from 5 to 1 degrees up, as the
+  sun's aureole in the haze dims faster than the rest. An envelope that
+  also lowered the highlights by the sun's own dimming held that, but
+  jumped by 100 levels where the sun went below the eye's horizon. Before
   (round 8), the twilight's exposure was blended in from 2.5 to -0.5
   degrees and lifted the picture by up to `DUSK_LIFT` = 1.2 stops (gone
   now): in a time-lapse the sky away from the sun went from 75 to 148
@@ -739,8 +783,8 @@ At the end of `main`:
 
 1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
    taken here; then times `uExposure`.
-   No shoulder keeps the hue: each channel meets the curve of steps 3 to
-   5 on its own, as on a camera's sensor.
+   No shoulder keeps the hue: each channel meets the curve of steps 4 to
+   6 on its own, as on a camera's sensor.
 2. The white balance `uBalance` (`balanceFor`). By day a camera's for
    daylight, `DAY_BALANCE` = (0.932, 1.013, 1.074). In twilight it goes
    `BALANCE_ADAPT` = 0.5 of the way (in log) towards the colour of the
@@ -756,13 +800,23 @@ At the end of `main`:
    Without it the sky away from the sun came out
    lavender and the Belt of Venus magenta, where photographs show a pale
    blue sky and a pink belt; held into the deeper twilight, it turned the
-   blue sky grey and the clouds brown.
-3. Light far too strong for the screen (1 to 6 times white) turns towards
+   blue sky grey and the clouds brown. Tried again without
+   `BALANCE_HIGH` (round 10): towards the sun from cruise at -4 degrees
+   the sky came out grey-lavender as in A1d, but away from it grey where
+   r3, A3f and A3a are pale blue; kept.
+3. A camera's saturation by day, `uSaturation` (`saturationFor`):
+   `DAY_SATURATION` = 1.3 about the luminance, in linear light, falling to
+   none as the sun goes from 8 to 1 degrees (`DUSK`) and none at night.
+   The light of the clear sky from cruise is almost pure Rayleigh, red a
+   quarter of the blue in linear sRGB; photographs from the air show it a
+   strong azure, red a tenth or less (the camera's colour). Twilight and
+   night were set without it, and keep their colours.
+4. Light far too strong for the screen (1 to 6 times white) turns towards
    white, as on film.
-4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
-5. Tone mapping `1 - exp(-col)`, channel by channel, then the display
-   power `1 / 2.2`. Steps 2 to 5 are those of `main`.
-6. Rounding at random to the storage steps (next section).
+5. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
+6. Tone mapping `1 - exp(-col)`, channel by channel, then the display
+   power `1 / 2.2`. Steps 2, 4, 5 and 6 are those of `main`.
+7. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames
 
