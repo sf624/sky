@@ -119,6 +119,25 @@ throws the compiler's log, and the page prints it.
 
 **Cost.** Measure the GPU time before and after (next section).
 
+**The start.** Opening the page must not hold the browser. `node
+tools/sky.mjs perf` prints the time to the first picture and the main
+thread's tasks over 50 ms until then; run it on a fresh Chrome (each run
+starts one) and more than once. On the test machine's GPU only
+`getContext` may take over 50 ms (up to about 0.4 s in a browser just
+started). The loading (see
+[design.md](design.md#from-the-address-bar-to-the-first-frame)) keeps to
+these rules, and new work at start should too:
+- Compile and link every program at once. Ask for `COMPILE_STATUS`,
+  `LINK_STATUS` and uniform locations only once `COMPLETION_STATUS_KHR`
+  says the program is done: asking earlier waits for the compiler, which
+  can take seconds for `fs` (ANGLE on Direct3D 11, the usual stack on
+  Windows).
+- CPU work over a few ms is a job (a generator that yields every little
+  while), run by `slices` at start and by `finish` later.
+- GPU work at start goes in `batches`, with a fence after each.
+- No `readPixels`, `getError` or `finish` that waits for the GPU while the
+  page loads.
+
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
 headless Chrome: in a page from the same origin, take the text of the

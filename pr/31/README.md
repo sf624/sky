@@ -69,6 +69,7 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 ## What it needs
 
 - A browser with WebGL2. Without it, the page shows only a gradient of sky colours.
+- While the page prepares the picture (compiling its shaders can take a few seconds the first time), it shows a dark sky with a line of progress. The browser stays responsive meanwhile.
 - A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
   - 2560×1440: about 9.3 ms
