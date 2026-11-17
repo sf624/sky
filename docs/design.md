@@ -95,7 +95,7 @@ The JS then runs once, at load, and does little:
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
      it, asking waits, so the page asks for one program a frame. A failed
      program throws the compiler's or the linker's message.
-   - Meanwhile the tables of the CPU, in slices of about 8 ms, one a frame
+   - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
      (`slices`). Each is a generator (a job) that yields every little while;
      `finish(job)` runs one at once.
      - `odTable` (`buildDepths`): optical depth to the top of the air
@@ -106,10 +106,15 @@ The JS then runs once, at load, and does little:
      - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
      - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
        (see [The air](#the-air)), for the haze given, the longest (0.2 to
-       0.3 s). It starts after the others and goes on in slices while the
+       0.3 s). It reads `odTable` (through `sunDepth`), so it starts when
+       that is done, and goes on beside the star and depth tables, while the
        GPU compiles the programs and draws the textures; the first frame
-       waits for it. Run before the programs, it held the first picture back
-       by some 0.7 s.
+       waits for it.
+     - The slices of all these are paced by timers (`soon`), not by frames:
+       while the page starts and the GPU draws the textures, a frame comes
+       only every 50 ms or so. Paced by frames, after the other tables, the
+       multiple-scattering table took 1.8 s and held the first picture back
+       by 0.4 s.
      - With them goes a constant, `NIGHT`: the moonless night sky
        (airglow), 8.59e-10 of the sun's irradiance, about 4e-8 of the
        daytime sky.
