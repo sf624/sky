@@ -31,7 +31,7 @@ becomes the middle of the range (`time=abc` gives 12).
 | `time` | 0 to 24, 0.05 | 15 | Local solar time, hours (the sun is due south at 12) |
 | `date` | 1 to 365, 1 | today | Day of the current year |
 | `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
-| `haze` | 0 to 6, 0.05 | 0.35 | Multiplier on the aerosol (Mie) density |
+| `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.14 at 1; see [The air](design.md#the-air)) |
 | `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
 | `alt` | 0.3 to 13, 0.1 | 11 | Altitude of the aircraft, km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
@@ -51,6 +51,7 @@ These are read directly.
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
+| `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |

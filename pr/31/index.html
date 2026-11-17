@@ -271,7 +271,7 @@
     </label>
     <label>
       <span class="row"><span data-t="haze">大気の霞</span><output id="hazeOut"></output></span>
-      <input id="haze" type="range" min="0" max="6" step="0.05" value="0.35">
+      <input id="haze" type="range" min="0" max="6" step="0.05" value="1">
     </label>
     <label>
       <span class="row"><span data-t="wind">海上の風</span><output id="windOut"></output></span>
@@ -648,9 +648,10 @@ uniform vec4 uBO[3];    // ozone absorption per km
 uniform vec4 uWR[3];    // spectrum -> linear sRGB (solar spectrum folded in)
 uniform vec4 uWG[3];
 uniform vec4 uWB[3];
-// Multiple scattering per unit of scattering coefficient: NMU x (6 * NH)
+// Multiple scattering per unit of scattering coefficient: NMU x (12 * NH)
 // texels, the three wavelength groups stacked in y; then the same for the
-// light of the sky on the low clouds (cloudSky).
+// light of the sky on the low clouds (cloudSky); then the light's mean
+// direction, towards the sun's side and up (msLean).
 uniform sampler2D uMS;
 uniform vec4 uWL[3];    // wavelength / 550 nm
 uniform float uNight;   // radiance of the moonless night sky (airglow)
@@ -684,19 +685,22 @@ const float PI = 3.14159265359;
 // Lengths in km.
 const float RG = 6360.0;        // ground radius
 const float RT = 6460.0;        // top of atmosphere
-const float BETA_M = 3.996e-3;  // Mie scattering per km at sea level
+const float BETA_M = 0.063;     // aerosol scattering per km at sea level, at the default haze (1)
 const float MIE_EXT = 1.11;     // extinction / scattering
 const float HR = 8.0;           // Rayleigh scale height
-const float HM = 1.2;           // Mie scale height
+// The haze of the lowest kilometres (the boundary layer): well mixed up to
+// BL.x km, falling off over about BL.y km above it (BL in the JS).
+const vec2 BL = vec2(1.5, 0.3);
 const float MIE_G = 0.7;        // Cornette-Shanks parameter of the aerosol (asymmetry 0.76)
+// The aerosol sends the light scattered many times on forwards (msLean):
+// MIE_LEAN times the light's mean direction, towards a view that looks where
+// it comes from. Its first moment would give 3 times the asymmetry, 2.28;
+// 4 matches the reference (see design.md), as the forward peak is sharper.
+const float MIE_LEAN = 4.0;
 // Aerosol above the haze of the lowest kilometres (mieDensity in the JS):
 // a thin layer in the free troposphere and one in the stratosphere.
-const vec3 AERO_FREE = vec3(0.7, 6.0, 5.0);    // density (as at sea level), height, half-width in km
-const vec3 AERO_STRAT = vec3(0.2, 20.0, 8.0);
-// Light that grazes the planet on its way (from below the local horizon)
-// is cut where it passes lower than GRAZE.x km, and kept above GRAZE.y
-// (grazeCut; GRAZE in the JS).
-const vec2 GRAZE = vec2(1.0, 5.0);
+const vec3 AERO_FREE = vec3(0.048, 6.0, 5.0);    // density (as at sea level), height, half-width in km
+const vec3 AERO_STRAT = vec3(0.004, 20.0, 8.0);
 const float ISUN = 20.0;
 const int NV = 20;              // view samples: the picture is within two steps of 8 bits of 40's
 const int NSHADE = 8;           // more samples in twilight: in the planet's shadow...
@@ -721,9 +725,10 @@ vec2 raySphere(vec3 o, vec3 d, float r) {
 // Densities of (Rayleigh, Mie, ozone) at altitude h. The depth table built
 // in makeSky repeats this profile: change both.
 float aeroLayer(float h, vec3 l) { float x = (h - l.y) / l.z; return l.x * exp(-x * x); }
+float boundaryLayer(float h) { return (1.0 + exp(-BL.x / BL.y)) / (1.0 + exp(min((h - BL.x) / BL.y, 60.0))); }
 vec3 density(float h) {
   h = max(h, 0.0);
-  return vec3(exp(-h / HR), exp(-h / HM) + aeroLayer(h, AERO_FREE) + aeroLayer(h, AERO_STRAT),
+  return vec3(exp(-h / HR), boundaryLayer(h) + aeroLayer(h, AERO_FREE) + aeroLayer(h, AERO_STRAT),
               max(0.0, 1.0 - abs(h - 25.0) / 15.0));
 }
 
@@ -755,13 +760,16 @@ void msTable(float h, float mus, int first, out vec4 ms[3]) {
   // groups lie one above the other: a read within one never reaches the
   // next.
   for (int k = 0; k < 3; k++) {
-    ms[k] = textureLod(uMS, (vec2(x, y + float((first + k) * NH)) + 0.5) / vec2(NMU, 6 * NH), 0.0);
+    ms[k] = textureLod(uMS, (vec2(x, y + float((first + k) * NH)) + 0.5) / vec2(NMU, 12 * NH), 0.0);
   }
 }
 // The light scattered many times that reaches a point of the air.
 void multiScatter(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 0, ms); }
 // The light of the sky on the low clouds there (see buildMultiScatter).
 void cloudSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 3, ms); }
+// Where that light comes from: its mean over the sphere times the
+// direction it comes from, towards the sun's side (lh) and up (lv).
+void msLean(float h, float mus, out vec4 lh[3], out vec4 lv[3]) { msTable(h, mus, 6, lh); msTable(h, mus, 9, lv); }
 
 // hash13 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
 float hash3(vec3 p) {
@@ -805,37 +813,29 @@ vec2 phases(float mu) {
                 / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5)));
 }
 
-// How much of the light from direction s reaches p past the planet's limb.
-// Light from below the local horizon grazes the planet on its way, and
-// along hundreds of kilometres of the lowest air: haze and cloud that the
-// model does not draw, the cloud deck below the aircraft among them, take
-// it out. Without this, the air beyond the edge of the planet's shadow
-// was lit by deep red light that had passed a few hundred metres above
-// the sea: the shadow's band came out pink, the sky over it lavender and
-// the Belt of Venus magenta, where photographs show a blue-grey band, a
-// pale blue sky and a pink to peach belt. Light from above the local
-// horizon is not cut (by day, and the eye's own view of the sun).
-float grazeCut(vec3 p, vec3 s) {
-  float ps = dot(p, s);
-  if (ps >= 0.0) return 1.0;
-  return smoothstep(GRAZE.x, GRAZE.y, sqrt(max(dot(p, p) - ps * ps, 0.0)) - RG);
-}
-
 // Light from one source (sun or moon) scattered towards the eye at p:
 // scattered once (times `direct`: less in the shadow of a cloud), plus what
 // was already scattered (the table).
 void addLight(vec3 p, float r, float h, vec3 od, vec3 dens, float scM, float extM,
-              vec3 dir, float gain, float direct, vec2 phase, in vec4 Tv[3], inout vec4 L[3]) {
-  vec4 ms[3];
-  multiScatter(h, dot(p, dir) / r, ms);
+              vec3 dir, float gain, float direct, vec2 phase, vec3 view, in vec4 Tv[3], inout vec4 L[3]) {
+  vec4 ms[3], lh[3], lv[3];
+  float mus = dot(p, dir) / r;
+  multiScatter(h, mus, ms);
+  msLean(h, mus, lh, lv);
+  // The aerosol scatters that light forwards: more of it towards a view
+  // that looks where it comes from (MIE_LEAN). Only the forward part: the
+  // first moment taken from the view away from it as well left that sky
+  // 0.65 of the reference's.
+  vec3 up = p / r, side = dir - mus * up;
+  float sl = length(side);
+  float cv = dot(view, up), ch = sl > 1e-5 ? dot(view, side) / sl : 0.0;
   bool lit = raySphere(p, dir, RG).y < 0.0;          // not behind the planet
   vec3 odl = lit ? od + depthToTop(p, dir) : vec3(0.0);
-  float cut = lit ? grazeCut(p, dir) : 0.0;
   for (int k = 0; k < 3; k++) {
     vec4 sc = uBR[k] * dens.x;
-    vec4 a = Tv[k] * (sc + scM) * ms[k];
+    vec4 a = Tv[k] * ((sc + scM) * ms[k] + scM * MIE_LEAN * max(ch * lh[k] + cv * lv[k], 0.0));
     if (lit) {
-      a += direct * cut * exp(-(uBR[k] * odl.x + extM * odl.y + uBO[k] * odl.z)) * (sc * phase.x + scM * phase.y);
+      a += direct * exp(-(uBR[k] * odl.x + extM * odl.y + uBO[k] * odl.z)) * (sc * phase.x + scM * phase.y);
     }
     L[k] += gain * a;
   }
@@ -1237,8 +1237,8 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
     for (int k = 0; k < 3; k++) {
       Tv[k] = exp(-(uBR[k] * od.x + extM * od.y + uBO[k] * od.z));
     }
-    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI, 1.0, phaseSun, Tv, S);
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI, 1.0, phaseMoon, Tv, S);
+    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI, 1.0, phaseSun, dir, Tv, S);
+    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI, 1.0, phaseMoon, dir, Tv, S);
     od += 0.5 * dens;
   }
 }
@@ -1656,7 +1656,6 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   float mus = dot(up, uLight);
   bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
   vec3 ol = lit ? ciDepthToTop(pc, uLight) : vec3(0.0);
-  float cut = lit ? grazeCut(pc, uLight) : 0.0;
   // Sunlight dims on its way into the sheet (less the forward peak, which
   // goes on as if not scattered): its depth ts there, against te along
   // the view. Scattered once, the sheet sends to the eye te times the mean
@@ -1682,7 +1681,7 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
     vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
     vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
     vec4 halo = 0.08 * mix(exp(-x * x / 1.5e-4), exp(-max(x, 0.0) / 0.05), step(0.0, x));
-    vec4 sun = lit ? cut * exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z)) : vec4(0.0);
+    vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z)) : vec4(0.0);
     H[k] = a * ((uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0))
                 + uLightI * sun * wBelow * below)
            + uLightI * sun * mix(ph + halo, vec4(spread), many) * once;
@@ -1735,7 +1734,7 @@ void main() {
       float rc = length(pc);
       bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
       vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
-      float dim = lit ? exp(-cirrusShadow(pc)) * grazeCut(pc, uLight) : 1.0;   // the thin cloud above shades them
+      float dim = lit ? exp(-cirrusShadow(pc)) : 1.0;   // the thin cloud above shades them
       vec4 msS[3], msM[3];
       cloudSky(rc - RG, dot(pc, uSun) / rc, msS);
       cloudSky(rc - RG, dot(pc, uMoon) / rc, msM);
@@ -1811,8 +1810,8 @@ void main() {
     }
     // Under a cloud the air near the sea is in its shadow too.
     float direct = mix(1.0, shade, 1.0 - smoothstep(0.6, 2.0, h));
-    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * vis, direct, phaseSun, Tv, L);
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * vis, direct, phaseMoon, Tv, L);
+    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * vis, direct, phaseSun, d, Tv, L);
+    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * vis, direct, phaseMoon, d, Tv, L);
     od += 0.5 * dens;
     if (atLayer) {
       bool isClouds = (layer == 0) == cloudsFirst;
@@ -2661,25 +2660,28 @@ const SkySound = (() => {
   const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
   const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
-  const DUSK = [2.5, -0.5];      // twilight's exposure takes over as the sun goes from 2.5 to -0.5 degrees:
+  const DUSK = [8, 1];           // twilight's exposure takes over as the sun goes from 8 to 1 degrees:
   const DUSK_SHARE = 0.65;       // ...set by the level that the brighter third of the picture passes (the sky):
-  const DUSK_MID = -3, DUSK_SHOWN = -2.2;   // ...at DUSK_MID at sunset, it is shown at DUSK_SHOWN...
+  const DUSK_MID = -3, DUSK_SHOWN = -1.2;   // ...at DUSK_MID at sunset, it is shown at DUSK_SHOWN...
   const DUSK_POW = 0.7;          // ...falling to the night's along a power of its distance from the night's
-  const DUSK_LIFT = 1.2, LIFT_SPAN = [-2.5, -8];   // ...and up to DUSK_LIFT stops brighter: all of it at LIFT_SPAN[0]
-                                                  // degrees, none from LIFT_SPAN[1] down (the night)
   const ABOVE = 3.5, ABOVE_SPAN = 5;   // ...and the highlights may stand up to ABOVE stops above white,
                                        // reached ABOVE_SPAN degrees after twilight's exposure has taken over;
   const PEAK_SHARE = 0.002, PEAK_ABOVE = 1;   // ...but the brightest PEAK_SHARE (the band of glow) at most PEAK_ABOVE
   const DIM_BAND = 0.1, DROP = 1.5;           // stops above white, DIM_BAND lower per stop it is dimmer than
-                                              // daylight's highlights, at most DROP lower
+                                              // daylight's highlights, at most DROP lower...
+  const GLOW_FREE = 3.5, GLOW_HOLD = 1;       // ...holding the sky down at most GLOW_HOLD stops for each stop the
+                                              // band stands more than GLOW_FREE stops above the sky
+  const MONO_RATE = 0.8, MONO_STEP = 0.25;    // as the sun goes down, the exposure opens up at most MONO_RATE
+                                              // stops for each stop the sky darkens (in steps of MONO_STEP degrees)
   const ADAPT_FAST = 0.2, ADAPT_SLOW = 0.5;  // s: towards less exposure, towards more
   const ADAPT_STOP = 0.01, ADAPT_START = 0.03;   // stops
   const ADAPT_TRACK = 0.002;                      // stops, in flight
 
   // ---------- The atmosphere (the same model as the shader) ----------
   // The parameters of the air follow Bruneton's demo (2017, BSD): see THIRD_PARTY_NOTICES.md.
-  const RG = 6360, RT = 6460, HR = 8, HM = 1.2;
-  const BETA_M = 3.996e-3, MIE_EXT = 1.11, ALBEDO = 0.07;
+  const RG = 6360, RT = 6460, HR = 8;
+  const BETA_M = 0.063, MIE_EXT = 1.11, ALBEDO = 0.07;
+  const BL = [1.5, 0.3];  // the boundary layer's top and edge, km (BL in the shader)
   const MIE_G = 0.7;      // the aerosol's phase function (MIE_G in the shader)
   // Phase functions of the air and of the aerosol (phases in the shader).
   const phaseR = mu => 3 / (16 * Math.PI) * (1 + mu * mu);
@@ -2688,17 +2690,9 @@ const SkySound = (() => {
   // The aerosol's density, relative to sea level's: the haze of the lowest
   // kilometres, and thin layers above it (density, height and half-width in
   // km), as in the shader (AERO_FREE, AERO_STRAT).
-  const AERO_UP = [[0.7, 6.0, 5.0], [0.2, 20.0, 8.0]];
-  // Light that grazes the planet lower than GRAZE[0] km is cut, above
-  // GRAZE[1] kept (grazeCut in the shader): from a point at r towards a
-  // light at cosine mu to the vertical.
-  const GRAZE = [1, 5];
-  const grazeCut = (r, mu) => {
-    if (mu >= 0) return 1;
-    const x = Math.min(1, Math.max(0, (r * Math.sqrt(1 - mu * mu) - RG - GRAZE[0]) / (GRAZE[1] - GRAZE[0])));
-    return x * x * (3 - 2 * x);
-  };
-  const mieDensity = h => AERO_UP.reduce((m, [k, c, w]) => m + k * Math.exp(-(((h - c) / w) ** 2)), Math.exp(-h / HM));
+  const AERO_UP = [[0.048, 6.0, 5.0], [0.004, 20.0, 8.0]];
+  const boundaryLayer = h => (1 + Math.exp(-BL[0] / BL[1])) / (1 + Math.exp(Math.min((h - BL[0]) / BL[1], 60)));
+  const mieDensity = h => AERO_UP.reduce((m, [k, c, w]) => m + k * Math.exp(-(((h - c) / w) ** 2)), boundaryLayer(h));
   const NW = 12;
   // Wavelengths in nm.
   const WL = [405, 430, 455, 480, 505, 530, 555, 580, 605, 630, 655, 680];
@@ -2785,13 +2779,16 @@ const SkySound = (() => {
   // clouds came out mauve and brown under a blue sky. By day, where the two
   // colours stand in a fixed ratio, it is the mean light itself.
   const NMU = 40, NH = 12, MS_MU_MIN = -0.35;
-  const msData = new Float32Array(NMU * NH * 6 * 4);   // RGBA texels, NMU x (6 * NH): the air, then the clouds
+  const msData = new Float32Array(NMU * NH * 12 * 4);  // RGBA texels, NMU x (12 * NH): the air, the clouds, the lean
   // The light of the sky from above on a level surface (all orders, over 4
   // pi, as the table's), by height, sun angle and wavelength: for the white
   // balance in twilight (balanceFor).
   const upData = new Float64Array(NMU * NH * NW);
   const msIndex = (j, i, w) => (((w >> 2) * NH + j) * NMU + i) * 4 + (w & 3);
   const cloudIndex = (j, i, w) => msIndex(j, i, w) + 3 * NH * NMU * 4;
+  // The mean light's lean (msLean in the shader): the light times the
+  // direction it comes from, towards the sun's side (side 0) and up (side 1).
+  const leanIndex = (side, j, i, w) => msIndex(j, i, w) + (6 + 3 * side) * NH * NMU * 4;
   function* buildMultiScatter(haze) {
     const bM = BETA_M * haze, bMe = bM * MIE_EXT;
     // NT bands of the sphere's height, narrower near the horizon (x |x|):
@@ -2803,6 +2800,8 @@ const SkySound = (() => {
     const band = k => { const x = -1 + 2 * k / NT; return x * Math.abs(x); };
     const L2 = new Float64Array(NW), F = new Float64Array(NW), G = new Float64Array(NW), ds = [0, 0, 0];
     const U = new Float64Array(NW);                // the same, from above only, times the cosine
+    const XH = new Float64Array(NW), XV = new Float64Array(NW);   // the same, times the direction (the lean)
+    const leanH = new Float64Array(NMU * NH * NW), leanV = new Float64Array(NMU * NH * NW);
     const once = new Float64Array(NMU * NH * NW), prev = new Float64Array(NMU * NH * NW);
     const upOnce = new Float64Array(NMU * NH * NW), series = new Float64Array(NMU * NH * NW);
     const all = new Float64Array(NMU * NH * NW), upAll = new Float64Array(NMU * NH * NW);
@@ -2827,7 +2826,7 @@ const SkySound = (() => {
           // blended in down to 9 degrees.
           const order = Math.min(1, Math.max(0, (0.3 - mus) / 0.15));
           if (pass === 1 && order === 0) continue;
-          L2.fill(0); F.fill(0); G.fill(0); U.fill(0);
+          L2.fill(0); F.fill(0); G.fill(0); U.fill(0); XH.fill(0); XV.fill(0);
           for (let a = 0; a < NT; a++) {
             const dy = band(a + 0.5), st = Math.sqrt(1 - dy * dy), wa = (band(a + 1) - band(a)) * NT / 2;
             const up = Math.max(dy, 0);
@@ -2849,7 +2848,7 @@ const SkySound = (() => {
                 const dR = Math.exp(-h / HR) * dt, dM = mieDensity(h) * dt;
                 const dO = Math.max(0, 1 - Math.abs(h - 25) / 15) * dt;
                 o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
-                const lit = pass === 0 && sunDepth(rr, cs, ds), cut = lit ? grazeCut(rr, cs) : 0;
+                const lit = pass === 0 && sunDepth(rr, cs, ds);
                 if (pass === 1) readPrev(h, cs);
                 for (let w = 0; w < NW; w++) {
                   const sc = BR[w] * dR + bM * dM;
@@ -2858,13 +2857,17 @@ const SkySound = (() => {
                     F[w] += tr;
                     if (lit) {
                       const v = wa * Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
-                              * (BR[w] * dR * pR + bM * dM * pM) * cut;
+                              * (BR[w] * dR * pR + bM * dM * pM);
                       L2[w] += v;
                       U[w] += v * up;
+                      XH[w] += v * dx;
+                      XV[w] += v * dy;
                     }
                   } else {
                     G[w] += tr * here[w];
                     U[w] += tr * here[w] * up;
+                    XH[w] += tr * here[w] * dx;
+                    XV[w] += tr * here[w] * dy;
                   }
                 }
                 o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
@@ -2873,8 +2876,11 @@ const SkySound = (() => {
                 const c = (dx * tmax * sx + (r + dy * tmax) * mus) / RG;
                 if (c > 0 && sunDepth(RG, c, ds)) {
                   for (let w = 0; w < NW; w++) {
-                    L2[w] += wa * Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
-                           * c * ALBEDO / Math.PI;
+                    const v = wa * Math.exp(-(BR[w] * (o0 + ds[0]) + bMe * (o1 + ds[1]) + BO[w] * (o2 + ds[2])))
+                            * c * ALBEDO / Math.PI;
+                    L2[w] += v;
+                    XH[w] += v * dx;
+                    XV[w] += v * dy;
                   }
                 }
               }
@@ -2887,9 +2893,13 @@ const SkySound = (() => {
               once[k] = L2[w] / n;
               upOnce[k] = U[w] / n;
               prev[k] = once[k] * series[k];
+              leanH[k] = XH[w] / n;
+              leanV[k] = XV[w] / n;
             } else {
               all[k] = prev[k] + order * (once[k] + G[w] / n - prev[k]);
               upAll[k] = upOnce[k] * series[k] + order * (upOnce[k] + U[w] / n - upOnce[k] * series[k]);
+              leanH[k] += order * XH[w] / n;
+              leanV[k] += order * XV[w] / n;
             }
           }
           yield;
@@ -2917,13 +2927,15 @@ const SkySound = (() => {
         for (let w = 0; w < NW; w++) {
           msData[msIndex(j, i, w)] = all[k + w];
           msData[cloudIndex(j, i, w)] = all[k + w] + cw * (c[w] * scale - all[k + w]);
+          msData[leanIndex(0, j, i, w)] = leanH[k + w];
+          msData[leanIndex(1, j, i, w)] = leanV[k + w];
         }
       }
     }
   }
   // Axes: x west, y up, z south. The view starts towards the south-west.
   const state = {
-    time: 15, day: 80, moonAge: 13, haze: 0.35, yaw: 45 * RAD, pitch: -8 * RAD,
+    time: 15, day: 80, moonAge: 13, haze: 1, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
     alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
@@ -3038,7 +3050,6 @@ const SkySound = (() => {
   // sun goes from DUSK[0] to DUSK[1] degrees (a smoothstep): the exposure
   // (exposureFor) and the white balance.
   const smooth01 = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
-  const duskRise = () => smooth01((DUSK[0] - state.elev) / (DUSK[0] - DUSK[1]));
 
   // The white balance (uBalance). By day a camera's for daylight. In
   // twilight, as an automatic white balance does and as the eye adapts, it
@@ -3048,8 +3059,8 @@ const SkySound = (() => {
   // (sun and sky) with the sun at 30 degrees.
   // That light is blue and a little violet: without it the sky away from the
   // sun came out lavender and the Belt of Venus magenta near the sea, where
-  // photographs show a pale blue sky and a pink belt. Blended in as
-  // twilight's exposure is (DUSK), and out again as the sun goes from 4 to 9
+  // photographs show a pale blue sky and a pink belt. Blended in as the
+  // sun goes from 2.5 to -0.5 degrees (BALANCE_IN), and out again as the sun goes from 4 to 9
   // degrees down (BALANCE_OUT): photographs of the deeper twilight are blue,
   // and a balance held there turned the sky grey and the clouds brown. And
   // out again with height, from BALANCE_HIGH[0] to BALANCE_HIGH[1] km: from
@@ -3058,7 +3069,7 @@ const SkySound = (() => {
   // light of the low air, turned that sky lavender-grey and the deck pink.
   // Unchanged by day and by night.
   const DAY_BALANCE = [0.932, 1.013, 1.074];
-  const BALANCE_ADAPT = 0.5, BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
+  const BALANCE_ADAPT = 0.5, BALANCE_IN = [2.5, -0.5], BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
   const lightOn = (alt, mus, out) => {
     const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
@@ -3077,7 +3088,7 @@ const SkySound = (() => {
   function balanceFor() {
     const y = Math.min(1, Math.max(0, (state.elev - BALANCE_OUT[1]) / (BALANCE_OUT[0] - BALANCE_OUT[1])));
     const z = Math.min(1, Math.max(0, (BALANCE_HIGH[1] - state.alt) / (BALANCE_HIGH[1] - BALANCE_HIGH[0])));
-    const k = BALANCE_ADAPT * duskRise() * y * y * (3 - 2 * y) * z * z * (3 - 2 * z);
+    const k = BALANCE_ADAPT * smooth01((BALANCE_IN[0] - state.elev) / (BALANCE_IN[0] - BALANCE_IN[1])) * y * y * (3 - 2 * y) * z * z * (3 - 2 * z);
     if (k === 0) return DAY_BALANCE;
     const spec = new Float64Array(NW), now = lightOn(0, state.sun[1], spec), ref = lightOn(0, 0.5, spec);
     return DAY_BALANCE.map((b, c) => b * (ref[c] / now[c]) ** k);
@@ -3117,13 +3128,6 @@ const SkySound = (() => {
   //   after sunset the sea and the clouds below darken sooner than the sky,
   //   and an exposure that followed them brightened the sky for some
   //   minutes;
-  // - and the twilight's picture is shown up to DUSK_LIFT stops brighter,
-  //   as a camera on automatic exposure brightens it relative to the
-  //   light after sunset: growing from the start of twilight's exposure to
-  //   LIFT_SPAN[0] degrees, gone again by LIFT_SPAN[1]. Without it the
-  //   views of civil twilight were 1 to 3 stops darker than photographs of
-  //   them; the picture as a whole stays about as bright as in the
-  //   afternoon, its sky brighter;
   // - but in twilight the brightest part of the view, the band of glow
   //   (the level that only PEAK_SHARE of the blocks pass), stands at most
   //   PEAK_ABOVE stops above white, and DIM_BAND stops lower for each stop
@@ -3134,32 +3138,71 @@ const SkySound = (() => {
   //   band dims to a thin orange line rather than a white one. A view
   //   away from the glow holds no such peak, and keeps the exposure of its
   //   sky.
+  //   In deep twilight that band gives way: it holds the sky down at most
+  //   GLOW_HOLD stops for each stop that it stands more than GLOW_FREE
+  //   stops above the sky (a thin line over a dark sky from cruise, A2a;
+  //   from near the sea, where it is a wide glow, the sky and the sea keep
+  //   a visible deep blue, r5).
+  // - and as the sun goes down the picture never grows brighter: the
+  //   exposure is at most what the same view would be given with the sun
+  //   higher (up to the start of twilight, in steps of MONO_STEP degrees),
+  //   opened up by MONO_RATE stops for each stop that the air's mean light
+  //   (msData, at the eye's height) is darker now. Without it, the sky
+  //   away from the sun rose by 70 levels of 255 from sunset to 2 degrees
+  //   below, as the brighter twilight's exposure took over.
+  // Of the picture only its levels at five shares are needed: they are
+  // sorted once, and the same view a stop brighter is the same shares a
+  // stop higher.
+  function exposureAt(st, elev, d) {
+    const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
+    const key = KEY - EYE * low;
+    const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
+    const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
+    const byDay = Math.max(Math.min(key, white), floor);
+    const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
+    if (dusk === 0) return byDay;
+    // Twilight's: the sky's level shown, from the night's (nightMid
+    // shown at nightShown) up to DUSK_SHOWN at DUSK_MID.
+    const sky = Math.max(st.sky + d, NIGHT_LEVEL), peak = st.peak + d;
+    const nightMid = NIGHT_LEVEL + MID_GAP, nightShown = KEY - EYE * NIGHT_LEVEL + nightMid;
+    const far = Math.max(0, (sky - nightMid) / (DUSK_MID - nightMid));
+    const shown = nightShown + (DUSK_SHOWN - nightShown) * far ** DUSK_POW;
+    const above = ABOVE * Math.min(1, Math.max(0, (DUSK[1] - elev) / ABOVE_SPAN));
+    const byGlow = Math.max(WHITE + PEAK_ABOVE - peak - Math.min(DROP, DIM_BAND * Math.max(0, DAY_HIGH - peak)),
+                            shown - sky - GLOW_HOLD * Math.max(0, peak - sky - GLOW_FREE));
+    const byDusk = Math.min(shown - sky, WHITE - high + above, byGlow);
+    return byDay + (byDusk - byDay) * dusk;
+  }
+  // log2 of the luminance of the air's mean light (msData) at height alt
+  // with the sun at elevation e (degrees): how much darker the sky is.
+  function airLevel(alt, e) {
+    const mus = Math.sin(e * RAD);
+    const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+    const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
+    const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
+    let lum = 0;
+    for (let w = 0; w < NW; w++) {
+      lum += WY[w] * ((msData[msIndex(j0, i0, w)] * (1 - fx) + msData[msIndex(j0, i0 + 1, w)] * fx) * (1 - fy)
+                    + (msData[msIndex(j0 + 1, i0, w)] * (1 - fx) + msData[msIndex(j0 + 1, i0 + 1, w)] * fx) * fy);
+    }
+    return Math.log2(Math.max(lum, 1e-30));
+  }
   function exposureFor(v) {
     const q = Float64Array.from(v).sort();
     const share = k => {
       const i = k * (q.length - 1), i0 = Math.floor(i);
       return q[i0] + (q[Math.min(i0 + 1, q.length - 1)] - q[i0]) * (i - i0);
     };
-    const low = Math.max(share(LOW_SHARE), NIGHT_LEVEL), high = share(1 - HIGH_SHARE);
-    const mid = Math.max(share(0.5), NIGHT_LEVEL);
-    const key = KEY - EYE * low;
-    const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
-    const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
-    const byDay = Math.max(Math.min(key, white), floor);
-    // Twilight's: the sky's level shown, from the night's (nightMid
-    // shown at nightShown) up to DUSK_SHOWN at DUSK_MID.
-    const sky = Math.max(share(DUSK_SHARE), NIGHT_LEVEL);
-    const nightMid = NIGHT_LEVEL + MID_GAP, nightShown = KEY - EYE * NIGHT_LEVEL + nightMid;
-    const far = Math.max(0, (sky - nightMid) / (DUSK_MID - nightMid));
-    const lift = DUSK_LIFT * smooth01((DUSK[0] - state.elev) / (DUSK[0] - LIFT_SPAN[0]))
-                           * smooth01((state.elev - LIFT_SPAN[1]) / (LIFT_SPAN[0] - LIFT_SPAN[1]));
-    const shown = nightShown + (DUSK_SHOWN - nightShown) * far ** DUSK_POW + lift;
-    const above = ABOVE * Math.min(1, Math.max(0, (DUSK[1] - state.elev) / ABOVE_SPAN));
-    const peak = share(1 - PEAK_SHARE);
-    const byGlow = WHITE + PEAK_ABOVE - peak - Math.min(DROP, DIM_BAND * Math.max(0, DAY_HIGH - peak));
-    const byDusk = Math.min(shown - sky, WHITE - high + above + lift, byGlow);
-    const dusk = duskRise() * state.sunOn;
-    return byDay + (byDusk - byDay) * dusk;
+    const st = { low: share(LOW_SHARE), high: share(1 - HIGH_SHARE), mid: share(0.5), sky: share(DUSK_SHARE), peak: share(1 - PEAK_SHARE) };
+    let E = exposureAt(st, state.elev, 0);
+    if (state.elev < DUSK[0]) {
+      const here = airLevel(state.alt, state.elev);
+      for (let e = state.elev + MONO_STEP; e < DUSK[0] + MONO_STEP; e += MONO_STEP) {
+        const d = MONO_RATE * (airLevel(state.alt, e) - here);
+        E = Math.min(E, d + exposureAt(st, e, d));
+      }
+    }
+    return E;
   }
 
   // ---------- Drawing ----------
@@ -3281,12 +3324,17 @@ const SkySound = (() => {
     }
     done(0.05);
     const forHaze = state.haze;
-    await slices([buildDepths(), buildStars(), depthTable()], share => done(0.05 + 0.25 * share));
+    // The slices are paced by timers (`soon`), not by frames: a frame comes
+    // only every 50 ms or so while the page starts and the GPU is busy, and
+    // a slice a frame made the tables take 1.8 s.
+    await slices([buildDepths()], share => done(0.05 + 0.08 * share), soon);
     // The table of multiple scattering, the longest (some 0.2 to 0.3 s),
-    // goes on in slices while the GPU compiles the programs and draws the
-    // textures below; the first frame waits for it. Before the textures it
-    // held the first picture back by some 0.7 s.
-    const scattered = slices([buildMultiScatter(forHaze)], () => {});
+    // reads the first table (`sunDepth`). It goes on beside the others, and
+    // while the GPU compiles the programs and draws the textures below; the
+    // first frame waits for it. Run after the others, in slices a frame, it
+    // held the first picture back by 0.4 s.
+    const scattered = slices([buildMultiScatter(forHaze)], () => {}, soon);
+    await slices([buildStars(), depthTable()], share => done(0.13 + 0.17 * share), soon);
 
     // The programs. Without the extension, asking waits until a program is
     // done: one a frame.
@@ -3439,10 +3487,17 @@ const SkySound = (() => {
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
+    // ?expo=L in the address pins it at L (log2, for tests: the tools compare
+    // a flight with a still at the exposure the flight ended with). Without
+    // it, expo is null and the meter sets the exposure. window.__exposure
+    // reads the exposure of the last frame (log2), pinned or not.
+    const pinned = new URLSearchParams(location.search).get('expo');
+    const pin = pinned !== null && pinned !== '' && isFinite(pinned) ? +pinned : null;
+    Object.defineProperty(window, '__exposure', { configurable: true, get: () => logE });
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 6 * NH, 0, gl.RGBA, gl.FLOAT, msData);
+        gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 12 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, w, h);
@@ -3619,7 +3674,7 @@ const SkySound = (() => {
       poll();
       const dt = then === null ? 0 : Math.min(Math.max(now - then, 0), 100) / 1000;
       then = now;
-      if (target !== null && logE !== null) {
+      if (target !== null && logE !== null && pin === null) {
         // Fast towards less light (a brighter view), slower towards more. It
         // stops within ADAPT_STOP stops and starts again beyond ADAPT_START,
         // so that the noise of the picture does not keep the drawing going
@@ -3715,7 +3770,7 @@ const SkySound = (() => {
           return true;
         }
         primed = null;
-        logE = target;
+        logE = pin ?? target;
         restart = true;
         turn = 1 - turn;
         return true;
@@ -3875,7 +3930,7 @@ const SkySound = (() => {
     const a = state.moonAge;
     moonOut.textContent = a < 1.5 || a > 28 ? T.newMoon : Math.abs(a - 7.4) < 1 ? T.firstQuarter
       : Math.abs(a - 14.8) < 1 ? T.fullMoon : Math.abs(a - 22.1) < 1 ? T.lastQuarter : T.moonAge(a.toFixed(0));
-    hazeOut.textContent = T.hazes[state.haze < 0.3 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3.5 ? 2 : 3];
+    hazeOut.textContent = T.hazes[state.haze < 0.5 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3 ? 2 : 3];
     altOut.textContent = Math.round(state.alt * 100) * 10 + ' m';
     cloudOut.textContent = T.clouds[state.cloud < 0.02 ? 0 : state.cloud < 0.35 ? 1 : state.cloud < 0.65 ? 2 : state.cloud < 0.9 ? 3 : 4];
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
@@ -4182,12 +4237,15 @@ const SkySound = (() => {
   // Runs jobs (see finish) to their ends in slices of about SLICE_MS, a
   // slice a frame; report(share) after each job.
   const SLICE_MS = 8;
-  async function slices(jobs, report) {
+  // The next task (a frame in a hidden tab, where timers are slowed anyway).
+  const soon = () => document.hidden ? nextFrame() : new Promise(resolve => setTimeout(resolve, 0));
+  // wait: how a slice yields (the next frame, or the next task).
+  async function slices(jobs, report, wait = nextFrame) {
     let start = performance.now();
     for (let k = 0; k < jobs.length; k++) {
       while (!jobs[k].next().done) {
         if (performance.now() - start > SLICE_MS) {
-          await nextFrame();
+          await wait();
           start = performance.now();
         }
       }
