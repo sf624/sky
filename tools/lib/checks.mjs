@@ -18,6 +18,10 @@ const reached = (x, z, kmh, heading, frames, ms) => {
 };
 const at = ([x, z]) => `at=${x.toFixed(6)},${z.toFixed(6)}`;
 const errorsOf = (pages) => pages.flatMap((p) => p.errors);
+// The exposure (log2) of the page's last frame, or null where the page has no `window.__exposure` (the base, which
+// has no meter) or has not set it yet; and the query that pins a page at it (`?expo=`; nothing where null).
+const exposureOf = async (p) => { const e = await p.eval('window.__exposure'); return typeof e === 'number' ? e : null; };
+const pinned = (e) => (e === null ? '' : `&expo=${e}`);
 
 // Loads, steps, shoots; returns the closed page, whose errors stay readable.
 async function shoot(ctx, root, q, steps, file, extra = {}) {
@@ -175,6 +179,7 @@ export const CHECKS = {
     const p = await ctx.session.open(ctx.page, `${v}&speed=900&at=10,60&res=0.5`, ctx.size);
     pages.push(p);
     const sizes = {};
+    let expo = null;
     try {
       const plan = [['fly', 61], ['stop', 5], ['grown1', 6], ['grown5', 4], ['settled', 60]];
       for (const [name, n] of plan) {
@@ -183,12 +188,13 @@ export const CHECKS = {
         await p.shot(f(name));
         sizes[name] = (await p.draws()).sky.size;
       }
+      expo = await exposureOf(p);   // the still is drawn at the settled picture's exposure (see flight)
     } finally {
       await p.close();
     }
     // The frame that reads the slider still flies: 61 frames of flight after the first.
     const z = 60 + KMS(900) * 61 * 0.016;
-    pages.push(await stillAt(ctx, ctx.page, `${v}&at=10,${z.toFixed(6)}`, f('still')));
+    pages.push(await stillAt(ctx, ctx.page, `${v}&at=10,${z.toFixed(6)}${pinned(expo)}`, f('still')));
     const still = readPng(f('still'));
     const box = [Math.round(still.w * 0.15), Math.round(still.h * 0.35), Math.round(still.w * 0.7), Math.round(still.h * 0.5)];
     for (const name of ['fly', 'stop', 'grown1', 'grown5', 'settled']) {
@@ -230,13 +236,33 @@ export const CHECKS = {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
     let ok = true;
+    // The flight's exposure at its last frame sets the still's (`?expo=`), so that both are drawn at the same
+    // exposure: each follows a meter of its own (the still settles at rest, within a hysteresis, the flight
+    // tracks), and they end a hair apart, which the comparison would count as a difference of the picture.
+    // Where the page has no such exposure (main), the still is drawn as it comes. The flight's exposure over its
+    // last LIMITS.steady.frames frames gives the steadiness: its range, in stops.
     const measure = async (root, who) => {
       const out = {};
       for (const fl of flights) {
         const fly = f(`${fl.name}.${who}`), still = f(`${fl.name}-still.${who}`);
-        pages.push(await shoot(ctx, root, `${fl.q}&speed=900&heading=0&at=40,60`, [[fl.frames, 16]], fly));
-        pages.push(await stillAt(ctx, root, `${fl.q}&heading=0&${at(reached(40, 60, 900, 0, fl.frames, 16))}`, still));
-        out[fl.name] = diffPng(still, fly, { out: f(`${fl.name}-diff.${who}`) });
+        const p = await ctx.session.open(root, `${fl.q}&speed=900&heading=0&at=40,60`, ctx.size);
+        let e = null;
+        const seen = [];
+        try {
+          await p.step(fl.frames - LIMITS.steady.frames, 16);
+          for (let i = 0; i < LIMITS.steady.frames; i++) {
+            await p.step(1, 16);
+            seen.push(await exposureOf(p));
+          }
+          e = seen[seen.length - 1];
+          await p.shot(fly);
+          pages.push(p);
+        } finally {
+          await p.close();
+        }
+        pages.push(await stillAt(ctx, root, `${fl.q}&heading=0&${at(reached(40, 60, 900, 0, fl.frames, 16))}${pinned(e)}`, still));
+        out[fl.name] = { ...diffPng(still, fly, { out: f(`${fl.name}-diff.${who}`) }), expo: e,
+          range: e === null ? null : Math.max(...seen) - Math.min(...seen) };
       }
       return out;
     };
@@ -244,9 +270,13 @@ export const CHECKS = {
     for (const fl of flights) {
       const d = page[fl.name], limit = LIMITS.flight[ctx.renderer][fl.name];
       const rel = base ? LIMITS.flightBase(base[fl.name].mean) : Infinity;
-      lines.push(`${fl.name}: ${fl.frames} frames flown against the still: ${fmtDiff(d)} (limit ${limit}` +
-        (base ? `; base ${base[fl.name].mean}, limit ${rel.toFixed(3)})` : ')'));
+      lines.push(`${fl.name}: ${fl.frames} frames flown against the still${d.expo === null ? '' : ` at exposure ${d.expo.toFixed(4)}`}: ` +
+        `${fmtDiff(d)} (limit ${limit}` + (base ? `; base ${base[fl.name].mean}, limit ${rel.toFixed(3)})` : ')'));
       if (d.mean > limit || d.mean > rel) ok = false;
+      if (d.range !== null) {
+        lines.push(`${fl.name}: exposure over the last ${LIMITS.steady.frames} frames moves ${d.range.toFixed(4)} stops (limit ${LIMITS.steady.range})`);
+        if (d.range > LIMITS.steady.range) ok = false;
+      }
     }
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
@@ -257,11 +287,16 @@ export const CHECKS = {
 const LIMITS = {
   wrap: (control) => control * 1.5 + 1,
   // 0.9: at rest the exposure stops within ADAPT_STOP of the meter's target and moves again only beyond
-  // ADAPT_START, so a picture settled after a flight may sit some 0.02 stops off the still's (0.84 at #31).
+  // ADAPT_START; the still is drawn at the settled picture's exposure (0.63 on main, 0.71 at #31).
   settled: { gpu: 0.9, swiftshader: 0.9 },
-  // cruise 1.8: the exposure follows a meter of the picture, which in flight holds fewer frames; it ends about
-  // 0.02 stops off the settled still's, a uniform 0.8 levels (1.62 at #31; 1.13 before the meter).
+  // cruise 1.8: the still is drawn at the flight's last exposure, so the two differ only by the picture
+  // (1.21 at #31; 1.55 when each followed its own meter, 1.13 on main).
   flight: { gpu: { cruise: 1.8, low: 1.6 }, swiftshader: { cruise: 1.8, low: 1.9 } },
+  // The exposure over the last 20 frames of a flight (0.3 s), its range in stops: it must hold steady, no
+  // pumping. Measured 0.0024 (cruise) and 0.0030 (3 km) on the GPU, where the tracking holds it within
+  // ADAPT_TRACK (0.002) of the meter, whose noise is of that size; 0.01 is three times that. A meter that pumped
+  // (the glow's, say) moves it by 0.05 stops and more.
+  steady: { frames: 20, range: 0.01 },
   flightBase: (base) => base * 1.1 + 0.03,
 };
 

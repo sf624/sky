@@ -679,16 +679,18 @@ that the noise of the picture does not keep it moving. In flight, which
 draws anyway, it keeps within `ADAPT_TRACK` = 0.002 of the meter.
 
 **The flight check and the meter.** A flight of 61 frames from the
-page's load (the tools' `flight` check) differs more from the still at
-the place reached than on main, where the exposure did not follow a
-meter (cruise 1.55 against 1.13 levels, 3 km 1.48 against 1.09). Nearly
-all of it is the exposure: each page starts at the meter of its first,
-single frame, the still keeps it (it lies within `ADAPT_START` of the
-settled picture's), and the flight follows the meter of its own, noisier
-picture from 240 m back; they end 0.01 to 0.02 stops apart, a uniform 1
-to 1.5 % (measured: -1.4465 against -1.4342 at cruise, -2.019 against
--1.997 at 3 km). With the exposure held fixed in both, the flight is
-within main's margin (1.21 and 1.12).
+page's load (the tools' `flight` check) is compared with a still at the
+place reached. Each page starts at the meter of its first, single frame;
+the still keeps it (within `ADAPT_START` of the settled picture's) and
+the flight follows the meter of its own, noisier picture, so they ended
+0.01 to 0.02 stops apart, a uniform 1 to 1.5 %: 1.55 levels against
+main's 1.13 at cruise, 1.48 against 1.09 at 3 km. That was an artefact of
+the comparison, so the check now reads the flight's exposure at its last
+frame (`window.__exposure`, log2) and draws the still at it (`?expo=`
+pins the exposure): 1.21 and 1.12. Separately it asserts that the
+exposure stays steady, moving under 0.01 stops over the last 20 frames
+(measured 0.0024 and 0.0030). `res` draws its still the same way. The
+base has neither, and is compared as it comes.
 
 At the end of `main`:
 

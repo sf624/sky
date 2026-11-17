@@ -62,8 +62,8 @@ The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may s
 | `stills` | yes | Every view gives the base's picture exactly (max difference 0). |
 | `wrap` | no | No seam where the way flown wraps at 256 km. The pictures are compared tile by tile (8 x 8), so that a seam in one part of the picture shows. Two stills 2.8 m apart across the wrap differ no more than two stills 2.8 m apart elsewhere (worst tile at most 1.5 times, plus 1 level). A flight across the wrap, after 27 and 61 frames, matches stills at those places within the same margin of a flight elsewhere. |
 | `loop` | no | The drawing stops at rest (no frame queued); nothing is drawn in a hidden tab; drawing starts again when the tab is shown. |
-| `res` | no | With `?res=0.5`, the picture is drawn at half size in flight and at full size soon after the aircraft stops. No frame is shifted against a still at that place (the best shift within 6 pixels is 0, 0), and the settled picture is within 0.8 levels (mean) of the still. Without `res`, slow frames (60 ms) make the picture smaller, and fast ones (16 ms) restore it. |
-| `flight` | no | Two flights of 61 frames (cruise, and near the clouds at 3 km) each stay within a limit (mean levels, per renderer, below) of a settled still at the place reached. With a base, each also does no worse than the base's (at most 1.1 times, plus 0.03). |
+| `res` | no | With `?res=0.5`, the picture is drawn at half size in flight and at full size soon after the aircraft stops. No frame is shifted against a still at that place (the best shift within 6 pixels is 0, 0), and the settled picture is within 0.9 levels (mean) of the still, drawn at the settled picture's exposure (`?expo=`, read from `window.__exposure`; a page without them, like main, is compared as it comes). Without `res`, slow frames (60 ms) make the picture smaller, and fast ones (16 ms) restore it. |
+| `flight` | no | Two flights of 61 frames (cruise, and near the clouds at 3 km) each stay within a limit (mean levels, per renderer, below) of a settled still at the place reached, drawn at the exposure the flight ended with (`?expo=`; a page without `window.__exposure` is compared as it comes). The flight's exposure over its last 20 frames also moves no more than 0.01 stops (no pumping). With a base, each also does no worse than the base's (at most 1.1 times, plus 0.03). |
 
 The trace and the stills of a view come from one run of it, so the two checks together load each view once per page.
 
@@ -184,8 +184,9 @@ The limits, from `main` and from copies of it broken on purpose (8-bit levels; "
 |---|---|---|---|---|---|
 | `wrap`: worst tile of stills across the wrap (elsewhere) | 0.93 (1.24) | 0.61 (0.77) | 4.07 | 4.07 | 1.5 x elsewhere + 1 |
 | `wrap`: worst tile at frame 27 of a flight, across (elsewhere) | 2.84 (2.80) | 3.46 (3.50) | 6.21 | 6.52 | 1.5 x elsewhere + 1 |
-| `res`: settled picture against the still, mean | 0.63 (0.84 with the exposure meter) | 0.61 | 1.03 | 1.15 | 0.9 |
-| `flight`: cruise, mean | 1.13 (1.62 with the exposure meter) | 1.16 | 2.79 | 2.10 | 1.8 |
+| `res`: settled picture against the still, mean | 0.63 (0.71 with the exposure meter) | 0.61 | 1.03 | 1.15 | 0.9 |
+| `flight`: cruise, mean | 1.13 (1.21 with the exposure meter, same exposure) | 1.16 | 2.79 | 2.10 | 1.8 |
+| `flight`: exposure range over the last 20 frames, stops | (none) | (none) | | | 0.01 (0.0024 cruise, 0.0030 at 3 km, GPU) |
 | `flight`: near the clouds, mean | 1.09 | 1.34 | 4.73 | 4.53 | 1.6 (GPU), 1.9 (SwiftShader) |
 
 The broken copies: for `wrap`, the sea's gusts read at `x / 250.0` instead of `x / WEATHER_KM` (a seam on the sea only); for `res`, the mean at rest trusting 3 frames instead of 63; for `flight`, `uWay` always 0 (no reprojection). With a base, `flight` also fails above 1.1 times the base's mean plus 0.03.
