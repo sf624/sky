@@ -724,13 +724,16 @@ const float STAR_GAIN = 3.0;
 const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
 const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands over the sky, shown (0 to 1)
 const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
-const float MILKY_EYE = 2.0;    // the Milky Way raised at night (see main)
+const float MILKY_EYE = 6.5;    // the Milky Way raised at night (see main)...
+const vec2 MILKY_SEEN = vec2(0.08, 0.8);   // ...over this range of its contrast with the sky behind it
 const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
 const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
 const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
 const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
 const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
-const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)
+const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)...
+const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
+const vec2 SKY_BLUE = vec2(0.001, 0.01);
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
 const int GRID = 128;
 const int SLOTS = 8;
@@ -1408,8 +1411,8 @@ const vec4 SWELL[SWELLS] = vec4[SWELLS](
 // over the pixel's footprint (fa, fc; as the foam's breakers), so that it
 // shows as a point however far. Where the footprint is wider than a facet,
 // the facets are taken four at a time, level by level, as one that
-// sparkles four times as often: from far the sparkles merge into their
-// mean, as the eye sees them. The facets stay put on the sea: a still
+// sparkles four times as often; where it holds more than a few sparkles,
+// they are counted (sparkleCount). The facets stay put on the sea: a still
 // holds still; in flight zh moves and they twinkle.
 const float FACET = 0.0005;
 const float FACET_TOL = 0.02;
@@ -1439,15 +1442,59 @@ float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2
   }
   return sum / max(mean, 1e-6);
 }
+// Many sparkles to a pixel: their count. A cell of the sea of the given
+// size holds lam of them on average (p of its facets); its light over the
+// mean is drawn as a lognormal of variance GRAIN / lam, from a hash of the
+// cell, and read as value noise (bilinear between cells) at GRAIN_N points
+// along the footprint. The mean stays 1 at every size; the grain gets finer
+// and fainter as the count grows with distance, and holds still on the sea.
+const float GRAIN = 4.0;
+const int GRAIN_N = 6;
+float sparkleCell(vec2 c, float n, float size) {
+  c = mod(c, n);
+  vec2 lo = mod(c, 1000.0), hi = floor(c / 1000.0);
+  vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
+  return sqrt(-2.0 * log(max(hash3(h + 0.29), 1e-7))) * cos(2.0 * PI * hash3(h + 0.83));
+}
+float sparkleCount(float size, float p, vec2 x, vec2 fa) {
+  float lam = p * (size / FACET) * (size / FACET);
+  float v = min(log(1.0 + GRAIN / max(lam, 1e-6)), 2.5), s = sqrt(v);
+  float n = round(WEATHER_KM / size);
+  float sum = 0.0;
+  for (int i = 0; i < GRAIN_N; i++) {
+    vec2 g = (x + fa * ((float(i) + 0.5) / float(GRAIN_N) - 0.5)) / size - 0.5;
+    vec2 g0 = floor(g), f = g - g0;
+    vec4 e = exp(s * vec4(sparkleCell(g0, n, size), sparkleCell(g0 + vec2(1.0, 0.0), n, size),
+                          sparkleCell(g0 + vec2(0.0, 1.0), n, size), sparkleCell(g0 + 1.0, n, size)) - 0.5 * v);
+    sum += mix(mix(e.x, e.y, f.x), mix(e.z, e.w, f.x), f.y);
+  }
+  return sum / float(GRAIN_N);
+}
 float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
-  float level = max(log2(length(fa) / FACET), 0.0);
-  float k = floor(level), f = level - k;
-  float tol = FACET_TOL * exp2(2.0 * k);
-  float many = smoothstep(2.0, 32.0, FACET_TOL * exp2(2.0 * level));   // so many facets: their mean
-  if (many >= 1.0) return 1.0;
-  float s = mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc),
-                sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc), f);
-  return mix(s, 1.0, many);
+  // p: the share of facets that sparkle here. Where the footprint holds
+  // few sparkles (counted at the middle of the path, zh = 0), they are
+  // drawn one by one; from 1 to 8 they hand over to their count.
+  float tau2 = FACET_TOL * s2r;
+  float p = tau2 / (s2r + tau2) * exp(-dot(zh, zh) / (s2r + tau2));
+  float across = length(fc), along = length(fa);
+  float count = smoothstep(0.0, 3.0, log2(along * across / (FACET * FACET) * FACET_TOL / (1.0 + FACET_TOL)));
+  float s = 0.0, c = 0.0;
+  if (count < 1.0) {
+    float level = max(log2(along / FACET), 0.0);
+    float k = floor(level), f = level - k;
+    float tol = FACET_TOL * exp2(2.0 * k);
+    float many = smoothstep(2.0, 32.0, FACET_TOL * exp2(2.0 * level));   // so many facets: their mean
+    s = many >= 1.0 ? 1.0 : mix(mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc),
+                                    sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc), f), 1.0, many);
+  }
+  if (count > 0.0) {
+    // Cells about as wide as the footprint, or a GRAIN_N-th of its length.
+    float level = max(log2(max(across, along / float(GRAIN_N)) / FACET), 0.0);
+    float k = floor(level), f = level - k;
+    float a = sparkleCount(FACET * exp2(k), p, x, fa) - 1.0, b = sparkleCount(FACET * exp2(k + 1.0), p, x, fa) - 1.0;
+    c = max(1.0 + ((1.0 - f) * a + f * b) / sqrt((1.0 - f) * (1.0 - f) + f * f), 0.0);
+  }
+  return mix(s, c, count);
 }
 
 // The sea at pg, at distance t along d, behind air of depth od and under
@@ -2075,7 +2122,7 @@ void main() {
     }
     vec3 c = d * uSky;                               // equatorial direction (J2000)
     float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
-    float glow = uNight * (vanRhijn + (1.0 + MILKY_EYE * uNightEye) * milkyWay(c)) * (1.0 - moonMask);
+    float milky = milkyWay(c), raise = 1.0;
     vec4 tk[3];
     vec4 tg[3];                                      // ...and for the airglow at night (below)
     for (int k = 0; k < 3; k++) {
@@ -2088,15 +2135,27 @@ void main() {
     // it can see against this sky, and the faintest whose colour it sees.
     vec2 seen = vec2(0.0);
     if (uNightEye > 0.0) {
-      float y = 0.0;
-      for (int k = 0; k < 3; k++) y += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], L[k] + tg[k] * glow * pow(uWL[k], vec4(-3.0)));
+      float y = 0.0, ym = 0.0;
+      for (int k = 0; k < 3; k++) {
+        vec4 lw = 0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k];
+        vec4 g = tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0));
+        y += dot(lw, L[k] + g * vanRhijn);
+        ym += dot(lw, g * milky);
+      }
       // The moon's glare in the eye veils the sky around it: 10 E / theta^2
       // cd/m2 at theta degrees from a light of E lux (Stiles and Holladay;
       // the moon is uMoonI of the sun's 133000 lux).
       float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
       float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
-      seen = starsSeen(CD * ISUN * y + veil);
+      float back = CD * ISUN * y + veil;
+      seen = starsSeen(back + CD * ISUN * ym);
+      // The dark-adapted eye sees the Milky Way plainly where it stands well
+      // over the sky and the moon's veil behind it, and not where its
+      // contrast with them is under its threshold: raised MILKY_EYE times
+      // over the range MILKY_SEEN of that contrast.
+      raise += MILKY_EYE * uNightEye * smoothstep(MILKY_SEEN.x, MILKY_SEEN.y, CD * ISUN * ym / max(back, 1e-9));
     }
+    float glow = uNight * (vanRhijn + raise * milky) * (1.0 - moonMask);
     vec4 st[3], sn[3];
     for (int k = 0; k < 3; k++) { st[k] = vec4(0.0); sn[k] = vec4(0.0); }
     ivec2 cell = starCell(c);
@@ -2200,7 +2259,14 @@ void main() {
     float cd = CD * dot(col, vec3(0.2126, 0.7152, 0.0722));
     float wide = 1.0 - smoothstep(log(MESOPIC.x), log(MESOPIC.y), log(max(cd, 1e-12)));
     rodShare = uNightEye * mix(ROD_HALF / (ROD_HALF + cd), wide, uNightGrey);
-    col = mix(col, max(rods, 0.0) * ROD_TINT, rodShare);
+    // A full moon's sky is dark but blue to the eye, where a quarter moon's
+    // is grey: at the top of the rods' range the grey of blue light turns
+    // blue (ROD_BLUE), as its luminance goes from SKY_BLUE.x to SKY_BLUE.y.
+    // Only light bluer than the rods' grey: the sky, and the sea that
+    // mirrors it; the moonlit clouds and the glitter stay grey.
+    float bluer = col.r > 0.0 ? smoothstep(0.0, 0.3, col.b / col.r * (ROD_TINT.r / ROD_TINT.b) - 1.0) : 0.0;
+    float blue = uNightGrey * bluer * smoothstep(log(SKY_BLUE.x), log(SKY_BLUE.y), log(max(cd, 1e-12)));
+    col = mix(col, max(rods, 0.0) * mix(ROD_TINT, ROD_BLUE, blue), rodShare);
   }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
