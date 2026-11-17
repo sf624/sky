@@ -98,6 +98,13 @@ not with other renderers or memory. Look at several views: the default,
 low sun, near the cloud tops, under the cloud base, cirrus overhead,
 night, haze, strong wind.
 
+A change of the picture is checked over a matrix of scenes, each beside a
+photograph of the same kind: altitude (about 0.3 km, 3 to 5 km, 11 km) by
+time (day, dusk, night) by clouds (low clouds, thin clouds, few and many),
+towards the sun and away from it, at rest and in flight. The rule and what
+to report are in [`CLAUDE.md`](https://github.com/sf624/sky/blob/main/CLAUDE.md).
+The picture comes before the processing load.
+
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
