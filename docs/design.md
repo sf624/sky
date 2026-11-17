@@ -238,19 +238,35 @@ air, or to the sea. The air is three species, with densities from
 
 - Rayleigh: `exp(-h / HR)`, `HR` = 8 km; scattering `uBR` = 13.558e-3 per km
   at 550 nm, falling with the fourth power of the wavelength (`BR`).
-- Mie (aerosol): `exp(-h / HM)`, `HM` = 1.2 km, the haze of the lowest
-  kilometres, plus two thin layers above it (`AERO_FREE`, `AERO_STRAT` in
-  `fs`, `AERO_UP` and `mieDensity` in the JS): 0.7 of the sea level's
-  density at 6 km (half-width 5 km, the free troposphere) and 0.2 at
-  20 km (half-width 8 km, the stratosphere: an optical depth of 0.0045
-  at the default haze, about that of the stratosphere's background
-  aerosol, 0.004 to 0.01 at 525 nm, where it was 0.0011). Scattering `BETA_M` =
-  3.996e-3 per km times `uHaze`, extinction `MIE_EXT` = 1.11 times that.
-  Grey: the same at every wavelength. The layers matter in twilight: their
-  forward scattering of the sun's light, from below the horizon, makes
-  the glow over the sunset a taller warm gradient (orange, yellow, pale,
-  then blue) instead of a thin orange line under a blue sky; by day they
-  widen the sun's aureole a little.
+- Mie (aerosol), after published profiles of the background aerosol
+  (OPAC, Hess et al. 1998; Shettle and Fenn 1979; SAGE II for the
+  stratosphere). The haze of the lowest kilometres, the boundary layer,
+  is well mixed up to `BL` = 1.5 km and falls off over about 0.3 km above
+  it (`boundaryLayer`: a logistic step, 1 at sea level); above it two thin
+  layers (`AERO_FREE`, `AERO_STRAT` in `fs`, `AERO_UP` and `mieDensity` in
+  the JS): 0.048 of the sea level's density at 6 km (half-width 5 km, the
+  free troposphere) and 0.004 at 20 km (half-width 8 km, the
+  stratosphere). Scattering `BETA_M` = 0.063 per km at sea level times
+  `uHaze` (the haze slider, 1 by default), extinction `MIE_EXT` = 1.11
+  times that (a single-scattering albedo of 0.9, continental aerosol).
+  Grey: the same at every wavelength (an Angstrom exponent of 1.3 changed
+  the colours by a few levels only). At the default haze the optical
+  depth at 550 nm is 0.11 in the boundary layer, 0.023 in the free
+  troposphere and 0.0045 in the stratosphere (its quiet background, 0.004
+  to 0.01), 0.14 in all (a visibility of 48 km at sea level): about the mean of continental and maritime air.
+  The slider scales all three: 0.3 is clean maritime air (0.04), 3 to 6
+  hazy (0.4 to 0.8). The default is 1.5 times what was first tried (0.09):
+  beside photographs from cruise and from the coast (a pale band along
+  the horizon, distant clouds and sea fading), 1.5 to 2 times looked
+  alike, 1 too crisp; more turned the Belt of Venus grey. Twice the
+  stratospheric layer (0.008) made a white dome of forward-scattered
+  sunlight over the set sun from cruise, where photographs show a level
+  band.
+  Before (round 8), the boundary layer was `exp(-h / 1.2)` with 0.0014 per
+  km: an optical depth of 0.002, some 50 times less than real air; the
+  horizon was crisp, distant clouds and sea did not fade, and at dusk the
+  ground below the band of glow was dark blue where photographs show a
+  brown-orange haze.
 - Ozone: a triangle from 10 to 40 km, peaking at 25 km; absorption `uBO`
   from the Chappuis cross-sections (`OZONE`) for 300 Dobson units.
 
@@ -278,7 +294,10 @@ the moon, `addLight`:
   which the shadow of the clouds lowers near the sea, and times
   `grazeCut`;
 - light scattered many times: the multiple-scattering table times the
-  local scattering coefficient, times the transmittance to the eye.
+  local scattering coefficient, times the transmittance to the eye; and
+  for the aerosol, which sends light on forwards, `MIE_LEAN` = 4 times the
+  table's lean (below) towards the view, where it is positive: more of
+  that light when the view looks where it comes from.
 
 The clouds and the cirrus enter the march as two layers (see
 [Low clouds](#low-clouds) and [Cirrus](#cirrus)). At each layer the march
@@ -287,19 +306,12 @@ ends a sample exactly there (`tLayer`), adds the layer's light (`C` or
 layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
 (`vis` = 0) the march stops.
 
-**`grazeCut(p, s)`**: light from below the local horizon grazes the
-planet on its way, along hundreds of kilometres of the lowest air, where
-haze and cloud that the model does not draw (the deck below the aircraft
-among them) take it out. Light that passes lower than `GRAZE` = 1 km is
-cut, above 5 km kept, smoothly in between. It applies to the light
-scattered once in the air, to the sunlight on the low clouds and on the
-cirrus, and to the light gathered for the multiple-scattering table
-(`grazeCut` in the JS), not to the eye's own view of the sun. By day
-nothing changes. Without it the air just outside the planet's shadow was
-lit by deep red light that had passed a few hundred metres above the sea:
-from 11 km, the shadow's band came out pink, the sky over it lavender and
-the Belt of Venus magenta, where photographs show a blue-grey band, a pale
-blue sky and a pink to peach belt.
+Light from below the local horizon grazes the planet on its way, through
+hundreds of kilometres of the boundary layer, which takes it out. Until
+round 8 the air was so clean that this light came through deep red, and
+a cut (`grazeCut`) removed light that passed lower than 1 km; with the
+real boundary layer the reference and the page agree without it (to 2 %
+in the planet's shadow), so it is gone.
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
@@ -348,15 +360,28 @@ degrees down. The mean light holds the glow on the horizon and the dark
 sea below: in deep twilight the clouds came out mauve and brown under a
 blue sky.
 
-One value per wavelength. The texture is `NMU` by `6 * NH`: the three
+A third and fourth hold the mean light's lean (`msLean`): the light
+gathered times the direction it comes from (pass 0 and the computed
+order), towards the sun's side and up. The table's light is a mean over
+directions, but the aerosol scatters forwards: below the band of glow,
+seen from cruise, the reference's light (scattered many times by the
+boundary layer, coming from the glow) was twice the table's and
+brown-orange where the table's was blue. The lean's first moment would
+weigh it by 3 times the asymmetry (2.28); with the forward peak sharper
+than that, 4 fits the reference best, and taking it only where it is
+positive keeps the views away from the light as they were (the first
+moment taken there too left the sky away from the sun 0.65 of the
+reference's).
+
+One value per wavelength. The texture is `NMU` by `12 * NH`: the three
 groups of four wavelengths of the air stacked in y, then those of the
-clouds. It depends on the haze, so `frame` rebuilds it when the haze
+clouds, then the lean towards the sun's side and up. It depends on the haze, so `frame` rebuilds it when the haze
 changes, and the renderer uploads it again. `fs` reads it through the
 GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
 
-**Against measurements** (a float64 copy of the model, with the aerosol
-layers and `grazeCut`). Integrated over the sky at sea level (haze
-0.35, 128 klx of sunlight outside the air), the model gives, against the
+**Against measurements** (a float64 copy of the model of round 8, with
+its thin aerosol and `grazeCut`; not measured again since). Integrated
+over the sky at sea level (haze 0.35 of that aerosol, 128 klx of sunlight outside the air), the model gives, against the
 horizontal illuminance table in Schlyter, "Radiometry and photometry in
 astronomy": sun at 0 degrees, 937 lx (measured 759); -6, 6.3 lx (3.4);
 -12, 0.016 lx (0.008). The zenith, against a fit to sky quality meter
@@ -622,51 +647,54 @@ itself, the one read that waits.
   below darken sooner than the sky, and a floor on them brightened the
   sky again for some ten minutes;
 - in twilight another exposure takes over, blended in as the sun goes
-  from `DUSK` = 2.5 to -0.5 degrees (a smoothstep, times `sunOn`): one set
+  from `DUSK` = 8 to 1 degrees (a smoothstep, times `sunOn`): one set
   by the sky, the level that the brighter third of the picture passes
   (`DUSK_SHARE` = 0.65), so that the view is shown as the eye sees it and
-  not held down by its highlights. At sunset and in civil twilight the
-  sky is light and pastel, its clouds lit, and the band of glow its
-  brightest part; then the view darkens steadily into the night. That
-  level is shown at `DUSK_SHOWN` = -2.2 (log2 after exposure) when it stands at
-  `DUSK_MID` = -3 (about sunset: as by day), and at the night's level
-  (the key's, `KEY - EYE * NIGHT_LEVEL + NIGHT_LEVEL + MID_GAP`, -4.6)
-  when it stands at the night's (`NIGHT_LEVEL + MID_GAP`); in between
-  along the power `DUSK_POW` = 0.7 of its distance from the night's, so
-  that it darkens slowly at first: through civil and nautical twilight
-  the eye still sees colours. On top of that, the twilight's picture is
-  shown up to `DUSK_LIFT` = 1.2 stops brighter, as a camera on automatic
-  exposure brightens it relative to the light after sunset: growing from
-  the start of the blend (2.5 degrees) to `LIFT_SPAN` = -2.5 degrees, gone
-  again by -8. Without it the views of civil twilight were 1 to 3 stops
-  darker than photographs of them. White gives way: the highlights may stand
-  up to `ABOVE` = 3.5 stops above white, an allowance that grows over
-  `ABOVE_SPAN` = 5 degrees after the blend, so that it does not let the
-  exposure leap as the sun sets. The sky, not the median nor the darker
-  quarter: the clouds and the sea below darken sooner than the sky after
-  sunset, and an exposure that followed them brightened the sky through
-  sunset. But the band of glow, the brightest part of a view towards the
-  sun (the level that only `PEAK_SHARE` = 0.2 % of the blocks pass, a
-  few rows of them), stands at most `PEAK_ABOVE` = 1 stop above white,
-  and `DIM_BAND` = 0.1 stops lower for each stop that it is dimmer than
-  daylight's highlights (`DAY_HIGH`), at most `DROP` = 1.5 stops lower.
-  As a camera's sensor does, the tone curve then takes each channel on
-  its own (below): the band's strongest channel runs into white at its
-  core, and it comes out white-yellow there, orange at its edges, pale
-  above, under a deep blue-grey sky and over a near-black ground, as in
-  photographs from the air; deep in the twilight it is a thin orange line
-  under a near-black sky (an A330's at about -8 degrees). A view away
-  from the glow holds no such peak and keeps the exposure of its sky.
-  Before (round 7), a view whose highlights stood well above its sky was
-  exposed for them, and a shoulder of the tone curve pressed the band
-  together keeping its hue: it stayed a thin saturated red-orange line
-  under a saturated blue sky, where photographs show a broad band, yellow
-  at its core; and from -6 degrees down that exposure gave way, so the
-  sky of deep twilight was lit up blue where photographs show it near
-  black. In a time-lapse the picture away from the sun is unchanged; towards
-  it, it darkens more in deep twilight, smoothly (the sky's mean level, of
-  255, at 11 km: 74 at -2 degrees, 30 at -6, 13 at -10, against 83, 62
-  and 52 before; at 0.3 km: 94, 49 and 37 against 113, 78 and 64).
+  not held down by its highlights. That level is shown at `DUSK_SHOWN` =
+  -1.2 (log2 after exposure) when it stands at `DUSK_MID` = -3 (about
+  sunset), and at the night's level (the key's, `KEY - EYE * NIGHT_LEVEL
+  + NIGHT_LEVEL + MID_GAP`, -4.6) when it stands at the night's
+  (`NIGHT_LEVEL + MID_GAP`); in between along the power `DUSK_POW` = 0.7
+  of its distance from the night's, so that it darkens slowly at first:
+  through civil and nautical twilight the eye still sees colours. The
+  highlights may stand up to `ABOVE` = 3.5 stops above white, an
+  allowance that grows over `ABOVE_SPAN` = 5 degrees after the blend. The
+  sky, not the median nor the darker quarter: the clouds and the sea
+  below darken sooner than the sky after sunset, and an exposure that
+  followed them brightened the sky through sunset. But the band of glow,
+  the brightest part of a view towards the sun (the level that only
+  `PEAK_SHARE` = 0.2 % of the blocks pass, a few rows of them), stands at
+  most `PEAK_ABOVE` = 1 stop above white, and `DIM_BAND` = 0.1 stops
+  lower for each stop that it is dimmer than daylight's highlights
+  (`DAY_HIGH`), at most `DROP` = 1.5 stops lower. As a camera's sensor
+  does, the tone curve then takes each channel on its own (below): the
+  band's strongest channel runs into white at its core, and it comes out
+  white-yellow there, orange at its edges, pale above, under a deep
+  blue-grey sky, as in photographs from the air; deep in the twilight it
+  is a thin orange line under a near-black sky (an A330's at about -8
+  degrees). In deep twilight the band gives way: it holds the sky at most
+  `GLOW_HOLD` = 1 stop down for each stop that it stands more than
+  `GLOW_FREE` = 3.5 stops above the sky. From cruise the band is a thin
+  line some 7 stops over a dark sky, and the sky stays near black; near
+  the sea, where it is a wide glow 4 stops over the sky, the sky and the
+  sea keep a visible deep blue (they were near black at -10 degrees,
+  where photographs show them deep blue). A view away from the glow holds
+  no such peak and keeps the exposure of its sky;
+- and as the sun goes down the picture never grows brighter. The
+  exposure is at most what the same view would get with the sun higher,
+  at every `MONO_STEP` = 0.25 degrees up to the start of the blend: the
+  same view with all its levels raised by `MONO_RATE` = 0.8 times the
+  stops that the air's mean light at the eye's height (`airLevel`, from
+  `msData`) is brighter there, and its exposure lowered as much. The
+  meter's statistics are sorted once, so this costs some 60 evaluations
+  of a few lines. With a uniform darkening the shown picture is then
+  monotone; 0.8, as the sky darkens more slowly than the mean light
+  through sunset (the sea and the clouds below darker sooner). Before
+  (round 8), the twilight's exposure was blended in from 2.5 to -0.5
+  degrees and lifted the picture by up to `DUSK_LIFT` = 1.2 stops (gone
+  now): in a time-lapse the sky away from the sun went from 75 to 148
+  (of 255) between sunset and 2 degrees below it, and the view towards
+  the sun from near the sea rose by 23 levels as the sun's disc set.
 
 `exposureFor` returns the exposure.
 
@@ -704,8 +732,8 @@ At the end of `main`:
    light on the level ground (the sky's from above, `upData`, kept by
    `buildMultiScatter`, and the sun's while it is up), relative to that
    light with the sun at 30 degrees, as an automatic white balance does
-   and as the eye adapts. Blended in as twilight's exposure is (`DUSK`),
-   and out again as the sun goes from 4 to 9 degrees down
+   and as the eye adapts. Blended in as the sun goes from 2.5 to -0.5
+   degrees (`BALANCE_IN`), and out again as the sun goes from 4 to 9 degrees down
    (`BALANCE_OUT`), and with height, from 2 to 11 km (`BALANCE_HIGH`):
    from cruise the view is the high sky and the deck far below, which
    photographs keep as blue as by day; this correction, warm for the
