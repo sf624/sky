@@ -479,7 +479,8 @@ a metre, and the finest noise showed those steps as terraces.
 
 **The field.** A signed field says where cloud is: positive inside,
 rising by about 1 per km of depth under the surface. `cloudShape` builds it
-as a sum:
+as a sum (a height field; heaps that stand alone and towers have a 3D body
+instead, below):
 
 - the weather map `uWeather` at `p.xz + uDrift` (R: cover, G: how high
   the heap stands),
@@ -563,6 +564,64 @@ as a sum:
   `lump` says how far a place stands out of the billows; `body` how thick
   the cloud is there; `q.w` how rough; `thin` how near the edge of its
   heap's foot (`rise` under 0.4; nought on a sheet).
+
+**The 3D body of heaps and towers.** The field above is a height field:
+for each column of the weather map one top, and billows that push that
+surface. It cannot overhang, nor hold a cleft that goes in under a
+turret, and its walls are the walls of the dome whatever the billows do:
+towers and big heaps came out as lumpy columns, scattered cumulus as round
+heaps of one size. So where the cover breaks into heaps (no sheet, below),
+and for towers wherever they stand, the heaps have a 3D body instead
+(`solid`: `(1 - max(deck, level1)) max(1 - sheet, tower)`, smoothly; the
+sheet, the deck and the top of the slider keep the field above, which is
+closest to photographs there). After Schneider (2015, 2017): density is
+an envelope from the weather map times a 3D shape.
+
+- The envelope `env` is how deep a place lies in its heap, from the same
+  terms as the dome: `thick + swell - y^3 / top^3`, 1 at the foot of a
+  heap's middle, 0 where the dome's top would stand.
+- The shape is the turrets of `uBody` (see [Textures made at start](#textures-made-at-start)),
+  read at the same place in the noise as the billows (`q`): on big heaps
+  and towers (`big`, from G) the larger of the 2 km and (90 %) 1 km
+  turrets, on small heaps of the 1 km and 500 m ones, at 85 %, plus 15 %
+  of the mean of the two next smaller sizes.
+- The field is `BODY_G (tur - 1 + BODY_A env + BODY_B)`, with `BODY_A` = 1
+  and `BODY_B` = 0.42: deep in a heap all is cloud; nearer its outside,
+  only the heads of the turrets, wider than the stems under them, with
+  clefts where two meet; so a heap is turrets on turrets, and small
+  heaps are one head or a few, with fragments round the big ones. Over
+  the top of the envelope (`env` under -0.15) the field falls 1.5 times
+  as fast again: else the head of a turret whose middle lay outside the
+  heap stood alone in the air, a ball over the cloud. `BODY_B` keeps the
+  cover of the slider: straight down from 13 km, the share of cloud is
+  6, 8, 13, 28 and 87 % at `cloud` 0.2, 0.35, 0.5, 0.65 and 0.8 (round
+  10's field: 6, 8, 14, 28, 87 %). The sizes of the clouds seen so fall in
+  number as about the -1.8th power of their width.
+- With the envelope's top as a square (not a cube), towers were spires.
+- `body` (how dense the cloud is) is at least 0.7 of the heap's top over
+  the whole body: from the column under them, the heads that overhang a
+  heap's thin foot were translucent, and the cloud behind showed through
+  them as patches with sharp outlines. The heads of big heaps do not fray
+  (`thin`), and those of small ones fray over a fringe 0.12 deep, not
+  0.4: deeper than the field rises in a head, the fringe was a veil.
+- `steep` is 1 on the body: its field rises as fast on a wall as on a top.
+- The early ways out of `cloudShape` take the field as if the turrets were
+  at their highest there (`bodyMax`). The reads of the normals do not
+  take them (`smoothReads`): where some of a normal's reads stopped early
+  and some did not, the bound and the field differ by up to half a unit,
+  the normals pointed anywhere, and lit sides had dark patches with sharp
+  outlines.
+- Everything that reads the field reads the body: the march, the light's
+  steps (so turrets shade the clefts beside them), the depth overhead,
+  the shadow map, the sea's shadows.
+
+The light was made for a height field in three places. On the body, above
+the lowest 150 to 400 m (`solidHere`): `column` (the light through a deck
+above) dims only what faces down; the underside of a head, which bulges
+out over its stem, is lit as the side of a billow, not as a base
+(`below`), nor is its depth towards the light that of a slab. Lit as a
+base, such undersides were blue-grey crescents round each big head, and
+sides under a head were grey patches.
 
 **The sheet.** With much cloud the heaps stand on a sheet
 (stratocumulus): from below a closed deck, from above cells. How much
@@ -1397,6 +1456,7 @@ All are made during the loading, in `makeSky`:
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: cirrus |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
+| `uBody` | 15 | 128^3, RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' turrets (`turrets`), at 4, 8, 16 and 32 cells per tile (2 km to 250 m) |
 | `uSlope` | 13 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
@@ -1416,6 +1476,18 @@ takes the heaps squared; G is the heap's height, higher where towers
 grow (the old map of towers). Then gusts on the sea, and
 the patches and bands of cirrus. The wave map is a sum of plane waves, each
 a whole number of times across the map.
+
+The turrets of `uBody` are cells of a jittered lattice (each point kept
+0.15 of a cell off the cell's sides), each a bubble of rising cloud: a
+head round its point, of a radius of 0.45 to 0.75 of a cell, a little
+flatter than wide (its height over the point counts 1 / 0.85), on a stem
+under it that is 1.4 times as long and narrows to 70 % of the head's
+width. A cell holds `1 - d^2` of that shape's distance `d` (a dome), and
+where two meet the higher wins, rounded over 0.2 (`SOFT`): a cleft between
+them. Drawn with `noise` slice by slice after the noise texture, the 128
+slices take about as long again: on a desktop GPU the first picture comes
+about half a second later (6.7 to 6.9 s after the navigation at 1280 x 720,
+against 6.0 to 6.4 s without them).
 
 The Worley noise of the noise texture's G and B is rounded at each
 feature point over a quarter of a cell (`1 + r0 / 4 - sqrt(d^2 + r0^2)`,
