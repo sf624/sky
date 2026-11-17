@@ -31,7 +31,7 @@ becomes the middle of the range (`time=abc` gives 12).
 | `time` | 0 to 24, 0.05 | 15 | Local solar time, hours (the sun is due south at 12) |
 | `date` | 1 to 365, 1 | today | Day of the current year |
 | `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
-| `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.14 at 1; see [The air](design.md#the-air)) |
+| `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.09 at 550 nm at 1, a clear day; see [The air](design.md#the-air)) |
 | `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
 | `alt` | 0.3 to 13, 0.1 | 11 | Altitude of the aircraft, km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
@@ -227,13 +227,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `eyeSphere` takes `c` from the heights and the near
   crossing from the far one. `highCloud` uses it.
 - **Facts kept twice are changed together.**
-  - The density profile, written out four times: `density()` in `fs`, and
-    in the JS `buildDepths`, `buildMultiScatter` and the depth table in
-    `makeSky`.
+  - The density profile: `densities()` in `fs`, and in the JS
+    (`boundaryLayer`, `mieUp`, `mieDensity`) for `buildDepths`,
+    `buildMultiScatter` and the depth table in `makeSky`.
   - The depth table: `DEPTH_MU`, `DEPTH_R` and `H_TOP` (1132.2544, from
     `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
-    `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
+    `MIE_EXT`, `MIE_PHASE`, `MIE_G_UP`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
   - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
