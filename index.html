@@ -3439,6 +3439,13 @@ const SkySound = (() => {
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
+    // ?expo=L in the address pins it at L (log2, for tests: the tools compare
+    // a flight with a still at the exposure the flight ended with). Without
+    // it, expo is null and the meter sets the exposure. window.__exposure
+    // reads the exposure of the last frame (log2), pinned or not.
+    const pinned = new URLSearchParams(location.search).get('expo');
+    const pin = pinned !== null && pinned !== '' && isFinite(pinned) ? +pinned : null;
+    Object.defineProperty(window, '__exposure', { configurable: true, get: () => logE });
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
@@ -3619,7 +3626,7 @@ const SkySound = (() => {
       poll();
       const dt = then === null ? 0 : Math.min(Math.max(now - then, 0), 100) / 1000;
       then = now;
-      if (target !== null && logE !== null) {
+      if (target !== null && logE !== null && pin === null) {
         // Fast towards less light (a brighter view), slower towards more. It
         // stops within ADAPT_STOP stops and starts again beyond ADAPT_START,
         // so that the noise of the picture does not keep the drawing going
@@ -3715,7 +3722,7 @@ const SkySound = (() => {
           return true;
         }
         primed = null;
-        logE = target;
+        logE = pin ?? target;
         restart = true;
         turn = 1 - turn;
         return true;
