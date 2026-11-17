@@ -421,10 +421,9 @@ applyLanguage(LANG);
 precision highp float;
 
 // Draws the textures of the clouds once, at start: slice uZ (0 to 1) of the
-// 3D noise, or the weather map (uZ = -1); and the cirrus's ice (-3), the
-// way of its fibres (-4) and its fibres (-5). Everything repeats.
+// 3D noise, or the weather map (uZ < 0). Everything repeats.
 uniform float uZ;
-uniform vec2 uSize;
+uniform float uSize;
 out vec4 outColor;
 
 // An integer hash: xor-shifts and multiplies, Wellons' lowbias32
@@ -503,22 +502,85 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   return sum;
 }
 
+void main() {
+  vec2 uv = gl_FragCoord.xy / uSize;
+  if (uZ >= 0.0) {
+    // Perlin-Worley (after Schneider, 2015): Worley cells, swollen by billowy Perlin noise.
+    vec3 p = vec3(uv, uZ);
+    float billow = min(abs(perlinFbm(p, vec3(4.0), 7, 0.0)), 1.0);
+    float g = worleyFbm(p, vec3(4.0), 10.0);
+    float b = worleyFbm(p, vec3(8.0), 20.0);
+    float a = worleyFbm(p, vec3(16.0), 30.0);
+    outColor = vec4(g + billow * (1.0 - g), g, b, a);
+  } else {
+    // Weather, on a map 256 km wide: systems of some 80 km; open cells of
+    // 30 km, with the cloud along their walls; streets, rows of cloud 5 km
+    // apart; and clumps from 6 km down to single clouds of 1 km. The many
+    // sizes of the clumps make clouds of many sizes.
+    vec3 p = vec3(uv, 0.37);
+    float systems = perlinFbm(p, vec3(3.0, 3.0, 1.0), 3, 40.0);
+    float walls = smoothstep(0.3, 0.75, 1.0 - worley(p, vec3(9.0, 9.0, 1.0), 50.0));
+    // Whole numbers turn the streets and keep them repeating.
+    vec3 s = vec3(4.0 * uv.x + uv.y, 4.0 * uv.y - uv.x, 0.37);
+    float streets = fbm(s, vec3(12.0, 3.0, 1.0), 3, 0.7, 90.0);
+    float clumps = fbm(p, vec3(40.0, 40.0, 1.0), 4, 0.75, 60.0);
+    float cover = 0.5 + 0.18 * systems + 0.15 * (walls - 0.5) + 0.3 * streets + 0.5 * clumps;
+    // Towers: the widest clumps, where the weather lets them grow; some
+    // grow taller than others.
+    float tall = smoothstep(0.4, 0.55, 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0))
+               * smoothstep(0.15, 0.4, fbm(p, vec3(20.0, 20.0, 1.0), 3, 0.6, 65.0))
+               * (0.7 + 0.6 * perlin(p, vec3(11.0, 11.0, 1.0), 75.0));
+    // Wind on the sea, which blows towards (2, 1): gusts and calms some
+    // 7 km across and twice as long down the wind, with finer ones inside
+    // them.
+    vec3 pw = vec3(2.0 * uv.x + uv.y, 2.0 * uv.y - uv.x, 0.37);
+    float gusts = 0.5 + 0.55 * perlinFbm(pw, vec3(8.0, 16.0, 1.0), 5, 80.0);
+
+    outColor = vec4(cover, tall, gusts, 0.0);
+  }
+}
+</script>
+
+<script id="ice" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+
+// Draws the cirrus's textures once: its map (uZ = -2), its ice (-3), the
+// way of the ice's fibres (-4) and the fibres (-5). Everything repeats.
+uniform float uZ;
+uniform vec2 uSize;
+out vec4 outColor;
+
+// An integer hash: Wellons' lowbias32, as in the noise shader.
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
 // ---------- The cirrus's ice ----------
 // A tile of ICE_KM square (half a unit of the cirrus's frame), built by
 // following the ice back in time. Ice is made in generating heads, falls
 // out of them, and the wind shear draws what falls into a trail behind
 // each head: slowly at first (a dense head), then faster, turning as it
-// falls into wind of another direction (a hook). Eddies stir the trails,
-// curl them and split them into fibres. The density at a point is the ice
-// that is there now: for each age, the ice of that age came from where
-// the eddies and the shear bring it from, and a head there made it then.
-// The eddies are followed back step by step from each texel (the method of
-// characteristics); the trail's drift is added in the heads' frame. No
-// texture is resampled, so nothing is blurred step after step, and each
-// texel is computed by itself.
+// falls into wind of another direction (a hook). Eddies stir the trails.
+// The density at a point is the ice that is there now: for each age, the
+// ice of that age came from where the eddies and the shear bring it from,
+// and a head there made it then. The eddies are followed back step by step
+// from each texel (the method of characteristics); the trail's drift is
+// added in the heads' frame. No texture is resampled, so nothing is
+// blurred step after step, and each texel is computed by itself.
+//
+// Four kinds of head make four fields (the channels of the texture), which
+// the scene mixes by the cirrus's map: plumes (R), rows of small heads
+// (G: bands, streets and feathers), flocks of small tufts (B) and large
+// plumes (A).
 const float ICE_KM = 40.477;     // WEATHER_KM / sqrt(10) / 2
-const int ICE_STEPS = 36;        // steps over a life of the ice
-const float ICE_CELLS = 10.0;    // cells of heads across the tile
+const float WEATHER_KM = 256.0;
+const int ICE_STEPS = 28;        // steps over a life of the ice
 
 // Lattice words: a point's coordinates and the seed hashed into one word.
 uint iceWord(uvec3 c, uint seed) {
@@ -551,12 +613,13 @@ float iceNoise(vec2 p, vec2 period, float t, uint seed, out vec2 grad) {
 }
 
 // The eddies: the curl of a potential at three sizes (13, 5 and 2 km),
-// which changes in time, the smaller the faster; speeds as Kolmogorov's
-// law gives them (in km per life of the ice, times amp). Seen from below,
-// the ice also spreads and gathers where the air rises and sinks: a gentle
-// divergent part, the gradient of the middle size.
+// which changes in time, the smaller the faster; speeds in km per life of
+// the ice, times amp. The largest is kept gentle: else every trail waved
+// alike. Seen from below, the ice also spreads and gathers where the air
+// rises and sinks: a gentle divergent part, the gradient of the middle
+// size.
 vec2 iceFlow(vec2 x, float t, float amp, uint seed) {
-  const vec3 OCT[3] = vec3[3](vec3(3.0, 0.5, 0.3), vec3(8.0, 0.45, 0.55), vec3(20.0, 0.18, 1.0));
+  const vec3 OCT[3] = vec3[3](vec3(3.0, 0.35, 0.3), vec3(8.0, 0.45, 0.55), vec3(20.0, 0.18, 1.0));
   vec2 v = vec2(0.0), g;
   for (int o = 0; o < 3; o++) {
     iceNoise(x * (OCT[o].x / ICE_KM), vec2(OCT[o].x), t * OCT[o].z, seed + uint(o), g);
@@ -586,135 +649,160 @@ float iceErf(float x) {
   return sign(x) * sqrt(1.0 - exp(-x2 * (1.2732395 + 0.147 * x2) / (1.0 + 0.147 * x2)));
 }
 
-// A head falls apart into ICE_STREAMS streams of ice that fall at
-// different speeds, so that the wind draws each out by its own length and
-// a trail splays like a feather.
-const int ICE_STREAMS = 3;
-const vec3 ICE_FALL = vec3(0.62, 0.88, 1.18);
-
-// The ice made by the head of the cell that q1 is in, along the way q0 to
-// q1 of a stream (in the heads' frame, km), at age a (0 to 1), the trail
-// running along e. A head lies in the middle 40 % of its cell and reaches
-// no further than 0.3 of a cell, so that one cell is enough and nothing
-// changes where the way crosses into another. It is a Gaussian puff that
-// grows with age and wobbles in time; the way is a segment, and the puff is
-// integrated along it, so that no step shows. Heads gather in groups
-// (noise over 20 and 8 km); weak heads lie between, which show only where
-// the weather gives much cirrus. Half the heads have died out: they left a
-// trail without a head (cirrus fibratus). A head makes its ice in fibres
-// (noise across the trail and in time, and thin bright threads).
-float iceHead(vec2 q0, vec2 q1, float a, vec2 e, uint seed, float many, float st) {
-  const float CELL = ICE_KM / ICE_CELLS;
-  vec2 cell = floor(q1 / CELL);
-  vec2 wc = cell - ICE_CELLS * floor((cell + 0.5) / ICE_CELLS);
-  uint h = iceWord(uvec3(uvec2(wc + 0.5), 7u), seed);
-  vec4 r = iceRandom(h);
-  float tr = 1.0 - a, r0 = 0.15 + 0.15 * r.z;
-  vec2 hp = (cell + 0.3 + 0.4 * r.xy) * CELL
-          + 0.25 * r0 * vec2(sin(6.2831853 * (1.3 + 2.0 * r.w) * tr + 9.0 * r.z), sin(6.2831853 * (1.1 + 2.3 * r.z) * tr + 7.0 * r.w));
-  float sig2 = r0 * r0 + (0.03 + 0.07 * r.w) * a, sig = sqrt(sig2);
-  // Along the way: from t0 to t0 + len, at dperp from the head.
-  vec2 s = q1 - q0, rel = q0 - hp;
+// The mean density along the way from q0 to q0 + s (km) of a Gaussian puff
+// of variance sig2 at a head: the puff integrated along the segment (with
+// erf), so that no step shows. rel: q0 less the head.
+float icePuff(vec2 rel, vec2 s, float sig2) {
   float len = length(s);
-  vec2 sd = s / max(len, 1e-6);
+  if (len * len < 0.0025 * sig2) return exp(-0.5 * dot(rel, rel) / sig2);
+  vec2 sd = s / len;
   float t0 = dot(rel, sd), dp2 = max(dot(rel, rel) - t0 * t0, 0.0);
-  vec2 pn = rel + sd * clamp(-t0, 0.0, len);
-  float dn = length(pn), far = 1.0 - smoothstep(0.22 * CELL, 0.3 * CELL, length(hp - q1));
-  if (dn > 3.5 * sig || far <= 0.0) return 0.0;
-  vec4 r2 = iceRandom(h ^ 0x5bd1e995u);
-  vec2 g2;
-  float group = iceNoise(hp * (2.0 / ICE_KM), vec2(2.0), 0.0, seed + 15u, g2)
-              + 0.5 * iceNoise(hp * (5.0 / ICE_KM), vec2(5.0), 0.0, seed + 17u, g2);
-  float str = smoothstep(0.1, 0.4, r2.x) * (0.08 + 1.4 * smoothstep(-0.05 - many, 0.35 - many, group)) * far;
-  float g;
-  if (len < 0.05 * sig) {
-    g = exp(-0.5 * dot(rel, rel) / sig2);
-  } else {
-    float k2 = 0.70710678 / sig;
-    g = exp(-0.5 * dp2 / sig2) * 1.2533141 * sig * (iceErf((t0 + len) * k2) - iceErf(t0 * k2)) / len;
-  }
-  // Fibres, at the point of the way nearest the head, finer for some heads.
-  float wf = 0.05 + 0.1 * r2.w;
-  vec2 yf = vec2((dot(pn, vec2(-e.y, e.x)) + (r2.y - 0.5) * 3.0 * tr) / wf, tr * (8.0 + 12.0 * r2.y)) + vec2(97.0 * r.x + 13.0 * st, 0.0);
-  float fn = iceValue(yf, seed + 101u), fr = 1.0 - abs(2.0 * iceValue(yf * vec2(1.6, 1.3) + 3.0, seed + 103u) - 1.0);
-  float fib = 0.2 + 0.9 * smoothstep(0.3, 0.7, fn) + 1.6 * fr * fr * fr * fr;
-  // The life of this head's ice: some fibres outlive the rest, so that a
-  // trail ends in fine fibres.
-  float life = (0.6 + 0.4 * r2.y) * (0.55 + 0.9 * fn);
-  float keep = (1.0 - smoothstep(0.4 * life, life, a)) * exp(-0.6 * a);
-  float alive = r2.z < 0.5 ? 1.0 : smoothstep(0.05, 0.15, a - 0.08 - 0.3 * r2.w);
-  return str * (0.3 + 1.4 * r.z * r.z) * keep * alive * fib * (r0 * r0 / sig2) * g;
+  float k2 = 0.70710678 * inversesqrt(sig2);
+  return exp(-0.5 * dp2 / sig2) * 1.2533141 * sqrt(sig2) * (iceErf((t0 + len) * k2) - iceErf(t0 * k2)) / len;
 }
 
-// The bodies of the cirrus: plumes, ICE_PLUMES to a side of the tile. A
-// plume's head is a soft, broad puff (0.5 to 1.3 km, growing with age to
-// some 2 km) that the shear draws into a long, widening tail: the body
-// that holds most of the ice (the head and plume of a cirrus uncinus,
-// spissatus or fibratus), with clear sky between plumes. Its strength has
-// a long tail (a few strong plumes, many weak ones) and gathers in groups
-// over the tile; a third of the cells have none. Inside, the ice falls in
-// streaks along the tail (value noise across it, 0.2 to 0.6 km, and thin
-// threads of 60 to 150 m), strongest at the plume's edges, where they
-// reach beyond its soft outline: the fibres fray out of the body. A plume
-// reaches no further than 0.8 of a cell, so the four cells nearest are
-// enough.
-const float ICE_PLUMES = 4.0;
-const float ICE_PLUME_REACH = 1.8;   // a plume's tail, against the trails of the small heads
-float icePlume(vec2 q0, vec2 q1, float a, vec2 e, uint seed, float many) {
-  const float CELL = ICE_KM / ICE_PLUMES;
-  vec2 base = floor(q1 / CELL - 0.5);
-  float sum = 0.0;
-  for (int c = 0; c < 4; c++) {
-    vec2 cell = base + vec2(float(c & 1), float(c >> 1));
-    vec2 wc = cell - ICE_PLUMES * floor((cell + 0.5) / ICE_PLUMES);
+// The point of the way from q0 to q0 + s nearest the head, from the head.
+vec2 iceNearest(vec2 rel, vec2 s) {
+  return rel + s * clamp(-dot(rel, s) / max(dot(s, s), 1e-12), 0.0, 1.0);
+}
+
+// The strands of a trail: its ice falls in streaks along it. u: the place
+// across the trail in units of its half width there, which grows with age,
+// so that the strands fan out; al: the place along it; n: strands to a
+// half width. Returns their weight (around 1) and the share of the head's
+// life that the strand there lives: the strands end one by one, the outer
+// ones first, so that a trail tapers and frays out instead of ending
+// round.
+vec2 iceStrands(float u, float al, float n, uint seed) {
+  float v = u * n;
+  float band = iceValue(vec2(v, al), seed);
+  float thr = 1.0 - abs(2.0 * iceValue(vec2(2.7 * v, 3.0 * al) + 5.0, seed + 2u) - 1.0);
+  thr *= thr;
+  thr *= thr * thr;
+  float life = (0.4 + 0.75 * iceValue(vec2(0.8 * v, 0.5), seed + 4u)) * (1.0 - 0.12 * min(u * u, 5.0));
+  return vec2(0.2 + 1.1 * band + 2.0 * thr, life);
+}
+
+// Plumes, `cells` to a side of the tile, a quarter of the cells empty: a
+// head (from 0.3 to 1.3 km times `size`, a few large and many small) whose
+// ice the shear draws into a trail that widens as it ages, a wedge of
+// strands: a tuft with a tail, a hook, a broad fan. Some have a dense head
+// (cirrus uncinus), others none, the head having died out (a fan of
+// fibres, cirrus fibratus). Their strengths have a long tail (the square
+// of a random number) and gather in groups. A head lies in the middle half
+// of its cell and reaches no further than 1.2 cells, so the nine cells
+// nearest are enough.
+float icePlumes(vec2 q0, vec2 q1, float a, vec2 e, uint seed, float cells, float size) {
+  float CELL = ICE_KM / cells;
+  vec2 base = floor(q1 / CELL) - 1.0;
+  float sum = 0.0, tr = 1.0 - a;
+  for (int c = 0; c < 9; c++) {
+    vec2 cell = base + vec2(float(c % 3), float(c / 3));
+    vec2 wc = cell - cells * floor((cell + 0.5) / cells);
     uint h = iceWord(uvec3(uvec2(wc + 0.5), 9u), seed);
     vec4 r = iceRandom(h), r2 = iceRandom(h ^ 0x68e31da4u);
-    if (r2.x < 0.33) continue;
-    float tr = 1.0 - a, r0 = 0.5 + 0.8 * r.z;
-    vec2 hp = (cell + 0.3 + 0.4 * r.xy) * CELL;
-    float sig2 = r0 * r0 + (0.3 + 1.2 * r.w) * a, sig = sqrt(sig2);
-    vec2 s = q1 - q0, rel = q0 - hp;
-    float len = length(s);
-    vec2 sd = s / max(len, 1e-6);
-    float t0 = dot(rel, sd), dp2 = max(dot(rel, rel) - t0 * t0, 0.0);
-    vec2 pn = rel + sd * clamp(-t0, 0.0, len);
-    float dn = length(pn), far = 1.0 - smoothstep(0.65 * CELL, 0.8 * CELL, length(hp - q1));
-    if (dn > 3.5 * sig || far <= 0.0) continue;
-    vec2 g2;
-    float group = iceNoise(hp * (2.0 / ICE_KM), vec2(2.0), 0.0, seed + 21u, g2);
-    // A long tail of strengths: the strongest plumes show with little cirrus.
-    float str = 2.5 * pow(r2.y, 2.0) * (0.25 + 1.5 * smoothstep(-0.3 - many, 0.3 - many, group)) * far;
-    // The streaks across the tail, at the point of the way nearest the head.
-    float across = dot(pn, vec2(-e.y, e.x));
-    vec2 yb = vec2(across / (0.2 + 0.4 * r2.z), tr * 3.0 + 31.0 * r.x);
-    vec2 yt = vec2((across + (r2.z - 0.5) * 4.0 * tr) / (0.06 + 0.09 * r2.w), tr * (10.0 + 14.0 * r2.z) + 57.0 * r.y);
-    float band = iceValue(yb, seed + 201u) * (0.4 + 1.2 * iceValue(yb * vec2(0.23, 0.4) + 7.0, seed + 205u));
-    float thr = 1.0 - abs(2.0 * iceValue(yt, seed + 203u) - 1.0);
-    thr = thr * thr * thr * thr * thr * smoothstep(0.3, 0.7, iceValue(yt * vec2(0.17, 0.3) + 5.0, seed + 207u));
-    float edge = smoothstep(0.4, 1.6, dn / sig);
-    float fib = mix(0.7 + 0.6 * band, 0.15 + 0.9 * band + 2.2 * thr, 0.35 + 0.65 * edge);
-    // The threads reach beyond the soft outline of the body.
-    float sw2 = sig2 * (1.0 + 1.6 * thr * edge);
-    float g;
-    if (len < 0.05 * sig) {
-      g = exp(-0.5 * dot(rel, rel) / sw2);
-    } else {
-      float k2 = 0.70710678 / sig;
-      g = exp(-0.5 * dp2 / sw2) * 1.2533141 * sig * (iceErf((t0 + len) * k2) - iceErf(t0 * k2)) / len;
-    }
-    float life = 0.7 + 0.3 * r2.w;
-    float keep = (1.0 - smoothstep(0.3 * life, life, a)) * exp(-1.2 * a);
-    sum += str * keep * fib * (r0 * r0 / sig2) * g;
+    if (r2.x < 0.25) continue;
+    vec2 hp = (cell + 0.25 + 0.5 * r.xy) * CELL;
+    float s = r.z * r.z;
+    float r0 = size * (0.3 + 1.0 * s) * (r2.w > 0.5 ? 0.5 : 1.0), sig = r0 + size * (0.5 + 3.0 * r2.z * r2.z) * (0.6 + 0.6 * s) * a;
+    vec2 rel = q0 - hp, pn = iceNearest(rel, q1 - q0);
+    float far = 1.0 - smoothstep(1.0 * CELL, 1.2 * CELL, length(hp - q1));
+    if (dot(pn, pn) > 12.25 * sig * sig || far <= 0.0) continue;
+    vec2 g;
+    float group = iceNoise(hp * (2.0 / ICE_KM), vec2(2.0), 0.0, seed + 21u, g);
+    float str = 2.0 * (0.2 + r2.y * r2.y) * (0.5 + smoothstep(-0.3, 0.3, group)) * far;
+    float u = dot(pn, vec2(-e.y, e.x)) / sig;
+    vec2 st = iceStrands(u, tr * 2.0 + 31.0 * r.x, 3.0 + 6.0 * r2.w, seed + 201u);
+    float life = (0.35 + 0.65 * r.w) * st.y;
+    float keep = 1.0 - smoothstep(0.45 * life, life, a);
+    float head = r2.w > 0.5 ? 1.0 + 2.0 * (r2.w - 0.5) * exp(-a / 0.06) : smoothstep(0.0, 0.12, a - 0.1 * r.w);
+    float fib = mix(1.0, st.x, (0.7 + 0.3 * smoothstep(0.5, 1.8, abs(u))) * smoothstep(0.0, 0.2, a));
+    sum += str * head * keep * fib * pow(r0 / sig, 0.6) * icePuff(rel, q1 - q0, sig * sig);
   }
   return sum;
 }
 
-// The ice at x (km in the tile) for one deck of cirrus: seed, the mean
-// direction of its trails (radians in the frame of the wind), and how
-// many heads it has (more with `many` above 0).
-const float ICE_TUFTS = 0.3;   // the small heads' share, against the plumes'
+// Rows: small heads (80 to 200 m) along lines that run with the wind,
+// ICE_ROWS.y to the tile (10 km apart), a head every 2 km along a row,
+// scattered across the row's width (0.3 to 2 km). A row comes and goes
+// along its length (runs of 5 to 20 km) and wanders across by up to 1 km.
+// Where the shear runs along the rows, the trails join into a band of
+// fibres (a street); where it runs across, they stand off a spine as ribs
+// that curl (a feather, cirrus vertebratus). A head lies in the middle
+// 40 % of its cell along and across and reaches no further than 0.8 of a
+// cell, so the four cells nearest are enough.
+const vec2 ICE_ROWS = vec2(40.0, 5.0);
+float iceRows(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
+  const vec2 CELL = ICE_KM / ICE_ROWS;
+  vec2 base = floor(q1 / CELL - 0.5);
+  float sum = 0.0, tr = 1.0 - a;
+  for (int c = 0; c < 4; c++) {
+    vec2 cell = base + vec2(float(c & 1), float(c >> 1));
+    // A head lies within 2 km of its row's middle: the row of a cell whose
+    // middle is further off has nothing here.
+    if (abs(q1.y - (cell.y + 0.5) * CELL.y) > 3.6) continue;
+    vec2 wc = cell - ICE_ROWS * floor((cell + 0.5) / ICE_ROWS);
+    uint h = iceWord(uvec3(uvec2(wc + 0.5), 13u), seed);
+    vec4 r = iceRandom(h), rr = iceRandom(iceWord(uvec3(0u, uint(wc.y + 0.5), 14u), seed));
+    float x = (cell.x + 0.3 + 0.4 * r.x) * CELL.x;
+    vec2 g;
+    float wig = iceNoise(vec2(x * (3.0 / ICE_KM), wc.y + 0.5), vec2(3.0, ICE_ROWS.y), 0.0, seed + 31u, g);
+    float width = 0.3 + 1.2 * rr.x * rr.x;
+    vec2 hp = vec2(x, (cell.y + 0.5) * CELL.y + wig + width * (r.y - 0.5));
+    vec2 d = abs(hp - q1) / CELL;
+    float far = 1.0 - smoothstep(0.65, 0.8, max(d.x, d.y));
+    float r0 = 0.05 + 0.08 * r.z, sig = r0 + (0.03 + 0.07 * rr.y) * a;
+    vec2 rel = q0 - hp, pn = iceNearest(rel, q1 - q0);
+    if (dot(pn, pn) > 12.25 * sig * sig || far <= 0.0) continue;
+    float act = iceNoise(vec2(x * (4.0 / ICE_KM), wc.y + 0.5), vec2(4.0, ICE_ROWS.y), 0.0, seed + 33u, g)
+              + 0.5 * iceNoise(vec2(x * (9.0 / ICE_KM), wc.y + 0.5), vec2(9.0, ICE_ROWS.y), 0.0, seed + 35u, g);
+    float str = smoothstep(-0.3 + 0.3 * rr.z, 0.05 + 0.3 * rr.z, act) * (0.5 + 1.0 * r.w) * far;
+    // Threads across each trail.
+    vec2 yf = vec2(dot(pn, vec2(-e.y, e.x)) / (0.03 + 0.04 * r.z), tr * 6.0 + 57.0 * r.y);
+    float fn = iceValue(yf, seed + 301u);
+    float life = (0.4 + 0.6 * rr.w) * (0.6 + 0.8 * fn);
+    float keep = 1.0 - smoothstep(0.4 * life, life, a);
+    sum += str * keep * (0.2 + 1.6 * fn * fn) * (r0 / sig) * icePuff(rel, q1 - q0, sig * sig);
+  }
+  return sum;
+}
+
+// Flocks: small heads (0.1 to 0.3 km), one to a cell of ICE_FLOCK to a
+// side of the tile, in the middle 40 % of the cell; a head reaches no
+// further than 0.3 of a cell, so one cell is enough. Noise over 20 and
+// 8 km gathers them in flocks with wide gaps between. A head is a puff
+// that grows with age and wobbles in time, and makes a short trail of
+// fibres (a tuft, cirrus floccus).
+const float ICE_FLOCK = 12.0;
+float iceFlock(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
+  const float CELL = ICE_KM / ICE_FLOCK;
+  vec2 cell = floor(q1 / CELL);
+  vec2 wc = cell - ICE_FLOCK * floor((cell + 0.5) / ICE_FLOCK);
+  uint h = iceWord(uvec3(uvec2(wc + 0.5), 7u), seed);
+  vec4 r = iceRandom(h);
+  float tr = 1.0 - a, r0 = 0.1 + 0.2 * r.z;
+  vec2 hp = (cell + 0.3 + 0.4 * r.xy) * CELL
+          + 0.25 * r0 * vec2(sin(6.2831853 * (1.3 + 2.0 * r.w) * tr + 9.0 * r.z), sin(6.2831853 * (1.1 + 2.3 * r.z) * tr + 7.0 * r.w));
+  float sig2 = r0 * r0 + (0.02 + 0.05 * r.w) * a;
+  vec2 rel = q0 - hp, pn = iceNearest(rel, q1 - q0);
+  float far = 1.0 - smoothstep(0.22 * CELL, 0.3 * CELL, length(hp - q1));
+  if (dot(pn, pn) > 12.25 * sig2 || far <= 0.0) return 0.0;
+  vec4 r2 = iceRandom(h ^ 0x5bd1e995u);
+  vec2 g;
+  float group = iceNoise(hp * (2.0 / ICE_KM), vec2(2.0), 0.0, seed + 15u, g)
+              + 0.5 * iceNoise(hp * (5.0 / ICE_KM), vec2(5.0), 0.0, seed + 17u, g);
+  float str = smoothstep(0.1, 0.4, r2.x) * smoothstep(-0.05, 0.3, group) * far;
+  vec2 yf = vec2((dot(pn, vec2(-e.y, e.x)) + (r2.y - 0.5) * 2.0 * tr) / (0.04 + 0.08 * r2.w), tr * (8.0 + 12.0 * r2.y) + 97.0 * r.x);
+  float fn = iceValue(yf, seed + 101u), fr = 1.0 - abs(2.0 * iceValue(yf * vec2(1.6, 1.3) + 3.0, seed + 103u) - 1.0);
+  float fib = 0.2 + 0.9 * smoothstep(0.3, 0.7, fn) + 1.6 * fr * fr * fr * fr;
+  float life = (0.4 + 0.5 * r2.y) * (0.55 + 0.9 * fn);
+  float keep = 1.0 - smoothstep(0.4 * life, life, a);
+  return str * (0.3 + 1.4 * r.z * r.z) * keep * fib * (r0 * r0 / sig2) * icePuff(rel, q1 - q0, sig2);
+}
+
+// The four fields of ice at x (km in the tile).
 const float ICE_GAIN = 7.0;    // the ice stored: 1 - exp(-ICE_GAIN x)
-float iceField(vec2 x, uint seed, float dir, float many) {
+vec4 iceField(vec2 x, uint seed) {
   vec2 g;
   // The character of the place, from slow noise over the tile: where the
   // trails run, how they turn, how long they are, how strong the eddies.
@@ -722,62 +810,85 @@ float iceField(vec2 x, uint seed, float dir, float many) {
   float n2 = iceNoise(x * (3.0 / ICE_KM), vec2(3.0), 0.0, seed + 12u, g);
   float n3 = iceNoise(x * (3.0 / ICE_KM), vec2(3.0), 0.0, seed + 13u, g);
   float n4 = iceNoise(x * (4.0 / ICE_KM), vec2(4.0), 0.0, seed + 14u, g);
-  float th0 = dir + 1.3 * n1, veer = 1.4 * n2;
+  float n5 = iceNoise(x * (3.0 / ICE_KM), vec2(3.0), 0.0, seed + 16u, g);
+  float th0 = 1.3 * n1, veer = 1.4 * n2;
   float reach = 15.0 + 8.0 * n3;
   float amp = 0.1 + 0.7 * smoothstep(-0.35, 0.4, n4);
+  // The rows' trails run along the rows in most places (bands), across
+  // them in some (feathers), and curl more.
+  float thr = 0.15 * n1 + 1.1 * sign(n5) * smoothstep(0.25, 0.45, abs(n5)), veerR = 1.2 * n2;
   const float DA = 1.0 / float(ICE_STEPS);
-  vec2 p = x, drift = vec2(0.0), q0 = x, q1 = x, q2 = x, q3 = x;
-  float sum = 0.0;
+  vec2 p = x, drift = vec2(0.0), driftR = vec2(0.0), qP = x, qA = x, qF = x, qR = x;
+  vec4 sum = vec4(0.0);
   for (int j = 0; j < ICE_STEPS; j++) {
     float a = (float(j) + 0.5) * DA;
-    // One step back through the eddies, and the trail's drift: slow at
-    // first, faster with age, turning by veer over a life. A faster stream
-    // goes further, and each turns a little away from the others.
+    // One step back through the eddies, and the trails' drift: slow at
+    // first, faster with age, turning by veer over a life.
     p -= DA * iceFlow(p, 1.0 - a, amp, seed);
-    vec2 e = vec2(cos(th0 + veer * a), sin(th0 + veer * a));
-    drift += DA * 1.015 * (1.0 - exp(-a / 0.015)) * reach * e;
-    vec2 dl = vec2(0.927 * drift.x + 0.375 * drift.y, -0.375 * drift.x + 0.927 * drift.y);
-    vec2 dr = vec2(0.927 * drift.x - 0.375 * drift.y, 0.375 * drift.x + 0.927 * drift.y);
-    vec2 n0 = p - ICE_FALL.x * dl, n1s = p - ICE_FALL.y * drift, n2s = p - ICE_FALL.z * dr;
-    sum += DA * ICE_TUFTS * (iceHead(q0, n0, a, e, seed, many, 0.0) + iceHead(q1, n1s, a, e, seed, many, 1.0)
-               + iceHead(q2, n2s, a, e, seed, many, 2.0)) / float(ICE_STREAMS);
-    vec2 np = p - ICE_PLUME_REACH * drift;
-    sum += DA * icePlume(q3, np, a, e, seed, many);
-    q3 = np;
-    q0 = n0;
-    q1 = n1s;
-    q2 = n2s;
+    float sh = DA * 1.015 * (1.0 - exp(-a / 0.015)) * reach;
+    vec2 e = vec2(cos(th0 + veer * a), sin(th0 + veer * a)), er = vec2(cos(thr + veerR * a), sin(thr + veerR * a));
+    drift += sh * e;
+    driftR += sh * er;
+    // Each kind falls at its own speed: its trails are as many times as long.
+    vec2 nP = p - 1.5 * drift, nA = p - 2.0 * drift, nF = p - 0.35 * drift, nR = p - 0.45 * driftR;
+    sum += DA * vec4(icePlumes(qP, nP, a, e, seed, 4.0, 1.0), iceRows(qR, nR, a, er, seed),
+                     iceFlock(qF, nF, a, e, seed), 2.5 * icePlumes(qA, nA, a, e, seed + 50u, 3.0, 1.8));
+    qP = nP;
+    qA = nA;
+    qF = nF;
+    qR = nR;
   }
   return sum;
+}
+
+// ---------- The cirrus's map ----------
+// Where the cirrus is and of what kind, over the map (WEATHER_KM, 1 km a
+// texel): R and G, how much there is for the upper and the lower deck
+// (patches of some 85 and 35 km, and bands along the wind of 40 by 8 km
+// and 27 by 5 km); B, the share of rows; A, the share of flocks against
+// the large plumes (both over some 100 km). The bands run in the cirrus's
+// frame (along (3, 1), across (-1, 3)), with whole numbers, so that the
+// map repeats.
+vec4 ciMap(vec2 uv) {
+  vec2 g, c = vec2(dot(uv, vec2(3.0, 1.0)), dot(uv, vec2(-1.0, 3.0)));
+  vec2 w;
+  for (int k = 0; k < 2; k++) {
+    uint s = 400u + 10u * uint(k);
+    vec2 o = k == 0 ? vec2(0.0) : vec2(0.383, 0.617);
+    float patches = iceNoise((uv + o) * 3.0, vec2(3.0), 0.0, s, g) + 0.5 * iceNoise((uv + o) * 7.0, vec2(7.0), 0.0, s + 1u, g);
+    float bands = iceNoise(c * vec2(2.0, 10.0), vec2(2.0, 10.0), 0.0, s + 2u, g)
+                + 0.5 * iceNoise(c * vec2(3.0, 16.0), vec2(3.0, 16.0), 0.0, s + 3u, g);
+    w[k] = 0.5 + 0.9 * patches + 0.6 * bands;
+  }
+  float rows = iceNoise(uv * 2.0, vec2(2.0), 0.0, 421u, g) + 0.5 * iceNoise(uv * 5.0, vec2(5.0), 0.0, 422u, g);
+  float flocks = iceNoise(uv * 3.0, vec2(3.0), 0.0, 431u, g) + 0.5 * iceNoise(uv * 6.0, vec2(6.0), 0.0, 432u, g);
+  return clamp(vec4(w, 0.5 + 0.9 * rows, 0.5 + 0.9 * flocks), 0.0, 1.0);
 }
 
 // The ice, read back to find the way its fibres run (uZ = -4).
 uniform sampler2D uIceIn;
 
-// The way the ice's fibres run at uv, for both decks: the structure tensor
-// of the ice (the mean of its gradient times itself over 3 x 3 texels of
-// this texture, from the ice at the same size), as (Jxx - Jyy, 2 Jxy) over
-// its trace. That is the gradient's direction at twice its angle, so that
-// a gradient and its opposite add up and the mean over a footprint (the
-// mipmaps) is the way most of it runs, with a length below 1 where it runs
-// many ways. The fibres run across it.
-vec4 iceWay(vec2 uv) {
-  vec2 s[25];
+// The way the ice's fibres run at uv: the structure tensor of the ice (its
+// four fields together; the mean of its gradient times itself over 3 x 3
+// texels of this texture, from the ice at the same size), as
+// (Jxx - Jyy, 2 Jxy) over its trace. That is the gradient's direction at
+// twice its angle, so that a gradient and its opposite add up and the mean
+// over a footprint (the mipmaps) is the way most of it runs, with a length
+// below 1 where it runs many ways. The fibres run across it.
+vec2 iceWay(vec2 uv) {
+  float s[25];
   float lod = log2(float(textureSize(uIceIn, 0).x) / uSize.x);
   for (int i = 0; i < 25; i++) {
-    s[i] = textureLod(uIceIn, uv + (vec2(i % 5, i / 5) - 2.0) / uSize, lod).rg;
+    s[i] = dot(textureLod(uIceIn, uv + (vec2(i % 5, i / 5) - 2.0) / uSize, lod), vec4(1.0));
   }
-  vec3 ju = vec3(0.0), jl = vec3(0.0);
+  vec3 j = vec3(0.0);
   for (int i = 0; i < 9; i++) {
     int x = i % 3 + 1, y = i / 3 + 1, c = y * 5 + x;
     float w = (x == 2 ? 2.0 : 1.0) * (y == 2 ? 2.0 : 1.0);
-    vec2 gx = 0.5 * (s[c + 1] - s[c - 1]), gy = 0.5 * (s[c + 5] - s[c - 5]);
-    ju += w * vec3(gx.x * gx.x, gy.x * gy.x, gx.x * gy.x);
-    jl += w * vec3(gx.y * gx.y, gy.y * gy.y, gx.y * gy.y);
+    float gx = 0.5 * (s[c + 1] - s[c - 1]), gy = 0.5 * (s[c + 5] - s[c - 5]);
+    j += w * vec3(gx * gx, gy * gy, gx * gy);
   }
-  vec2 vu = vec2(ju.x - ju.y, 2.0 * ju.z) / (ju.x + ju.y + 1e-4);
-  vec2 vl = vec2(jl.x - jl.y, 2.0 * jl.z) / (jl.x + jl.y + 1e-4);
-  return 0.5 + 0.5 * vec4(vu, vl);
+  return 0.5 + 0.5 * vec2(j.x - j.y, 2.0 * j.z) / (j.x + j.y + 1e-4);
 }
 
 // The way, read back to draw the fibres along it (uZ = -5).
@@ -795,105 +906,50 @@ float iceGrain(vec2 p, float per, uint seed) {
   return mix(mix(v[0], v[1], u.x), mix(v[2], v[3], u.x), u.y);
 }
 
-// The fibres of the ice at uv, for both decks: noise summed along the line
-// that runs the ice's way through uv, ICE_FIB_STEPS steps each side
-// (line integral convolution, after Cabral and Leedom, 1993). Grains of
-// 25 and 90 m drawn out along curving lines of some 1.2 km: streaks that
-// bend with the trails, crowd and splay. Around 0.5; grains finer than two
-// texels are left out.
+// The fibres of the ice at uv: noise summed along the line that runs the
+// ice's way through uv, ICE_FIB_STEPS steps each side (line integral
+// convolution, after Cabral and Leedom, 1993). Grains of 25 and 90 m drawn
+// out along curving lines of some 1.2 km: streaks that bend with the
+// trails, crowd and splay. Around 0.5; grains finer than two texels are
+// left out.
 const int ICE_FIB_STEPS = 24;
 const float ICE_FIB_GAIN = 0.075;     // two standard deviations of the sum to 1
-vec2 iceFibres(vec2 uv) {
+float iceFibres(vec2 uv) {
   const float H = 0.025 / ICE_KM;                 // a step, tile units
   float texel = ICE_KM / uSize.x;
   float fine = 1.0 - smoothstep(10.0, 14.0, 1000.0 * texel);
-  vec2 sum = vec2(0.0);
-  for (int deck = 0; deck < 2; deck++) {
-    float s = 0.0;
-    for (int side = 0; side < 2; side++) {
-      vec2 p = uv, prev = vec2(0.0);
-      for (int i = 0; i <= ICE_FIB_STEPS; i++) {
-        if (side == 1 && i == 0) continue;
-        // The way over 80 m, and more of it over 320 m: round a head the
-        // ice's gradient runs round it, and the fibres would ring it.
-        vec4 w = textureLod(uWayIn, p, 1.0) + 1.5 * textureLod(uWayIn, p, 3.0) - 1.25;
-        vec2 v = deck == 0 ? w.rg : w.ba;
-        float phi = 0.5 * atan(-v.y, -v.x);
-        vec2 e = vec2(cos(phi), sin(phi));
-        if (i == 0) e *= side == 0 ? 1.0 : -1.0;
-        else if (dot(e, prev) < 0.0) e = -e;
-        // A Hann window over the line, so that the streaks fade at their ends.
-        float k = 0.5 + 0.5 * cos(3.14159265 * float(i) / float(ICE_FIB_STEPS + 1));
-        uint seed = uint(5000 + 1000 * deck);
-        s += k * (fine * iceGrain(p * 1619.0, 1619.0, seed) + 0.35 * iceGrain(p * 450.0, 450.0, seed + 1u));
-        prev = e;
-        p += H * e;
-      }
+  float s = 0.0;
+  for (int side = 0; side < 2; side++) {
+    vec2 p = uv, prev = vec2(0.0);
+    for (int i = 0; i <= ICE_FIB_STEPS; i++) {
+      if (side == 1 && i == 0) continue;
+      // The way over 80 m, and more of it over 320 m: round a head the
+      // ice's gradient runs round it, and the fibres would ring it.
+      vec2 v = textureLod(uWayIn, p, 1.0).rg + 1.5 * textureLod(uWayIn, p, 3.0).rg - 1.25;
+      float phi = 0.5 * atan(-v.y, -v.x);
+      vec2 e = vec2(cos(phi), sin(phi));
+      if (i == 0) e *= side == 0 ? 1.0 : -1.0;
+      else if (dot(e, prev) < 0.0) e = -e;
+      // A Hann window over the line, so that the streaks fade at their ends.
+      float k = 0.5 + 0.5 * cos(3.14159265 * float(i) / float(ICE_FIB_STEPS + 1));
+      s += k * (fine * iceGrain(p * 1619.0, 1619.0, 5000u) + 0.35 * iceGrain(p * 450.0, 450.0, 5001u));
+      prev = e;
+      p += H * e;
     }
-    sum[deck] = s;
   }
-  return 0.5 + 0.5 * clamp(sum * ICE_FIB_GAIN, -1.0, 1.0);
+  return 0.5 + 0.5 * clamp(s * ICE_FIB_GAIN, -1.0, 1.0);
 }
 
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
   if (uZ < -4.5) {
-    outColor = vec4(iceFibres(uv), 0.0, 1.0);
+    outColor = vec4(iceFibres(uv), 0.0, 0.0, 1.0);
   } else if (uZ < -3.5) {
-    outColor = iceWay(uv);
+    outColor = vec4(iceWay(uv), 0.0, 1.0);
   } else if (uZ < -2.5) {
-    // The cirrus's ice, two decks: R, the upper; G, the lower, with more
-    // heads, its trails turned 35 degrees from the upper's.
-    vec2 x = uv * ICE_KM;
-    float up = iceField(x, 1000u, 0.0, 0.0), low = iceField(x + vec2(13.7, 21.1), 2000u, 0.61, 0.25);
-    outColor = vec4(1.0 - exp(-ICE_GAIN * vec2(up, low)), 0.0, 1.0);
-  } else if (uZ >= 0.0) {
-    // Perlin-Worley (after Schneider, 2015): Worley cells, swollen by billowy Perlin noise.
-    vec3 p = vec3(uv, uZ);
-    float billow = min(abs(perlinFbm(p, vec3(4.0), 7, 0.0)), 1.0);
-    float g = worleyFbm(p, vec3(4.0), 10.0);
-    float b = worleyFbm(p, vec3(8.0), 20.0);
-    float a = worleyFbm(p, vec3(16.0), 30.0);
-    outColor = vec4(g + billow * (1.0 - g), g, b, a);
+    outColor = 1.0 - exp(-ICE_GAIN * iceField(uv * ICE_KM, 1000u));
   } else {
-    // Weather, on a map 256 km wide: systems of some 80 km; open cells of
-    // 30 km, with the cloud along their walls; streets, rows of cloud 5 km
-    // apart; and clumps from 6 km down to single clouds of 1 km. The many
-    // sizes of the clumps make clouds of many sizes.
-    vec3 p = vec3(uv, 0.37);
-    float systems = perlinFbm(p, vec3(3.0, 3.0, 1.0), 3, 40.0);
-    float walls = smoothstep(0.3, 0.75, 1.0 - worley(p, vec3(9.0, 9.0, 1.0), 50.0));
-    // Whole numbers turn the streets and keep them repeating.
-    vec3 s = vec3(4.0 * uv.x + uv.y, 4.0 * uv.y - uv.x, 0.37);
-    float streets = fbm(s, vec3(12.0, 3.0, 1.0), 3, 0.7, 90.0);
-    float clumps = fbm(p, vec3(40.0, 40.0, 1.0), 4, 0.75, 60.0);
-    float cover = 0.5 + 0.18 * systems + 0.15 * (walls - 0.5) + 0.3 * streets + 0.5 * clumps;
-    // Towers: the widest clumps, where the weather lets them grow; some
-    // grow taller than others.
-    float tall = smoothstep(0.4, 0.55, 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0))
-               * smoothstep(0.15, 0.4, fbm(p, vec3(20.0, 20.0, 1.0), 3, 0.6, 65.0))
-               * (0.7 + 0.6 * perlin(p, vec3(11.0, 11.0, 1.0), 75.0));
-    // Wind on the sea, which blows towards (2, 1): gusts and calms some
-    // 7 km across and twice as long down the wind, with finer ones inside
-    // them.
-    vec3 pw = vec3(2.0 * uv.x + uv.y, 2.0 * uv.y - uv.x, 0.37);
-    float gusts = 0.5 + 0.55 * perlinFbm(pw, vec3(8.0, 16.0, 1.0), 5, 80.0);
-
-    // High, thin cloud: the wind draws it out along a, the direction (3, 1)
-    // on the map; b runs across. Both step by whole numbers across the map,
-    // so the pattern repeats; a few long waves bend b. Patches of some 80 km
-    // and bands of 40 by 10 km within them. This says only where cirrus is
-    // and how much: its forms are in the ice (uIce), drawn below.
-    const float TAU = 6.2831853;
-    float bend = 0.05 * sin(TAU * dot(uv, vec2(2.0, 1.0)) + 1.3) + 0.04 * sin(TAU * dot(uv, vec2(-1.0, 3.0)) + 4.1)
-               + 0.03 * sin(TAU * dot(uv, vec2(3.0, -2.0)) + 2.2) + 0.02 * sin(TAU * dot(uv, vec2(5.0, 4.0)) + 0.4)
-               + 0.015 * sin(TAU * dot(uv, vec2(-6.0, 5.0)) + 5.0) + 0.006 * sin(TAU * dot(uv, vec2(13.0, -9.0)) + 2.9);
-    vec3 c = vec3(dot(uv, vec2(3.0, 1.0)), dot(uv, vec2(-1.0, 3.0)) + bend, 0.61);
-    float patches = perlinFbm(p, vec3(3.0, 3.0, 1.0), 3, 85.0);
-    float bands = perlinFbm(c, vec3(2.0, 8.0, 1.0), 3, 100.0);
-    float cirrus = 0.42 + 0.55 * patches + 0.6 * bands;
-
-    outColor = vec4(cover, tall, gusts, cirrus);
+    outColor = ciMap(uv);
   }
 }
 </script>
@@ -1718,23 +1774,27 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
 // (Th), the light it sends to the eye (H, like C of the clouds in main) and
 // the distance it comes from (tHigh; negative without any).
 // It fills a shell from CI_LO to CI_HI, drawn on CI_LAYERS thin layers
-// through it: two decks of cirrus, each with ice of its own.
+// through it: two decks of cirrus, each reading the ice in a frame of its
+// own.
 const float CI_LO = 12.2, CI_HI = 12.8;    // km
 const float CI_TAU = 0.3;                  // scale of its vertical optical depth
 const int CI_LAYERS = 2;
-const float CI_ROLL = 1.5;                 // the light scattered forward rolls off towards it
-// The ice (uIce, built at start by the noise shader): a tile of half a unit
-// of the cirrus's frame along and across the wind, which repeats over the
-// map (one unit is 81 km, and ten units fill the map). R: the upper deck;
-// G: the lower.
+const float CI_ROLL = 1.0;                 // the light scattered forward rolls off towards it
+// The ice (uIce, built at start by the ice shader): a tile of ICE_KM
+// (40.5 km) of four fields of ice, R: plumes, G: rows (bands, streets,
+// feathers), B: flocks, A: large plumes. Each deck reads it in a frame of
+// its own (ciTile), and mixes the fields by the cirrus's map.
 uniform sampler2D uIce;
 // The way the ice's fibres run, a quarter as wide (built with the ice, see
-// iceWay in the noise shader): for each deck the ice's gradient at twice
-// its angle. RG: the upper deck; BA: the lower.
+// iceWay in the ice shader): the gradient of the ice at twice its angle.
 uniform sampler2D uIceWay;
-// The ice's fibres (built with it, see iceFibres in the noise shader):
-// streaks along the ice's way, around 0.5. R: the upper deck; G: the lower.
+// The ice's fibres (built with it, see iceFibres in the ice shader):
+// streaks along the ice's way, around 0.5.
 uniform sampler2D uIceFib;
+// The cirrus's map (built with the ice, see ciMap in the ice shader), over
+// the map: R and G, how much cirrus the upper and the lower deck have; B,
+// the share of rows; A, the share of flocks against large plumes.
+uniform sampler2D uCiMap;
 
 // An integer hash: Wellons' lowbias32, as in the noise shader.
 uint ihash(uint x) {
@@ -1842,38 +1902,69 @@ float ciVeil = 0.0;
 // And its depth over some 2.5 km, for the glow next to the sun and the moon.
 float ciMean = 0.0;
 
-// The cirrus at x on the map (km), on deck k (0: the lower, 1: the upper), seen over a footprint with the axes f1 and
-// f2 (km on the map). In units of the vertical optical depth of the whole
-// shell: the deck's share of it.
-float ciDensity(vec2 x, int k, vec2 f1, vec2 f2) {
+// The ice's tile for deck k at uv on the map: the upper deck (1) along
+// (3, 1) and across (-1, 3), two tiles to a unit of 81 km; the lower (0)
+// along (1, 1) and across (-1, 1), four tiles to a unit of 181 km, so that
+// its forms are a little larger and run 27 degrees from the upper's. Both
+// step by whole numbers, so that they repeat with the map. J: the tile's
+// coordinates over km on the map. Each deck's tile is shifted so that the
+// place where the page starts (and every view without `at`) has some of
+// its cirrus overhead: from near the shell a view sees only a few km of
+// it, and there the tile had a gap.
+const vec2 CI_START[2] = vec2[2](vec2(0.319, 0.454), vec2(0.938, 0.426));
+vec2 ciTile(vec2 uv, int k, out mat2 J) {
+  vec2 tc;
+  if (k == 0) {
+    tc = 4.0 * vec2(uv.x + uv.y, uv.y - uv.x);
+    J = mat2(1.0, -1.0, 1.0, 1.0) * (4.0 / WEATHER_KM);
+  } else {
+    tc = 2.0 * vec2(3.0 * uv.x + uv.y, 3.0 * uv.y - uv.x);
+    J = mat2(3.0, -1.0, 1.0, 3.0) * (2.0 / WEATHER_KM);
+  }
+  tc += CI_START[k];
+  return tc - floor(tc);
+}
+
+// The cirrus at x on the map (km), on deck k (0: the lower, 1: the upper),
+// seen over a footprint with the axes f1 and f2 (km on the map). In units
+// of the vertical optical depth of the whole shell: the deck's share of
+// it. Without `fibres`, as the light of the sun feels it over a wide
+// footprint, where the fibres average out: the code that reads them is
+// left out.
+float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres) {
   ciBody = 0.0;
   ciVeil = 0.0;
   ciMean = 0.0;
   vec2 uv = x / WEATHER_KM;
-  float lod = log2(max(max(length(f1), length(f2)) / 0.25, 1.0));
-  // The weather: how much cirrus each deck has here. The lower deck reads
-  // another place of the map, so that the decks come and go apart.
-  float thr = 0.78 - 0.9 * uCirrus + (k == 0 ? 0.16 : 0.0);
-  vec2 wuv = k == 0 ? uv + vec2(0.383, 0.617) : uv;
-  float near = smoothstep(thr - 0.5, thr - 0.38, textureLod(uWeather, wuv, max(lod, 6.0)).a);
+  float lod = log2(max(max(length(f1), length(f2)), 1.0));
+  // The map: how much cirrus this deck has here, and of what kinds. The
+  // lower deck reads another place of it and needs more, so that the decks
+  // come and go apart. Over some 16 km it tells where there is none, and
+  // most of the sky costs little.
+  vec2 muv = k == 0 ? uv + vec2(0.383, 0.617) : uv;
+  float thr = 0.72 - 0.85 * uCirrus + (k == 0 ? 0.12 : 0.0);
+  vec4 cf = textureLod(uCiMap, muv, max(lod, 4.0));
+  float near = smoothstep(thr - 0.5, thr - 0.38, k == 0 ? cf.g : cf.r);
   if (near <= 0.0) return 0.0;
-  float w = textureLod(uWeather, wuv, lod).a;
-  float m = smoothstep(thr - 0.3, thr + 0.15, w) * near;
-  // The ice, in the frame of the wind (along (3, 1), across (-1, 3)): two
-  // tiles to a unit. The footprint's axes go along, through the mipmaps and
-  // the anisotropic filter.
-  vec2 tc = 2.0 * vec2(dot(uv, vec2(3.0, 1.0)), dot(uv, vec2(-1.0, 3.0)));
-  tc -= floor(tc);
-  const mat2 J = mat2(3.0, -1.0, 1.0, 3.0) * (2.0 / WEATHER_KM);
-  vec2 g1 = J * f1, g2 = J * f2;
-  float ice = k == 0 ? textureGrad(uIce, tc, g1, g2).g : textureGrad(uIce, tc, g1, g2).r;
+  vec4 cm = textureLod(uCiMap, muv, lod);
+  float m = smoothstep(thr - 0.3, thr + 0.15, k == 0 ? cm.g : cm.r) * near;
+  // The kinds: plumes everywhere, fewer where rows are many; flocks or
+  // large plumes.
+  float sr = smoothstep(0.35, 0.75, cm.b), sf = smoothstep(0.45, 0.8, cm.a);
+  vec4 wk = vec4(1.0 - 0.5 * sr, sr, 0.5 * sf, 1.2 - 0.6 * sf);
+  // The ice in the deck's frame. The footprint's axes go along, through
+  // the mipmaps and the anisotropic filter.
+  mat2 J;
+  vec2 tc = ciTile(uv, k, J), g1 = J * f1, g2 = J * f2;
+  float ice = dot(textureGrad(uIce, tc, g1, g2), wk), F = 1.0;
   // The fibres, along the ice's way over a few times the footprint, and
   // over a wider one where the ice runs many ways.
-  float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
-  vec4 wf = textureLod(uIceWay, tc, lw + 1.0) * 2.0 - 1.0, wc = textureLod(uIceWay, tc, lw + 4.0) * 2.0 - 1.0;
-  vec2 way = k == 0 ? wf.ba + 0.5 * wc.ba : wf.rg + 0.5 * wc.rg;
-  float fib = (k == 0 ? textureGrad(uIceFib, tc, g1, g2).g : textureGrad(uIceFib, tc, g1, g2).r) * 2.0 - 1.0;
-  float F = sqrt(max(1.0 + 1.1 * fib * (1.0 - 0.5 * smoothstep(0.3, 0.9, ice)) * smoothstep(0.1, 0.5, length(way)), 0.0) * ciFibres(tc, g1, g2, way, ice, k == 0 ? 3000u : 4000u));
+  if (fibres) {
+    float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
+    vec2 way = textureLod(uIceWay, tc, lw + 1.0).rg * 2.0 - 1.0 + 0.5 * (textureLod(uIceWay, tc, lw + 4.0).rg * 2.0 - 1.0);
+    float fib = textureGrad(uIceFib, tc, g1, g2).r * 2.0 - 1.0;
+    F = sqrt(max(1.0 + 1.6 * fib * (1.0 - 0.5 * smoothstep(0.3, 0.9, ice)) * smoothstep(0.1, 0.5, length(way)), 0.0) * ciFibres(tc, g1, g2, way, ice, k == 0 ? 3000u : 4000u));
+  }
   // Little cirrus shows only its densest ice; more shows its thin parts too.
   // The ramp is soft, so that a cloud fades in as a whole and has no outline.
   // The ramp acts on the body of the ice (over some 0.4 km or the
@@ -1881,27 +1972,25 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2) {
   // whole, with clear sky between them. Inside a body its fibres modulate
   // the ice, gently in the core and fully at the edges; just outside, the
   // strongest fibres fray out.
-  float t = 0.4 * pow(1.0 - uCirrus, 1.6) + 0.3 * (1.0 - m);
-  float sb = max(6.0, 0.0099 / max(max(length(g1), length(g2)), 1e-7));
-  float bs = k == 0 ? textureGrad(uIce, tc, g1 * sb, g2 * sb).g : textureGrad(uIce, tc, g1 * sb, g2 * sb).r;
-  float core = smoothstep(t - 0.1, t + 0.6, bs) * smoothstep(0.0, 0.5, bs), hair = smoothstep(0.5 * t, t + 0.05, bs);
-  float fine = ice * F * F;
-  float d = (mix(bs, fine, 1.0 - 0.45 * core) * core + 0.7 * fine * min(fine, 1.0) * max(hair - core, 0.0)) * (0.4 + 0.6 * m);
-  float db = bs * core * (0.4 + 0.6 * m);
-  // Much cirrus also makes a milky veil (cirrostratus): even, without
-  // fibres, mottled softly by the ice around (over some 2.5 and 10 km), and
-  // thicker where there is more of it.
+  float t = 0.6 * pow(1.0 - uCirrus, 1.3) + 0.25 * (1.0 - m);
   float gl = max(max(length(g1), length(g2)), 1e-7);
-  vec2 v2 = k == 0 ? textureGrad(uIce, tc, g1 * max(1.0, 0.062 / gl), g2 * max(1.0, 0.062 / gl)).gr
-                   : textureGrad(uIce, tc, g1 * max(1.0, 0.062 / gl), g2 * max(1.0, 0.062 / gl)).rg;
-  float vb = k == 0 ? textureGrad(uIce, tc, g1 * max(1.0, 0.25 / gl), g2 * max(1.0, 0.25 / gl)).g
-                    : textureGrad(uIce, tc, g1 * max(1.0, 0.25 / gl), g2 * max(1.0, 0.25 / gl)).r;
-  float sheet = 0.35 * smoothstep(0.6, 1.0, uCirrus) * m * (0.3 + 0.7 * smoothstep(0.0, 0.25, vb))
-              * (0.75 + 0.6 * v2.x + 0.2 * v2.y);
-  float scale = CI_TAU * (1.8 + 3.5 * uCirrus * uCirrus);
+  float sb = max(4.0, 0.005 / gl);
+  float bs = dot(textureGrad(uIce, tc, g1 * sb, g2 * sb), wk);
+  float core = smoothstep(t - 0.05, t + 0.35, bs) * smoothstep(0.0, 0.4, bs), hair = smoothstep(0.5 * t, t + 0.05, bs);
+  float fine = ice * F * F;
+  float d = (mix(bs, fine, 1.0 - 0.25 * core) * core + 0.7 * fine * min(fine, 1.0) * max(hair - core, 0.0)) * (0.4 + 0.6 * m);
+  float db = bs * core * (0.4 + 0.6 * m);
+  // Much cirrus also makes a veil (cirrostratus) between the bodies: it
+  // grows from the ice around (over some 2.5 and 10 km), thick where the
+  // bodies are many and thin in the gaps, so that it keeps their bands and
+  // patches, and it takes half of their fibres.
+  float s2 = max(1.0, 0.062 / gl), s3 = max(1.0, 0.25 / gl);
+  float v2 = dot(textureGrad(uIce, tc, g1 * s2, g2 * s2), wk), vb = dot(textureGrad(uIce, tc, g1 * s3, g2 * s3), wk);
+  float sheet = 0.3 * smoothstep(0.7, 1.0, uCirrus) * m * (0.12 + 1.2 * smoothstep(0.02, 0.45, 0.6 * v2 + 0.4 * vb)) * mix(1.0, F * F, 0.5);
+  float scale = CI_TAU * (0.8 + 1.5 * uCirrus + 3.0 * uCirrus * uCirrus);
   ciBody = scale * (db + sheet);
   ciVeil = scale * sheet;
-  ciMean = scale * (v2.x * (0.4 + 0.6 * m) * smoothstep(0.5 * t, t + 0.3, v2.x) + sheet);
+  ciMean = scale * (v2 * (0.4 + 0.6 * m) * smoothstep(0.5 * t, t + 0.3, v2) + sheet);
   return scale * (d + sheet);
 }
 
@@ -1909,7 +1998,7 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2) {
 // km: the mean over the shell.
 float cirrusDepth(vec2 x, float foot) {
   vec2 f1 = vec2(foot, 0.0), f2 = vec2(0.0, foot);
-  return 0.5 * (ciDensity(x, 0, f1, f2) + ciDensity(x, 1, f1, f2));
+  return 0.5 * (ciDensity(x, 0, f1, f2, false) + ciDensity(x, 1, f1, f2, false));
 }
 
 // depthToTop in fewer steps, denser near p: enough for the light of one
@@ -1991,7 +2080,7 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
     vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
     vec2 f1 = dn * (pix * t / max(cv, 1e-3) + 0.12 * (s1 - s0) * lh);
     vec2 f2 = vec2(-dn.y, dn.x) * (pix * t + 0.12 * (s1 - s0) * lh);
-    float rho = ciDensity(p.xz + uDrift, k, f1, f2), way = (s1 - s0) / DECK;
+    float rho = ciDensity(p.xz + uDrift, k, f1, f2, true), way = (s1 - s0) / DECK;
     tau += rho * way;
     tauV += rho;
     bodyT += ciBody;
@@ -2047,12 +2136,12 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
   // The halo needs crystals that fall flat and smooth, as in a thin, even
   // veil (cirrostratus): it shows where the veil is, faint and soft.
-  float haloW = 0.05 * smoothstep(0.05, 0.4, veilT) * (1.0 - many);
+  float haloW = 0.025 * smoothstep(0.05, 0.4, veilT) * (1.0 - many);
   vec4 F[3];
   for (int k = 0; k < 3; k++) {
     vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
     vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
-    vec4 halo = haloW * mix(exp(-x * x / 4e-4), exp(-max(x, 0.0) / 0.05), step(0.0, x));
+    vec4 halo = haloW * mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
     vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * ol.y + uBO[k] * ol.z)) : vec4(0.0);
     H[k] = a * ((uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0))
                 + uLightI * sun * wBelow * below);
@@ -2977,6 +3066,7 @@ const SkySound = (() => {
   // The cirrus's ice: texels a side (on a GPU, and on a software renderer),
   // and per draw; the way of its fibres is a quarter as wide.
   const ICE = 4096, ICE_SOFT = 1024, ICE_PIECE = 512;
+  const CI_MAP = 256;   // the cirrus's map: texels a side, over WEATHER_KM
   const WEATHER_KM = 256;  // the weather map repeats after this many km (as in the shader)
   // The view from the aircraft is a mean over frames: of about IN_MOTION
   // while it moves, of all of them at rest. When the light changes, RELIGHT
@@ -3400,7 +3490,7 @@ const SkySound = (() => {
       for (const s of shaders) if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
       throw new Error(gl.getProgramInfoLog(prog));
     };
-    const prog = link('fs'), noiseProgram = link('noise'), wavesProgram = link('waves');
+    const prog = link('fs'), noiseProgram = link('noise'), iceProgram = link('ice'), wavesProgram = link('waves');
     const mean = link('mean'), show = link('show');
     gl.flush();
 
@@ -3426,7 +3516,7 @@ const SkySound = (() => {
         }
         await settle();
         const ms = performance.now() - start;
-        batch = ms < 100 ? Math.min(batch * 2, 128) : ms > 250 ? Math.max(1, batch / 2) : batch;
+        batch = ms < 100 ? Math.min(batch * 2, 1024) : ms > 250 ? Math.max(1, batch / 2) : batch;
         report(i / parts.length);
       }
     };
@@ -3482,18 +3572,115 @@ const SkySound = (() => {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
+    // Builds a texture's mipmaps, and reads it through them.
+    const smooth = target => {
+      gl.generateMipmap(target);
+      gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    };
+
+    // The cirrus's textures, drawn by the ice program (see Cirrus in
+    // docs/design.md): its map on unit 13; its ice on unit 10, seen from
+    // afar through the mipmaps and aslant through the GPU's anisotropic
+    // filter; the way of the ice's fibres on unit 11; the fibres on unit 12.
+    // The ice and the fibres are drawn in pieces (ICE_PIECE square), so
+    // that no single draw keeps the GPU long: during the loading, in
+    // batches after the noise, if the page starts with cirrus; else when
+    // cirrus is first shown, all at once, so that a sky without cirrus never
+    // pays for them.
+    let buildIce, iceParts;
+    {
+      const draw = iceProgram;
+      const uZ = gl.getUniformLocation(draw, 'uZ'), uSize = gl.getUniformLocation(draw, 'uSize');
+      const parts = () => {
+        let frame;
+        // A texture to draw into, bound to its unit.
+        const target = (unit, format, size) => {
+          gl.activeTexture(gl.TEXTURE0 + unit);
+          gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+          gl.texStorage2D(gl.TEXTURE_2D, Math.log2(size) + 1, format, size, size);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, gl.getParameter(gl.TEXTURE_BINDING_2D), 0);
+          gl.viewport(0, 0, size, size);
+          gl.uniform2f(uSize, size, size);
+        };
+        const sharp = () => {
+          smooth(gl.TEXTURE_2D);
+          if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+        };
+        const pieces = z => {
+          const parts = [[0, () => {
+            gl.uniform1f(uZ, z);
+            gl.enable(gl.SCISSOR_TEST);
+          }]];
+          for (let y = 0; y < iceSize; y += ICE_PIECE) {
+            for (let x = 0; x < iceSize; x += ICE_PIECE) {
+              parts.push([ICE_PIECE * ICE_PIECE / (NOISE * NOISE), () => {      // weighed as slices of the noise of as many texels
+                gl.scissor(x, y, ICE_PIECE, ICE_PIECE);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+              }]);
+            }
+          }
+          parts.push([0, () => gl.disable(gl.SCISSOR_TEST)]);
+          return parts;
+        };
+        return [
+          [0, () => {
+            gl.useProgram(draw);
+            frame = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+            target(13, gl.RGBA8, CI_MAP);
+            gl.uniform1f(uZ, -2);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            smooth(gl.TEXTURE_2D);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          }],
+          [0, () => {
+            gl.useProgram(draw);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+            target(10, gl.RGBA8, iceSize);
+          }],
+          ...pieces(-3),
+          [0, () => {
+            sharp();
+            target(11, gl.RG8, iceSize / 4);
+            gl.uniform1f(uZ, -4);
+            gl.uniform1i(gl.getUniformLocation(draw, 'uIceIn'), 10);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            smooth(gl.TEXTURE_2D);
+            target(12, gl.R8, iceSize);
+            gl.uniform1i(gl.getUniformLocation(draw, 'uWayIn'), 11);
+          }],
+          ...pieces(-5),
+          [0, () => {
+            sharp();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.deleteFramebuffer(frame);
+            gl.deleteProgram(draw);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.useProgram(prog);
+          }],
+        ];
+      };
+      if (state.cirrus > 0) {
+        // The map at once: some drivers finish a program only at its first
+        // draw (see prime), and the ice program is large. Its driver works
+        // on it while the noise is built; the rest follows the noise.
+        iceParts = parts();
+        iceParts.shift()[1]();
+        buildIce = () => {};
+      } else {
+        buildIce = () => {
+          buildIce = () => {};
+          for (const [, part] of parts()) part();
+        };
+      }
+    }
+
     // Cloud textures: the 3D noise on unit 2, the weather map on unit 3.
     // The noise program draws them, slice by slice, and the weather map in
-    // strips of 64 rows (the scissor), in batches; and the cirrus's ice
-    // (buildIce below).
-    let buildIce;
+    // strips of 64 rows (the scissor), in batches.
     {
       const n = NOISE, m = WEATHER, STRIP = 64;
-      const smooth = target => {
-        gl.generateMipmap(target);
-        gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      };
       gl.activeTexture(gl.TEXTURE2);
       const noise = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_3D, noise);
@@ -3509,7 +3696,7 @@ const SkySound = (() => {
         const target = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, target);
         gl.viewport(0, 0, n, n);
-        gl.uniform2f(uSize, n, n);
+        gl.uniform1f(uSize, n);
         const parts = [];
         for (let z = 0; z < n; z++) {
           parts.push([1, () => {
@@ -3521,7 +3708,7 @@ const SkySound = (() => {
         parts.push([0, () => {
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, weather, 0);
           gl.viewport(0, 0, m, m);
-          gl.uniform2f(uSize, m, m);
+          gl.uniform1f(uSize, m);
           gl.uniform1f(uZ, -1);
           gl.enable(gl.SCISSOR_TEST);
         }]);
@@ -3533,105 +3720,17 @@ const SkySound = (() => {
         }
         parts.push([0, () => gl.disable(gl.SCISSOR_TEST)]);
         await batches(parts, share => done(0.6 + 0.15 * share));
-        gl.activeTexture(gl.TEXTURE3);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.deleteFramebuffer(target);
-        // The cirrus's ice, on unit 10: two decks (R and G), seen from afar
-        // through the mipmaps, and aslant through the GPU's anisotropic
-        // filter. Drawn in pieces (ICE_PIECE square), so that no single draw
-        // keeps the GPU long: during the loading, in batches, if the page
-        // starts with cirrus; else when cirrus is first shown, all at once,
-        // so that a sky without cirrus never pays for it.
-        const iceParts = () => {
-          let tex, frame;
-          const parts = [[0, () => {
-            gl.useProgram(draw);
-            gl.activeTexture(gl.TEXTURE10);
-            tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.texStorage2D(gl.TEXTURE_2D, Math.log2(iceSize) + 1, gl.RG8, iceSize, iceSize);
-            frame = gl.createFramebuffer();
-            gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-            gl.viewport(0, 0, iceSize, iceSize);
-            gl.uniform2f(uSize, iceSize, iceSize);
-            gl.uniform1f(uZ, -3);
-            gl.enable(gl.SCISSOR_TEST);
-          }]];
-          for (let y = 0; y < iceSize; y += ICE_PIECE) {
-            for (let x = 0; x < iceSize; x += ICE_PIECE) {
-              parts.push([ICE_PIECE * ICE_PIECE / (n * n), () => {      // weighed as slices of as many texels
-                gl.scissor(x, y, ICE_PIECE, ICE_PIECE);
-                gl.drawArrays(gl.TRIANGLES, 0, 3);
-              }]);
-            }
-          }
-          // Then the way of its fibres, on unit 11, from the ice's mipmaps;
-          // and the fibres, on unit 12, drawn along the way, in pieces too.
-          let fib;
-          parts.push([0, () => {
-            gl.disable(gl.SCISSOR_TEST);
-            smooth(gl.TEXTURE_2D);
-            if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
-            const w = iceSize / 4;
-            gl.activeTexture(gl.TEXTURE11);
-            const way = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, way);
-            gl.texStorage2D(gl.TEXTURE_2D, Math.log2(w) + 1, gl.RGBA8, w, w);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, way, 0);
-            gl.viewport(0, 0, w, w);
-            gl.uniform2f(uSize, w, w);
-            gl.uniform1f(uZ, -4);
-            gl.uniform1i(gl.getUniformLocation(draw, 'uIceIn'), 10);
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-            smooth(gl.TEXTURE_2D);
-            gl.activeTexture(gl.TEXTURE12);
-            fib = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, fib);
-            gl.texStorage2D(gl.TEXTURE_2D, Math.log2(iceSize) + 1, gl.RG8, iceSize, iceSize);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fib, 0);
-            gl.viewport(0, 0, iceSize, iceSize);
-            gl.uniform2f(uSize, iceSize, iceSize);
-            gl.uniform1f(uZ, -5);
-            gl.uniform1i(gl.getUniformLocation(draw, 'uWayIn'), 11);
-            gl.enable(gl.SCISSOR_TEST);
-          }]);
-          for (let y = 0; y < iceSize; y += ICE_PIECE) {
-            for (let x = 0; x < iceSize; x += ICE_PIECE) {
-              parts.push([ICE_PIECE * ICE_PIECE / (n * n), () => {
-                gl.scissor(x, y, ICE_PIECE, ICE_PIECE);
-                gl.drawArrays(gl.TRIANGLES, 0, 3);
-              }]);
-            }
-          }
-          parts.push([0, () => {
-            gl.disable(gl.SCISSOR_TEST);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.deleteFramebuffer(frame);
-            gl.deleteProgram(draw);
-            smooth(gl.TEXTURE_2D);
-            if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
-            gl.activeTexture(gl.TEXTURE0);
-            gl.useProgram(prog);
-          }]);
-          return parts;
-        };
-        if (state.cirrus > 0) {
-          await batches(iceParts(), share => done(0.75 + 0.1 * share));
-          buildIce = () => {};
-        } else {
-          buildIce = () => {
-            buildIce = () => {};
-            for (const [, part] of iceParts()) part();
-          };
-        }
-        gl.activeTexture(gl.TEXTURE3);
+        gl.deleteProgram(draw);
       }
       smooth(gl.TEXTURE_2D);
       gl.activeTexture(gl.TEXTURE2);
       smooth(gl.TEXTURE_3D);
       gl.activeTexture(gl.TEXTURE0);
     }
+
+    if (iceParts) await batches(iceParts, share => done(0.75 + 0.1 * share));
 
     // The map of the waves on the sea, on unit 4, drawn by its own program.
     {
@@ -3677,6 +3776,7 @@ const SkySound = (() => {
     gl.uniform1i(U('uIce'), 10);
     gl.uniform1i(U('uIceWay'), 11);
     gl.uniform1i(U('uIceFib'), 12);
+    gl.uniform1i(U('uCiMap'), 13);
     gl.uniform4fv(U('uBR'), new Float32Array(BR));
     gl.uniform4fv(U('uBO'), new Float32Array(BO));
     gl.uniform4fv(U('uWL'), new Float32Array(WL.map(l => l / 550)));

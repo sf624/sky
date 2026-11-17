@@ -176,15 +176,22 @@ default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
-The cirrus's ice, the way of its fibres and the fibres are built once,
-during the loading (or when cirrus is first shown, if the page starts
-without it): about 0.9 s of GPU time on the RTX 3090 (the plumes add
-some 0.4 s: the first picture of the default view came 0.4 s later than
-without them). A renderer without a GPU builds them a quarter as wide (see
+The cirrus's map, ice, way of its fibres and fibres are built once, by
+their own program (`ice`), during the loading (or when cirrus is first
+shown, if the page starts without it). Measured with `perf` at 1920 x
+1080 on the RTX 3090 in November 2026: the first picture came 4.1 s after
+navigation with `cirrus=0.5`, 3.3 s with `cirrus=0`, against 3.2 s for
+`main` before the ice. Most of the difference is not the building (some
+0.25 s of GPU time for the ice, 15 ms for the fibres) but the driver
+finishing the large ice program at its first draw (about 0.3 s); it was
+1.7 s while the ice was part of the `noise` program, which every page
+draws. With the cirrus's code in the scene, the scene's own first draw
+also grew from 0.8 to 1.4 s, until the depth that the sun's light feels
+(`cirrusDepth`, four copies) left out the fibres. A renderer without a
+GPU builds the textures a quarter as wide (see
 [design.md](design.md#cirrus)): on SwiftShader a still at 480 x 270
-looking up at cirrus took 59 s from load against 43 s for the same view
-without cirrus (at full size the ice alone took two minutes). Views with `cirrus=0` build
-nothing.
+looking up at cirrus took 51 s from load against 35 s for `main`. Views
+with `cirrus=0` build nothing.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -237,20 +244,23 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
-  - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
-    `fs` shaders.
-  - The layout of the cirrus's way (RG the upper deck, BA the lower, the
-    gradient at twice its angle): `iceWay` and `iceFibres` in the `noise`
-    shader, `ciDensity` in `fs`.
+  - The integer hash `ihash` (lowbias32): in the `noise`, `ice`, `waves`
+    and `fs` shaders.
+  - The layout of the cirrus's textures (the ice's four kinds in RGBA;
+    the way as the gradient at twice its angle; the map's channels):
+    `iceField`, `iceWay`, `iceFibres` and `ciMap` in the `ice` shader,
+    `ciDensity` in `fs`.
+  - `WEATHER_KM` and `ICE_KM`: in the `ice` shader too.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
     (`BASE_KM / 128.0`).
   - The size of the weather map, 1024: `WEATHER` in the JS;
     `WEATHER_KM / 1024.0` in `addSea`.
   - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
-  - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
-    shader (the bands of the weather map, and `ICE_KM`, half a unit of the
-    frame) and in `fs` (the tile's coordinates and `J` in `ciDensity`).
+  - The cirrus's frames, along (3, 1) and across (-1, 3) for the upper
+    deck, along (1, 1) for the lower: in the `ice` shader (the bands of
+    `ciMap`, and `ICE_KM`, half a unit of the upper frame) and in `fs`
+    (`ciTile`).
 - **One flat loop over a neighbourhood.** On Mesa's D3D12 driver (WSL),
   two nested loops over the cells around a point (`for i in -2..0`, `for j
   in -1..1`) came out wrong: the cirrus's streaks were cut along the
@@ -260,7 +270,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
   of a whole number `x` equal to `p` gave `p` in places, not 0, and the
   cirrus's noise had a seam along that lattice line. `iceNoise` and the
-  heads' cells in `iceHead` wrap by hand, `c - p * floor((c + 0.5) / p)`.
+  heads' cells in `icePlumes`, `iceRows` and `iceFlock` wrap by hand,
+  `c - p * floor((c + 0.5) / p)`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

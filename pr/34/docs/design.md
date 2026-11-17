@@ -15,6 +15,7 @@ blocks. It loads no other file.
 | (no id) | JS | `TEXT`, the strings in Japanese and English, and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
+| `ice` | fragment shader | Draws the cirrus's map, ice, way and fibres once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
@@ -57,11 +58,10 @@ time (see the next section).
   Hence `BASE_KM` = 8 (32 tiles of the noise), `DETAIL` = 7 (whole tiles of
   the fine noise per tile), the wave bands and the cells of the foam
   rounded to whole numbers per map (`rep`, `cells`), the swells with whole
-  numbers of crests (`SWELL`), the cirrus frame stepping by whole numbers
-  (the tile of the ice twice in a unit of it, and every noise in the ice
-  with a whole number of cells to the tile), and the `bend` of the
-  cirrus's bands in the weather map written with whole-number
-  frequencies.
+  numbers of crests (`SWELL`), the cirrus frames stepping by whole numbers
+  (the tile of the ice twice or four times in a unit of each, and every
+  noise in the ice with a whole number of cells to the tile), and the bands
+  of the cirrus's map written with whole-number frequencies in its frame.
 - Comments in the code are plain English sentences that say what and why.
 
 ## From the address bar to the first frame
@@ -89,7 +89,7 @@ The JS then runs once, at load, and does little:
    function: it waits a frame (`nextFrame`) wherever it would otherwise
    hold the main thread or wait for the GPU. Its steps:
    - `getContext`, and the extensions.
-   - Every program (`fs`, `noise`, `waves`, `mean`, `show`) is
+   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`) is
      compiled and linked at once, and nothing asks how it went yet. With
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
@@ -114,11 +114,14 @@ The JS then runs once, at load, and does little:
      The noise and the weather map are drawn in batches (`batches`), the
      weather map in strips of 64 rows (the scissor; each pixel is the
      same as from one draw), and so are the cirrus's ice and its fibres in
-     pieces of 512 x 512, if the page starts with cirrus (else `render`
-     draws them all at once when cirrus is first shown; see
-     [Cirrus](#cirrus)). After each batch the page waits for a fence
+     pieces of 512 x 512, after the noise, if the page starts with cirrus
+     (else `render` draws them all at once when cirrus is first shown; see
+     [Cirrus](#cirrus)). The cirrus's map is drawn before the noise, as soon
+     as the programs are linked: some drivers finish a program only at its
+     first draw (see `prime`), and the ice program is large; its driver
+     works on it while the noise is built. After each batch the page waits for a fence
      (`settle`); a batch doubles while the GPU gets through it in under
-     100 ms and halves over 250 ms. The GPU process draws the whole
+     100 ms (up to 64 pieces of the ice) and halves over 250 ms. The GPU process draws the whole
      browser, and a slow GPU given seconds of work at once would freeze it.
    - `prime`: the first frame is drawn as the first frame will draw it,
      up to the canvas (`render` as a probe, which then puts its state
@@ -407,8 +410,8 @@ towards the light.
 ## Cirrus
 
 `highCloud`. The cirrus fills a shell from `CI_LO` = 12.2 to `CI_HI` =
-12.8 km, split into `CI_LAYERS` = 2 decks of 0.3 km, each with ice of its
-own: the upper and the lower deck of cirrus. Where both have ice, their
+12.8 km, split into `CI_LAYERS` = 2 decks of 0.3 km, each reading the ice
+in a frame of its own: the upper and the lower deck of cirrus. Where both have ice, their
 trails cross at different angles, and in flight the decks slide over each
 other.
 
@@ -426,64 +429,74 @@ behind, ray by ray (see [development.md](development.md#glsl-rules)).
 along the wind but the result of a process, followed at start for every
 texel: ice is made in generating heads, falls out of them, and the wind
 shear draws what falls into a trail behind each head; eddies stir the
-trails. Two kinds of head make it: plumes, which hold most of the ice,
-and small heads, which add tufts and threads between them.
+trails. Four kinds of head make four fields, one to a channel, which the
+scene mixes by the cirrus's map (below), so that one region of the sky has
+plumes, another bands or flocks:
 
-- **Plumes** (`icePlume`): `ICE_PLUMES` = 4 cells to a side of the tile
-  (10 km), a third of them empty. A plume's head is a soft, broad puff of
-  0.5 to 1.3 km (growing to some 1.8 km), and the shear draws it into a
-  tail `ICE_PLUME_REACH` = 1.8 times as long as the small heads' trails
-  (some 15 to 40 km): the body of a cirrus, separate from the next, with
-  clear sky between. Their strengths have a long tail (the square of a
-  random number), so that a few are strong, and they gather in groups.
-  Inside, the ice falls in streaks along the tail: bands of 0.2 to 0.6 km
-  and sparse threads of 60 to 150 m, a little aslant to the tail and
-  changing along it every 1 to 2 km, so that they end and cross. The
-  streaks are faint in the core and strong at the edges, where the
-  threads reach out beyond the soft outline: the fibres fray out of the
-  body. A plume reaches no further than 0.8 of a cell, so the four cells
-  nearest are enough.
-- **Small heads** (`iceHead`, their share `ICE_TUFTS` = 0.3) sit one to a cell of 4 km, in the middle 40 % of the cell,
-  and reach no further than 0.3 of a cell: so one cell is enough at each
-  step, and nothing changes where a way crosses into the next. A random
-  number and two octaves of noise (20 and 8 km) set their strength: they
-  gather in groups with wide gaps between, and weak heads lie between the
-  groups (they show only where the weather gives much cirrus). A head is a
-  Gaussian puff of 150 to 300 m that grows with age (to some 400 m) and
-  wobbles a little in time. Half the heads have died out at an age of
-  their own: they left a trail without a head (cirrus fibratus).
+- **Plumes** (R, `icePlumes`): 4 cells to a side of the tile (10 km), a
+  quarter of them empty. A head is 0.3 to 1.3 km (a few large, many
+  small), and its trail widens as it ages, by 0.3 to 4 km over a life: a
+  wedge, from a narrow streak to a broad fan. Half the plumes have a
+  dense head, half the head size (a tuft, cirrus uncinus); the others
+  have none, their ice fading in (a fan of fibres, cirrus fibratus).
+  Their strengths vary from 0.4 to 2.4 and gather in groups. The trails
+  are 1.5 times the drift (some 10 to 35 km).
+- **Large plumes** (A): the same with 3 cells to a side (13.5 km), heads
+  1.8 times as large, trails twice the drift (up to 45 km), 2.5 times as
+  strong: the broad fans and sheets.
+- **Rows** (G, `iceRows`): small heads (50 to 130 m) along lines with the
+  wind, 5 to the tile (8 km apart), a head every 1 km, scattered over
+  the row's width (0.3 to 1.5 km). A row comes and goes along its length
+  (runs of 5 to 20 km) and wanders across by up to 1 km. Its trails have
+  a direction of their own: along the rows in most places, where they
+  join into a band of fibres (a street); turned some 60 degrees in
+  places (slow noise), where they stand off a spine as ribs that curl (a
+  feather, cirrus vertebratus). The bands wrap round the tile, so they
+  run on as far as the map lets them.
+- **Flocks** (B, `iceFlock`): small heads (0.1 to 0.3 km), one to a cell
+  of 3.4 km, gathered in flocks with wide gaps by two octaves of noise
+  (20 and 8 km), each with a short trail of threads (cirrus floccus).
+  Half have died out and left their trail. A flock's head grows with age
+  and wobbles in time.
+- **Strands** (`iceStrands`). A plume's ice falls in strands along its
+  trail: value noise across it, at 3 to 9 strands to the trail's half
+  width, and thin bright threads within. The place across is measured in
+  units of the trail's width at that age, so the strands fan out with
+  the trail. Each strand has a life of its own, the outer ones shorter:
+  the strands end one by one, so that a trail tapers and frays out
+  instead of ending round. The head itself is a plain puff.
 - **The trail.** The shear draws the ice away from its head, slowly at
   first (a dense head), then at full speed, along a direction that turns
-  with age (`veer`: a hook, cirrus uncinus). The direction, the turn, the
-  length of the trails (some 7 to 23 km) and the strength of the eddies
-  change over the tile (slow noise), so that one place has straight
-  fibratus and another tangled hooks.
-- **Splay.** A head's ice falls apart into `ICE_STREAMS` = 3 streams that
-  fall at different speeds: the shear draws each out by its own length and
-  turns it 22 degrees away from the others, so a trail splays like a
-  feather and is wide.
+  with age (`veer`: a hook). The direction, the turn, the length of the
+  trails (some 7 to 23 km of drift) and the strength of the eddies change
+  over the tile (slow noise). Each kind falls at its own speed: its
+  trails are as many times as long as the drift (plumes 1.5, large plumes
+  2, rows 0.45, flocks 0.35).
 - **Eddies**: the curl of a noise potential at 13, 5 and 2 km (divergence
   free), which changes in time (its gradients turn), the smaller the
-  faster, with speeds as Kolmogorov's law gives them; and a gentle
-  divergent part, the gradient of the middle size, as the ice spreads and
-  gathers where the air rises and sinks. They bend the trails gently and
-  stretch them into filaments; stronger eddies curled them into smoke and
-  spirals, which cirrus seldom shows.
-- **Threads.** A head makes its ice unevenly across the trail (value
-  noise across, 50 to 150 m, drawn out in time) and in thin bright
-  threads; the shear and the eddies then draw them out along the trail's
-  own way, so they follow the local form. Some outlive the rest, so a
-  trail ends in fine threads.
+  faster; the largest is kept gentle (0.35 against 0.45 for the middle
+  one), or every trail waved alike; and a gentle divergent part, the
+  gradient of the middle size, as the ice spreads and gathers where the
+  air rises and sinks.
 - **How.** For each texel, the eddies are followed back in time
-  (`ICE_STEPS` = 36 steps over a life of the ice; the method of
+  (`ICE_STEPS` = 28 steps over a life of the ice; the method of
   characteristics). At each age, the ice of that age at the texel came from
-  where the eddies bring it from, less the trail's drift; a head there made
+  where the eddies bring it from, less each kind's drift; a head there made
   it then. Each step is a segment, and each head's puff is integrated along
-  it (with `erf`), so that no step shows. Nothing is resampled step after
-  step, so nothing blurs, and each texel is computed by itself: the field
-  does not depend on the order of the draws, and repeats with the tile.
-  The sum is stored as `1 - exp(-ICE_GAIN x)`, `ICE_GAIN` = 7: dense
-  plumes near 1, thin trails and gaps near 0.
+  it (with `erf`, `icePuff`), so that no step shows. A plume reaches no
+  further than 1.2 cells, so the nine cells nearest are enough; a row's
+  head no further than 0.8 of a cell, a flock's 0.3: four cells and one.
+  Nothing is resampled step after step, so nothing blurs, and each texel
+  is computed by itself: the field does not depend on the order of the
+  draws, and repeats with the tile. Each field is stored as
+  `1 - exp(-ICE_GAIN x)`, `ICE_GAIN` = 7.
+
+**The cirrus's map** (`uCiMap`, `ciMap`), 256 x 256 over the map (1 km a
+texel), says where the cirrus is and of what kind, at the scale of 50 to
+300 km: R and G, how much for the upper and the lower deck (patches of
+some 85 and 35 km, and bands along the wind of 40 by 8 km and 27 by 5 km,
+in the frame of the wind with whole numbers); B, the share of rows; A,
+the share of flocks against large plumes (both over some 100 km).
 
 **The fibres.** Photographed cirrus is made of many fine, nearly parallel
 streaks inside each tuft, down to hair-fine ones; the ice's 10 m texels
@@ -491,7 +504,7 @@ hold only the coarser ones, and seen from near the shell they are
 magnified to mush. Two more textures are drawn from the ice, and the
 scene adds the finest streaks itself:
 
-- **The way** (`uIceWay`): where the ice runs, for both decks, from its
+- **The way** (`uIceWay`): where the ice runs (its four kinds together), from its
   structure tensor (the mean of its gradient times itself over 3 x 3
   texels of 40 m), stored as the gradient's direction at twice its angle,
   `(Jxx - Jyy, 2 Jxy)` over the trace. A gradient and its opposite then
@@ -531,33 +544,42 @@ sky (at another place the streaks run another way).
 `ciDensity` gives a deck's share of the vertical optical depth at a place
 on the map.
 
-- **The weather.** A of the weather map, against a level set by
-  `uCirrus`, gives how much cirrus there is (`m`). The lower deck reads
-  another place of the map and needs more of it, so that the decks come
-  and go apart and two decks cross only in places. Over some
-  16 km (a coarse level of the map) it tells where there is none, and most
-  of the sky costs little. The weather now holds patches and bands only;
-  the forms are in the ice.
-- **The ice** is read in the cirrus's frame (along (3, 1), across
-  (-1, 3), two tiles to a unit of 81 km) with `textureGrad` over the
-  pixel's footprint (`f1`, `f2`: the footprint's axes on the map, drawn
-  out along the ray's way and a little by the way through the deck),
-  through the mipmaps and, where the GPU has it, its anisotropic filter.
+- **The map.** The deck's channel of the map, against a level set by
+  `uCirrus` (`0.72 - 0.85 c`), gives how much cirrus there is (`m`). The
+  lower deck reads another place of the map and needs more of it (0.12),
+  so that the decks come and go apart and two decks cross only in
+  places. Over some 16 km (a coarse level of the map) it tells where
+  there is none, and most of the sky costs little. The kinds are mixed
+  by B and A: plumes everywhere (fewer where rows are many), rows, flocks
+  or large plumes.
+- **The ice** is read in each deck's frame (`ciTile`): the upper deck
+  along (3, 1), two tiles to a unit of 81 km; the lower along (1, 1),
+  four tiles to a unit of 181 km, so that its forms are a little larger
+  and run 27 degrees from the upper's. Each tile is shifted
+  (`CI_START`) so that the place where the page starts has some cirrus
+  overhead: from near the shell a view sees only a few km of it, and the
+  tile had a gap there. It is read with `textureGrad` over the pixel's
+  footprint (`f1`, `f2`: the footprint's axes on the map, drawn out along
+  the ray's way and a little by the way through the deck), through the
+  mipmaps and, where the GPU has it, its anisotropic filter.
 - **The slider.** The ramp acts on the body of the ice (the ice over some
-  0.4 km, or the footprint if it is wider), not on its fibres, at
-  `t = 0.4 (1 - c)^1.6 + 0.3 (1 - m)`: little cirrus shows only the
+  0.2 km, or four footprints if that is wider), not on its fibres, at
+  `t = 0.6 (1 - c)^1.3 + 0.25 (1 - m)`: little cirrus shows only the
   densest plumes, more shows weaker ones; clouds come and go whole, with
-  clear sky between them, and the ramp is soft (from `t - 0.1` to
-  `t + 0.6`), so that a body fades out towards its edges. Inside a body
-  the fine ice (with its fibres) is mixed with the body's mean, half and
-  half in the core and wholly at the edges; just outside, where the body
-  is below the ramp but above half of it, only the strongest fibres show.
-  (A ramp on the fine ice itself, as before, let thin threads show
-  everywhere: a combed sky.)
-- **The veil.** Above `c` = 0.6 a milky veil (cirrostratus) grows, up to
-  0.35 of the shell's depth: even, without fibres, mottled softly by the
-  ice around (over some 2.5 and 10 km). It does not take the fibres: with
-  them it was a combed ceiling.
+  clear sky between them, and the ramp (from `t - 0.05` to `t + 0.35`)
+  lets a body fade out towards its edges. Inside a body the fine ice
+  (with its fibres) is mixed with the body's mean, a quarter in the core
+  and none at the edges; just outside, where the body is below the ramp
+  but above half of it, only the strongest fibres show. The depth grows
+  with the slider as `0.8 + 1.5 c + 3 c^2`. Measured on the screen (the
+  share of the sky that differs from `cirrus=0`, looking up at 35 degrees
+  from 0.3 km): 25, 30, 37, 48, 97 and 99 % at 0.1, 0.25, 0.4, 0.6, 0.8
+  and 1.
+- **The veil.** Above `c` = 0.7 a veil (cirrostratus) grows between the
+  bodies, up to 0.3 of the shell's depth. It grows from the ice around
+  (over some 2.5 and 10 km): thick where the bodies are many, thin (0.12)
+  in the gaps, so that it keeps their bands and patches; and it takes
+  half of their fibres.
 - `ciBody` is the body of the ice (over some 0.4 km, or six footprints if
   that is wider): the light inside the sheet feels it. `ciVeil` is the share of the veil: it draws the halo.
   `ciMean` is the depth over some 2.5 km: the glow next to the sun and the
@@ -575,8 +597,9 @@ on the map.
   them, instead of smears along the fibres in front of them; a
   broad refraction lobe; and a flat part to the side and back, some 0.3 of
   the mean, as ray tracing of ice crystals gives it), the 22-degree halo
-  with the dispersion of ice (faint and soft, and only where there is a
-  veil: a halo needs the even, smooth crystals of cirrostratus), light
+  with the dispersion of ice (faint, 0.025, and soft, some 1.4 degrees
+  inside, and only where there is a veil: a halo needs the even, smooth
+  crystals of cirrostratus), light
   scattered once with the sheet's own shadow (a low sun enters the sheet
   within some seven times its thickness, between the clouds, so cirrus at
   sunset is lit gold), a share scattered many times,
@@ -589,34 +612,41 @@ on the map.
   the sky round it, more than the screen shows: its thick and thin parts
   would be one white glow, where a photograph through such a veil keeps
   them apart. The light scattered forward rolls off smoothly towards
-  `CI_ROLL` = 1.5 times the screen's white (after the exposure,
+  `CI_ROLL` = 1 times the screen's white (after the exposure,
   `x -> R (1 - exp(-x / R))`), so the texture of the ice stays up to a
   small sun. The rest of the cirrus's light is untouched.
 - `cirrusShadow` dims the direct light on the low clouds and the sea (half
   the depth counts: ice scatters mostly forward). It reads the mean of the
-  two decks over 0.5 km (`cirrusDepth`), and so does the glare.
+  two decks over 0.5 km (`cirrusDepth`), and so does the glare. These
+  calls leave out the fibres (`ciDensity` with `fibres` false), which
+  average out over such a footprint: the scene is compiled with four
+  copies of them, and the fibres doubled the time the driver took to
+  finish the program.
 
 `highCloud` returns `Th`, `H` and `tHigh`; the march through the air treats
 it as its second layer.
 
-**The ice's textures.** `uIce` (4096 x 4096, RG8, a tile of 40.5 km, 10 m
-a texel; R: the upper deck, G: the lower, which has more heads and trails
-turned 35 degrees from the upper's) is drawn by the `noise` shader (`uZ` =
--3) in pieces of 512 x 512 (`ICE_PIECE`), so that no single draw keeps the
-GPU long; then `uIceWay` (a quarter as wide, RGBA8: RG the upper deck's
-way, BA the lower's; `uZ` = -4, one draw from the ice's mipmaps) and
-`uIceFib` (as wide as the ice, RG8; `uZ` = -5, in pieces). They are built
-during the loading, in batches, if the page starts with cirrus; else when
-cirrus is first shown (`buildIce`, called by `render`, all at once), so
-that a sky without cirrus never pays for them. On an RTX 3090 the three
-take about 0.9 s of GPU time. A renderer without a GPU (its name says
-SwiftShader, llvmpipe, softpipe, software or Basic Render) builds them a
-quarter as wide (`ICE_SOFT` = 1024, 40 m a texel, without the 25 m
-grains): SwiftShader then loads a view with cirrus some 16 s slower than
-one without, where the full size took two minutes more. The name decides, not a timing, so
-that a renderer always draws the same. Every pattern in them repeats with
-the tile, and the tile twice in a unit of the cirrus's frame, which
-repeats ten times over the map.
+**The ice's textures.** They are drawn by the `ice` program, which is
+apart from `noise`: the driver here finishes a program at its first draw,
+and the ice made `noise` take 1.7 s for it on every page. The cirrus's map
+(`uZ` = -2) is drawn first, before the noise (see the loading). `uIce`
+(4096 x 4096, RGBA8, a tile of 40.5 km, 10 m a texel; the four kinds) is
+drawn with `uZ` = -3 in pieces of 512 x 512 (`ICE_PIECE`), so that no
+single draw keeps the GPU long; then `uIceWay` (a quarter as wide, RG8,
+from the four kinds together; `uZ` = -4, one draw from the ice's mipmaps)
+and `uIceFib` (as wide as the ice, R8; `uZ` = -5, in pieces). Both decks
+read the same textures, each in its own frame. They are built during the
+loading, in batches, if the page starts with cirrus; else when cirrus is
+first shown (`buildIce`, called by `render`, all at once), so that a sky
+without cirrus never pays for them. On an RTX 3090 they take some 0.25 s
+of GPU time, and the first picture comes about 0.9 s later than without
+cirrus (see [development.md](development.md#gpu-time)). A renderer without
+a GPU (its name says SwiftShader, llvmpipe, softpipe, software or Basic
+Render) builds them a quarter as wide (`ICE_SOFT` = 1024, 40 m a texel,
+without the 25 m grains). The name decides, not a timing, so that a
+renderer always draws the same. Every pattern in them repeats with the
+tile, and the tile two or four times in a unit of each deck's frame,
+which repeats ten or four times over the map.
 
 ## Sun, moon, stars
 
@@ -763,7 +793,7 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All are made during the loading, in `makeSky` (the cirrus's three
+All are made during the loading, in `makeSky` (the cirrus's four
 later if the page starts without cirrus: when cirrus is first shown):
 
 | Texture | Unit | Size and format | Made by | Holds |
@@ -771,25 +801,26 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uMS` | 0 | 40 x 36, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile |
-| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
+| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: unused (0) |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uIce` | 10 | 4096 x 4096 (1024 x 1024 without a GPU), RG8, mipmapped, repeating, anisotropic where available | `noise` shader, in pieces | The ice of the cirrus, two decks (see [Cirrus](#cirrus)) |
-| `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `noise` shader, from the ice | The way the ice runs, two decks |
-| `uIceFib` | 12 | as the ice, RG8, mipmapped, repeating, anisotropic where available | `noise` shader, in pieces, from the way | The ice's fibres, two decks |
+| `uIce` | 10 | 4096 x 4096 (1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
+| `uIceWay` | 11 | a quarter of the ice's size, RG8, mipmapped, repeating | `ice` shader, from the ice | The way the ice runs |
+| `uIceFib` | 12 | as the ice, R8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces, from the way | The ice's fibres |
+| `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
 reads unit 6.
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
-down to 1 km, towers where the widest clumps are, gusts on the sea, and
-the patches and bands of cirrus. The wave map is a sum of plane waves, each
+down to 1 km, towers where the widest clumps are, and gusts on the sea.
+The cirrus's map is drawn by the `ice` shader (see [Cirrus](#cirrus)). The wave map is a sum of plane waves, each
 a whole number of times across the map.
 
 Their random numbers come from one integer hash, `ihash`: Wellons'
 lowbias32 (two rounds of xor-shift and multiply, from hash-prospector, in
-the public domain). The `noise` shader hashes a lattice cell's
+the public domain). The `noise` and `ice` shaders hash a lattice cell's
 coordinates, packed into one word, plus the seed; the `waves` shader the
 number of the wave; `fs` the lattice of the finest fibres. The word, and its low 21 and 10 bits moved up, are
 three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
