@@ -397,24 +397,34 @@ throughout. The layers and the cut change these figures by less than
 zenith at -10 and -14 degrees was 3 and 6 times too dark.
 
 **Against a reference** (November 2026). A Monte Carlo solver of the same
-atmosphere (spherical shells, the twelve wavelengths, Rayleigh, both
-aerosol layers, ozone, a ground of albedo 0.07, every order; the
+atmosphere (spherical shells, the twelve wavelengths, Rayleigh, the
+aerosol profile above, ozone, a ground of albedo 0.07, every order; the
 light scattered once by a fine march, the rest by paths with a
 track-length estimate of the sun's light on each segment and the hero
 wavelength scheme of Wilkie et al., 2014), against a float64 copy of
-`fs`'s march with the page's own tables, over elevations -5 to 60
+`fs`'s march with the page's own tables, over elevations -30 to 60
 degrees at 0, 90 and 180 degrees from the sun, from 0.3, 4 and 11 km,
-the sun at 2, -2, -4, -6 and -10 degrees. The light scattered once
-agrees within 2 % (towards the sun 0.96 to 1.00). The table's light is
-about 0.6 of the reference's towards the sun in twilight (the second
-scattering at the point is taken as isotropic, while that light comes
-from the glow, scattered forwards), 0.85 to 1.2 to the side and away;
-by day 0.6 to 0.95. Towards the sun it is 5 to 20 % of the sky, so the
-sky there is within 5 to 10 % of the reference, with its colour (the
-chromaticity within 0.02). So the thin band of glow is what this
-atmosphere gives: with the same air, the reference's band is as thin.
-The aerosol aloft and the tone curve (see [Exposure](#exposure-and-the-tone-curve))
-make the difference.
+the sun at 30, 2, -2, -4, -6 and -10 degrees (round 9, the default
+haze). Medians over each set of rays:
+
+- The light scattered once agrees within 3 % (1.00 almost everywhere).
+- The sky (from the horizon up): 0.88 to 1.0 of the reference by day and
+  towards and away from the sun in twilight, with its colour (the
+  r-chromaticity within 0.02). The anti-twilight arch and the planet's
+  shadow away from the sun follow the reference closely: the pink band
+  is a narrow one in the reference too (warm from 0 to 5 degrees, at its
+  warmest at 3).
+- To the side in deep twilight the page is too bright: 1.1 to 1.3 at -6,
+  1.4 to 1.7 at -10 (the table's light gathered as a mean).
+- Below the horizon towards the sun in twilight (the haze over the ground
+  under the band of glow): 0.6 to 0.8 of the reference, and still bluer
+  (r-chromaticity 0.06 to 0.13 lower); before the lean, 0.44 and blue
+  where the reference is brown-orange. By day below the horizon, 0.84 to
+  0.97 (the sea there is the page's own, not the reference's grey ground).
+
+So the light of the sky is the page's atmosphere's; what still differs
+from photographs is mostly how much aerosol there is, and the exposure
+and tone curve (see [Exposure](#exposure-and-the-tone-curve)).
 
 ## Low clouds
 
