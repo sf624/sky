@@ -771,20 +771,43 @@ all dimmed and reddened by the air:
   sine of the ecliptic latitude, from the ecliptic's pole (`uEcliptic`,
   set from `OBLIQUITY`); so it is the real ecliptic for the date, the
   time and the place. Nearer the sun than the table goes (15 degrees on
-  the ecliptic), the power goes on, to 2 degrees. The air dims it as the
-  Milky Way. As the night eye comes in, its cone is raised as the Milky
-  Way is (`MILKY_EYE`), but only by what it stands above `ZODI_FLOOR` =
-  200, smoothly (`(z - 200)^2 / z`): so the cone reads about as bright as
-  the Milky Way's brighter parts, as the eye sees them, and the faint
-  band and floor elsewhere stay as they are. Raised in full, the floor
-  made the moonless sky some twice as bright, and the eye saw fewer
-  stars all over it (the faintest star seen depends on the sky behind
-  it). Nothing fades it: by day and in twilight the sky is far brighter
-  and the exposure hides it, and so does a moonlit sky. By day and down
-  to the sun 6 degrees below the horizon it moves no pixel by more than
-  one level (in at most 6 % of them, by their random rounding); it
-  comes out of the twilight glow as the sun goes from 12 to 18 degrees
-  down. It costs a few operations per pixel of sky.
+  the ecliptic), the power goes on, to 2 degrees. `zodiacal` returns the
+  cone (the power term) and the rest (the floor and the bumps) apart.
+
+  It is drawn only at night, once the night eye comes in (`uNightEye`):
+  by day and in civil twilight the sky is thousands of times brighter,
+  and leaving it out keeps every picture with the sun above -3 degrees as
+  it was. The air dims it as the Milky Way. Its floor and the gegenschein
+  are drawn as they are. Its cone is drawn as the eye sees it
+  (`zodiacalSeen`), from its contrast over what lies behind it (the sky,
+  the Milky Way, the rest of the zodiacal light and the moon's veil in
+  the eye), as the rods see them: the airglow, bluer than sunlight, is
+  brighter to them. Below `ZODI_SEEN` = 0.22 the cone is not drawn; above,
+  its drawn contrast rises smoothly from 0 and soon as 0.89 c / 0.22 - 1,
+  some four times the contrast. Its slope never passes (1 + d) / c, so
+  that where the sky behind brightens faster than the cone (the last of
+  the twilight at the horizon, the moon's veil, the Milky Way) the sum
+  still brightens: a steeper rise (tried first: a smoothstep over the
+  contrast) left a dark rim between the cone and the glow at the horizon.
+  On a moonless spring evening from cruise (sun 18 degrees down) the
+  cone's contrast to the rods is about 1.5 at its base, 0.6 to 1 at 30
+  to 45 degrees up and 0.4 towards 90 degrees from the sun: drawn, its
+  base stands 1.3 to 2 times as far over the sky as the Milky Way's
+  brightest clouds (34 against 17 to 26 levels of 255), and it is seen
+  to some 40 degrees up. Under a first-quarter moon its base still has a
+  contrast of 0.8 from cruise (the moonlit air above 11 km is thin) and
+  shows weaker; near the sea 0.27 and it is barely there; under a full
+  moon it is not drawn. A contrast mapping that never dims a sum cannot
+  show the far cone (0.4 to 0.6) plainly and hide the quarter moon's (0.27
+  near the sea) too: they are too close.
+
+  Before (round 1) the cone was raised `MILKY_EYE` times only by what
+  it stood above 200 S10: its base was raised most, its far part (200 to
+  600 S10) hardly, and it read as a short, stubby glow on the horizon;
+  under the moon nothing faded it but the brighter sky. Raised in full,
+  the floor made the moonless sky some twice as bright, and the eye saw
+  fewer stars all over it (the faintest star seen depends on the sky
+  behind it). It costs a few operations per pixel of sky.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
