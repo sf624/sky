@@ -50,6 +50,7 @@ export const CLASSES = {
   comments: 'comments, blank lines and spacing in shader texts',
   readback: 'hashes of what the frames drew (textures and canvases)',
   query: 'calls that only ask (get*, is*, checkFramebufferStatus)',
+  start: 'frames 0 and 1, the start: a page may load in another order, or make there what its first frame needs',
 };
 const QUERY = /^(get[A-Z]\w*|is[A-Z]\w*|checkFramebufferStatus)\(/;
 
@@ -73,6 +74,7 @@ function normalise(t, ignore) {
   for (const [name, frames] of t.canvases) {
     const out = new Map();
     for (const [f, lines] of frames) {
+      if (ignore.has('start') && f <= 1) continue;
       out.set(f, lines.filter((l) => !(ignore.has('readback') && l.startsWith('readback ')) && !(ignore.has('query') && QUERY.test(l)))
         .map((l) => l.replace(/src:([0-9a-f]{16})/g, (_, h) => 'src:' + srcId(h))));
     }

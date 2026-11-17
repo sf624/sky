@@ -29,7 +29,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `perf [--q QUERY] [--size WxH] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas, the frame rate, and the GPU time per kind of draw (median and p90). Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
+| `perf [--q QUERY] [--size WxH] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the frame rate, and the GPU time per kind of draw (median and p90). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
 
@@ -81,7 +81,7 @@ Every page (except under `perf`) runs on a fake clock, so that two runs give the
 - CSS transitions and animations are turned off: they would run on the real clock.
 - The text and the controls over the hero (`.title`, `.panel`, `.hint`, `.fs`) and the scroll bar are hidden from the first frame on, except in the views marked `ui`.
 
-**When is the page ready?** At the load event; where an element has `data-sky`, when its value is `ready` (`failed` stops the run); and when the network has been quiet for 300 ms (no request in flight, as the DevTools Network domain counts them), so that files fetched after the load, one after another, are in. A page that loads in parts should still mark itself `data-sky="loading"` in its markup: a pause longer than 300 ms between two requests would otherwise end the wait. Then the tools let two real frames of the browser pass, so that the resize and intersection observers have run, before the first fake frame.
+**When is the page ready?** At the load event; where an element has `data-sky`, when its value is `ready` (`failed` stops the run); and when the network has been quiet for 300 ms (no request in flight, as the DevTools Network domain counts them), so that files fetched after the load, one after another, are in. A page that loads in parts should still mark itself `data-sky="loading"` in its markup: a pause longer than 300 ms between two requests would otherwise end the wait. While it says `loading` after the load event, the tools run the timers due and the animation frames it asks for, every 10 ms, without moving the fake clock (`__loading()` in the page): the page's loading, which waits a frame at a time, goes on, and all of it is frame 0. Its own frames must not start before it says `ready` (the page's `kick()` waits for the end of the loading). Then the tools let two real frames of the browser pass, so that the resize and intersection observers have run, before the first fake frame.
 
 ## The GL trace
 
@@ -95,7 +95,9 @@ The trace records what the page asks of WebGL, per canvas, in order: every call 
 - The read-back keeps the GL errors already pending for the page's own `getError`.
 - A call made outside a stepped frame after the setup (in an event or an observer) is marked `outside a frame:`: when it runs depends on the browser.
 
-Frame 0 is everything before the first fake frame: compiling, linking, building the noise, weather and wave textures. Frame k ends after the timers and the animation frames of the k-th step.
+Frame 0 is everything before the first fake frame: the whole loading (compiling, linking, building the noise, weather and wave textures, drawing the first frame once as a probe).
+
+The trace leaves out the calls whose number depends on how fast the GPU is, not on the page: the sync objects (`fenceSync`, `getSyncParameter`, `clientWaitSync`, `waitSync`, `deleteSync`, `isSync`), `flush`, and `getProgramParameter` and `getShaderParameter` with `COMPLETION_STATUS_KHR`. A page that polls them while it loads still gives the same trace run after run. Frame k ends after the timers and the animation frames of the k-th step.
 
 On one renderer, the same page gives the same trace byte for byte, run after run: the trace has no time in it and no GPU noise. The GPU and SwiftShader give different pixels, and the page asks some things that depend on the renderer (extensions). So compare traces of one renderer with each other; `--ignore readback` compares the commands alone, across renderers.
 
@@ -108,6 +110,7 @@ On one renderer, the same page gives the same trace byte for byte, run after run
 | `comments` | comments, blank lines and spacing in shader texts (for moves of shader code) |
 | `readback` | the hashes of what the frames drew |
 | `query` | calls that only ask (`get…`, `is…`, `checkFramebufferStatus`), for example a different order of `getUniformLocation` |
+| `start` | frames 0 and 1: a change to the loading may do the same work in another order, or do in frame 0 what the first frame did (make the pictures, upload a table). The frames after must be the same |
 
 Example: `node tools/sky.mjs trace-diff a.trace b.trace --ignore shader,readback`. A difference is printed like this:
 

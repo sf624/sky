@@ -14,10 +14,13 @@ const READY_MS = +(process.env.SKY_READY_MS || 180000);
 // Ready: the load event; where an element has data-sky, its value "ready" ("failed" stops the run); and the
 // network quiet (no request in flight for QUIET_MS, counted by the DevTools Network domain), so that files a
 // page fetches after the load, one after another, are in. A page that loads in parts should still mark itself
-// data-sky="loading" in its markup.
+// data-sky="loading" in its markup. While it is "loading" after the load event, the animation frames and the
+// timers it asks for run without moving the fake clock (__loading in inpage.mjs): a page that loads over
+// animation frames gets them, and all of it is frame 0 of the trace.
 const READY = `(() => {
   const el = document.querySelector('[data-sky]'), v = el && el.dataset.sky;
   if (v === 'failed') return 'failed';
+  if (document.readyState === 'complete' && v === 'loading') return 'loading:' + window.__loading();
   return document.readyState === 'complete' && (!el || v === 'ready') ? 'ready' : '';
 })()`;
 const QUIET_MS = 300;
@@ -65,9 +68,9 @@ export class Session {
     page.url = this.server.url(root) + query;
     await page.send('Page.navigate', { url: page.url });
     const t0 = Date.now();
-    for (;;) {
-      await sleep(100);
-      let r = '';
+    for (let r = '';;) {
+      await sleep(r.startsWith('loading') ? 10 : 100);
+      r = '';
       try {
         r = await page.eval(READY);
       } catch (err) {

@@ -306,6 +306,13 @@ function install(cfg, hashBytes) {
     if (cfg.trace && frame > cfg.trace.frames) T.on = false;
   };
 
+  // Calls whose number depends on how fast the GPU is, not on the page: waiting on fences (sync objects),
+  // flushes, and the questions whether a shader or a program is done (KHR_parallel_shader_compile). The trace
+  // leaves them out, so that a page that waits for the GPU gives the same trace run after run.
+  const COMPLETION_STATUS_KHR = 0x91B1;
+  const TIMING = new Set(['fenceSync', 'clientWaitSync', 'waitSync', 'getSyncParameter', 'deleteSync', 'isSync', 'flush']);
+  const timing = (m, a) => TIMING.has(m)
+    || ((m === 'getProgramParameter' || m === 'getShaderParameter') && a[1] === COMPLETION_STATUS_KHR);
   const DRAWS = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements', 'clear', 'clearBufferfv', 'clearBufferiv', 'clearBufferuiv', 'clearBufferfi']);
   for (const m of Object.keys(O)) {
     const orig = O[m];
@@ -313,7 +320,7 @@ function install(cfg, hashBytes) {
       const s = st(this);
       contexts.add(this);
       let text = null;
-      if (T.on) {
+      if (T.on && !timing(m, a)) {
         const pos = enumPos(m, a.length);
         const args = a.map((v, i) => {
           if (m === 'shaderSource' && i === 1) {
@@ -386,6 +393,17 @@ function install(cfg, hashBytes) {
       inStep = false;
     }
     return now;
+  };
+  // While the page loads (data-sky="loading", see page.mjs): runs the timers due and the animation frames
+  // asked for, without moving the clock. All of it belongs to frame 0.
+  window.__loading = () => {
+    runTimers();
+    const due = [...frames];
+    frames.clear();
+    for (const [, cb] of due) {
+      try { cb(now); } catch (e) { later(e); }
+    }
+    return frames.size;
   };
   window.__trace = async () => {
     const canvases = [];

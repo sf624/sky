@@ -20,12 +20,13 @@ blocks. It loads no other file.
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
-| (no id) | JS | Everything else, in one function that runs at load. |
+| (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
 
 There is one canvas, `#sky`, the hero: the view from an aircraft. Clouds,
 sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
 over frames. It fills the window, and the page does not scroll.
-`makeSky(canvas, view)` compiles `fs` and the other shaders for it.
+`makeSky(canvas, view, { done, shown })` makes its renderer, a step at a
+time (see the next section).
 
 ## Conventions
 
@@ -64,38 +65,92 @@ over frames. It fills the window, and the page does not scroll.
 
 ## From the address bar to the first frame
 
-The JS runs once, at load:
+The page shows at once in its loading state: the hero is dark (`.loading`,
+a gradient of a night sky), with the title over it. After 0.3 s a thin line
+of progress and a word (`TEXT.loading`) fade in, so a quick start shows only
+the dark. The panel and the full-screen button stay hidden (no clicks, no
+focus) until the first picture. All of this is HTML and CSS: it needs no
+script.
 
-1. **Tables that do not depend on the view.**
-   - `odTable` (`buildDepths`): optical depth to the top of the air towards
-     the sun, over altitude (48 rows, squared spacing) and the cosine of the
-     sun's zenith angle (96 columns from -0.2), 64 steps each. Read by
-     `sunDepth()` in the JS only.
-   - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
-     (see [The air](#the-air)).
-   - `starData` (`buildStars`): the star texture.
-   - `DAY_LEVEL` (the metered sky with the sun at 42 degrees) and `NIGHT`
-     (4e-8 of it: the moonless night sky, airglow).
-2. **The renderer.** `makeSky` for `#sky`, inside a `try`: if it fails, the
-   error goes to the console. Without WebGL2, the canvas keeps its CSS
-   gradient.
-3. **Inputs.** URL parameters with the id of a slider set that slider's
+The JS then runs once, at load, and does little:
+
+1. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
-   then act as the now button, the select and the play button. `yaw`,
-   `pitch`, `heading`, `at`, `pixels` and `res` are read directly (see
+   then act as the now button, the select and the play button, but the
+   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
+   `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
-4. **The loop.** `update()` marks the state changed and calls `kick()`,
-   which asks for one `requestAnimationFrame(frame)`.
+2. **The loading.** After the first paint (an animation frame, then a
+   message), `makeSky` for `#sky` makes the renderer. It is an `async`
+   function: it waits a frame (`nextFrame`) wherever it would otherwise
+   hold the main thread or wait for the GPU. Its steps:
+   - `getContext`, and the extensions.
+   - Every program (`fs`, `noise`, `waves`, `mean`, `show`) is
+     compiled and linked at once, and nothing asks how it went yet. With
+     `KHR_parallel_shader_compile`, the GPU process compiles them on threads
+     of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
+     it, asking waits, so the page asks for one program a frame. A failed
+     program throws the compiler's or the linker's message.
+   - Meanwhile the tables of the CPU, in slices of about 8 ms, one a frame
+     (`slices`). Each is a generator (a job) that yields every little while;
+     `finish(job)` runs one at once.
+     - `odTable` (`buildDepths`): optical depth to the top of the air
+       towards the sun, over altitude (48 rows, squared spacing) and the
+       cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
+       each. Read by `sunDepth()` in the JS only.
+     - `starData` (`buildStars`): the star texture.
+     - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
+       (see [The air](#the-air)), for the haze the page starts with
+       (`NIGHT_HAZE`, the slider's own value).
+     - `NIGHT` (`nightSky`): the moonless night sky (airglow), 4e-8 of the
+       metered sky with the sun at 42 degrees, at `NIGHT_HAZE`.
+     - `msData` again, if the address gives another haze, for that one.
+     - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
+   - The textures (see [Textures made at start](#textures-made-at-start)).
+     The noise and the weather map are drawn in batches (`batches`), the
+     weather map in strips of 64 rows (the scissor; each pixel is the
+     same as from one draw). After each batch the page waits for a fence
+     (`settle`); a batch doubles while the GPU gets through it in under
+     100 ms and halves over 250 ms. The GPU process draws the whole
+     browser, and a slow GPU given seconds of work at once would freeze it.
+   - `prime`: the first frame is drawn as the first frame will draw it,
+     up to the canvas (`render` as a probe, which then puts its state
+     back), and the page waits for a fence. Some drivers finish a program
+     only at its first draw, which can take a second: that happens now,
+     behind the loading state. The first frame starts afresh and draws
+     over all that the probe drew.
+3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
+   without WebGL2 or if a program failed: the error goes to the console,
+   the loading state fades out, and the canvas keeps its CSS gradient).
+   `kick()` asks for the first frame; a time-lapse asked for in the address
+   starts now; the title's and the panel's timers start (see `.told` and
+   `.still`). Before this, `kick()` and `schedule()` do nothing.
+4. **The first picture.** The first frame goes to the canvas, and
+   `render` calls `shown()`: the hero gets `.shown`, and the loading state
+   fades out over the picture in 0.8 s (it lets the pointer through at
+   once), while the panel fades in. The class and the picture reach the screen in the same frame, and
+   the fade starts from opaque: nothing empty or half drawn shows.
+
+So no step holds the main thread for long, except `getContext` itself.
+The pictures are the same as when everything ran at once: the jobs and
+batches only split the same work.
+
+A hidden tab has no animation frames: there `nextFrame` waits 100 ms
+instead (the browser slows that down further), so the loading goes on
+slowly; the first frame waits until the tab is shown.
+
+**The loop.** `update()` marks the state changed and calls `kick()`,
+which asks for one `requestAnimationFrame(frame)`.
 
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed, runs
-  `celestial()`, sets the exposure (`state.airExposure`) and the panel's
-  labels;
+- if something changed: rebuilds `msData` when the haze has changed (at
+  once, with `finish`), runs `celestial()`, sets the exposure
+  (`state.airExposure`) and the panel's labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
@@ -525,7 +580,7 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All are uploaded in `makeSky`:
+All are made during the loading, in `makeSky`:
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|

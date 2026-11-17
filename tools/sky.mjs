@@ -12,7 +12,7 @@ const REPO = path.dirname(TOOLS);
 const USAGE = `usage: node tools/sky.mjs <command> [options]
   trace       [--view NAME | --q QUERY] [--frames N] [--ms MS] [--size WxH] [--out FILE]
               the GL trace of the page's first frames, as text
-  trace-diff  A B [--ignore ${'shader,line,comments,readback,query'}] [--max N]
+  trace-diff  A B [--ignore ${'shader,line,comments,readback,query,start'}] [--max N]
               compares two traces; exit status 1 if they differ
   stills      [--views a,b] [--base DIR|REV] [--size WxH] [--out DIR]
               stills of the fixed views (tools/views.json); with --base, compared with the base's
