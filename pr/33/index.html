@@ -702,13 +702,15 @@ layout(location = 0) out vec4 outColor;
 // kept in steps of 1 / uSteps.
 uniform float uSteps;
 layout(location = 1) out vec4 outAux;
+// (The first stage's third texture: see clouds.)
+layout(location = 2) out vec4 outLight;
 // The light of the clouds is worked out in two stages. Stage 0 draws a
 // quarter of the pixels (half the width and the height) and keeps, for the
 // first cloud each ray meets, the parts of its light that change slowly
 // across the picture (outColor, outAux); stage 1 draws the picture and takes
 // them from there (uLightA, uLightB; see clouds). -1: one stage only.
 uniform float uStage;
-uniform sampler2D uLightA, uLightB;
+uniform sampler2D uLightA, uLightB, uLightC;
 
 const float PI = 3.14159265359;
 // The parameters of the air follow Bruneton's demo (2017): see THIRD_PARTY_NOTICES.md.
@@ -1240,8 +1242,14 @@ float overhead(vec3 p, float jit, bool down) {
 // more with the sun high (0.5 + 0.75 mu0), and a base is brighter overhead
 // than aslant (as 1 + 2 cos, the overcast sky of the CIE). The sun's part
 // has the gain BELOW; the sky's part takes the 6 % the sea sends back up.
-vec2 throughDeck(float mu0, float tDown, float cv) {
-  float esc = (3.0 / 7.0) * (1.0 + 2.0 * cv);
+// Inside the cloud, part of that light goes back up (r of the light going
+// down there): looking down, the eye sees it. The light then varies with
+// the cosine, as 1 + 2 cv for the stream down and 1 - 2 cv for the stream
+// up (Eddington's form), from a base looking down on the dark sea to the
+// same grey all round deep in a thick deck. (Inside, the light looking
+// down was that of the horizon, and a line ran across the fog there.)
+vec2 throughDeck(float mu0, float tDown, float cv, float r) {
+  float esc = (3.0 / 7.0) * max(1.0 + 2.0 * cv + r * (1.0 - 2.0 * cv), 0.3 + 0.7 * r);
   return vec2(BELOW * mu0 * min((0.5 + 0.75 * mu0) * tDown, 1.0) * esc / PI, 1.06 * tDown * esc);
 }
 
@@ -1254,9 +1262,9 @@ float hg(float mu, float g) {
 // sMany: many times) and of skylight (sAmb), and the distance it comes from
 // (tBar; negative without clouds).
 void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
-            out float Tc, out float sOne, out float sMany, out float sAmb, out float tBar, out vec4 mapA, out vec4 mapB) {
+            out float Tc, out float sOne, out float sMany, out float sAmb, out float tBar, out vec4 mapA, out vec4 mapB, out vec4 mapC) {
   const float DS_MIN = 0.02, DS_NEAR = 0.008, DS_REL = 0.0045, COARSE = 3.0, FINE = 0.35;
-  Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; tBar = -1.0; mapA = vec4(-1.0); mapB = vec4(0.0);
+  Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; tBar = -1.0; mapA = vec4(-1.0); mapB = vec4(0.0); mapC = vec4(0.0);
   float pix = 2.0 * uTan / uRes.y;
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
@@ -1312,6 +1320,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   bool lit = false, fog = true;
   float under = 0.0;
   float keptTau = 0.0, keptCav = 0.0, keptGK = 0.0;
+  vec4 keptFine = vec4(0.0);
   vec3 keptNL = vec3(0.0, 1.0, 0.0);
   float TcLit = 1.0, column = -1.0, above = 0.0;
   for (int i = 0; i < CLOUD_STEPS; i++) {
@@ -1327,7 +1336,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // Strode into a cloud: go back and walk, though not to before the
       // start (with the eye in a cloud, that would put the cloud behind
       // it, and the sky would show through).
-      t = max(t - (came - ds), ta);
+      t = max(t - (came - ds), ta + jitter * ds);
       came = ds;
       walk = 3;
       continue;
@@ -1399,11 +1408,18 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // through the cloud above, the billows' normal, the hollows) come
         // from the first stage, where a ray of a near pixel met the first
         // cloud it met at the same distance as this light (bilateral, after
-        // Kopf et al. 2007); else they are worked out here. (Also for a
+        // Kopf et al. 2007: the near pixels that did, by their weights,
+        // however small; with at least 30 % of the weight, as it was, the
+        // outlines were worked out in full, 2.5 ms among the tops, and
+        // looked the same); else they are worked out here. (Also for a
         // cloud behind a thin fringe: only for the first, the outlines of
         // billows seen against those behind them were worked out in full,
         // 4 ms of the frame among the tops.)
         float tps = t - (fPrev < 0.0 ? came * f / (f - fPrev) : 0.0), tauC = 0.0, cav = 0.0, gK = 0.0;
+        // What the light's first two steps find (w: crisp), and the fine
+        // normal (see below): its cosines to the light (x) and to the up (y),
+        // and how deep in a crease the place lies (z: occ).
+        vec4 fineL = keptFine;
         vec3 nL = upL;
         // Deeper in the same cloud, they are those of the last sample.
         bool mapped = again, behind = uStage == 1.0;
@@ -1415,7 +1431,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         } else if (uStage > 0.5) {
           vec2 hp = gl_FragCoord.xy * 0.5 - 0.5, fr = fract(hp);
           ivec2 i0 = ivec2(floor(hp)), top = textureSize(uLightA, 0) - 1;
-          vec4 A = vec4(0.0), B = vec4(0.0);
+          vec4 A = vec4(0.0), B = vec4(0.0), C = vec4(0.0);
           float ws = 0.0, tol = 0.04 * tps + 0.03;
           for (int k = 0; k < 4; k++) {
             ivec2 o = ivec2(k & 1, k >> 1), ij = clamp(i0 + o, ivec2(0), top);
@@ -1424,9 +1440,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
                      * max(1.0 - abs(a.x - tps) / tol, 0.0) * (a.x >= 0.0 ? 1.0 : 0.0);
             A += wk * a;
             B += wk * texelFetch(uLightB, ij, 0);
+            C += wk * texelFetch(uLightC, ij, 0);
             ws += wk;
           }
-          if (ws > 0.3) {
+          if (ws > 0.02) {
             mapped = true;
             A /= ws;
             B /= ws;
@@ -1436,6 +1453,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             cav = A.w;
             nL = normalize(B.xyz);
             gK = B.w;
+            fineL = C / ws;
           }
         }
         // The same at the size of whole billows (at least 120 m, from the
@@ -1525,20 +1543,60 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             tauC = mix(tauC, above / max(sunUp, 0.05), slabbed);
           }
         }
+        // The depth towards the light over its first two steps (crisp), and
+        // which way the surface faces at the size of the small billows: as
+        // the parts above, from the first stage where it served (a billow of
+        // the fine noise is many pixels wide wherever this one is worked out:
+        // within 8 km; worked out for every pixel, they took 10 ms of the
+        // frame among the tops), else here.
+        if (!mapped) {
+          float crisp = 0.0;
+          if (!slab) lightDepth(ps, uLight, step, lod, off, 0, 2, crisp);
+          crisp *= 1.0 - slabbed;
+          // Which way the surface faces, from the field smoothed as for mid:
+          // its gradient, normalised, so that each billow turns from the
+          // light by degrees (the slope towards the light alone was lit or
+          // not, as the field is steep). Beyond 8 km, where the light's first
+          // step is 50 m and a pixel some 10 m, the billows' normal is nearly
+          // the whole billows' one: that one serves (four reads of the fine
+          // noise fewer). On a base, which has no fine noise, the same; and a
+          // base has no creases (their shade drew lines where the field over
+          // the base passed 0.1). (The same where the first stage did not
+          // serve: along outlines, and on a cloud seen through another.)
+          bool far = step >= 0.05 || fb > 0.1 || uStage == 1.0;
+          smoothReads = true;
+          shake = vec3(hash(gl_FragCoord.xy + 1.37 * uPass + 3.1), hash(gl_FragCoord.yx + 2.11 * uPass + 5.3),
+                       hash(gl_FragCoord.xy + 3.07 * uPass + 9.7)) - 0.5;
+          float f0 = far ? fL : cloudField(ps, lm, true, y0, b0, c0, e0);
+          vec3 grad = far ? -gK * hL * vec3(dot(nL, uLight), dot(nL, side), dot(nL, cross(uLight, side)))
+                          : vec3(cloudField(ps + h * uLight, lm, true, y0, b0, c0, e0),
+                                 cloudField(ps + h * side, lm, true, y0, b0, c0, e0),
+                                 cloudField(ps + h * cross(uLight, side), lm, true, y0, b0, c0, e0)) - f0;
+          if (far) h = hL;
+          float glen = max(length(grad), 1e-6);
+          // The normal; out along it, the field falls as fast as it rises
+          // here on a billow in the open, and less in a crease between
+          // billows (occ: 1 where it does not fall at all).
+          vec3 nrm = -(grad.x * uLight + grad.y * side + grad.z * cross(uLight, side)) / glen;
+          float fo = cloudField(ps + 2.0 * h * nrm, far ? lmL : lm, !far, y0, b0, c0, e0);
+          float occ = clamp((fo - f0) / (2.0 * glen) + 1.0, 0.0, 1.0) * (1.0 - smoothstep(0.0, 0.1, fb));
+          smoothReads = false;
+          fineL = vec4(dot(nrm, uLight), dot(nrm, upL), occ, crisp);
+        }
         keptTau = tauC;
         keptCav = cav;
         keptNL = nL;
         keptGK = gK;
+        keptFine = fineL;
         if (uStage == 0.0) {
           // The first stage keeps these, and its ray ends here.
           mapA = vec4(tps, tauC, above, cav);
           mapB = vec4(nL, gK);
+          mapC = fineL;
           return;
         }
         float tau = tauC;
-        crisp = 0.0;
-        if (!slab) lightDepth(ps, uLight, step, lod, off, 0, 2, crisp);
-        crisp *= 1.0 - slabbed;
+        crisp = fineL.w;
         float facingL = clamp((0.4 + dot(nL, uLight)) / 1.4, 0.0, 1.0);
         // With the sun low, a side turned from it is lit by the sky more than
         // by sunlight that went through the cloud: blue-grey against the warm
@@ -1546,35 +1604,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float low = 1.0 - smoothstep(0.05, 0.35, uLight.y);
         float shapeL = mix(SHAPE * (1.0 - 0.5 * low), 1.1, facingL * facingL * (3.0 - 2.0 * facingL));
         float deepL = 1.0 - CAVITY * cav;
-        // Which way the surface faces, from the field smoothed as for mid:
-        // its gradient, normalised, so that each billow turns from the light
-        // by degrees (the slope towards the light alone was lit or not, as
-        // the field is steep). Beyond 8 km, where the light's first step is
-        // 50 m and a pixel some 10 m, the billows' normal is nearly the
-        // whole billows' one: that one serves (four reads of the fine noise
-        // fewer). On a base, which has no fine noise, the same; and a base
-        // has no creases (their shade drew lines where the field over the
-        // base passed 0.1).
-        bool far = step >= 0.05 || fb > 0.1;
-        smoothReads = true;
-        shake = vec3(hash(gl_FragCoord.xy + 1.37 * uPass + 3.1), hash(gl_FragCoord.yx + 2.11 * uPass + 5.3),
-                     hash(gl_FragCoord.xy + 3.07 * uPass + 9.7)) - 0.5;
-        if (far && mapped) fL = cloudField(ps, lmL, false, y0, b0, c0, e0);
-        float f0 = far ? fL : cloudField(ps, lm, true, y0, b0, c0, e0);
-        vec3 grad = far ? -gK * hL * vec3(dot(nL, uLight), dot(nL, side), dot(nL, cross(uLight, side)))
-                        : vec3(cloudField(ps + h * uLight, lm, true, y0, b0, c0, e0),
-                               cloudField(ps + h * side, lm, true, y0, b0, c0, e0),
-                               cloudField(ps + h * cross(uLight, side), lm, true, y0, b0, c0, e0)) - f0;
-        if (far) h = hL;
-        float glen = max(length(grad), 1e-6);
-        float facing = clamp((0.3 - grad.x / glen) / 1.3, 0.0, 1.0);
-        // The normal; out along it, the field falls as fast as it rises
-        // here on a billow in the open, and less in a crease between
-        // billows (occ: 1 where it does not fall at all).
-        vec3 nrm = -(grad.x * uLight + grad.y * side + grad.z * cross(uLight, side)) / glen;
-        float fo = cloudField(ps + 2.0 * h * nrm, far ? lmL : lm, !far, y0, b0, c0, e0);
-        float occ = clamp((fo - f0) / (2.0 * glen) + 1.0, 0.0, 1.0) * (1.0 - smoothstep(0.0, 0.1, fb));
-        smoothReads = false;
+        float facing = clamp((0.3 + fineL.x) / 1.3, 0.0, 1.0);
+        float occ = fineL.z;
         // The sky lights what faces up, the higher the better. This
         // follows the field without the fine noise: light spreads over
         // tens of metres in a cloud, and the creases of the fine noise
@@ -1618,7 +1649,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float inc = mix(1.0, smoothstep(-0.05, 0.3, dot(nL, uLight)), clamp(white - 0.2, 0.0, 1.0));
         one = p0 * exp(-tau) * inc;
         float crease = 1.0 - CREASE * occ;
-        open = mix(open, 0.55 + 0.35 * dot(nrm, normalize(ps + eye())), 0.5);
+        open = mix(open, 0.55 + 0.35 * fineL.y, 0.5);
         // SUNLIT: the gain of the light scattered many times, and SKYLIT that
         // of the sky's: a sunlit top keeps room below white for its
         // gradients, and a side in shadow is a luminous blue-grey, lit by
@@ -1646,7 +1677,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // surface, and the fog was a dark, flat grey.)
         if (fog && !again) under = overhead(ps, hash(gl_FragCoord.xy + 2.71 * uPass + 13.3), true);
         float mu0 = clamp(sunUp, 0.0, 1.0), tDown = (1.0 + COLUMN * under) / (1.0 + COLUMN * (above + under));
-        vec2 deck = throughDeck(mu0, tDown, max(dot(d, upL), 0.0));
+        vec2 deck = fog ? throughDeck(mu0, tDown, dot(d, upL), COLUMN * under / (1.0 + COLUMN * under))
+                        : throughDeck(mu0, tDown, max(dot(d, upL), 0.0), 0.0);
         float below = fog ? 1.0 : (1.0 - smoothstep(-0.6, -0.1, dot(nL, upL))) * smoothstep(2.0, 6.0, above);
         float manyBase = shapeL * white * sideways + deck.x;
         many = deepL * crease * hollow * billow * mix(manyTop, manyBase, below);
@@ -1885,30 +1917,64 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   skyAt(ps, up, betaM, extM, S);
   multiScatter(0.0, dot(n, uSun), msS);
   multiScatter(0.0, dot(n, uMoon), msM);
-  // Clouds in the mirror hide that sky (three samples up the layer tell how
-  // much is left) and show their sides and bases: grey with skylight, and
-  // whiter where the sun reaches around the sea.
-  float seen = 1.0, veil = 0.0;
+  // Clouds in the mirror. The waves too small to show (s2r) spread what the
+  // sea mirrors over some ten to twenty degrees each way, so it shows the
+  // mean light of a wide patch of the clouds, more of it the more the view
+  // grazes, never their single cells. (Mirrored along one direction, the
+  // cells of a deck came out as sharp dark ovals on a pale sheet: wet sand,
+  // not a sea.) Four directions stand for the spread (the slopes at plus or
+  // minus sigma along two axes, turned anew each frame, so that the mean
+  // over the frames covers it), each weighed by how much of its facets the
+  // eye sees (more of those tilted towards it: the mirror shows a higher
+  // part of the sky). Each reads the cloud straight up through the shell
+  // where it meets the clouds' middle (four reads), smoothed over the patch
+  // it stands for: what is left of the sky behind it (seen), and the light
+  // of the base there as clouds draws it (throughDeck, from the depth
+  // overhead), seen aslant.
+  vec4 mir[3];
+  float seen = 1.0;
+  for (int k = 0; k < 3; k++) mir[k] = 0.75 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.035 * soft * c * lit[k];
   if (uCloud > 0.0) {
-    for (int i = 0; i < 3; i++) {
-      vec2 h = (CT - CB) * (i == 0 ? vec2(0.07, 0.14) : i == 1 ? vec2(0.23, 0.18) : vec2(0.47, 0.3));
-      veil += cloudDensity(ps - eye() + up * ((CB + h.x) / dot(up, n)), 3.0, false) * h.y / dot(up, n);
+    float wsum = 0.0;
+    vec2 e1 = sigma * ua, e2 = vec2(-e1.y, e1.x);
+    mir[0] = vec4(0.0); mir[1] = vec4(0.0); mir[2] = vec4(0.0);
+    for (int j = 0; j < 4; j++) {
+      vec2 o = slope + (j < 2 ? e1 : -e1) + ((j & 1) == 0 ? e2 : -e2);
+      vec3 nk = normalize(n - o.x * ex - o.y * ez);
+      float wk = max(dot(nk, -d), 0.0);
+      vec3 uk = reflect(d, nk);
+      uk = normalize(uk + max(0.03 - dot(uk, n), 0.0) * n);
+      float ck = dot(uk, n), dist = (CB + 0.5) / ck;
+      // The patch on the clouds that this direction stands for: the spread
+      // of a quarter of the slopes (some 2 sigma of angle) at that distance
+      // and slant. The field is smoothed over it, but its edge is not made
+      // as wide (that is for a pixel's footprint across an outline): read
+      // so, a deck far off let nearly all the light through, and the sea
+      // towards the horizon mirrored a white sky.
+      float lodk = log2(max(2.0 * sigma * dist / ck, 0.06) / TEXEL_KM);
+      vec3 xk = ps - eye() + uk * dist;
+      float tv = 0.0;
+      for (int i = 0; i < 4; i++) {
+        vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
+        float y, bump, body, edge;
+        float f = cloudField(xk + n * h.x, lodk, false, y, bump, body, edge);
+        if (f > 0.0) tv += cloudExtinction(f, min(lodk, 2.0), y, body, edge) * h.y;
+      }
+      vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
+      float sk = exp(-tv / ck);
+      for (int k = 0; k < 3; k++) {
+        vec4 base = deck.x * lit[k] + deck.y * 2.0 * (uSunI * msS[k] + uMoonI * msM[k]);
+        mir[k] += wk * mix(base, S[k], sk);
+      }
+      wsum += wk;
     }
-    seen = exp(-veil);
+    for (int k = 0; k < 3; k++) mir[k] /= max(wsum, 1e-6);
+    seen = 0.0;
   }
-  // What the mirror shows of the clouds is their base, lit as clouds
-  // describes it (the sun's light and the sky's that came down through
-  // them, from their depth straight up: the slant depth of the veil times
-  // the cosine), seen aslant. It showed the sky's mean light, and under a
-  // deck the sea stayed blue below a grey ceiling.
-  vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * veil * dot(up, n)), dot(up, n));
   // Under a cloud less light comes down to the water, of any kind.
   for (int k = 0; k < 3; k++) {
     vec4 sky = uSunI * msS[k] + uMoonI * msM[k];
-    vec4 base = deck.x * lit[k] + deck.y * 2.0 * sky;
-    // (Without clouds, the old blend: the picture stays as it was, bit for bit.)
-    vec4 hidden = uCloud > 0.0 ? base : 0.75 * sky + 0.035 * soft * c * lit[k];
-    L[k] += T[k] * (Fm * mix(hidden, S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
+    L[k] += T[k] * (Fm * mix(mir[k], S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
   }
 }
 
@@ -2198,14 +2264,14 @@ void main() {
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   if (uCirrus > 0.0 && uStage != 0.0) highCloud(o, d, tmax, extM, Th, tHigh, H);
-  vec4 mapA = vec4(-1.0), mapB = vec4(0.0);
+  vec4 mapA = vec4(-1.0), mapB = vec4(0.0), mapC = vec4(0.0);
   if (uCloud > 0.0) {
     vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
     float ta = max(uAlt > CT ? top.x : uAlt < CB ? base.y : 0.0, 0.0);
     float tb = min(ground ? (uAlt < CB ? -1.0 : base.x) : top.y, 600.0);
     float sOne = 0.0, sMany = 0.0, sAmb = 0.0;
     if (tb > ta) {
-      clouds(o, d, ta, tb, ign(gl_FragCoord.xy + 5.588238 * uPass), Tc, sOne, sMany, sAmb, tBar, mapA, mapB);
+      clouds(o, d, ta, tb, ign(gl_FragCoord.xy + 5.588238 * uPass), Tc, sOne, sMany, sAmb, tBar, mapA, mapB, mapC);
     }
 
     if (tBar > 0.0) {
@@ -2229,6 +2295,7 @@ void main() {
   if (uStage == 0.0) {
     outColor = mapA;
     outAux = mapB;
+    outLight = mapC;
     return;
   }
 
@@ -3710,9 +3777,10 @@ const SkySound = (() => {
     const uDrift = U('uDrift'), uCirrus = U('uCirrus');
     const uLight = U('uLight'), uLightI = U('uLightI');
     const uJitter = U('uJitter'), uPass = U('uPass'), uStage = U('uStage');
-    // Units 10 and 11: what the first stage of the clouds' light keeps.
+    // Units 10 to 12: what the first stage of the clouds' light keeps.
     gl.uniform1i(U('uLightA'), 10);
     gl.uniform1i(U('uLightB'), 11);
+    gl.uniform1i(U('uLightC'), 12);
     let tableHaze = null;
     // Draws the view v, w by h pixels, into the bound framebuffer (vw by vh
     // of it: the first stage draws a quarter of the pixels).
@@ -3810,7 +3878,7 @@ const SkySound = (() => {
       return p;
     };
     // The first stage of the clouds' light, for a frame of w by h pixels:
-    // two textures of half floats, half as wide and high (see the shader's
+    // three textures of half floats, half as wide and high (see the shader's
     // uStage). Without float targets there is no first stage (staged).
     let staged = fine;
     const lightMap = (old, w, h) => {
@@ -3820,10 +3888,11 @@ const SkySound = (() => {
         gl.deleteFramebuffer(old.target);
         gl.deleteTexture(old.a);
         gl.deleteTexture(old.b);
+        gl.deleteTexture(old.c);
       }
-      const m = { w: hw, h: hh, target: gl.createFramebuffer(), a: gl.createTexture(), b: gl.createTexture() };
+      const m = { w: hw, h: hh, target: gl.createFramebuffer(), a: gl.createTexture(), b: gl.createTexture(), c: gl.createTexture() };
       gl.activeTexture(gl.TEXTURE10);
-      for (const texture of [m.a, m.b]) {
+      for (const texture of [m.a, m.b, m.c]) {
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, hw, hh);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -3836,7 +3905,8 @@ const SkySound = (() => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, m.a, 0);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, m.b, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, m.c, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) staged = false;
       return m;
     };
@@ -3914,11 +3984,13 @@ const SkySound = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, light.target);
         bind(10, null);
         bind(11, null);
+        bind(12, null);
         gl.activeTexture(gl.TEXTURE0);
         gl.uniform1f(uStage, 0);
         draw(v, cam, w, h, light.w, light.h);
         bind(10, light.a);
         bind(11, light.b);
+        bind(12, light.c);
         gl.activeTexture(gl.TEXTURE0);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);

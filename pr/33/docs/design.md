@@ -452,6 +452,11 @@ clouds.
   over a whole stride (`COARSE * dsAir`); the mean over frames removes the
   noise. Jittered over a fine step only, the strides landed in the same
   places frame after frame, and clouds 3 to 5 km off showed ripples.
+  With the eye in a cloud, the first stride lands in it and steps back to
+  the eye: there the start keeps a jitter over one fine step. It went back
+  to the eye itself in every frame, the steps through the fog were the
+  same each time, and where the fog thinned out its edge came out as
+  flat facets with stepped outlines.
 
 **Two stages.** The light is most of the cost, and much of it changes
 slowly across the picture. So the hero draws `fs` twice a frame
@@ -459,18 +464,27 @@ slowly across the picture. So the hero draws `fs` twice a frame
 the first cloud it meets and keeps the slow parts of its light there
 (`uLightA`: the distance, the depth towards the light past its first two
 steps with the long shadows below, the depth overhead (`overhead`), the hollows;
-`uLightB`: the billows' normal and how steep the field is), in two
-textures of half floats; stage 1 draws the picture and, at its first
-light, takes those from the four nearest texels whose ray met the cloud
-at the same distance (within 4 % plus 30 m: a bilateral upsampling, after
-Kopf et al. 2007). It does so for any cloud along the ray whose distance
+`uLightB`: the billows' normal and how steep the field is; `uLightC`: the
+fine normal's cosines to the light and to the up, `occ`, and the depth
+over the light's first two steps, `crisp`), in three textures of half
+floats; stage 1 draws the picture and, at its first light, takes those
+from those of the four nearest texels whose ray met the cloud at the same
+distance (within 4 % plus 30 m: a bilateral upsampling, after Kopf et al.
+2007), by their weights, however small. (A billow of the fine noise is
+many pixels wide wherever the fine normal is worked out, within 8 km.
+Worked out at every pixel, the fine normal and `crisp` took 9 ms of the
+frame among the tops at WQHD; with at least 30 % of the weight asked of
+the texels that matched, the outlines took 2.5 ms more and looked the
+same.) It does so for any cloud along the ray whose distance
 matches, not only the first: a ray that grazes the fringe of a billow
 and goes on to the one behind it (along the outlines of billows seen
 against others) worked out the second in full, 4 ms of the frame among
 the tops. Where none did (along outlines), it works them out
-itself, without the hollows and the long shadows: a few such pixels made
+itself, without the hollows and the long shadows, and with the normal of
+whole billows for the fine one: a few such pixels made
 whole groups of their neighbours on the GPU wait. Deeper in the same
-cloud, the next light keeps the slow parts of the last. Without float
+cloud, the next light keeps the slow parts of the last, the fine normal
+and `crisp` with them. Without float
 targets there is one stage (`uStage` -1), which works out all of it.
 The smooth reads (the eased weather map, and the shaken reads nearer)
 serve the normals only (`smoothReads`): along the march and towards the
@@ -593,11 +607,18 @@ found between the last two samples. For each:
   by the open sky (`open`): nearly white, neutral and smooth by day, and
   black at sunset, when only the sky's light is left.
 - **Inside a cloud** (the eye in it), the light is that of two streams in a
-  slab, one down and one back up: from about all of it near the top to
-  `tDown` at the base, as the depth under the place (`under`, `overhead`
-  straight down) is to the whole: `(1 + COLUMN under) / (1 + COLUMN
-  (above + under))`, brighter looking up. It was lit as a surface, and
-  the fog was a flat, dark grey.
+  slab, one down and one back up: the stream down goes from about all of
+  it near the top to `tDown` at the base, as the depth under the place
+  (`under`, `overhead` straight down) is to the whole: `(1 + COLUMN under)
+  / (1 + COLUMN (above + under))`; the stream up is that less what the
+  whole slab lets through (`r` of the stream down). Looking along a
+  direction at cosine `cv` to the up, the eye sees `3 / 7` of
+  `(1 + 2 cv) + r (1 - 2 cv)` (Eddington's form, with the base's own
+  `1 + 2 cv`): brighter looking up, darker looking down, a smooth
+  gradient, the same grey all round deep in a thick deck, and the dark sea
+  showing through near its base. It was lit as a surface, and the fog was
+  a flat, dark grey; then the light looking down was that of the horizon,
+  and a line ran across the fog there.
 - `inc`: a thick cloud is lit once, and a few times (`p1`, `p2`), only
   where light falls on it, by the billows' normal: a side or a base that
   the light grazes gets little, though light runs in its fringe. With the
@@ -657,13 +678,28 @@ towards the horizon, glowed as a pale-blue band.
   Walter et al., 2007).
 - **Mirrored sky.** `skyAt` marches 8 steps of air in the mirrored
   direction of the tilted footprint. Rough water mirrors less at grazing
-  angles (the mean Fresnel factor of Bruneton et al., 2010). Three samples
-  of `cloudDensity` up the layer tell how much of that sky the clouds hide;
-  in its place the mirror shows their base, lit as seen from below
-  (`tDown` from the depth of those samples straight up, the sun's part
-  times `BELOW`). It showed the sky's mean light, and under a deck the sea
-  stayed blue below a grey ceiling. Without clouds the old blend stays, so
-  that `cloud=0` draws as before, bit for bit.
+  angles (the mean Fresnel factor of Bruneton et al., 2010).
+- **Clouds in the mirror.** The waves too small to show (`s2r`) spread
+  what the sea mirrors over some ten to twenty degrees each way, so the
+  sea shows the mean light of a wide patch of the clouds, never their
+  single cells. Four directions stand for the spread: the slopes of the
+  footprint plus or minus `sigma` along and across the view, each weighed
+  by how much of its facets the eye sees (more of those tilted towards
+  it, so the mirror shows a higher, brighter part of an overcast). Each
+  reads the cloud straight up through the shell where it meets the
+  clouds' middle (four reads, from 0.2 km under to 1.8 km over it),
+  smoothed over the patch it stands for (the spread of a quarter of the
+  slopes at that distance and slant: kilometres towards the horizon), with
+  the edge of the field as narrow as near (widened with the smoothing, it
+  let nearly all the light through a deck far off, and the sea towards
+  the horizon mirrored a white sky). From that depth: what is left of the
+  sky behind it, and the base's light there as `clouds` draws it
+  (`throughDeck`, the sun's part times `BELOW`), seen aslant. Mirrored
+  along one direction, three samples up the layer made a deck's cells
+  sharp dark ovals on a pale sheet, like wet sand; under a deck the sea is
+  now a dull grey, darker than the sky and lighter towards the horizon, as
+  in photographs. Without clouds the old blend stays, so that `cloud=0`
+  draws as before, bit for bit.
 - **Light from below.** `SEA`: blue light scattered back out of clear water.
 - **Foam.** Whitecaps cover `2.95e-6 U^3.52` of the sea (Monahan and
   O'Muircheartaigh, 1980), as separate breakers in a grid of cells: counted
@@ -765,8 +801,8 @@ pixel (`uJitter`, Halton (2, 3)) and the samples through the clouds
 textures for it, each with a second 8-bit texture beside it (`aux`):
 
 - `light`: the first stage of the clouds' light (`lightMap`), drawn by
-  `fs` with `uStage` 0 at half the width and height into two textures of
-  half floats on units 10 and 11, before the frame (see Low clouds);
+  `fs` with `uStage` 0 at half the width and height into three textures
+  of half floats on units 10 to 12, before the frame (see Low clouds);
 - `shot`: the new frame, drawn by `fs` into two outputs: the colour
   (`outColor`) and the distance of what each pixel shows (`outAux`);
 - two `pictures` that take turns: the one so far is read while the next is
