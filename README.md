@@ -43,7 +43,7 @@ The panel at the bottom changes the time and the weather.
 - **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
 - **Moon**: the age of the moon, 0 to 29.5 days.
-- **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: the air of an ordinary day; 0.3 is clean air over the sea, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
+- **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
 - **Altitude**: 300 m to 13,000 m (11,000 m at first).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
