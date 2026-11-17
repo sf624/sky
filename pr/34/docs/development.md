@@ -178,11 +178,12 @@ the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
 The cirrus's ice, the way of its fibres and the fibres are built once,
 during the loading (or when cirrus is first shown, if the page starts
-without it): 0.4 to 0.5 s of GPU time on the RTX 3090. A renderer without
-a GPU builds them a quarter as wide (see
-[design.md](design.md#cirrus)): on SwiftShader a view with cirrus loads
-about as fast as one without (36 s against 36 s for a still at 480 x 270;
-at full size it took two minutes longer). Views with `cirrus=0` build
+without it): about 0.9 s of GPU time on the RTX 3090 (the plumes add
+some 0.4 s: the first picture of the default view came 0.4 s later than
+without them). A renderer without a GPU builds them a quarter as wide (see
+[design.md](design.md#cirrus)): on SwiftShader a still at 480 x 270
+looking up at cirrus took 59 s from load against 43 s for the same view
+without cirrus (at full size the ice alone took two minutes). Views with `cirrus=0` build
 nothing.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
