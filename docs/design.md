@@ -652,13 +652,26 @@ cloud around each sample in finer detail than the map can hold.
   read over the pixel's footprint (as the breakers of the foam). The sum
   is divided by its mean over all facets, so the glitter keeps its light.
   Where the footprint is wider than a facet, the facets are taken four at
-  a time, level by level, as one that sparkles four times as often; from
-  far (cruise) the sparkles merge into the mean, as they do to the eye.
-  The facets stay put on the sea, so a still holds still; in flight the
-  slope that mirrors the moon moves on, and they twinkle. By day the
-  sun's glitter is drawn as before. Before (round 1), the moon's path from
-  near the sea was a smooth pale column with a grey halo; photographs of
-  short exposure (B4, 1/5 s) show separate sparkles on black water.
+  a time, level by level, as one that sparkles four times as often.
+  Where the footprint holds more than a few sparkles (from 1 to 8 at the
+  middle of the path; `sparkleCount`), they are counted instead: cells of
+  the sea about as wide as the footprint (or a sixth of its length) each
+  hold a number of sparkles drawn as a lognormal of mean 1 and variance
+  `GRAIN` = 4 over the count expected in the cell, read as value noise at
+  `GRAIN_N` = 6 points along the footprint. The mean stays the glitter's
+  at every distance, and the grain gets finer and fainter as the count
+  grows, so that the separate sparkles near the sea merge into a grainy
+  band and, towards the horizon, a bright streak, with no line where one
+  way hands over to the other. The facets and the cells stay put on the
+  sea, so a still holds still; in flight the slope that mirrors the moon
+  moves on, and the sparkles twinkle, while the far grain moves with the
+  sea. By day the sun's glitter is drawn as before. Before (round 1), the
+  moon's path from near the sea was a smooth pale column with a grey halo;
+  photographs of short exposure (B4, 1/5 s) show separate sparkles on
+  black water. In round 2 the sparkles merged into their mean beyond a
+  footprint of some 20 m: from 0.3 km a horizontal line crossed the path
+  at about 2 km, beyond which it was a smooth white column striped by the
+  swell.
 - **Mirrored sky.** `skyAt` marches 8 steps of air in the mirrored
   direction of the tilted footprint. Rough water mirrors less at grazing
   angles (the mean Fresnel factor of Bruneton et al., 2010). Three samples
@@ -722,8 +735,16 @@ all dimmed and reddened by the air:
 - **Airglow** (`uNight`), brighter towards the horizon (van Rhijn's factor),
   and **the Milky Way** (`milkyWay`): a noise pattern on the real galactic
   plane, brighter towards its centre. As the night eye comes in, the Milky
-  Way is raised `MILKY_EYE` = 2 times more (the dark-adapted eye sees it as
-  a grey band, which the steeper night curve below would hide), and the air
+  Way is raised up to `MILKY_EYE` = 6.5 times more: the dark-adapted eye
+  sees it plainly as a grey band, which the steeper night curve below
+  would hide. How much depends on its contrast with what lies behind it,
+  the sky and the moon's veil in the eye (see the stars below): fully
+  above a contrast of 0.8, not at all below 0.08 (`MILKY_SEEN`). So it
+  is plain on a moonless night (40 to 50 of 255 against a sky of 8 to 10
+  in a view of Cygnus), weaker under a quarter moon (from cruise its
+  brightest parts at about 40, near the sea about 24 against 15), and
+  gone under a full moon. Before (round 2) it was raised 2 times at all
+  phases and stood 15 to 27 against 8 to 9 on a moonless night. The air
   takes only half of their light away: it scatters much of what it takes
   back towards the eye, and the sky from cruise brightens towards the
   horizon (by about 1.5 times at 5 degrees up) instead of staying flat.
@@ -953,7 +974,14 @@ At the end of `main`:
    eye still sees that sky blue. So the moonlit clouds under a quarter moon
    (about 0.003 cd/m2) are grey, those under a full moon (about 0.07)
    mostly grey, and the moon's glitter keeps a little colour only where it
-   is bright; the moonlit sky is a dark grey-blue, where a long exposure
+   is bright. At the top of the rods' range, from `SKY_BLUE` = 0.001 to
+   0.01 cd/m2, the rods' grey of light bluer than that grey turns bluer
+   (`ROD_BLUE`): a full moon's sky (about 0.002 to 0.02 cd/m2, darkest
+   overhead from cruise) and the sea that mirrors it are a dark blue,
+   lighter towards the horizon, while a quarter moon's sky (under 0.001)
+   stays grey, and so do the moonlit clouds and the glitter, which are
+   not bluer than the grey. Before (round 2) the full moon's sky was a
+   flat grey (R, G and B within a fifth of each other). A long exposure
    shows all of them in the colours of sunlight. Round 1 took the share
    as `0.01 / (0.01 + Y)`: it left the full moon's clouds tan and a brown
    rim along the far cloud tops. That rim is the far clouds' light
