@@ -631,6 +631,10 @@ plumes, another bands or flocks:
   of the reach over a life, at 35 to 80 degrees from the shear: the
   head's track is a spine and the trails leave it aslant (a feather, a
   hooked plume) instead of a wedge of parallel strands from one point.
+  A head's ice fades out over 0.75 to 1 cell from where the common way
+  puts it (1 to 1.2 before), so that a head never leaves the nine cells
+  searched while it still has ice: moving heads, cut there, drew straight
+  seams.
   With one way and one turn for the whole tile (round 8), every trail of a
   deck was parallel and the streaks converged on one vanishing point like
   ruled rays.
@@ -696,7 +700,7 @@ plumes, another bands or flocks:
   where the eddies bring it from, less each kind's drift; a head there made
   it then. Each step is a segment, and each head's puff is integrated along
   it (with `erf`, `icePuff`), so that no step shows. A plume reaches no
-  further than 1.2 cells from where the common way puts its head, so the
+  further than 1 cell from where the common way puts its head, so the
   nine cells nearest are enough (four to a side, for the heads whose own
   way takes them farther, drew the same picture at nearly twice the cost
   on SwiftShader); a row's
@@ -829,7 +833,8 @@ on the map.
 - **The depth of a deck.** Seen from near the shell, a ray crosses a
   deck aslant over hundreds of metres, and the ice at its top and its
   bottom does not line up: the footprint grows by 0.08 of the way through
-  the deck along the ray (not across it: blurred across too, the strands
+  the deck along the ray (0.04 for each of the two reads near the shell,
+  blended in smoothly: a step there drew a straight seam across the veil) (not across it: blurred across too, the strands
   of distant plumes averaged out to smooth patches), so that from just
   under a deck its fine threads soften instead of standing as long ruled
   lines; from the ground the blur is about a pixel.

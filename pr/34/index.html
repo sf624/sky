@@ -753,7 +753,11 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     vec4 r = iceRandom(h), r2 = iceRandom(h ^ 0x68e31da4u);
     if (r2.x < 0.25 + 0.05 * gate) continue;
     vec2 hp = (cell + mix(vec2(0.25), vec2(0.05), gate) + mix(0.5, 0.9, gate) * r.xy) * CELL;
-    float far = 1.0 - smoothstep(1.0 * CELL, 1.2 * CELL, length(hp - q1));
+    // Only heads within a cell of q1 are sure to be among the nine cells
+    // searched: the ice fades out before a head leaves them (a head that
+    // moves takes its ice farther, and a cut at the edge of the cells
+    // searched drew straight seams across the sky).
+    float far = 1.0 - smoothstep(0.75 * CELL, 1.0 * CELL, length(hp - q1));
     if (far <= 0.0) continue;
     float s = r.z * r.z;
     // A plume without a head (its head died out) is a fan: a spray of
@@ -798,7 +802,7 @@ float icePlumes(vec2 p0, vec2 p1, float a0, float a, float k, uint seed, float c
     // A dense head is lumpy, not a round puff: knots of a third and a tenth
     // of its size.
     float lump = 1.0;
-    if (a < 0.5) {
+    if (a < 0.35 && !fan) {
       lump = 0.65 * iceValue(pn / (0.3 * r0) + 17.0 * r.xy, seed + 107u) + 0.35 * iceValue(pn / (0.1 * r0) + 5.0 * r.yx, seed + 109u);
       lump = mix(1.0, 0.2 + 1.6 * lump * lump, exp(-a / 0.12));
     }
@@ -2171,7 +2175,9 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   // The tufts gather in fields of some 40 to 60 km with wide gaps between
   // (noise over the map): spread evenly, far off they stood in rows like
   // the scales of a fish.
-  float fields = smoothstep(-0.25, 0.25, ciNoise(uv * 5.0, vec2(5.0), k == 0 ? 811u : 812u) + 0.5 * ciNoise(uv * 11.0, vec2(11.0), 813u));
+  // (Without the fibres, for the sun's light over a wide footprint, their
+  // mean: the code is left out of those copies.)
+  float fields = fibres ? smoothstep(-0.25, 0.25, ciNoise(uv * 5.0, vec2(5.0), k == 0 ? 811u : 812u) + 0.5 * ciNoise(uv * 11.0, vec2(11.0), 813u)) : 0.55;
   vec4 wk = vec4((1.0 - 0.5 * sr) * (0.15 + 1.1 * fields), sr, 0.5 * sf, (1.2 - 0.6 * sf) * (0.6 + 1.4 * smoothstep(0.15, 0.85, uCirrus)));
   // The ice in the deck's frame. The footprint's axes go along, through
   // the mipmaps and the anisotropic filter.
@@ -2221,7 +2227,10 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   vec4 sv2 = textureGrad(uIce, tc, g1 * s2, g2 * s2), svb = textureGrad(uIce, tc, g1 * s3, g2 * s3);
   float v2 = dot(sv2 * sv2, wk), vb = dot(svb * svb, wk);
   float veilOn = CI_VEIL * pow(smoothstep(0.35, 1.0, c), 1.6) * m;
-  float sheet = veilOn * max(exp(2.6 * ciVeilNoise(tc, gl, k == 0 ? 600u : 700u) - 0.4) - 6.0 * pow(1.0 - c, 1.5), 0.0) * mix(1.0, F * F, 0.7);
+  // Without the fibres (the sun's light through the sheet, over a wide
+  // footprint) the veil's noise averages out: its median is enough, and
+  // the code is left out of those copies.
+  float sheet = veilOn * max(exp(2.6 * (fibres ? ciVeilNoise(tc, gl, k == 0 ? 600u : 700u) : 0.0) - 0.4) - 6.0 * pow(1.0 - c, 1.5), 0.0) * mix(1.0, F * F, 0.7);
   float ym = max(v2 - floor0, 0.0), yw = max(vb - floor0, 0.0);
   // The glow round the sun and the moon reads the veil's mean.
   float sheetM = veilOn;
@@ -2335,7 +2344,7 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
       vec2 dh = d.xz - up.xz * dot(d, up);
       float lh = length(dh);
       vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
-      vec2 f1 = dn * (pix * t / max(cv, 1e-3) + 0.08 * wj * (s1 - s0) * lh);
+      vec2 f1 = dn * (pix * t / max(cv, 1e-3) + 0.08 * mix(1.0, 0.5, smoothstep(0.0, 0.2, near)) * (s1 - s0) * lh);
       vec2 f2 = vec2(-dn.y, dn.x) * pix * t;
       float rho = ciDensity(p.xz + uDrift, k, f1, f2, true, j == 0 ? near * vec2(-0.3, 0.12) : vec2(0.0), 0.3 * near);
       tau += wj * rho * way;
