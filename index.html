@@ -3324,12 +3324,17 @@ const SkySound = (() => {
     }
     done(0.05);
     const forHaze = state.haze;
-    await slices([buildDepths(), buildStars(), depthTable()], share => done(0.05 + 0.25 * share));
+    // The slices are paced by timers (`soon`), not by frames: a frame comes
+    // only every 50 ms or so while the page starts and the GPU is busy, and
+    // a slice a frame made the tables take 1.8 s.
+    await slices([buildDepths()], share => done(0.05 + 0.08 * share), soon);
     // The table of multiple scattering, the longest (some 0.2 to 0.3 s),
-    // goes on in slices while the GPU compiles the programs and draws the
-    // textures below; the first frame waits for it. Before the textures it
-    // held the first picture back by some 0.7 s.
-    const scattered = slices([buildMultiScatter(forHaze)], () => {});
+    // reads the first table (`sunDepth`). It goes on beside the others, and
+    // while the GPU compiles the programs and draws the textures below; the
+    // first frame waits for it. Run after the others, in slices a frame, it
+    // held the first picture back by 0.4 s.
+    const scattered = slices([buildMultiScatter(forHaze)], () => {}, soon);
+    await slices([buildStars(), depthTable()], share => done(0.13 + 0.17 * share), soon);
 
     // The programs. Without the extension, asking waits until a program is
     // done: one a frame.
@@ -4232,12 +4237,15 @@ const SkySound = (() => {
   // Runs jobs (see finish) to their ends in slices of about SLICE_MS, a
   // slice a frame; report(share) after each job.
   const SLICE_MS = 8;
-  async function slices(jobs, report) {
+  // The next task (a frame in a hidden tab, where timers are slowed anyway).
+  const soon = () => document.hidden ? nextFrame() : new Promise(resolve => setTimeout(resolve, 0));
+  // wait: how a slice yields (the next frame, or the next task).
+  async function slices(jobs, report, wait = nextFrame) {
     let start = performance.now();
     for (let k = 0; k < jobs.length; k++) {
       while (!jobs[k].next().done) {
         if (performance.now() - start > SLICE_MS) {
-          await nextFrame();
+          await wait();
           start = performance.now();
         }
       }
