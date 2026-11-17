@@ -277,7 +277,9 @@ tile is read through the GPU's filter, and its facets would show on a
 surface as smooth as a base). The cloud is the lesser of the two fields.
 
 `cloudDetail` gives the fine noise: `DETAIL` = 7 tiles per tile, billows
-of 300 m down to about 20 m. The 300 m billows stand out about a third of
+of 300 m down to about 20 m, weighed by `RELIEF` = 0.85 (1 made the
+small lumps stand out like a cauliflower in photographs' place of soft
+domes). The 300 m billows stand out about a third of
 their width, the smaller ones up to a half, so that small billows sit on
 large ones: a cauliflower (equal weights made a foam). Near the eye the
 same noise, 8 and 64 times finer (billows of 36 m down to 1 m), adds
@@ -320,15 +322,22 @@ clouds.
   steps under a base, which has no fine noise (rays that grazed it crept
   along it). Steps of 3 m looked the same and cost half as much again. On a
   long path the march must end within its budget (`COARSE * 80` steps'
-  worth). `rel` is the one rate for the whole ray that does so; `L` the
+  worth), all of it for the part beyond the knee (`DS_MIN / DS_REL`, 4.4
+  km), wherever the ray enters the shell. The budget used to pay for the
+  part before the knee too: once the eye came within about 6 km of the
+  tops (below some 6.5 km, looking down 20 degrees), that part ate it,
+  the steps beyond grew up to three times longer and the noise read with
+  them was smoothed as much, so the clouds went soft between 6.5 and
+  5.2 km of altitude. `CLOUD_STEPS` pays for the near part. `rel` is the one rate for the whole ray that does so; `L` the
   distance past which steps of `DS_REL * t` grow by `1 + t / L` and do so
   too (the sum of `dt / ds` from `max(ta, DS_MIN / DS_REL)` to the end has
   a closed form). The lesser of the two keeps the steps fine near the eye
   and as before far off. With `rel` alone, clouds 2 to 5 km off were
   marched in steps of 100 to 200 m on rays that end far away, and their
   edges came out as thin dark squiggles and a hatch. At most
-  `CLOUD_STEPS` = 320 steps, and the march stops when less than 1 % gets
-  through. With 160, rays that pass under a deck towards the horizon ran
+  `CLOUD_STEPS` = 400 steps, and the march stops when less than 1 % gets
+  through (320 ran out on a few rays along the horizon under a deck once
+  the near part no longer took from the budget). With 160, rays that pass under a deck towards the horizon ran
   out of steps before they met it, and the sky behind showed as a thin
   pale-blue line.
 - The plan must not jump where the end of the ray does: a ray that meets
@@ -374,15 +383,21 @@ found between the last two samples. For each:
   axes across it, normalised. The slope towards the light alone was lit or
   dark and nothing between, as the field is steep: flat white with blue
   patches, like snow. A wrap of 0.3 lets a side turned a little away still
-  catch some light.
+  catch some light. The same normal at the size of whole billows (the
+  field without the fine noise, over at least 120 m) gives `shapeL`: the light scattered
+  many times falls from 110 % on a billow's lit top to `SHAPE` = 45 % on
+  its side turned away, by a smooth curve. In photographs the light falls
+  off over a whole billow and its small bumps are only faintly shaded; the
+  normal of the small bumps alone made the clouds white all over, with
+  small dark creases.
 - `occ`: out along the normal, over 3 first steps, the field falls as fast
   as it rises at the surface on a billow in the open, and less in a crease;
-  `crease` dims the light of a crease by up to `CREASE` = 50 %, and `open`
+  `crease` dims the light of a crease by up to `CREASE` = 25 %, and `open`
   takes half its value from the normal's tilt towards the sky. Together
   they give each billow a lit top and a grey underside, as cotton wool.
 - `hollow` dims the hollows between those billows (where `mid`, what the
   fine noise smoothed over a few first steps adds at the surface, is
-  negative) towards 55 %, and lifts their tops towards 115 %, by a smooth
+  negative) towards 75 %, and lifts their tops towards 110 %, by a smooth
   curve (a clamp left flat grey patches with sharp outlines, and `mid` was
   cut off where the field over the base passed 0.3: their edges).
   On a surface that faces down it also shows the cells of a deck: Worley
@@ -407,7 +422,12 @@ found between the last two samples. For each:
   `column`. `white` makes
   only thick clouds brilliant; `billow` lights the tops of the big billows
   far off, where the fine ones are below a pixel; `bounce` lights a side
-  turned from the sun with the sunlit cloud around it.
+  turned from the sun with the sunlit cloud around it. The light scattered
+  many times has a gain of `SUNLIT` = 0.53 and the sky's light one of
+  `SKYLIT` = 1.5: with 0.66 and 1, sunlit cloud sat at display white with
+  little gradient left (half the cloud of a view from 4 km above 210 of
+  255), and the sides in shadow were grey rather than the luminous
+  blue-grey of photographs.
 
 `clouds` returns what gets through (`Tc`), the light per unit of sunlight
 scattered once (`sOne`) and many times (`sMany`), per unit of skylight

@@ -158,11 +158,21 @@ sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
 Those numbers are older than the detail of the low clouds near the eye
-(#33, November 2026), which trades time for the picture. At 1920 x 1080,
-flying, `res=1`: the default view 8.6 ms (was 5.1), `alt=2&cloud=0.7`
-16.7 ms (5.0), the tops from 4.6 km 8.2 ms (4.0), among clouds at 1.8 km
-15.8 ms (4.5), under a deck at 0.6 km 15.9 ms (6.0). Where the clouds
-fill the view from near, the scene costs about three times what it did.
+(#33, November 2026), which trades time for the picture. Flying, `res=1`,
+the scene in ms at 1920 x 1080 and at 2560 x 1440 (main in brackets):
+
+| View | 1920 x 1080 | 2560 x 1440 |
+|---|---|---|
+| Default (cruise) | 8.9 (4.9) | 14.5 (8.1) |
+| `alt=2&cloud=0.7` | 24.5 (5.1) | 41 |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 13.2 (3.5) | 23.0 (5.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 19.9 (5.1) | 34.2 (7.4) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 19.2 (5.8) | 32.8 (10.0) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 15.5 (4.7) | 26.7 (6.4) |
+
+Where clouds fill the view from near, the scene costs three to five times
+what it did; at WQHD the slowest views come near the 40 ms at which the
+drawing size drops in flight.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down

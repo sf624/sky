@@ -794,12 +794,15 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const float RELIEF = 1.0;           // the same for the fine noise
+const float RELIEF = 0.85;          // the same for the fine noise
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
-const int CLOUD_STEPS = 320;
+const int CLOUD_STEPS = 400;
 const vec4 MICRO = vec4(0.12, 0.07, 0.045, 0.05); // weights of the finer billows (cloudDetail)
 const float LIGHT_MIN = 0.015;
-const float CREASE = 0.5;           // how much a crease between billows dims the light it sends
+const float CREASE = 0.25;          // how much a crease between billows dims the light it sends
+const float SHAPE = 0.45;           // the light scattered many times on a billow's side turned from the light, against its top
+const float SUNLIT = 0.53;          // the gain of the light scattered many times
+const float SKYLIT = 1.5;           // the gain of the sky's light on the clouds
 const float UNDER = 0.3;            // the light of the sky left in the air under a full deck
 const float COLUMN = 0.11;          // (1 - g) 0.75: how a deep column dims the light through it
 const float DEEP = 0.5;             // light scattered many times on a side turned from the light, against a lit side     // the first step towards the light, at least (km)
@@ -1099,12 +1102,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // squiggles and a hatch. Now the steps grow from DS_REL * t by 1 + t / L,
   // where L is set so that this too ends within the budget (the sum of
   // dt / (DS_REL t (1 + t / L)) from s0 to plan), and never past rel * t:
-  // fine near the eye, as before far off.
+  // fine near the eye, as before far off. The whole budget is for the part
+  // beyond the knee, wherever the ray enters the shell. It used to pay for
+  // the part before the knee as well: once the eye came within about 6 km
+  // of the tops, that part ate the budget, the steps beyond it grew three
+  // times longer, and the noise read with them was smoothed as much, so the
+  // clouds below went soft between 6.5 and 5.2 km. The march's own limit
+  // (CLOUD_STEPS) pays for the near part.
   float knee = DS_MIN / DS_REL;
-  float near = max(min(plan, knee) - ta, 0.0) / DS_MIN;
-  float s0 = max(ta, knee), E = exp(DS_REL * max(BUDGET - near, 0.3 * BUDGET));
+  float s0 = max(ta, knee), E = exp(DS_REL * BUDGET);
   float L = plan > E * s0 ? s0 * plan * (E - 1.0) / (plan - E * s0) : 1e9;
-  float rel = DS_REL * max(1.0, log(max(plan, knee) / max(ta, knee)) / DS_REL / max(BUDGET - near, 0.3 * BUDGET));
+  float rel = DS_REL * max(1.0, log(max(plan, knee) / max(ta, knee)) / DS_REL / BUDGET);
   // Light scattered once keeps the forward peak of the droplets; light
   // scattered many times goes deeper and forgets its direction. These five
   // terms stand for the orders of scattering; a thick cloud top that faces
@@ -1203,6 +1211,20 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
                          cloudField(ps + h * side, lm, true, y0, b0, c0, e0),
                          cloudField(ps + h * cross(uLight, side), lm, true, y0, b0, c0, e0)) - f0;
         float glen = max(length(grad), 1e-6);
+        // The same at the size of whole billows (at least 120 m, from the
+        // field without the fine noise: with it the picture barely changed,
+        // at 4 ms more near the tops): in photographs the light falls off over a
+        // billow, from its lit top to a grey side, and the small bumps on it
+        // are only faintly shaded, as light spreads inside the cloud. The
+        // normal of the small bumps alone made a cloud white all over, with
+        // small dark creases, like snow.
+        float hL = max(h, 0.12), lmL = max(lm, max(lod, log2(hL / 0.075) - 0.5) + 1.0);
+        float fL = cloudField(ps, lmL, false, y0, b0, c0, e0);
+        vec3 gL = vec3(cloudField(ps + hL * uLight, lmL, false, y0, b0, c0, e0),
+                       cloudField(ps + hL * side, lmL, false, y0, b0, c0, e0),
+                       cloudField(ps + hL * cross(uLight, side), lmL, false, y0, b0, c0, e0)) - fL;
+        float facingL = clamp((0.4 - gL.x / max(length(gL), 1e-6)) / 1.4, 0.0, 1.0);
+        float shapeL = mix(SHAPE, 1.1, facingL * facingL * (3.0 - 2.0 * facingL));
         float facing = clamp((0.3 - grad.x / glen) / 1.3, 0.0, 1.0);
         // The normal; out along it, the field falls as fast as it rises
         // here on a billow in the open, and less in a crease between
@@ -1217,7 +1239,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float yu, bu, cu, eu;
         float reach = max(clamp(0.0125 * t, 0.05, 0.1), 2.0 * exp2(lod) * TEXEL_KM);
         float rise = (cloudField(ps + normalize(ps + eye()) * reach, lod, false, yu, bu, cu, eu) - (fs - bump)) / reach;
-        float hm = 6.0 * mid, hollow = 1.0 + hm / (1.0 + max(-hm / 0.45, hm / 0.15));
+        float hm = 6.0 * mid, hollow = 1.0 + hm / (1.0 + max(-hm / 0.25, hm / 0.1));   // 75 % to 110 %
         // From below, a deck shows its cells: thick middles darker, thin
         // rims lighter, some 600 m across (Worley cells of the noise, read
         // at 3.5 times the tile's frequency: a texel of 18 m, whose facets
@@ -1251,10 +1273,14 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // a deck its thick cells are darker than the thin gaps between them.
         float column = 1.0 / (1.0 + COLUMN * max(shadowDepth(ps + eye(), normalize(ps + eye()), 5) - 5.0, 0.0));
         open = mix(open, 0.55 + 0.35 * dot(nrm, normalize(ps + eye())), 0.5);
-        many = crease * hollow * billow * white * (0.66 * mix(0.15, 1.0, facing) * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft))
-                                 + column * (0.66 * mix(DEEP, 1.0, facing) * p3 * exp(-0.05 * soft)
+        // SUNLIT: the gain of the light scattered many times, and SKYLIT that
+        // of the sky's: a sunlit top keeps room below white for its
+        // gradients, and a side in shadow is a luminous blue-grey, lit by
+        // the sky, not a dark grey.
+        many = shapeL * crease * hollow * billow * white * (SUNLIT * mix(0.15, 1.0, facing) * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft))
+                                 + column * (SUNLIT * mix(DEEP, 1.0, facing) * p3 * exp(-0.05 * soft)
                                  + p4 * exp(-0.012 * soft)) + 0.02 * bounce);
-        amb = crease * hollow * billow * (column * open * mix(1.0, white, 0.5) + 0.15 * bounce);
+        amb = SKYLIT * crease * hollow * billow * (column * open * mix(1.0, white, 0.5) + 0.15 * bounce);
       }
       sOne += Tc * a * one;
       sMany += Tc * a * many;
