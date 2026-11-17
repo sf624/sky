@@ -112,6 +112,25 @@ throws the compiler's log, and the page prints it.
 
 **Cost.** Measure the GPU time before and after (next section).
 
+**The start.** Opening the page must not hold the browser. `node
+tools/sky.mjs perf` prints the time to the first picture and the main
+thread's tasks over 50 ms until then; run it on a fresh Chrome (each run
+starts one) and more than once. On the test machine's GPU only
+`getContext` may take over 50 ms (up to about 0.4 s in a browser just
+started). The loading (see
+[design.md](design.md#from-the-address-bar-to-the-first-frame)) keeps to
+these rules, and new work at start should too:
+- Compile and link every program at once. Ask for `COMPILE_STATUS`,
+  `LINK_STATUS` and uniform locations only once `COMPLETION_STATUS_KHR`
+  says the program is done: asking earlier waits for the compiler, which
+  can take seconds for `fs` (ANGLE on Direct3D 11, the usual stack on
+  Windows).
+- CPU work over a few ms is a job (a generator that yields every little
+  while), run by `slices` at start and by `finish` later.
+- GPU work at start goes in `batches`, with a fence after each.
+- No `readPixels`, `getError` or `finish` that waits for the GPU while the
+  page loads.
+
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
 headless Chrome: in a page from the same origin, take the text of the
@@ -156,6 +175,13 @@ without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
+
+The cirrus's ice is built once, during the loading (or when cirrus is
+first shown, if the page starts without it): 0.1 to 0.3 s of GPU time
+on the RTX 3090 (and the `noise` shader compiles in some 1.6 s, 0.4 s more
+than before it held the ice), about two minutes on SwiftShader. So on
+SwiftShader every view with cirrus loads two minutes longer; views with
+`cirrus=0` do not build it.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -208,8 +234,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
-  - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
-    `fs` shaders.
+  - The integer hash `ihash` (lowbias32): in the `noise` and `waves`
+    shaders.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
     (`BASE_KM / 128.0`).
   - The size of the weather map, 1024: `WEATHER` in the JS;
@@ -217,8 +243,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
   - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
   - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
-    shader and in `fs` (`CI_UNIT`, the `bend` in `ciDensity`, the
-    shear of the layers, and the footprint `fp` in `highCloud`).
+    shader (the bands of the weather map, and `ICE_KM`, half a unit of the
+    frame) and in `fs` (the tile's coordinates and `J` in `ciDensity`).
 - **One flat loop over a neighbourhood.** On Mesa's D3D12 driver (WSL),
   two nested loops over the cells around a point (`for i in -2..0`, `for j
   in -1..1`) came out wrong: the cirrus's streaks were cut along the
@@ -227,8 +253,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
   over a neighbourhood where it needs one.
 - **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
   of a whole number `x` equal to `p` gave `p` in places, not 0, and the
-  cirrus's noise had a seam along that lattice line. `ciNoise` wraps by
-  hand, `c - p * floor((c + 0.5) / p)`.
+  cirrus's noise had a seam along that lattice line. `iceNoise` and the
+  heads' cells in `iceHead` wrap by hand, `c - p * floor((c + 0.5) / p)`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

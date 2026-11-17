@@ -20,12 +20,13 @@ blocks. It loads no other file.
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
-| (no id) | JS | Everything else, in one function that runs at load. |
+| (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
 
 There is one canvas, `#sky`, the hero: the view from an aircraft. Clouds,
 sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
 over frames. It fills the window, and the page does not scroll.
-`makeSky(canvas, view)` compiles `fs` and the other shaders for it.
+`makeSky(canvas, view, { done, shown })` makes its renderer, a step at a
+time (see the next section).
 
 ## Conventions
 
@@ -57,46 +58,102 @@ over frames. It fills the window, and the page does not scroll.
   the fine noise per tile), the wave bands and the cells of the foam
   rounded to whole numbers per map (`rep`, `cells`), the swells with whole
   numbers of crests (`SWELL`), the cirrus frame stepping by whole numbers
-  (`ciNoise` with a whole `period`, the tile of the fibres `CI_TILE`), and
-  the `bend` of the cirrus written with whole-number frequencies. The
-  `bend` sum appears twice, in `noise` and in `ciDensity`: change both
-  together.
+  (the tile of the ice twice in a unit of it, and every noise in the ice
+  with a whole number of cells to the tile), and the `bend` of the
+  cirrus's bands in the weather map written with whole-number
+  frequencies.
 - Comments in the code are plain English sentences that say what and why.
 
 ## From the address bar to the first frame
 
-The JS runs once, at load:
+The page shows at once in its loading state: the hero is dark (`.loading`,
+a gradient of a night sky), with the title over it. After 0.3 s a thin line
+of progress and a word (`TEXT.loading`) fade in, so a quick start shows only
+the dark. The panel and the full-screen button stay hidden (no clicks, no
+focus) until the first picture. All of this is HTML and CSS: it needs no
+script.
 
-1. **Tables that do not depend on the view.**
-   - `odTable` (`buildDepths`): optical depth to the top of the air towards
-     the sun, over altitude (48 rows, squared spacing) and the cosine of the
-     sun's zenith angle (96 columns from -0.2), 64 steps each. Read by
-     `sunDepth()` in the JS only.
-   - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
-     (see [The air](#the-air)).
-   - `starData` (`buildStars`): the star texture.
-   - `DAY_LEVEL` (the metered sky with the sun at 42 degrees) and `NIGHT`
-     (4e-8 of it: the moonless night sky, airglow).
-2. **The renderer.** `makeSky` for `#sky`, inside a `try`: if it fails, the
-   error goes to the console. Without WebGL2, the canvas keeps its CSS
-   gradient.
-3. **Inputs.** URL parameters with the id of a slider set that slider's
+The JS then runs once, at load, and does little:
+
+1. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
-   then act as the now button, the select and the play button. `yaw`,
-   `pitch`, `heading`, `at`, `pixels` and `res` are read directly (see
+   then act as the now button, the select and the play button, but the
+   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
+   `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
-4. **The loop.** `update()` marks the state changed and calls `kick()`,
-   which asks for one `requestAnimationFrame(frame)`.
+2. **The loading.** After the first paint (an animation frame, then a
+   message), `makeSky` for `#sky` makes the renderer. It is an `async`
+   function: it waits a frame (`nextFrame`) wherever it would otherwise
+   hold the main thread or wait for the GPU. Its steps:
+   - `getContext`, and the extensions.
+   - Every program (`fs`, `noise`, `waves`, `mean`, `show`) is
+     compiled and linked at once, and nothing asks how it went yet. With
+     `KHR_parallel_shader_compile`, the GPU process compiles them on threads
+     of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
+     it, asking waits, so the page asks for one program a frame. A failed
+     program throws the compiler's or the linker's message.
+   - Meanwhile the tables of the CPU, in slices of about 8 ms, one a frame
+     (`slices`). Each is a generator (a job) that yields every little while;
+     `finish(job)` runs one at once.
+     - `odTable` (`buildDepths`): optical depth to the top of the air
+       towards the sun, over altitude (48 rows, squared spacing) and the
+       cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
+       each. Read by `sunDepth()` in the JS only.
+     - `starData` (`buildStars`): the star texture.
+     - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
+       (see [The air](#the-air)), for the haze the page starts with
+       (`NIGHT_HAZE`, the slider's own value).
+     - `NIGHT` (`nightSky`): the moonless night sky (airglow), 4e-8 of the
+       metered sky with the sun at 42 degrees, at `NIGHT_HAZE`.
+     - `msData` again, if the address gives another haze, for that one.
+     - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
+   - The textures (see [Textures made at start](#textures-made-at-start)).
+     The noise and the weather map are drawn in batches (`batches`), the
+     weather map in strips of 64 rows (the scissor; each pixel is the
+     same as from one draw), and so is the cirrus's ice in pieces of 512 x
+     512, if the page starts with cirrus (else `render` draws it all at
+     once when cirrus is first shown; see [Cirrus](#cirrus)). After each batch the page waits for a fence
+     (`settle`); a batch doubles while the GPU gets through it in under
+     100 ms and halves over 250 ms. The GPU process draws the whole
+     browser, and a slow GPU given seconds of work at once would freeze it.
+   - `prime`: the first frame is drawn as the first frame will draw it,
+     up to the canvas (`render` as a probe, which then puts its state
+     back), and the page waits for a fence. Some drivers finish a program
+     only at its first draw, which can take a second: that happens now,
+     behind the loading state. The first frame starts afresh and draws
+     over all that the probe drew.
+3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
+   without WebGL2 or if a program failed: the error goes to the console,
+   the loading state fades out, and the canvas keeps its CSS gradient).
+   `kick()` asks for the first frame; a time-lapse asked for in the address
+   starts now; the title's and the panel's timers start (see `.told` and
+   `.still`). Before this, `kick()` and `schedule()` do nothing.
+4. **The first picture.** The first frame goes to the canvas, and
+   `render` calls `shown()`: the hero gets `.shown`, and the loading state
+   fades out over the picture in 0.8 s (it lets the pointer through at
+   once), while the panel fades in. The class and the picture reach the screen in the same frame, and
+   the fade starts from opaque: nothing empty or half drawn shows.
+
+So no step holds the main thread for long, except `getContext` itself.
+The pictures are the same as when everything ran at once: the jobs and
+batches only split the same work.
+
+A hidden tab has no animation frames: there `nextFrame` waits 100 ms
+instead (the browser slows that down further), so the loading goes on
+slowly; the first frame waits until the tab is shown.
+
+**The loop.** `update()` marks the state changed and calls `kick()`,
+which asks for one `requestAnimationFrame(frame)`.
 
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed, runs
-  `celestial()`, sets the exposure (`state.airExposure`) and the panel's
-  labels;
+- if something changed: rebuilds `msData` when the haze has changed (at
+  once, with `finish`), runs `celestial()`, sets the exposure
+  (`state.airExposure`) and the panel's labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
@@ -349,88 +406,116 @@ towards the light.
 ## Cirrus
 
 `highCloud`. The cirrus fills a shell from `CI_LO` = 12.2 to `CI_HI` =
-12.8 km. It is drawn on `CI_LAYERS` = 4 thin layers through the shell,
-each with fibres of its own, which the eye sees through one another: from
-near they part and cross, and in flight they slide over each other.
+12.8 km, split into `CI_LAYERS` = 2 decks of 0.3 km, each with ice of its
+own: the upper and the lower deck of cirrus. Where both have ice, their
+trails cross at different angles, and in flight the decks slide over each
+other.
 
-Each layer is read where the ray crosses it (going up from below, going
-down from above; a ray that runs between two layers reads the nearest,
-halfway along). The crossings come from `eyeSphere`, which takes them from
-the heights, not from `raySphere`: the slider stops on the layers' heights,
-and from an eye at a sphere's own height `raySphere` puts the near crossing
-a hair ahead or behind, ray by ray (see
-[development.md](development.md#glsl-rules)).
+Each deck is read where the ray crosses its middle height (or halfway
+along a ray that only grazes it), and its depth counts as many times as
+the ray's way through the deck is longer than the deck is thick. The
+crossings come from `eyeSphere`, which takes them from the heights, not
+from `raySphere`: the slider stops on these heights, and from an eye at a
+sphere's own height `raySphere` puts the near crossing a hair ahead or
+behind, ray by ray (see [development.md](development.md#glsl-rules)).
 
 ![Cirrus seen from 11 km: ?date=319&pitch=28&cirrus=0.6&cloud=0.3](images/cirrus.jpg)
 
-- `ciDensity` gives a layer's share of the vertical optical depth at a
-  place on the map.
-  - **The weather.** A of the weather map, against a level set by
-    `uCirrus`, gives how much cirrus there is. The level is set so that
-    each step of the slider covers about as much sky as the cirrus of
-    before (a smooth envelope) did, averaged over places and pitches. Over
-    some 16 km (a coarse level of the map) it tells where there is none,
-    and most of the sky costs little.
-  - **The flow.** The ice is drawn out along lines that run down the wind
-    and bend: the coordinate across them (`psi`) is the across-wind
-    coordinate pushed about by noise, gently enough that the lines never
-    close on themselves. In some places (noise of 27 by 13 km) they also
-    wave from side to side all together, by noise that changes faster
-    along the wind than across it. Where the lines crowd, the fibres crowd;
-    where they part, the fibres splay. Waves everywhere made a full sky
-    look like wood grain.
-  - **The body**: the weather's cover, plus wisps of 10 by 2 km down to 1.6
-    km by 340 m and bundles 1 to 3 km apart, all along the flow, through a
-    soft ramp (a smoothstep, squared). There is no outline: a patch thins
-    out over a good part of its width, and its fibres reach beyond it. The
-    more cirrus, the stronger the wisps, so that a full sky still has thin
-    places and thick.
-  - **The layers.** Ice falls out of the cloud and the wind shears it: the
-    pattern of a lower layer lies up to 2 km further up the wind. How the
-    ice lies through the shell (higher or lower, thicker or thinner) changes
-    from place to place, and gives each layer its share. The finest wisps
-    and the fibres differ from layer to layer.
-  - **The fibres** (`uFibres`, below): two reads of a tile of 8.1 by 4.05 km
-    at two sizes, along the flow, with their mean taken out. How much they
-    show changes from place to place (noise of some 16 by 5 km); in a
-    thick body they fade to a sheen, as in a milky sheet of cirrostratus.
-    Strong everywhere, they made a full sky look combed; weak in every
-    wisp, the wisps looked like soft brush strokes.
-  - **The footprint.** `highCloud` gives the pixel's footprint along and
-    across the wind (`fp`), drawn out on the sheet where the ray is aslant.
-    Each octave of the body fades out before it gets finer than it; the
-    fibres are read with `textureGrad` over the same footprint, through the
-    mipmaps and, where the GPU has it, its anisotropic filter. So the
-    pattern is filtered rather than aliased.
-  - Every octave of noise steps by whole numbers over the frame, which
-    repeats ten times over the map, and the tile of the fibres a whole
-    number of times over a unit of the frame.
-- The depth along the ray is the layers' depth times the way through the
-  shell over its thickness (over the share of it that the layers crossed
-  stand for).
-- Light: forward scattering by ice (three Henyey-Greenstein lobes), the
-  22-degree halo with the dispersion of ice, light scattered once with the
-  sheet's own shadow, a share scattered many times, skylight from the
-  multiple-scattering table, and light from the low clouds below, at the
-  mean distance of the layers seen. A fibre in a thick body of ice is lit
-  through the body (`ciBody`, the depth without the fibres), so dense
-  patches are grey inside and their thin edges bright.
+**The ice** (`uIce`, below) holds the forms. It is not noise drawn out
+along the wind but the result of a process, followed at start for every
+texel: ice is made in generating heads, falls out of them, and the wind
+shear draws what falls into a trail behind each head; eddies stir the
+trails.
+
+- **Heads** sit one to a cell of 4 km, in the middle 40 % of the cell,
+  and reach no further than 0.3 of a cell: so one cell is enough at each
+  step, and nothing changes where a way crosses into the next. A random
+  number and two octaves of noise (20 and 8 km) set their strength: they
+  gather in groups with wide gaps between, and weak heads lie between the
+  groups (they show only where the weather gives much cirrus). A head is a
+  Gaussian puff of 120 to 280 m that grows slowly with age and wobbles in
+  time. Half the heads have died out at an age of their own: they left a
+  trail without a head (cirrus fibratus).
+- **The trail.** The shear draws the ice away from its head, slowly at
+  first (a dense head), then at full speed, along a direction that turns
+  with age (`veer`: a hook, cirrus uncinus). The direction, the turn, the
+  length of the trails (some 3 to 23 km) and the strength of the eddies
+  change over the tile (slow noise), so that one place has straight
+  fibratus and another tangled hooks.
+- **Splay.** A head's ice falls apart into `ICE_STREAMS` = 3 streams that
+  fall at different speeds: the shear draws each out by its own length and
+  turns it a little away from the others, so a trail splays like a
+  feather.
+- **Eddies**: the curl of a noise potential at 13, 5 and 2 km (divergence
+  free), which changes in time (its gradients turn), the smaller the
+  faster, with speeds as Kolmogorov's law gives them; and a gentle
+  divergent part, the gradient of the middle size, as the ice spreads and
+  gathers where the air rises and sinks. They curl the
+  trails, fold them, and stretch them into filaments.
+- **Fibres.** A head makes its ice unevenly across the trail (value noise
+  across, 50 to 150 m, drawn out in time) and in thin bright threads; the
+  shear and the eddies then draw them out along the trail's own way, so
+  the fibres follow the local form. Some fibres outlive the rest, so a
+  trail ends in fine fibres.
+- **How.** For each texel, the eddies are followed back in time
+  (`ICE_STEPS` = 36 steps over a life of the ice; the method of
+  characteristics). At each age, the ice of that age at the texel came from
+  where the eddies bring it from, less the trail's drift; a head there made
+  it then. Each step is a segment, and each head's puff is integrated along
+  it (with `erf`), so that no step shows. Nothing is resampled step after
+  step, so nothing blurs, and each texel is computed by itself: the field
+  does not depend on the order of the draws, and repeats with the tile.
+  The sum is stored as `1 - exp(-30 x)`.
+
+`ciDensity` gives a deck's share of the vertical optical depth at a place
+on the map.
+
+- **The weather.** A of the weather map, against a level set by
+  `uCirrus`, gives how much cirrus there is (`m`). The lower deck reads
+  another place of the map, so that the decks come and go apart. Over some
+  16 km (a coarse level of the map) it tells where there is none, and most
+  of the sky costs little. The weather now holds patches and bands only;
+  the forms are in the ice.
+- **The ice** is read in the cirrus's frame (along (3, 1), across
+  (-1, 3), two tiles to a unit of 81 km) with `textureGrad` over the
+  pixel's footprint (`f1`, `f2`: the footprint's axes on the map, drawn
+  out along the ray's way and a little by the way through the deck),
+  through the mipmaps and, where the GPU has it, its anisotropic filter.
+- **The slider.** Little cirrus shows only the densest ice: the ice passes
+  through a soft ramp at `1 - m`, so a cloud fades in as a whole and has no
+  outline. More cirrus shows the thin parts too, and much cirrus adds a
+  milky veil where there is much ice around (the ice over some 2.5 km, a
+  coarse level of its mipmaps).
+- `ciBody` is the ice over a footprint six times as wide: the light inside
+  the sheet feels it.
+- Light: forward scattering by ice (a narrow diffraction peak within a
+  degree or two of the sun, so that the glow round the sun stays small; a
+  broad refraction lobe; and a flat part to the side and back, some 0.3 of
+  the mean, as ray tracing of ice crystals gives it), the 22-degree halo with the dispersion of ice, light
+  scattered once with the sheet's own shadow, a share scattered many times,
+  skylight from the multiple-scattering table, and light from the low
+  clouds below, at the mean distance of the decks seen. A fibre in a thick
+  body of ice is lit through the body (`ciBody`), so dense patches are grey
+  inside and their thin edges bright. Sunlight reaches the shell through
+  the air above it (`ciDepthToTop`): at a low sun it is reddened.
 - `cirrusShadow` dims the direct light on the low clouds and the sea (half
   the depth counts: ice scatters mostly forward). It reads the mean of the
-  body over the shell, without the fibres (`cirrusDepth`), and so does the
-  glare.
+  two decks over 0.5 km (`cirrusDepth`), and so does the glare.
 
 `highCloud` returns `Th`, `H` and `tHigh`; the march through the air treats
 it as its second layer.
 
-**The fibres' texture** (`uFibres`, 2048 x 1024, R8), drawn once at start
-by the `noise` shader (`uZ` = -2): lines of five sizes, in rows from 675 m
-apart down to 42 m, from 150 m wide down to 3 m (4 m a texel). Each line wanders across as it runs,
-so that it crosses its neighbours at small angles, and comes and goes along
-its length; the finer they are, the more they gather in bundles; a gentle
-wave bends each size by itself. Their mean is summed in the JS from the
-full texture (`uFibreMean`): the last level of the mipmaps rounds to 8 bits
-at every level, and differs from GPU to GPU.
+**The ice's texture** (`uIce`, 4096 x 4096, RG8, a tile of 40.5 km, 10 m a
+texel; R: the upper deck, G: the lower, which has more heads and trails
+turned 35 degrees from the upper's) is drawn by the `noise` shader (`uZ` =
+-3) in pieces of 512 x 512 (`ICE_PIECE`), so that no single draw keeps the
+GPU long: during the loading, in batches, if the page starts with cirrus;
+else when cirrus is first shown (`buildIce`, called by `render`, all at
+once), so that a sky without cirrus never pays for it. On an RTX 3090 it takes 0.1 to 0.3
+s, and the `noise` shader compiles 0.4 s longer than before; SwiftShader
+takes about two minutes. Every pattern in it repeats with the tile, and
+the tile twice in a unit of the cirrus's frame, which repeats ten times
+over the map.
 
 ## Sun, moon, stars
 
@@ -577,7 +662,8 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All are uploaded in `makeSky`:
+All are made during the loading, in `makeSky` (the ice of the cirrus
+later if the page starts without cirrus: when cirrus is first shown):
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
@@ -587,7 +673,7 @@ All are uploaded in `makeSky`:
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uFibres` | 10 | 2048 x 1024, R8, mipmapped, repeating, anisotropic where available | `noise` shader | The fibres of the cirrus (see [Cirrus](#cirrus)) |
+| `uIce` | 10 | 4096 x 4096, RG8, mipmapped, repeating, anisotropic where available | `noise` shader, in pieces | The ice of the cirrus, two decks (see [Cirrus](#cirrus)) |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
 reads unit 6.
@@ -604,11 +690,11 @@ the public domain). The `noise` shader hashes a lattice cell's
 coordinates, packed into one word, plus the seed; the `waves` shader the
 number of the wave. The word, and its low 21 and 10 bits moved up, are
 three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
-`ciNoise` in `fs` uses the same hash per pixel: one word per lattice point,
-which with its low half moved up is the gradient. It wraps the lattice by
-hand, not with `mod()`: on the GPU here, `mod()` of a whole number by itself
-gave the number back in places, and a seam ran along the lattice line there
-(seen as a difference from SwiftShader).
+ice uses the same hash (`iceWord`: a lattice point's coordinates and the
+seed, each times an odd constant, summed into one word). Its noise wraps
+the lattice by hand, not with `mod()`: on the GPU here, `mod()` of a whole
+number by itself gave the number back in places, and a seam ran along the
+lattice line there (seen as a difference from SwiftShader).
 
 ## Sound
 
