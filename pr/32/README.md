@@ -43,7 +43,7 @@ The panel at the bottom changes the time and the weather.
 - **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
 - **Moon**: the age of the moon, 0 to 29.5 days.
-- **Haze**: the amount of dust and small droplets in the air, 0 to 6 (0.35 at first). With more, the horizon and the sky around the sun turn white.
+- **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
 - **Altitude**: 300 m to 13,000 m (11,000 m at first).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
@@ -69,6 +69,7 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 ## What it needs
 
 - A browser with WebGL2. Without it, the page shows only a gradient of sky colours.
+- While the page prepares the picture (compiling its shaders can take a few seconds the first time), it shows a dark sky with a line of progress. The browser stays responsive meanwhile.
 - A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
   - 2560×1440: about 9.3 ms

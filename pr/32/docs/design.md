@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and nine `<script>`
+`index.html` holds everything: the markup, the CSS and ten `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -19,13 +19,15 @@ blocks. It loads no other file.
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. With `SHADOW_MAP` defined, the map of the clouds' shadow. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| `meter` | fragment shader | Meters the picture for the exposure, block by block. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
-| (no id) | JS | Everything else, in one function that runs at load. |
+| (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
 
 There is one canvas, `#sky`, the hero: the view from an aircraft. Clouds,
 sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
 over frames. It fills the window, and the page does not scroll.
-`makeSky(canvas, view)` compiles `fs` and the other shaders for it.
+`makeSky(canvas, view, { done, shown })` makes its renderer, a step at a
+time (see the next section).
 
 ## Conventions
 
@@ -64,38 +66,104 @@ over frames. It fills the window, and the page does not scroll.
 
 ## From the address bar to the first frame
 
-The JS runs once, at load:
+The page shows at once in its loading state: the hero is dark (`.loading`,
+a gradient of a night sky), with the title over it. After 0.3 s a thin line
+of progress and a word (`TEXT.loading`) fade in, so a quick start shows only
+the dark. The panel and the full-screen button stay hidden (no clicks, no
+focus) until the first picture. All of this is HTML and CSS: it needs no
+script.
 
-1. **Tables that do not depend on the view.**
-   - `odTable` (`buildDepths`): optical depth to the top of the air towards
-     the sun, over altitude (48 rows, squared spacing) and the cosine of the
-     sun's zenith angle (96 columns from -0.2), 64 steps each. Read by
-     `sunDepth()` in the JS only.
-   - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
-     (see [The air](#the-air)).
-   - `starData` (`buildStars`): the star texture.
-   - `DAY_LEVEL` (the metered sky with the sun at 42 degrees) and `NIGHT`
-     (4e-8 of it: the moonless night sky, airglow).
-2. **The renderer.** `makeSky` for `#sky`, inside a `try`: if it fails, the
-   error goes to the console. Without WebGL2, the canvas keeps its CSS
-   gradient.
-3. **Inputs.** URL parameters with the id of a slider set that slider's
+The JS then runs once, at load, and does little:
+
+1. **Inputs.** URL parameters with the id of a slider set that slider's
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
-   then act as the now button, the select and the play button. `yaw`,
-   `pitch`, `heading`, `at`, `pixels` and `res` are read directly (see
+   then act as the now button, the select and the play button, but the
+   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
+   `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
-4. **The loop.** `update()` marks the state changed and calls `kick()`,
-   which asks for one `requestAnimationFrame(frame)`.
+2. **The loading.** After the first paint (an animation frame, then a
+   message), `makeSky` for `#sky` makes the renderer. It is an `async`
+   function: it waits a frame (`nextFrame`) wherever it would otherwise
+   hold the main thread or wait for the GPU. Its steps:
+   - `getContext`, and the extensions.
+   - Every program (`fs`, `noise`, `waves`, `mean`, `show`, `meter`) is
+     compiled and linked at once, and nothing asks how it went yet. With
+     `KHR_parallel_shader_compile`, the GPU process compiles them on threads
+     of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
+     it, asking waits, so the page asks for one program a frame. A failed
+     program throws the compiler's or the linker's message.
+   - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
+     (`slices`). Each is a generator (a job) that yields every little while;
+     `finish(job)` runs one at once.
+     - `odTable` (`buildDepths`): optical depth to the top of the air
+       towards the sun, over altitude (48 rows, squared spacing) and the
+       cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
+       each. Read by `sunDepth()` in the JS only.
+     - `starData` (`buildStars`): the star texture.
+     - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
+     - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
+       (see [The air](#the-air)), for the haze given, the longest (0.2 to
+       0.3 s). It reads `odTable` (through `sunDepth`), so it starts when
+       that is done, and goes on beside the star and depth tables, while the
+       GPU compiles the programs and draws the textures; the first frame
+       waits for it.
+     - The slices of all these are paced by timers (`soon`), not by frames:
+       while the page starts and the GPU draws the textures, a frame comes
+       only every 50 ms or so. Paced by frames, after the other tables, the
+       multiple-scattering table took 1.8 s and held the first picture back
+       by 0.4 s.
+     - With them goes a constant, `NIGHT`: the moonless night sky
+       (airglow), 8.59e-10 of the sun's irradiance, about 4e-8 of the
+       daytime sky.
+   - The textures (see [Textures made at start](#textures-made-at-start)).
+     The noise and the weather map are drawn in batches (`batches`), the
+     weather map in strips of 64 rows (the scissor; each pixel is the
+     same as from one draw). After each batch the page waits for a fence
+     (`settle`); a batch doubles while the GPU gets through it in under
+     100 ms and halves over 250 ms. The GPU process draws the whole
+     browser, and a slow GPU given seconds of work at once would freeze it.
+   - `prime`: the first frame is drawn as the first frame will draw it
+     (`render` as a probe, which then puts its state back), and `show` once
+     without a pixel (the scissor). Some drivers finish a program only at
+     its first draw, which can take a second: that happens now. Once a
+     fence says the GPU is done, the meter of that frame is read: the read
+     does not wait.
+3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
+   without WebGL2 or if a program failed: the error goes to the console,
+   the loading state fades out, and the canvas keeps its CSS gradient).
+   `kick()` asks for the first frame; a time-lapse asked for in the address
+   starts now; the title's and the panel's timers start (see `.told` and
+   `.still`). Before this, `kick()` and `schedule()` do nothing.
+4. **The first picture.** The first frame is only metered, as always (see
+   [Exposure](#exposure-and-the-tone-curve)); if what it is drawn from is
+   what `prime` drew, prime's reading stands, else it reads the meter at
+   once. The second frame goes to the canvas, and `render` calls `shown()`:
+   the hero gets `.shown`, and the loading state fades out over the picture
+   in 0.8 s (it lets the pointer through at once), while the panel fades
+   in. The class and the picture reach the screen in the same frame, and
+   the fade starts from opaque: nothing empty or half drawn shows.
+
+So no step holds the main thread for long, except `getContext` itself.
+The pictures are the same as when everything ran at once: the jobs and
+batches only split the same work.
+
+A hidden tab has no animation frames: there `nextFrame` waits 100 ms
+instead (the browser slows that down further), so the loading goes on
+slowly; the first frame waits until the tab is shown.
+
+**The loop.** `update()` marks the state changed and calls `kick()`,
+which asks for one `requestAnimationFrame(frame)`.
 
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed, runs
-  `celestial()`, sets the exposure (`state.airExposure`) and the panel's
-  labels;
+- if something changed: rebuilds `msData` when the haze has changed (at
+  once, with `finish`; it takes about a quarter of a second: while the haze
+  slider moves, it is built `HAZE_WAIT` = 250 ms after the last move), runs
+  `celestial()` and sets the panel's labels;
 - moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
   `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
@@ -103,8 +171,8 @@ The JS runs once, at load:
   is out of date (see [The clouds' shadow](#the-clouds-shadow));
 - asks for another frame only if the renderer returned true.
 
-The renderer returns true while the aircraft flies or while its picture is
-still settling. So the page draws nothing at rest once the picture is
+The renderer returns true while the aircraft flies, while its picture is
+still settling, or while the exposure moves. So the page draws nothing at rest once the picture is
 clean, or in a hidden tab. `visibilitychange` calls `kick()` again.
 
 **Playing.** The play button runs the time at the rate of the select beside
@@ -149,7 +217,9 @@ the rate to real time, and plays.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
   angle. It counts (`state.moonI`) only when the sun is below -3 degrees and
   the moon above -18.
-- `state.sunOn` (`uSunI`) is 0 when the sun is below -21 degrees.
+- `state.sunOn` (`uSunI`) fades from 1 to 0 as the sun goes from 18 to 21
+  degrees down (a smoothstep), so that no step shows when it stops
+  mattering.
 - One light for the clouds and the sea (`uLight`, `uLightI`): the sun while
   it is above -3 degrees, else the moon.
 - `state.sky` (`uSky`) turns J2000 equatorial directions into local axes.
@@ -174,25 +244,88 @@ air, or to the sea. The air is three species, with densities from
 
 - Rayleigh: `exp(-h / HR)`, `HR` = 8 km; scattering `uBR` = 13.558e-3 per km
   at 550 nm, falling with the fourth power of the wavelength (`BR`).
-- Mie (aerosol): `exp(-h / HM)`, `HM` = 1.2 km; scattering `BETA_M` =
-  3.996e-3 per km times `uHaze`, extinction `MIE_EXT` = 1.11 times that.
-  Grey: the same at every wavelength.
+- Mie (aerosol), after published profiles of the background aerosol
+  (OPAC, Hess et al. 1998; Shettle and Fenn 1979; SAGE II for the
+  stratosphere). The haze of the lowest kilometres, the boundary layer,
+  is well mixed up to `BL` = 1.5 km and falls off over about 0.3 km above
+  it (`boundaryLayer`: a logistic step, 1 at sea level); above it two thin
+  layers (`AERO_FREE`, `AERO_STRAT` in `fs`, `AERO_UP` and `mieUp` in
+  the JS): 0.048 of the sea level's density at 6 km (half-width 5 km, the
+  free troposphere) and 0.004 at 20 km (half-width 8 km, the
+  stratosphere). Scattering `BETA_M` = 0.044 per km at sea level times
+  `uHaze` (the haze slider, 1 by default), extinction `MIE_EXT` = 1.05
+  times that (a single-scattering albedo of 0.95: between maritime air,
+  0.99, and continental, 0.92). By wavelength, times
+  `(550 nm / wavelength)^ANGSTROM`, `ANGSTROM` = 1.3 (`MA` in the JS,
+  `uMA` in `fs`): a little bluer. At the default haze the optical depth
+  at 550 nm is 0.070 in the boundary layer, 0.019 in the free troposphere
+  and 0.0026 in the stratosphere, 0.091 in all: a clear day of fair
+  weather (0.05 to 0.15 over the sea and the coast; a visibility of about
+  65 km at sea level). The slider scales all three: 0.3 is very clean air
+  (0.03), 3 to 6 hazy (0.3 to 0.55).
+  The default was chosen from a series of haze values beside photographs
+  of clear days, from the sea and from the air, by day and at dusk
+  (round 10). Round 9 had 0.14 in all, and with the phase function
+  of the time the sky near a sun at 30 degrees, seen from near the sea,
+  was a milky beige column from the top of the picture down to the
+  horizon, and a sun 2 degrees up dimmed so much that its glitter was
+  nearly gone.
+  Before (round 8), the boundary layer was `exp(-h / 1.2)` with 0.0014 per
+  km: an optical depth of 0.002, some 50 times less than real air; the
+  horizon was crisp, distant clouds and sea did not fade, and at dusk the
+  ground below the band of glow was dark blue where photographs show a
+  brown-orange haze.
 - Ozone: a triangle from 10 to 40 km, peaking at 25 km; absorption `uBO`
   from the Chappuis cross-sections (`OZONE`) for 300 Dobson units.
 
-Phase functions (`phases`): Rayleigh, and the Cornette-Shanks form for Mie
-with `g` = 0.8.
+Phase functions (`phases`): Rayleigh, and for the aerosol the
+Cornette-Shanks form (`cornetteShanks`), by height:
+
+- In the boundary layer, two lobes: a sharp one, `MIE_PHASE` = (0.149,
+  0.932, 0.609) — 0.149 of the light with parameter 0.932, from the
+  larger particles (sea salt, dust) — and a broad one with 0.609. Fitted
+  to Mie theory (computed for this, from Bohren and Huffman's
+  recurrences) for humid maritime and continental aerosol after OPAC: the
+  mean of the two is matched within 8 % from 2.5 to 90 degrees off the
+  light. The asymmetry is 0.715. The sun's aureole is round and bright
+  within a few degrees and falls off fast: 2 to 4 times the single
+  lobe's (`g` = 0.7) within 2.5 degrees of the sun, 0.8 of it from 10
+  to 20 degrees. The
+  single lobe of round 9 made the sky from 10 to 30 degrees off the sun
+  too bright, and as bright near the horizon as up by the sun: from near
+  the sea it drew a pale column under a high sun, with a nearly vertical
+  edge.
+- Above it (`MIE_G_UP` = 0.6, an asymmetry of 0.66), one broad lobe: the
+  free troposphere and the stratosphere hold small sulphate particles,
+  whose Mie phase function has no sharp peak (fitted the same way). With
+  the boundary layer's lobes there, the stratospheric layer drew a small
+  white core over the set sun from cruise.
+- `densities(h)` gives the boundary layer's share of the aerosol at `h`
+  (its `w`), and `addLight` mixes the two by it. `buildMultiScatter`
+  does the same (`phaseM`, `phaseUp`).
 
 **The march.** `NV` = 20 samples at
-`t = tmax * f * f`: denser near the eye. Each sample adds, for the sun and
-for the moon, `addLight`:
+`t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
+through the planet's shadow: in parallel light, a cylinder of radius `RG`
+behind the planet (`shadowSpan`). Then the march has three runs, each
+denser at its start: `NV` samples from the eye to the shadow, `NSHADE` = 8
+in it, and `NFAR` = 16 in the lit air beyond (a run of no length is
+skipped). The light scattered once rises steeply from the shadow's edge;
+20 samples over the whole ray left layers of colour above the band of
+glow that came and went with the angle (a purple one at 7 degrees with the
+sun 14 degrees down). A ray that misses the shadow is marched as before,
+so the day's picture is unchanged. Each sample adds, for the sun and for
+the moon, `addLight`:
 
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
   (`depthToTop`) times the phase functions, times `direct`: the share of
   the light that the clouds let through there (below);
 - light scattered many times: the multiple-scattering table times the
-  local scattering coefficient, times the transmittance to the eye.
+  local scattering coefficient, times the transmittance to the eye; and
+  for the aerosol, which sends light on forwards, `MIE_LEAN` = 4 times the
+  table's lean (below) towards the view, where it is positive: more of
+  that light when the view looks where it comes from.
 
 The clouds and the cirrus enter the march as two layers (see
 [Low clouds](#low-clouds) and [Cirrus](#cirrus)). At each layer the march
@@ -201,9 +334,16 @@ ends a sample exactly there (`tLayer`), adds the layer's light (`C` or
 layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
 (`vis` = 0) the march stops.
 
+Light from below the local horizon grazes the planet on its way, through
+hundreds of kilometres of the boundary layer, which takes it out. Until
+round 8 the air was so clean that this light came through deep red, and
+a cut (`grazeCut`) removed light that passed lower than 1 km; with the
+real boundary layer the reference and the page agree without it (to 2 %
+in the planet's shadow), so it is gone.
+
 **Shafts.** Below the tops of the clouds, `direct` comes from the clouds'
 shadow map (`cloudShadow`), sampled more finely than the march: `SHAFTS`
-= 16 samples over the part of the ray below `CT` (`sa` to `sb`), denser
+= 16 samples over the part of the ray below `CT` (`ca` to `cb`), denser
 near the eye (`f * f`), at new places each frame (`ign`). Each step of the
 march takes the mean of `exp(-tau)` over the samples that fall in it,
 weighed by the air's scattering there (Rayleigh at 550 nm and Mie), or
@@ -219,26 +359,109 @@ clouds, or without a light, nothing is sampled.
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
-- The table repeats the density profile. The profile is written out five
-  times: `density()` in `fs`, and in the JS `buildDepths`,
-  `buildMultiScatter`, `skyLuminance` and this table in `makeSky`. Change
-  all five.
+- The table repeats the density profile. The profile is written out twice:
+  `densities()` in `fs`, and in the JS (`boundaryLayer`, `mieUp` and
+  `mieDensity` for the aerosol, used by `buildDepths`, `buildMultiScatter`
+  and this table in `makeSky`).
+  Change both.
 
 **Multiple scattering** (`buildMultiScatter`, after Hillaire, 2020): for
 each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
-zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the light
-scattered twice is gathered over the sphere as if scattering were
-isotropic (8 by 4 directions over half the sphere, mirrored; 14 steps
-each), with sunlight bounced off the ground (`ALBEDO` = 0.07); the higher
-orders follow as a geometric series. One value per wavelength, per unit of
-scattering coefficient. The texture is `NMU` by `3 * NH`: the three groups
-of four wavelengths stacked in y. It depends on the haze, so `frame`
-rebuilds it when the haze changes, and the renderer uploads it again.
-`fs` reads it through the GPU's filter (`textureLod`; RGBA16F when full
-floats cannot be filtered).
+zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the mean light
+that reaches a point, to be times the scattering coefficient there:
 
-The JS keeps a copy of the march, `skyLuminance()`, to meter the exposure
-(see [Exposure](#exposure-and-the-tone-curve)).
+- The light scattered once is gathered over the sphere, with the phase
+  functions of the air and the aerosol (each layer's) for the sun's light scattered
+  towards the point, and with sunlight bounced off the ground (`ALBEDO` =
+  0.07). In twilight that light comes from the lit air towards the sun,
+  scattered forwards; gathered as if isotropic, the table held 0.65 to
+  0.75 of the reference's (below) in the planet's shadow, now 0.85 to 0.95:
+  16 bands of height, narrower near the horizon (edges at `x |x|` for
+  even `x`), each counted by its share of the sphere, times 4 directions
+  over half the sphere, mirrored; 14 steps each. In twilight that light
+  comes from the lit air low on the horizon: 8 even bands, the nearest
+  3.6 degrees off it, missed most of it, and the sky of nautical twilight
+  came out 3 to 5 times too dark.
+- The higher orders follow as a geometric series (Hillaire).
+- Then, while the sun stands lower than 17 degrees (blended in down to
+  9), one more gathering of that field itself, an order computed rather
+  than guessed. The series keeps the colour of the light scattered twice;
+  in deep twilight that is the red glow on the horizon, and the air came
+  out orange where the sky above is blue. One more order is enough: a
+  second changes the table by less than 1 %.
+
+A second table holds the sky's light on the low clouds (`cloudSky`): as
+bright as the mean light, but in the colour of the light from above on a
+level surface (gathered over the upper half of the sphere times the
+cosine, all orders), relative to that of the mean light with the sun at
+30 degrees at the same height. It is the mean light itself while the sun
+stands higher than 6 degrees, and fully the light from above from -3
+degrees down. The mean light holds the glow on the horizon and the dark
+sea below: in deep twilight the clouds came out mauve and brown under a
+blue sky.
+
+A third and fourth hold the mean light's lean (`msLean`): the light
+gathered times the direction it comes from (pass 0 and the computed
+order), towards the sun's side and up. The table's light is a mean over
+directions, but the aerosol scatters forwards: below the band of glow,
+seen from cruise, the reference's light (scattered many times by the
+boundary layer, coming from the glow) was twice the table's and
+brown-orange where the table's was blue. The lean's first moment would
+weigh it by 3 times the asymmetry (2.1 in the boundary layer); with the forward peak sharper
+than that, 4 fits the reference best, and taking it only where it is
+positive keeps the views away from the light as they were (the first
+moment taken there too left the sky away from the sun 0.65 of the
+reference's).
+
+One value per wavelength. The texture is `NMU` by `12 * NH`: the three
+groups of four wavelengths of the air stacked in y, then those of the
+clouds, then the lean towards the sun's side and up. It depends on the haze, so `frame` rebuilds it when the haze
+changes, and the renderer uploads it again. `fs` reads it through the
+GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
+
+**Against measurements** (a float64 copy of the model of round 8, with
+its thin aerosol and `grazeCut`; not measured again since). Integrated
+over the sky at sea level (haze 0.35 of that aerosol, 128 klx of sunlight outside the air), the model gives, against the
+horizontal illuminance table in Schlyter, "Radiometry and photometry in
+astronomy": sun at 0 degrees, 937 lx (measured 759); -6, 6.3 lx (3.4);
+-12, 0.016 lx (0.008). The zenith, against a fit to sky quality meter
+readings (hnsky.org, "SQM twilight"): 0 degrees, 148 cd/m2 (216); -6, 0.89
+(0.63); -10, 0.014 (0.013); -14, 5.1e-4 (4.7e-4). Within a factor of two
+throughout. The layers and the cut change these figures by less than
+10 %: they matter for the colours low in the sky, not for these totals. Before the bands, the extra order and the shadow's runs, the
+zenith at -10 and -14 degrees was 3 and 6 times too dark.
+
+**Against a reference** (November 2026). A Monte Carlo solver of the same
+atmosphere (spherical shells, the twelve wavelengths, Rayleigh, the
+aerosol profile above with its phase functions by height, ozone, a ground
+of albedo 0.07, every order; the light scattered once by a fine march,
+the rest by paths with a track-length estimate of the sun's light on each
+segment and the hero wavelength scheme of Wilkie et al., 2014), against a
+float64 copy of `fs`'s march with the page's own tables, over elevations
+-10 to 60 degrees at 0, 90 and 180 degrees from the sun, from 0.3, 4 and
+11 km, the sun at 30, 2, -2, -4, -6 and -10 degrees (round 10, the
+default haze, 4096 paths a ray). Medians over each set of rays:
+
+- The light scattered once agrees within 3 % (1.00 almost everywhere).
+- The sky (from the horizon up): 0.90 to 1.0 of the reference by day and
+  towards and away from the sun in twilight (0.97 to 1.0 from 4 and
+  11 km), with its colour (the r-chromaticity within 0.02). The
+  anti-twilight arch and the planet's shadow away from the sun follow the
+  reference closely: the pink band is a narrow one in the reference too
+  (warm from 0 to 5 degrees, at its warmest at 3). Away from the sun in
+  deep twilight from 0.3 and 4 km, 1.2 to 1.35.
+- To the side in deep twilight the page is too bright: 1.1 to 1.2 at -6,
+  1.6 to 1.8 at -10 (the table's light gathered as a mean).
+- Below the horizon towards the sun in twilight (the haze over the ground
+  under the band of glow): 0.7 to 1.0 of the reference (0.96 to 0.98 from
+  11 km), a little bluer (r-chromaticity up to 0.06 lower); before the
+  lean, 0.44 and blue where the reference is brown-orange. By day below
+  the horizon, 0.8 to 0.96 (the sea there is the page's own, not the
+  reference's grey ground).
+
+So the light of the sky is the page's atmosphere's; what still differs
+from photographs is mostly how much aerosol there is, and the exposure
+and tone curve (see [Exposure](#exposure-and-the-tone-curve)).
 
 ## Low clouds
 
@@ -320,7 +543,8 @@ scattered once (`sOne`) and many times (`sMany`), per unit of skylight
 (`sAmb`), and the mean distance it comes from (`tBar`). `main` turns them
 into the spectrum `C` at `tBar`: sunlight through the air above (and
 through the cirrus, `cirrusShadow`), plus skylight from the
-multiple-scattering table, plus airglow.
+table of the sky's light on the clouds (`cloudSky`, see
+[The air](#the-air)), plus airglow.
 
 The clouds' own light is worked out inside them, as above. Everything
 outside them (the air, the sea, the glare) reads their shadow from one
@@ -375,7 +599,21 @@ What reads it:
   not in the map: as before, its shadow where the ray meets the sea
   (`ciShade`) dims the air below 2 km;
 - the sea: the shadow passed to `addSea`, with the cirrus's
-  (`cirrusShadow`);
+  (`cirrusShadow`). The sea reads it through `seaShadow`, with soft
+  edges: the light `exp(-tau)` is averaged over `SHADOW_TAPS` = 8 points
+  across the light, out to a radius of `SHADOW_PEN` (0.035) times the way
+  along the light from clouds `SHADOW_OCC` = 1.5 km high (at most 0.75 km),
+  spaced evenly out from the middle and turned by a new angle each frame
+  (`ign`), and only then made a depth again. That is about 60 m under a
+  high sun and 500 m under a sun 6 degrees high; on the sea the edge is
+  longer along the light by 1 / sin of its height. The sun is a disc, and
+  the light through a cloud's thin edge is spread around it by the
+  droplets' forward scattering: a real shadow on the sea fades over tens to
+  hundreds of metres. Read once, the map's contour was the edge of the
+  glitter, which shows white down to a hundredth of its light: the glitter
+  was cut out along it, hard, and with a low sun into blocks (one texel is
+  drawn out along the light on the sea). Points spaced evenly over a disc
+  left round blots; spaced evenly out from the middle, they weigh it more;
 - the glare: the clouds towards the sun dim it (`cloudShadow(o)`).
 
 The clouds' own light march (`lightDepth`) does not read it: it sees the
@@ -408,7 +646,7 @@ cloud around each sample in finer detail than the map can hold.
   sharp from near, averaged from far.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
-depth of the clouds (`cloudShadow`, the map) and of the cirrus
+depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
 (`cirrusShadow`) towards the light. It hides the glitter and the direct
 light on the water; the light that a cloud lets through diffusely
 (`soft`) falls more slowly.
@@ -480,23 +718,188 @@ cirrus towards the sun.
 
 ## Exposure and the tone curve
 
-The exposure is set in the JS, once per change, by `airExposure()`. It
-meters the sky at the aircraft's altitude (`meterLight()`: the mean of
-three points, or the glow above the sun if brighter), the band along the
-horizon and the sunlit cloud tops (`cloudLuminance`), whichever is
-brightest, against the same with the sun at 42 degrees (`REF_SUN`). It
-opens up as the sky darkens, but not all the way. It stops down from high
-up (`AIR_STOP`) and further with clouds (`CLOUD_STOP`), more so close over
-the tops, and opens up under a sheet of cloud.
+The exposure follows the picture, as the eye or a camera's automatic
+exposure does: it is set from what the view shows, sky, clouds, sea,
+glitter and the inside of a cloud alike.
+
+**The level.** `fs` writes, in the alpha of each frame, the level of the
+pixel: log2 of its luminance before exposure, coded from 0 to 1 over
+`LOG_RANGE` (-34 to 18, `uLogRange`). `mean` carries it along with the
+colour, so the picture's level is as clean as its colours. The sun's
+disc and glare and its glitter on the sea (and the moon's glitter) count
+in it at only `METER_GLINT` = 0.15 of their light (`G` in `main` and
+`addSea`): a camera lets the sun and its mirror image run into white and
+exposes for the rest. Photographs from cruise keep the sky as light
+facing the sun as away from it (h11-vueling01 and 03); counted in full,
+the glitter held the view towards the sun 1.5 to 2.4 stops below the
+view away, and the sky there was navy (round 10).
+
+**The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
+texels (`METER`): each is a block of the picture and holds the mean level
+of 4 by 4 points in it, in 16 bits over two 8-bit channels. The JS reads
+it back `METER_LAG` = 3 frames later, when the GPU has long drawn it, so
+that the read does not wait for the GPU's work. Counting frames, not
+polling a fence, keeps the page's frames the same from run to run on a
+stepped clock (the tools' fake clock). A read still costs a round trip to
+the GPU process (about 2 ms on the test machine), so the meter is read at
+most every `METER_MS` = 100 ms of the page's time. The first frame of
+the page is metered at once, not shown, and drawn again at its exposure:
+the page starts adapted. The loading has drawn that frame before and read
+its meter without waiting (`prime`, see
+[From the address bar](#from-the-address-bar-to-the-first-frame)); only if
+something changed since (a resize, say) does the first frame read it
+itself, the one read that waits.
+
+**The exposure the picture asks for** (`exposureFor`, log2) comes from the
+2304 block levels, sorted:
+
+- `low`, the level of the darker quarter (`LOW_SHARE`), but at least
+  `NIGHT_LEVEL` = -25.5 (a moonless night sky);
+- `high`, the level that only the brightest 3% of the blocks pass
+  (`HIGH_SHARE`);
+- `key` = `KEY` - `EYE` * `low` (`KEY` = -1.3): as the view darkens,
+  the eye opens up `EYE` = 0.85 stops for each stop, not all the way. So
+  a night is darker than a day and dusk is in between, and black sea at night is exposed as
+  the night sky, not lifted into noise;
+- `white` brings `high` to `WHITE` (2^0.3 before the tone curve: just
+  below white) in daylight (`high` at `DAY_HIGH` = 0.5 or more), and `DIM`
+  = 0.6 stops lower for each stop that `high` is below that: the
+  brightest parts of a dim view are not white either (the moonlit clouds
+  of a night);
+- `mid`, the median level, but at least `NIGHT_LEVEL`;
+- by day and by night, the exposure is the lesser of `key` and `white`, but not less than a
+  floor: the exposure that takes `mid` only `DEEP` = 0.8 of the way from
+  the key's level down to the night's (`MID_GAP` = 0.5: in a night sky the
+  median stands about half a stop above the darker quarter), and never
+  more than `key`. So dusk darkens steadily into the night, rather than
+  reaching the night's level early and staying there. The floor is on the
+  median, not on the darker quarter: after sunset the sea and the clouds
+  below darken sooner than the sky, and a floor on them brightened the
+  sky again for some ten minutes;
+- in twilight another exposure takes over, blended in as the sun goes
+  from `DUSK` = 8 to 1 degrees (a smoothstep, times `sunOn`): one set
+  by the sky, the level that the brighter third of the picture passes
+  (`DUSK_SHARE` = 0.65), so that the view is shown as the eye sees it and
+  not held down by its highlights. That level is shown at `DUSK_SHOWN` =
+  -0.8 (log2 after exposure) when it stands at `DUSK_MID` = -3 (about
+  sunset), and at the night's level (the key's, `KEY - EYE * NIGHT_LEVEL
+  + NIGHT_LEVEL + MID_GAP`, -4.6) when it stands at the night's
+  (`NIGHT_LEVEL + MID_GAP`); in between along the power `DUSK_POW` = 0.7
+  of its distance from the night's, so that it darkens slowly at first:
+  through civil and nautical twilight the eye still sees colours. The
+  highlights may stand up to `ABOVE` = 3.5 stops above white, an
+  allowance that grows over `ABOVE_SPAN` = 5 degrees after the blend. The
+  sky, not the median nor the darker quarter: the clouds and the sea
+  below darken sooner than the sky after sunset, and an exposure that
+  followed them brightened the sky through sunset. But the band of glow,
+  the brightest part of a view towards the sun (the level that only
+  `PEAK_SHARE` = 0.2 % of the blocks pass, a few rows of them), stands at
+  most `PEAK_ABOVE` = 1 stop above white, and `DIM_BAND` = 0.1 stops
+  lower for each stop that it is dimmer than daylight's highlights
+  (`DAY_HIGH`), at most `DROP` = 1.5 stops lower. As a camera's sensor
+  does, the tone curve then takes each channel on its own (below): the
+  band's strongest channel runs into white at its core, and it comes out
+  white-yellow there, orange at its edges, pale above, under a deep
+  blue-grey sky, as in photographs from the air; deep in the twilight it
+  is a thin orange line under a near-black sky (an A330's at about -8
+  degrees). In deep twilight the band gives way: it holds the sky at most
+  `GLOW_HOLD` = 1 stop down for each stop that it stands more than
+  `GLOW_FREE` = 3.5 stops above the sky. From cruise the band is a thin
+  line some 7 stops over a dark sky, and the sky stays near black; near
+  the sea, where it is a wide glow 4 stops over the sky, the sky and the
+  sea keep a visible deep blue (they were near black at -10 degrees,
+  where photographs show them deep blue). A view away from the glow holds
+  no such peak and keeps the exposure of its sky;
+- and as the sun goes down the picture never grows brighter. The
+  exposure is at most what the same view would get with the sun higher,
+  at every `MONO_STEP` = 0.25 degrees up to the start of the blend: the
+  same view with all its levels raised by `MONO_RATE` times the
+  stops that the air's mean light at the eye's height (`airLevel`, from
+  `msData`) is brighter there, and its exposure lowered as much. The
+  meter's statistics are sorted once, so this costs some 60 evaluations
+  of a few lines. With a uniform darkening the shown picture is then
+  monotone. `MONO_RATE` is 1 through civil twilight and 0.8 from the sun
+  6 degrees down (`MONO_DEEP`, -3 to -6, a smoothstep): at 0.8 throughout
+  (round 9) the sky away from the sun after sunset was held near the
+  late afternoon's level, darker and deeper blue than photographs from
+  cruise show it (r3, A3f: pale blue); 1 throughout lifted deep twilight
+  near the sea by up to a stop. The picture as a whole still never
+  brightens after sunset; the sky part of a view away from the sun does
+  rise (80 to 138 of 255 at 11 km between 8 degrees up and 2.4 down), as
+  the deck below darkens sooner than the sky. Not seen by the envelope:
+  facing a sun that is still up from near the sea, the view brightens
+  by 3 to 9 levels per 0.4 degrees from 5 to 1 degrees up, as the
+  sun's aureole in the haze dims faster than the rest. An envelope that
+  also lowered the highlights by the sun's own dimming held that, but
+  jumped by 100 levels where the sun went below the eye's horizon. Before
+  (round 8), the twilight's exposure was blended in from 2.5 to -0.5
+  degrees and lifted the picture by up to `DUSK_LIFT` = 1.2 stops (gone
+  now): in a time-lapse the sky away from the sun went from 75 to 148
+  (of 255) between sunset and 2 degrees below it, and the view towards
+  the sun from near the sea rose by 23 levels as the sun's disc set.
+
+`exposureFor` returns the exposure.
+
+**Adaptation.** Each frame the exposure moves
+towards its target by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
+a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
+view) and `ADAPT_SLOW` = 0.5 s towards more. It starts when the target is
+`ADAPT_START` = 0.03 stops away and stops within `ADAPT_STOP` = 0.01, so
+that the noise of the picture does not keep it moving. In flight, which
+draws anyway, it keeps within `ADAPT_TRACK` = 0.002 of the meter.
+
+**The flight check and the meter.** A flight of 61 frames from the
+page's load (the tools' `flight` check) is compared with a still at the
+place reached. Each page starts at the meter of its first, single frame;
+the still keeps it (within `ADAPT_START` of the settled picture's) and
+the flight follows the meter of its own, noisier picture, so they ended
+0.01 to 0.02 stops apart, a uniform 1 to 1.5 %: 1.55 levels against
+main's 1.13 at cruise, 1.48 against 1.09 at 3 km. That was an artefact of
+the comparison, so the check now reads the flight's exposure at its last
+frame (`window.__exposure`, log2) and draws the still at it (`?expo=`
+pins the exposure): 1.21 and 1.12. Separately it asserts that the
+exposure stays steady, moving under 0.01 stops over the last 20 frames
+(measured 0.0024 and 0.0030). `res` draws its still the same way. The
+base has neither, and is compared as it comes.
 
 At the end of `main`:
 
-1. Spectrum to linear sRGB, times `ISUN` and `uExposure`.
-2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
-3. Light far too strong for the screen turns towards white (as on film).
-4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
-5. Tone mapping `1 - exp(-col)`, then the display power `1 / 2.2`.
-6. Rounding at random to the storage steps (next section).
+1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
+   taken here; then times `uExposure`.
+   No shoulder keeps the hue: each channel meets the curve of steps 4 to
+   6 on its own, as on a camera's sensor.
+2. The white balance `uBalance` (`balanceFor`). By day a camera's for
+   daylight, `DAY_BALANCE` = (0.932, 1.013, 1.074). In twilight it goes
+   `BALANCE_ADAPT` = 0.5 of the way (in log) towards the colour of the
+   light on the level ground (the sky's from above, `upData`, kept by
+   `buildMultiScatter`, and the sun's while it is up), relative to that
+   light with the sun at 30 degrees, as an automatic white balance does
+   and as the eye adapts. Blended in as the sun goes from 2.5 to -0.5
+   degrees (`BALANCE_IN`), and out again as the sun goes from 4 to 9 degrees down
+   (`BALANCE_OUT`), and with height, from 2 to 11 km (`BALANCE_HIGH`):
+   from cruise the view is the high sky and the deck far below, which
+   photographs keep as blue as by day; this correction, warm for the
+   light of the low air, turned that sky lavender-grey and the deck pink.
+   Without it the sky away from the sun came out
+   lavender and the Belt of Venus magenta, where photographs show a pale
+   blue sky and a pink belt; held into the deeper twilight, it turned the
+   blue sky grey and the clouds brown. Tried again without
+   `BALANCE_HIGH` (round 10): towards the sun from cruise at -4 degrees
+   the sky came out grey-lavender as in A1d, but away from it grey where
+   r3, A3f and A3a are pale blue; kept.
+3. A camera's saturation by day, `uSaturation` (`saturationFor`):
+   `DAY_SATURATION` = 1.3 about the luminance, in linear light, falling to
+   none as the sun goes from 8 to 1 degrees (`DUSK`) and none at night.
+   The light of the clear sky from cruise is almost pure Rayleigh, red a
+   quarter of the blue in linear sRGB; photographs from the air show it a
+   strong azure, red a tenth or less (the camera's colour). Twilight and
+   night were set without it, and keep their colours.
+4. Light far too strong for the screen (1 to 6 times white) turns towards
+   white, as on film.
+5. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
+6. Tone mapping `1 - exp(-col)`, channel by channel, then the display
+   power `1 / 2.2`. Steps 2, 4, 5 and 6 are those of `main`.
+7. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames
 
@@ -505,8 +908,9 @@ pixel (`uJitter`, Halton (2, 3)) and the samples through the clouds
 (`uPass`). The picture is the mean of many frames. `makeSky` keeps three
 textures for it, each with a second 8-bit texture beside it (`aux`):
 
-- `shot`: the new frame, drawn by `fs` into two outputs: the colour
-  (`outColor`) and the distance of what each pixel shows (`outAux`);
+- `shot`: the new frame, drawn by `fs` into two outputs: the colour with
+  the level in alpha (`outColor`) and the distance of what each pixel
+  shows (`outAux`);
 - two `pictures` that take turns: the one so far is read while the next is
   drawn by `mean`; then `show` copies the new one to the canvas.
 
@@ -562,18 +966,24 @@ count, capped by `uTrust`, which the JS sets per frame:
 |---|---|---|
 | First frame, canvas resized, or a jump of more than 1 km | 0 | 1 |
 | The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames | 1 | 1/2 |
-| The view moves or the aircraft flies | `IN_MOTION - 1` = 9 | 1/10 |
+| The view moves, the aircraft flies, or the exposure moves | `IN_MOTION - 1` = 9 | 1/10 |
 | At rest | 63 | 1/(n + 1): the plain mean |
 
+The frames are tone-mapped before they join the mean, so a frame drawn
+at another exposure would linger in it. While the exposure moves, the
+mean therefore weighs the frames as in motion: the picture lags the
+exposure by a few frames, and once the exposure stops, the plain mean
+takes over.
+
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
-the frames since the last change (`calm`) and stops once it reaches
-`SETTLE + RELIGHT` = 38: 39 frames in all after the last change. While
-the aircraft flies, it never stops. Playing at real time, each step of 10 s
+the frames since the last change or the last move of the exposure
+(`calm`) and stops once it reaches `SETTLE + RELIGHT` = 38: 39 frames in
+all after the last change, if the exposure does not move. While the
+aircraft flies, it never stops. Playing at real time, each step of 10 s
 starts the count again (see [Playing](#from-the-address-bar-to-the-first-frame)).
-A still picture for testing therefore
-needs `speed=0`, and from page load about 46 frames: the first frames may
-start the mean again (the first reset, and a restart if the drawing size
-grows).
+A still picture for testing therefore needs `speed=0`, and from page load
+about 48 frames: the first frame is only metered, and the next ones may
+start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
@@ -594,11 +1004,11 @@ frame. `?res=` fixes `scale` for tests.
 
 ## Textures made at start
 
-All are uploaded in `makeSky`:
+All are made during the loading, in `makeSky`:
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
-| `uMS` | 0 | 40 x 36, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering |
+| `uMS` | 0 | 40 x 72, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering; the sky's light on the clouds |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
@@ -606,9 +1016,9 @@ All are uploaded in `makeSky`:
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-reads unit 6. Unit 10 holds the clouds' shadow map (`uShadow`, `SHADOW`
-texels square, RGBA16F or RGBA8, linear), drawn while the page runs (see
-[The clouds' shadow](#the-clouds-shadow)).
+and `meter` read unit 6. Unit 10 holds the clouds' shadow map
+(`uShadow`, `SHADOW` texels square, RGBA16F or RGBA8, linear), drawn
+while the page runs (see [The clouds' shadow](#the-clouds-shadow)).
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km

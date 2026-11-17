@@ -31,7 +31,7 @@ becomes the middle of the range (`time=abc` gives 12).
 | `time` | 0 to 24, 0.05 | 15 | Local solar time, hours (the sun is due south at 12) |
 | `date` | 1 to 365, 1 | today | Day of the current year |
 | `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
-| `haze` | 0 to 6, 0.05 | 0.35 | Multiplier on the aerosol (Mie) density |
+| `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.09 at 550 nm at 1, a clear day; see [The air](design.md#the-air)) |
 | `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
 | `alt` | 0.3 to 13, 0.1 | 11 | Altitude of the aircraft, km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
@@ -51,6 +51,7 @@ These are read directly.
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
+| `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
@@ -78,18 +79,32 @@ same commands to WebGL. For example
 
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
-frames and stops (`SETTLE + RELIGHT`, and the frame of the change). From
-page load, step about 46 frames before the screenshot: the first frames
-may start the mean again (the first reset, and a restart if the drawing
-size grows). Hide the overlays (`.title`, `.panel`,
-`.hint`, `.fs`) for a clean picture. The canvas is made with
-`preserveDrawingBuffer`, so `canvas.toDataURL()` reads what is shown.
+frames and stops (`SETTLE + RELIGHT`, and the frame of the change), or
+more while the exposure moves. From page load, step about 48 frames
+before the screenshot: the first frame is only metered, and the next ones
+may start the mean again (a restart if the drawing size grows). Hide the
+overlays (`.title`, `.panel`, `.hint`, `.fs`) for a clean picture. The
+canvas is made with `preserveDrawingBuffer`, so `canvas.toDataURL()`
+reads what is shown.
+
+**The exposure in tests.** The exposure follows the meter. Its blocks are
+read back a fixed number of frames after they are drawn (`METER_LAG`),
+not when a fence has passed, and the exposure adapts by the page's clock.
+So a harness on a fake clock that steps frames gets the same exposure,
+and the same frames, run after run, with no pause between frames.
 
 **Realism.** The goal is a sky that looks real: a picture that could be a
 photograph taken from an aircraft window. Compare with real photographs,
 not with other renderers or memory. Look at several views: the default,
 low sun, near the cloud tops, under the cloud base, cirrus overhead,
 night, haze, strong wind.
+
+A change of the picture is checked over a matrix of scenes, each beside a
+photograph of the same kind: altitude (about 0.3 km, 3 to 5 km, 11 km) by
+time (day, dusk, night) by clouds (low clouds, thin clouds, few and many),
+towards the sun and away from it, at rest and in flight. The rule and what
+to report are in [`CLAUDE.md`](https://github.com/sf624/sky/blob/main/CLAUDE.md).
+The picture comes before the processing load.
 
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
@@ -104,6 +119,25 @@ SwiftShader, `--use-angle=swiftshader`). Look at the console: `makeSky`
 throws the compiler's log, and the page prints it.
 
 **Cost.** Measure the GPU time before and after (next section).
+
+**The start.** Opening the page must not hold the browser. `node
+tools/sky.mjs perf` prints the time to the first picture and the main
+thread's tasks over 50 ms until then; run it on a fresh Chrome (each run
+starts one) and more than once. On the test machine's GPU only
+`getContext` may take over 50 ms (up to about 0.4 s in a browser just
+started). The loading (see
+[design.md](design.md#from-the-address-bar-to-the-first-frame)) keeps to
+these rules, and new work at start should too:
+- Compile and link every program at once. Ask for `COMPILE_STATUS`,
+  `LINK_STATUS` and uniform locations only once `COMPLETION_STATUS_KHR`
+  says the program is done: asking earlier waits for the compiler, which
+  can take seconds for `fs` (ANGLE on Direct3D 11, the usual stack on
+  Windows).
+- CPU work over a few ms is a job (a generator that yields every little
+  while), run by `slices` at start and by `finish` later.
+- GPU work at start goes in `batches`, with a fence after each.
+- No `readPixels`, `getError` or `finish` that waits for the GPU while the
+  page loads.
 
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
@@ -130,7 +164,10 @@ on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
 Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`; a frame that needs a new map of the clouds'
+texture, `mean`, and `show`; at most every 100 ms a fourth, the
+exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
+November 2026; reading it back costs about 2 ms of the main thread here,
+none of the GPU's); and a frame that needs a new map of the clouds'
 shadow draws it first (see
 [design.md](design.md#the-clouds-shadow)). The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
@@ -152,14 +189,19 @@ default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
-The clouds' shadow, measured the same way at 1920 x 1080 in November 2026
-(two sets of three runs, before and after it came in, alternated):
+The clouds' shadow, measured on the same GPU at 2560 x 1440 (`res=1`,
+flying) in November 2026, after the exposure and haze of round 10: three
+runs each, alternated with main, medians of the scene's GPU time:
 
 | View | Scene before | Scene after | Shadow map, per draw |
 |---|---|---|---|
-| Default (cruise, `date=320`) | 5.1 to 5.5 ms | 5.3 to 5.6 ms (+0.15) | 0.70 ms |
-| Under the base (`alt=0.4&cloud=0.6&time=15.5&date=320&haze=1.5`) | 8.1 ms | 8.4 to 8.5 ms (+0.35) | 1.08 ms |
-| `cloud=0` | 2.4 to 3.1 ms | 2.5 to 2.9 ms (the same) | not drawn |
+| Cruise (the defaults) | 12.4 to 12.7 ms | 13.0 to 13.2 ms (+0.55) | 0.71 ms |
+| 4 km, low sun (`alt=4&cloud=0.6&date=320&time=16.5&yaw=61.2&pitch=-5`) | 10.2 to 10.4 ms | 11.5 to 11.6 ms (+1.2) | 1.44 ms |
+| Under the base (`alt=0.3&cloud=0.7&date=320&time=15.5&yaw=51.2&pitch=4`) | 15.5 to 15.7 ms | 15.9 to 16.0 ms (+0.35) | 1.27 ms |
+| `cloud=0` | | the same picture and the same draws | not drawn |
+
+Of that, the soft shadow on the sea (`seaShadow`, eight reads of the map
+per pixel of sea) is about 0.12 ms in the 4 km view.
 
 In flight the map is drawn every 0.5 km (every 2 s at 900 km/h): it adds
 next to nothing to the mean. A frame whose light, altitude or cloud
@@ -178,6 +220,9 @@ The numbers to tune, all in `index.html`:
 | `SHADOW_DS` (`fs`) | 0.2 km | the length of a step along a line of the map (24 to 96 steps) |
 | `SHADOW_ENC` (`fs`) | 4 | the depth at which the stored value is one half |
 | `SHAFTS` (`fs`) | 16 | samples of the map along a view ray below the tops |
+| `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
+| `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
+| `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -220,15 +265,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `eyeSphere` takes `c` from the heights and the near
   crossing from the far one. `highCloud` uses it.
 - **Facts kept twice are changed together.**
-  - The density profile, written out five times: `density()` in `fs`, and
-    in the JS `buildDepths`, `buildMultiScatter`, `skyLuminance` and the
-    depth table in `makeSky`.
-  - The phase functions, Mie `g` = 0.8 included: `phases` in `fs` and
-    `skyLuminance` in the JS.
+  - The density profile: `densities()` in `fs`, and in the JS
+    (`boundaryLayer`, `mieUp`, `mieDensity`) for `buildDepths`,
+    `buildMultiScatter` and the depth table in `makeSky`.
   - The depth table: `DEPTH_MU`, `DEPTH_R` and `H_TOP` (1132.2544, from
     `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
-    `MIE_EXT`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
+    `MIE_EXT`, `MIE_PHASE`, `MIE_G_UP`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
   - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
