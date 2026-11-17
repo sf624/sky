@@ -179,8 +179,8 @@ the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 The cirrus's map, ice, way of its fibres and fibres are built once, by
 their own program (`ice`), during the loading (or when cirrus is first
 shown, if the page starts without it). Measured with `perf` at 1920 x
-1080 on the RTX 3090 in November 2026: the first picture came 4.1 s after
-navigation with `cirrus=0.5`, 3.3 s with `cirrus=0`, against 3.2 s for
+1080 on the RTX 3090 in November 2026: the first picture came 4.1 to 4.4 s after
+navigation with `cirrus=0.5`, 3.3 to 4.1 s with `cirrus=0`, against 3.2 s for
 `main` before the ice. Most of the difference is not the building (some
 0.25 s of GPU time for the ice, 15 ms for the fibres) but the driver
 finishing the large ice program at its first draw (about 0.3 s); it was
@@ -190,7 +190,7 @@ also grew from 0.8 to 1.4 s, until the depth that the sun's light feels
 (`cirrusDepth`, four copies) left out the fibres. A renderer without a
 GPU builds the textures a quarter as wide (see
 [design.md](design.md#cirrus)): on SwiftShader a still at 480 x 270
-looking up at cirrus took 51 s from load against 35 s for `main`. Views
+looking up at cirrus took 51 to 62 s from load against 35 s for `main`. Views
 with `cirrus=0` build nothing.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),

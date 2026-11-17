@@ -438,40 +438,49 @@ plumes, another bands or flocks:
   small), and its trail widens as it ages, by 0.3 to 4 km over a life: a
   wedge, from a narrow streak to a broad fan. Half the plumes have a
   dense head, half the head size (a tuft, cirrus uncinus); the others
-  have none, their ice fading in (a fan of fibres, cirrus fibratus).
-  Their strengths vary from 0.4 to 2.4 and gather in groups. The trails
-  are 1.5 times the drift (some 10 to 35 km).
+  have none, their ice fading in from a narrow root: a fan of 6 to 12
+  strands to a half width that spreads by 20 to 40 degrees (a spray of
+  fibres, cirrus fibratus). Their strengths vary from 0.4 to 2.4 and
+  gather in groups. The trails are 1.5 times the drift (some 24 km); each
+  head turns the common way by up to 0.12 rad and makes it up to 10 %
+  longer or shorter, so the trails of a region are near parallel without
+  being copies.
 - **Large plumes** (A): the same with 3 cells to a side (13.5 km), heads
   1.8 times as large, trails twice the drift (up to 45 km), 2.5 times as
   strong: the broad fans and sheets.
 - **Rows** (G, `iceRows`): small heads (50 to 130 m) along lines with the
   wind, 5 to the tile (8 km apart), a head every 1 km, scattered over
   the row's width (0.3 to 1.5 km). A row comes and goes along its length
-  (runs of 5 to 20 km) and wanders across by up to 1 km. Its trails have
-  a direction of their own: along the rows in most places, where they
-  join into a band of fibres (a street); turned some 60 degrees in
-  places (slow noise), where they stand off a spine as ribs that curl (a
-  feather, cirrus vertebratus). The bands wrap round the tile, so they
-  run on as far as the map lets them.
+  (runs of 5 to 20 km) and wanders across by up to 1 km. Each row's
+  trails have a way and a turn of their own: along the row in most rows,
+  where they join into a band of fibres (a street); turned some 60
+  degrees in a fifth of them, where they stand off a spine as ribs that
+  curl (a feather, cirrus vertebratus). The bands wrap round the tile, so
+  they run on as far as the map lets them.
 - **Flocks** (B, `iceFlock`): small heads (0.1 to 0.3 km), one to a cell
   of 3.4 km, gathered in flocks with wide gaps by two octaves of noise
   (20 and 8 km), each with a short trail of threads (cirrus floccus).
   Half have died out and left their trail. A flock's head grows with age
   and wobbles in time.
 - **Strands** (`iceStrands`). A plume's ice falls in strands along its
-  trail: value noise across it, at 3 to 9 strands to the trail's half
-  width, and thin bright threads within. The place across is measured in
+  trail: value noise across it (squared, so that there are gaps between
+  the strands), at 3 to 12 strands to the trail's half width, and thin
+  bright threads within. The place across is measured in
   units of the trail's width at that age, so the strands fan out with
   the trail. Each strand has a life of its own, the outer ones shorter:
   the strands end one by one, so that a trail tapers and frays out
   instead of ending round. The head itself is a plain puff.
 - **The trail.** The shear draws the ice away from its head, slowly at
-  first (a dense head), then at full speed, along a direction that turns
-  with age (`veer`: a hook). The direction, the turn, the length of the
-  trails (some 7 to 23 km of drift) and the strength of the eddies change
-  over the tile (slow noise). Each kind falls at its own speed: its
-  trails are as many times as long as the drift (plumes 1.5, large plumes
-  2, rows 0.45, flocks 0.35).
+  first (a dense head), then at full speed, along a way that turns with
+  age (a hook): `iceDrift`, in closed form (an arc). The shear runs one
+  way over the tile (`ICE_TH`, turning by `ICE_VEER` = 0.7 rad over a
+  life, `ICE_REACH` = 16 km of drift); each head and each row turns it a
+  little, as above. It used to change over the tile (slow noise), read at
+  each texel: a trail then took the way of every place it crossed, and
+  every trail bent into regular waves as long as the noise (S-shaped
+  ribbons). Only the strength of the eddies changes over the tile. Each
+  kind falls at its own speed: its trails are as many times as long as
+  the drift (plumes 1.5, large plumes 2, rows 0.45, flocks 0.35).
 - **Eddies**: the curl of a noise potential at 13, 5 and 2 km (divergence
   free), which changes in time (its gradients turn), the smaller the
   faster; the largest is kept gentle (0.35 against 0.45 for the middle
@@ -489,7 +498,9 @@ plumes, another bands or flocks:
   Nothing is resampled step after step, so nothing blurs, and each texel
   is computed by itself: the field does not depend on the order of the
   draws, and repeats with the tile. Each field is stored as
-  `1 - exp(-ICE_GAIN x)`, `ICE_GAIN` = 7.
+  `sqrt(x / ICE_STORE)`, `ICE_STORE` = 1, and read back squared: the
+  scene's depth is linear in the ice. The old `1 - exp(-7 x)` saturated:
+  most of a plume read near 1, a flat white.
 
 **The cirrus's map** (`uCiMap`, `ciMap`), 256 x 256 over the map (1 km a
 texel), says where the cirrus is and of what kind, at the scale of 50 to
@@ -511,7 +522,8 @@ scene adds the finest streaks itself:
   add up, so the mipmaps average the way over a footprint, and its length
   says how much the ice runs one way (near 1 along a trail, near 0 in a
   round head). The fibres run across the gradient.
-- **The fibres** (`uIceFib`): grains of 25 and 90 m summed along the line
+- **The fibres** (`uIceFib`, a gentle factor: 0.6 of its swing; at 1.6
+  it broke the strands into short dashes): grains of 25 and 90 m summed along the line
   that follows the way through each texel, 24 steps of 25 m each side
   under a Hann window (line integral convolution, after Cabral and
   Leedom, 1993): streaks of some 1.2 km that bend with the trails, crowd
@@ -520,7 +532,7 @@ scene adds the finest streaks itself:
   it. They are read like the ice (`textureGrad`, mipmaps, the anisotropic
   filter), so from afar they average out by themselves.
 - **The finest streaks** (`ciFibres`): three octaves from 24 m down to
-  3 m, 14 times as long as wide, the zeros of gradient noise drawn out
+  3 m, 20 times as long as wide, the zeros of gradient noise drawn out
   along the way (thin bright lines on a mean of 1). Noise turned to
   follow the way would shear its streaks apart far from the centre of the
   turn, so they are drawn on `CI_WAYS` = 16 fixed ways that repeat with
@@ -530,7 +542,10 @@ scene adds the finest streaks itself:
   side. An octave fades out before it gets narrower than the footprint
   across it, or than most of the footprint's length: seen aslant, the
   streaks that point at the eye would otherwise outlast the others and
-  fan out towards the horizon.
+  fan out towards the horizon; and when it is many times (12 to 40) wider
+  than the footprint, where the finer ones carry the streaks. Wider
+  streaks than these are the ice's own strands, which bend with the
+  trails: straight ones of 70 m and more, tried, looked ruled.
 
 The fibres modulate the ice (a factor around 1), strongest where the ice
 is thin and runs one way: thin parts break up into streaks, dense cores
@@ -562,39 +577,46 @@ on the map.
   footprint (`f1`, `f2`: the footprint's axes on the map, drawn out along
   the ray's way and a little by the way through the deck), through the
   mipmaps and, where the GPU has it, its anisotropic filter.
-- **The slider.** The ramp acts on the body of the ice (the ice over some
-  0.2 km, or four footprints if that is wider), not on its fibres, at
-  `t = 0.6 (1 - c)^1.3 + 0.25 (1 - m)`: little cirrus shows only the
-  densest plumes, more shows weaker ones; clouds come and go whole, with
-  clear sky between them, and the ramp (from `t - 0.05` to `t + 0.35`)
-  lets a body fade out towards its edges. Inside a body the fine ice
-  (with its fibres) is mixed with the body's mean, a quarter in the core
-  and none at the edges; just outside, where the body is below the ramp
-  but above half of it, only the strongest fibres show. The depth grows
-  with the slider as `0.8 + 1.5 c + 3 c^2`. Measured on the screen (the
-  share of the sky that differs from `cirrus=0`, looking up at 35 degrees
-  from 0.3 km): 25, 30, 37, 48, 97 and 99 % at 0.1, 0.25, 0.4, 0.6, 0.8
-  and 1.
-- **The veil.** Above `c` = 0.7 a veil (cirrostratus) grows between the
-  bodies, up to 0.3 of the shell's depth. It grows from the ice around
-  (over some 2.5 and 10 km): thick where the bodies are many, thin (0.12)
-  in the gaps, so that it keeps their bands and patches; and it takes
-  half of their fibres.
-- `ciBody` is the body of the ice (over some 0.4 km, or six footprints if
-  that is wider): the light inside the sheet feels it. `ciVeil` is the share of the veil: it draws the halo.
-  `ciMean` is the depth over some 2.5 km: the glow next to the sun and the
-  moon is drawn from it.
+- **The depth.** The optical depth follows the ice: `CI_TAU` = 2.2 times
+  the ice (with its fibres), times `0.6 + 0.8 c` for the slider `c` and
+  `0.3 + 0.7 m` for the map. Seen straight up most of a plume is at 0.05
+  to 0.5, its cores at 1 to 2, so the brightness varies with the
+  thickness and blue shows through the thin parts. The slider takes a
+  floor off the ice first, `0.25 (1 - c)^4 + 0.04 (1 - m)`: little cirrus
+  shows only the densest plumes, more shows weaker ones, and what is left
+  fades in from nothing along its own strands and fibres, with no outline
+  of its own. The floor is soft (`y^2 / (y + knee)` above it, the knee
+  half the floor), so the depth grows smoothly from 0. (Round 7 cut a
+  blurred body of the ice with a narrow ramp over a stored value near 1:
+  flat white patches with smooth, cut-out outlines.) Measured on the
+  screen (the share of the sky that differs from `cirrus=0`, looking up
+  at 35 degrees from 0.3 km): 9, 28, 49, 73, 90, 96, 99 and 100 % at 0.1,
+  0.25, 0.4, 0.6, 0.7, 0.8, 0.9 and 1.
+- **The veil.** From `c` = 0.55 a veil (cirrostratus) grows between the
+  plumes, up to `CI_VEIL` = 0.45 of vertical depth. It grows in
+  proportion to the ice around (over some 2.5 and 10 km), with no ramp
+  that would give it an outline of its own: thick where the plumes are
+  many, and in the gaps only from 0.8 (up to 0.3 of it), so that the
+  cover grows smoothly and the veil keeps their bands and patches; and it
+  takes half of their fibres.
+- `ciBody` is the depth of the ice over some 0.4 km (or four footprints if
+  that is wider): the light inside the sheet feels it. `ciVeil` is the
+  share of the veil: it draws the halo. `ciMean` is the depth over some
+  2.5 km: a share of the glow next to the sun and the moon is drawn from it.
 - **The depth of a deck.** Seen from near the shell, a ray crosses a
   deck aslant over hundreds of metres, and the ice at its top and its
-  bottom does not line up: the footprint grows by 0.12 of the way through
-  the deck along and across the ray, so that from just under a deck its
-  fine threads soften instead of standing as long ruled lines; from the
-  ground the blur is about a pixel.
+  bottom does not line up: the footprint grows by 0.08 of the way through
+  the deck along the ray (not across it: blurred across too, the strands
+  of distant plumes averaged out to smooth patches), so that from just
+  under a deck its fine threads soften instead of standing as long ruled
+  lines; from the ground the blur is about a pixel.
 - Light: forward scattering by ice (a narrow diffraction peak within a
-  degree or two of the sun, so that the glow round the sun stays small,
-  taken from the sheet's depth over some 2.5 km (`ciMean`), so that the
-  sun and the moon stay round discs in an even glow, as photographs show
-  them, instead of smears along the fibres in front of them; a
+  degree or two of the sun, so that the glow round the sun stays small;
+  it follows the ice in front of the light, so that the glow keeps the
+  cloud's texture and grows with its thickness, with 0.3 of it taken from
+  the sheet's depth over some 2.5 km (`ciMean`), the light's own glare
+  spreading it: all of it from the mean drew the blurred plume round the
+  light as a smooth bright lens; a
   broad refraction lobe; and a flat part to the side and back, some 0.3 of
   the mean, as ray tracing of ice crystals gives it), the 22-degree halo
   with the dispersion of ice (faint, 0.025, and soft, some 1.4 degrees
@@ -602,7 +624,10 @@ on the map.
   crystals of cirrostratus), light
   scattered once with the sheet's own shadow (a low sun enters the sheet
   within some seven times its thickness, between the clouds, so cirrus at
-  sunset is lit gold), a share scattered many times,
+  sunset is lit gold), a share scattered many times (its sunlight fades
+  with a quarter of the depth, as ice sends most of it on forward: with
+  the full depth, thick ice towards a low sun went darker than the sky
+  behind it),
   skylight from the multiple-scattering table, and light from the low
   clouds below, at the mean distance of the decks seen. A fibre in a thick
   body of ice is lit through the body (`ciBody`), so dense patches are grey
