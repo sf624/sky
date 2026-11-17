@@ -772,42 +772,60 @@ all dimmed and reddened by the air:
   set from `OBLIQUITY`); so it is the real ecliptic for the date, the
   time and the place. Nearer the sun than the table goes (15 degrees on
   the ecliptic), the power goes on, to 2 degrees. `zodiacal` returns the
-  cone (the power term) and the rest (the floor and the bumps) apart.
+  cone (the power term) and the rest (the floor and the bumps) apart, and
+  the cone in the shape it is drawn in (below).
 
   It is drawn only at night, once the night eye comes in (`uNightEye`):
   by day and in civil twilight the sky is thousands of times brighter,
   and leaving it out keeps every picture with the sun above -3 degrees as
   it was. The air dims it as the Milky Way. Its floor and the gegenschein
-  are drawn as they are. Its cone is drawn as the eye sees it
-  (`zodiacalSeen`), from its contrast over what lies behind it (the sky,
-  the Milky Way, the rest of the zodiacal light and the moon's veil in
-  the eye), as the rods see them: the airglow, bluer than sunlight, is
-  brighter to them. Below `ZODI_SEEN` = 0.22 the cone is not drawn; above,
-  its drawn contrast rises smoothly from 0 and soon as 0.89 c / 0.22 - 1,
-  some four times the contrast. Its slope never passes (1 + d) / c, so
-  that where the sky behind brightens faster than the cone (the last of
-  the twilight at the horizon, the moon's veil, the Milky Way) the sum
-  still brightens: a steeper rise (tried first: a smoothstep over the
-  contrast) left a dark rim between the cone and the glow at the horizon.
-  On a moonless spring evening from cruise (sun 18 degrees down) the
-  cone's contrast to the rods is about 1.5 at its base, 0.6 to 1 at 30
-  to 45 degrees up and 0.4 towards 90 degrees from the sun: drawn, its
-  base stands 1.3 to 2 times as far over the sky as the Milky Way's
-  brightest clouds (34 against 17 to 26 levels of 255), and it is seen
-  to some 40 degrees up. Under a first-quarter moon its base still has a
-  contrast of 0.8 from cruise (the moonlit air above 11 km is thin) and
-  shows weaker; near the sea 0.27 and it is barely there; under a full
-  moon it is not drawn. A contrast mapping that never dims a sum cannot
-  show the far cone (0.4 to 0.6) plainly and hide the quarter moon's (0.27
-  near the sea) too: they are too close.
+  are drawn as they are. Its cone is drawn as the eye sees it, a look like
+  the Milky Way's:
+  - **Shape.** Along the ecliptic it keeps the fit's brightness. Across
+    it, the fit widens with the angle from the sun (it is flattened by
+    the same ratio at every angle), and drawn so the cone spread into a
+    fan and read as a soft glow on the horizon. The eye sees a long band
+    instead, widest and brightest at its base, narrowing to its tip
+    (Trouvelot's drawing of 1876, reports from dark sites). So it is
+    drawn as a band of half width `ZODI_BAND` (to 1/e): 14 degrees at 25
+    degrees from the sun, 5 at 80, on a weaker, wider glow (the fit's
+    own profile, squared, three tenths of it).
+  - **Brightness** (`zodiacalSeen`). It starts from the cone's contrast
+    c over what lies behind it (the sky, the Milky Way, the rest of the
+    zodiacal light and the moon's veil in the eye), as the rods see
+    them: the airglow, bluer than sunlight, is brighter to them. From
+    `ZODI_SEEN` = 0.25 on, with a soft knee, the drawn sum of sky and
+    cone grows as c (so the cone is drawn some four times its own
+    light), and then levels off towards `ZODI_MOST` = 6 times the sky:
+    the eye's response to so faint a glow is compressive, and a cone 3
+    and one 10 times the sky look nearly alike. Without that, the base
+    near the sun burned out while the cone faded within 30 degrees of
+    it. The log of the sum never rises faster than the log of c, so
+    where the sky behind brightens faster than the cone (the last of the
+    twilight at the horizon, the moon's veil) the sum does not darken: a
+    steeper rise (tried first: a smoothstep over the contrast)
+    left a dark rim between the cone and the glow at the horizon.
+  - **What it leaves alone.** The exposure meter does not count the
+    zodiacal light (a faint glow over part of the sky does not change
+    how the rest is exposed): the exposure is the same as without it.
+    The Milky Way is raised by its contrast with the sky and the moon's
+    veil alone, as before. The faintest star seen counts the cone's own
+    light in its drawn shape, but not the floor nor the fit's wide
+    profile: counted in, they took 3 to 6 % of the stars all over the
+    sky, which were set to look right without them.
 
-  Before (round 1) the cone was raised `MILKY_EYE` times only by what
-  it stood above 200 S10: its base was raised most, its far part (200 to
-  600 S10) hardly, and it read as a short, stubby glow on the horizon;
-  under the moon nothing faded it but the brighter sky. Raised in full,
-  the floor made the moonless sky some twice as bright, and the eye saw
-  fewer stars all over it (the faintest star seen depends on the sky
-  behind it). It costs a few operations per pixel of sky.
+  On a moonless spring evening (sun 18 degrees down, 35 degrees north)
+  the cone stands, over a sky of 7 to 22 levels of 255, about 25 (from
+  0.3 km) to 48 (from 11 km) levels at its base, 17 at 30 degrees up,
+  12 at 40, 9 at 50 and 5 at 60, and fades out by about 75 degrees up;
+  it is some 20 degrees wide at half its height near the base and 7 near
+  60 degrees up. The Milky Way's brightest clouds stand 17 to 26. On an
+  autumn evening, with the ecliptic low, it is a slanting band along the
+  western horizon, 11 to 17 levels near its base. Under a first-quarter
+  moon it is shorter and weaker from cruise (the moonlit air above 11 km
+  is thin, so it keeps some contrast) and only a trace from near the
+  sea; under a full moon it is not drawn. It costs a few operations per
+  pixel of sky.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
@@ -869,7 +887,10 @@ in it at only `METER_GLINT` = 0.15 of their light (`G` in `main` and
 exposes for the rest. Photographs from cruise keep the sky as light
 facing the sun as away from it (h11-vueling01 and 03); counted in full,
 the glitter held the view towards the sun 1.5 to 2.4 stops below the
-view away, and the sky there was navy (round 10).
+view away, and the sky there was navy (round 10). The zodiacal light, as
+drawn, does not count at all (`zodiY`): with it counted, a spring
+evening's view of its cone was exposed 0.25 to 0.56 stops darker than
+without.
 
 **The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
 texels (`METER`): each is a block of the picture and holds the mean level
