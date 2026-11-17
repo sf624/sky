@@ -155,8 +155,10 @@ flies: at rest the page draws nothing. Fix the drawing scale with
 on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
-Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`. The scene is nearly all of it. Measured on an
+Each frame of the hero is four draws: the first stage of the clouds'
+light (`fs` with `uStage` 0, a quarter of the pixels), the scene (`fs`)
+into the frame texture, `mean`, and `show`. The two draws of `fs` are
+nearly all of it; the numbers below for the scene are their sum. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The page had a scroll bar then, so the drawing sizes are
 those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
@@ -178,21 +180,25 @@ the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
 Those numbers are older than the detail of the low clouds near the eye
 (#33, November 2026), which trades time for the picture. Flying, `res=1`,
-the scene in ms at 1920 x 1080 and at 2560 x 1440 (main in brackets):
+the scene in ms at 1920 x 1080 and at 2560 x 1440 (main in brackets; both
+stages):
 
 | View | 1920 x 1080 | 2560 x 1440 |
 |---|---|---|
-| Default (cruise) | 7.3 (4.9) | 12.1 (8.1) |
-| `alt=2&cloud=0.7` | 20.7 (5.1) | 35.3 |
-| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 10.9 (3.5) | 19.5 (5.9) |
-| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 17.6 (5.1) | 30.3 (7.4) |
-| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 28.6 (5.8) | 49.6 (10.0) |
-| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 13.7 (4.7) | 23.5 (6.4) |
+| Default (cruise) | 9.8 (4.9) | 15.6 (8.1) |
+| `alt=2&cloud=0.7` | 24.3 (5.1) | 40.1 |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 14.0 (3.5) | 23.5 (5.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 21.0 (5.1) | 34.7 (7.4) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 12.9 (5.8) | 21.2 (10.0) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 15.6 (4.7) | 25.8 (6.4) |
 
 Where clouds fill the view from near, the scene costs three to five times
-what it did. The view from under broken cloud at 0.6 km is the slowest:
-there the rays pass between heaps and meet several, each lit; at WQHD it
-passes the 40 ms at which the drawing size drops in flight.
+what it did. Of the scene's own draw, the light of the clouds was three
+quarters: its slow parts are now worked out at a quarter of the pixels (see
+[design.md](design.md#low-clouds)), and the smooth reads of the noise serve
+the normals only. Closest to the tops (`alt=2`, among clouds at 1.8 km)
+the fine normals and the march are most of what is left, and the scene
+still takes over 25 ms at WQHD.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
