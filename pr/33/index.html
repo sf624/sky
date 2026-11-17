@@ -903,6 +903,8 @@ const float DEEP = 0.5;             // light scattered many times on a side turn
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
 const float THROUGH = 0.1;          // the gain of the sunlight that comes down through a cloud
 const float CAVITY = 0.6;           // how much a deep hollow between domes dims the light scattered into it
+const float SPREAD = 0.15;          // how far light spreads sideways on its way down through a deck, km
+const float BELOW = 0.5;            // the gain of the sunlight that came down through a deck, seen from under it
 
 // Places in the clouds are given from the eye (p less eye()). At the
 // Earth's radius a float steps by half a metre, and the finest noise
@@ -925,46 +927,30 @@ float heightAt(vec3 p) {
 // interpolation"), and the map bends smoothly: one read still. The
 // distance to the eye decides, not lod: the samples towards the light then
 // read the map as the ray does.
-// The smooth reads (the eased and spline weather map, the spline noise)
+// The smooth reads (the eased weather map, and the shaken reads nearer)
 // serve the normals only (smooth): along the march and towards the light,
 // the bends of the GPU's filter move a surface by less than a metre, and the
 // smooth reads cost a third of the frame.
 bool smoothReads = false;
+// Where they are smooth, the reads of the maps move by this much of a texel,
+// a new amount each frame (-0.5 to 0.5).
+vec3 shake = vec3(0.0);
+// What cloudShape last found of the sheet's relief: how far its cells and
+// rolls raise it, as a share of its depth (0 off the sheet).
+float relief = 0.0;
 
 vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
   float ease = smoothReads ? clamp(-3.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) : 0.0;
   if (ease == 0.0) return textureLod(uWeather, x / WEATHER_KM, lod - 2.0);
   float N = float(textureSize(uWeather, 0).x);
   vec2 u = x * (N / WEATHER_KM) - 0.5, i = floor(u), f = u - i;
-  // Nearer still, a cubic B-spline (four filtered reads, as noiseSpline):
-  // the eased map still bent enough for lit and shaded sides to show
-  // upright streaks.
+  // Nearer still, the eased map still bent enough for lit and shaded
+  // sides to show upright streaks: there the read moves by up to half a
+  // texel each frame (shake), and the mean over the frames is smooth. A
+  // cubic B-spline (four filtered reads) did the same, at four times the
+  // cost.
   if (ease < 1.0 || !fine) return textureLod(uWeather, (i + mix(f, f * f * (3.0 - 2.0 * f), ease) + 0.5) / N, 0.0);
-  vec2 g = 1.0 - f;
-  vec2 w0 = g * g * g / 6.0, w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
-  vec2 w3 = f * f * f / 6.0, w2 = 1.0 - w0 - w1 - w3;
-  vec2 a = w0 + w1, b = w2 + w3;
-  vec2 h0 = (i - 0.5 + w1 / a) / N, h1 = (i + 1.5 + w3 / b) / N;
-  return a.y * (a.x * textureLod(uWeather, vec2(h0.x, h0.y), 0.0) + b.x * textureLod(uWeather, vec2(h1.x, h0.y), 0.0))
-       + b.y * (a.x * textureLod(uWeather, vec2(h0.x, h1.y), 0.0) + b.x * textureLod(uWeather, vec2(h1.x, h1.y), 0.0));
-}
-
-// The noise at q, level level, through a cubic B-spline: smooth, with a
-// smooth slope (the GPU's filter bends where texels meet, and lit and
-// shaded sides showed those bends as a grid of facets near the eye).
-// Eight filtered reads, each at a place between two texels that weighs
-// them as the spline does (Sigg and Hadwiger, GPU Gems 2, ch. 20).
-vec4 noiseSpline(vec3 q, float level) {
-  float N = float(textureSize(uNoise, int(level)).x);
-  vec3 u = q * N - 0.5, i = floor(u), f = u - i, g = 1.0 - f;
-  vec3 w0 = g * g * g / 6.0, w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
-  vec3 w3 = f * f * f / 6.0, w2 = 1.0 - w0 - w1 - w3;
-  vec3 a = w0 + w1, b = w2 + w3;
-  vec3 h0 = (i - 0.5 + w1 / a) / N, h1 = (i + 1.5 + w3 / b) / N;
-  return a.z * (a.y * (a.x * textureLod(uNoise, vec3(h0.x, h0.y, h0.z), level) + b.x * textureLod(uNoise, vec3(h1.x, h0.y, h0.z), level))
-              + b.y * (a.x * textureLod(uNoise, vec3(h0.x, h1.y, h0.z), level) + b.x * textureLod(uNoise, vec3(h1.x, h1.y, h0.z), level)))
-       + b.z * (a.y * (a.x * textureLod(uNoise, vec3(h0.x, h0.y, h1.z), level) + b.x * textureLod(uNoise, vec3(h1.x, h0.y, h1.z), level))
-              + b.y * (a.x * textureLod(uNoise, vec3(h0.x, h1.y, h1.z), level) + b.x * textureLod(uNoise, vec3(h1.x, h1.y, h1.z), level)));
+  return textureLod(uWeather, (u + shake.xz + 0.5) / N, 0.0);
 }
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -980,6 +966,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   body = 0.0;
   lump = 0.0;
   base = -9.0;
+  relief = 0.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
   vec2 x = p.xz + uDrift;
@@ -1036,13 +1023,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // place to place, so that no two tiles show the same clouds.
   vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
-  // Near the eye (a pixel finer than 16 m) through the spline, which
-  // smooths the bends of the GPU's filter; the distance decides, as in
-  // weather. Only where the fine noise is wanted too: the surface, not the
-  // shadows.
-  float spline = fine && smoothReads ? clamp(-2.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) : 0.0;
-  vec4 n = spline < 1.0 ? textureLod(uNoise, q.xyz, max(lod, 0.0)) : vec4(0.0);
-  if (spline > 0.0) n = mix(n, noiseSpline(q.xyz, 0.0), spline);
+  // Near the eye (a pixel finer than 16 m) the read moves by up to half a
+  // texel each frame (shake), so that the mean over the frames smooths the
+  // bends of the GPU's filter; the distance decides, as in weather. Only
+  // where the fine noise is wanted too: the surface, not the shadows. (A
+  // cubic B-spline, eight filtered reads, did the same at 7 ms more near
+  // the tops.)
+  float shaken = fine && smoothReads ? clamp(-2.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) : 0.0;
+  vec4 n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
   // Hard, growing turrets stand beside older, smoother cloud.
   q.w = mix(0.45, 1.3, smoothstep(0.35, 0.65, n.g));
   // Billows of 2 km down to 125 m, rounded into domes (see cloudDetail;
@@ -1076,7 +1064,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
     float rows = smoothstep(0.45, 0.7, far.a) * sheet;
     float roll = sin(2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571));
-    fs += 13.0 * sheetTop * (mix(0.4, 0.15, rows) * cells + 0.25 * rows * (roll - 0.3) + 0.5 * lumps * lump / LUMPS);
+    float raise = mix(0.4, 0.15, rows) * cells + 0.25 * rows * (roll - 0.3) + 0.5 * lumps * lump / LUMPS;
+    fs += 13.0 * sheetTop * raise;
+    relief = clamp(raise, -0.6, 0.9) * sheet;
     body = max(body, sheet * sheetTop * max(1.0 + 0.5 * cells, 0.2) / 0.28);
     // The heaps and the sheet merge without a crease (a smooth max).
     float k = clamp(0.5 + (fs - f) / 0.4, 0.0, 1.0);
@@ -1213,6 +1203,48 @@ float shadowDepth(vec3 ps, vec3 dir, int N) {
   return tau;
 }
 
+// Optical depth of the clouds straight up from p (given from the eye):
+// six steps of 60 m growing by 1.8 each, so that the sheet just above, where
+// most of it is, is read at the size of its cells, and the rest of the
+// shell more coarsely; the start is moved by jit (0 to 1) of a first step.
+// Five samples from the shell's bottom read the field smoothed over
+// hundreds of metres: under a deck it was nearly one value everywhere, and
+// on cloud tops, near the surface, it found cloud over them.
+// down: straight down instead, to the bottom of the shell.
+float overhead(vec3 p, float jit, bool down) {
+  vec3 up = normalize(p + eye()) * (down ? -1.0 : 1.0);
+  float len = down ? heightAt(p) - CB : CT - heightAt(p), tau = 0.0, s = 0.06 * jit, ds = 0.06, r = 0.0;
+  for (int i = 0; i < 6; i++) {
+    if (s >= len) break;
+    float dt = min(ds, len - s);
+    tau += cloudDensity(p + up * (s + 0.5 * dt), max(log2(0.5 * dt / TEXEL_KM), 0.0), false) * dt;
+    if (i >= 1 && i <= 3 && !down) r += relief / 3.0;
+    s += dt;
+    ds *= 1.8;
+  }
+  // (Beyond some 2.5 km, what is left of the shell in one read.)
+  if (s < len) tau += cloudDensity(p + up * (0.5 * (s + len)), max(log2(0.5 * (len - s) / TEXEL_KM), 0.0), false) * (len - s);
+  // A deck's water is not spread evenly: there is more of it where its
+  // cells and rolls stand higher (in a cloud that rises as one, the water
+  // grows with the height over the base, so the depth with the square of
+  // the thickness). The relief of the sheet 100 to 550 m up says where:
+  // its mean, as at one height the creases of its cells, straight lines
+  // between Worley cells, showed from below as tiles with sharp edges.
+  return tau * (1.0 + r) * (1.0 + r);
+}
+
+// Light that came down through cloud which lets tDown of it through (two
+// streams), as it leaves the base at a cosine cv to the vertical: per unit
+// of sunlight with the sun at a cosine mu0 over the top (x), and per unit of
+// the sky's light, 2 ms (y). A slab lets the sun's light through a little
+// more with the sun high (0.5 + 0.75 mu0), and a base is brighter overhead
+// than aslant (as 1 + 2 cos, the overcast sky of the CIE). The sun's part
+// has the gain BELOW; the sky's part takes the 6 % the sea sends back up.
+vec2 throughDeck(float mu0, float tDown, float cv) {
+  float esc = (3.0 / 7.0) * (1.0 + 2.0 * cv);
+  return vec2(BELOW * mu0 * min((0.5 + 0.75 * mu0) * tDown, 1.0) * esc / PI, 1.06 * tDown * esc);
+}
+
 float hg(float mu, float g) {
   return (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
 }
@@ -1277,7 +1309,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // The light of the last sample; deeper in the same cloud the next ones
   // share it.
   float one = 0.0, many = 0.0, amb = 0.0;
-  bool lit = false, used = false;
+  bool lit = false, fog = true;
+  float under = 0.0;
   float keptTau = 0.0, keptCav = 0.0, keptGK = 0.0;
   vec3 keptNL = vec3(0.0, 1.0, 0.0);
   float TcLit = 1.0, column = -1.0, above = 0.0;
@@ -1364,9 +1397,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // The parts of the light that change slowly across the picture
         // (the depth towards the light past its first two steps, the light
         // through the cloud above, the billows' normal, the hollows) come
-        // from the first stage for the first cloud a ray meets, where a ray
-        // of a near pixel there met it at the same distance (bilateral,
-        // after Kopf et al. 2007); else they are worked out here.
+        // from the first stage, where a ray of a near pixel met the first
+        // cloud it met at the same distance as this light (bilateral, after
+        // Kopf et al. 2007); else they are worked out here. (Also for a
+        // cloud behind a thin fringe: only for the first, the outlines of
+        // billows seen against those behind them were worked out in full,
+        // 4 ms of the frame among the tops.)
         float tps = t - (fPrev < 0.0 ? came * f / (f - fPrev) : 0.0), tauC = 0.0, cav = 0.0, gK = 0.0;
         vec3 nL = upL;
         // Deeper in the same cloud, they are those of the last sample.
@@ -1376,7 +1412,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           cav = keptCav;
           nL = keptNL;
           gK = keptGK;
-        } else if (!used && uStage > 0.5) {
+        } else if (uStage > 0.5) {
           vec2 hp = gl_FragCoord.xy * 0.5 - 0.5, fr = fract(hp);
           ivec2 i0 = ivec2(floor(hp)), top = textureSize(uLightA, 0) - 1;
           vec4 A = vec4(0.0), B = vec4(0.0);
@@ -1402,7 +1438,6 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             gK = B.w;
           }
         }
-        used = true;
         // The same at the size of whole billows (at least 120 m, from the
         // field without the fine noise: with it the picture barely changed,
         // at 4 ms more near the tops): in photographs the light falls off over a
@@ -1444,9 +1479,22 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           // a slab of that depth lets through (two streams, g = 0.85). Under
           // a deck its thick cells are darker than the thin gaps between
           // them. (Once per cloud the ray enters: it changes little within
-          // one, and costs five reads of the field.)
+          // one.)
           if (column < 0.0 || fPrev < 0.0) {
-            above = shadowDepth(ps + eye(), upL, 5);
+            // Under cloud, the mean of two columns up to SPREAD off to
+            // either side, at angles new each frame: light spreads sideways
+            // on its way down through a deck, and its base is lit as the
+            // depth over a few hundred metres round it says. (Read at one
+            // place, the creases between the noise's Worley cells showed on
+            // the base as tiles with straight edges; one column a frame
+            // farther off left a grain in flight.)
+            // (One column where nothing faces down, and where the first
+            // stage did not serve: along outlines.)
+            float ar = 2.0 * PI * ign(gl_FragCoord.xy + 5.588238 * uPass + 23.0), down = 1.0 - smoothstep(-0.6, -0.1, dot(nL, upL));
+            vec3 aside = SPREAD * sqrt(hash(gl_FragCoord.xy + 3.71 * uPass + 29.3)) * down * (cos(ar) * eastL + sin(ar) * northL);
+            float jit = hash(gl_FragCoord.yx + 1.93 * uPass + 7.7);
+            above = overhead(ps + aside, jit, false);
+            if (down > 0.5 && !behind) above = 0.5 * (above + overhead(ps - aside, 1.0 - jit, false));
             column = 1.0 / (1.0 + COLUMN * max(above - 5.0, 0.0));
           }
         }
@@ -1454,7 +1502,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // (more than 14 of depth overhead), that of a flat sheet: the steps
         // towards the light would only find the deck.
         // (By degrees from 8 to 14 of depth: a sudden change drew lines.)
-        float slabbed = sunUp > 0.0 ? smoothstep(8.0, 14.0, above) : 0.0;
+        // Only on what faces down: on the side of a heap, under a bulge of
+        // it, the sheet made the light's path run through all of the bulge,
+        // and with the sun low such places were black pits on lit cloud.
+        float slabbed = sunUp > 0.0 ? smoothstep(8.0, 14.0, above) * (1.0 - smoothstep(-0.6, -0.2, dot(nL, upL))) : 0.0;
         bool slab = slabbed == 1.0;
         if (!mapped) {
           if (slab) {
@@ -1506,6 +1557,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // base passed 0.1).
         bool far = step >= 0.05 || fb > 0.1;
         smoothReads = true;
+        shake = vec3(hash(gl_FragCoord.xy + 1.37 * uPass + 3.1), hash(gl_FragCoord.yx + 2.11 * uPass + 5.3),
+                     hash(gl_FragCoord.xy + 3.07 * uPass + 9.7)) - 0.5;
         if (far && mapped) fL = cloudField(ps, lmL, false, y0, b0, c0, e0);
         float f0 = far ? fL : cloudField(ps, lm, true, y0, b0, c0, e0);
         vec3 grad = far ? -gK * hL * vec3(dot(nL, uLight), dot(nL, side), dot(nL, cross(uLight, side)))
@@ -1531,14 +1584,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float rise = (cloudField(ps + normalize(ps + eye()) * reach, lod, false, yu, bu, cu, eu) - (fs - bump)) / reach;
         float hm = 6.0 * mid, hollow = 1.0 + hm / (1.0 + max(-hm / 0.25, hm / 0.1));   // 75 % to 110 %
         // From below, a deck shows its cells: thick middles darker, thin
-        // rims lighter, some 600 m across (Worley cells of the noise, read
-        // at 3.5 times the tile's frequency: a texel of 18 m, whose facets
-        // do not show; the tile's own 62 m texels did, as blocks).
+        // rims lighter, some 600 m and 100 m across (Worley cells of the
+        // noise, read at 3.5 and 10 times the tile's frequency: texels of
+        // 18 and 6 m, whose facets do not show). They are read in one level
+        // layer of the noise: a base is nearly level, and where it crossed
+        // from one layer to the next the bends of the GPU's filter drew long
+        // straight lines.
         if (rise > 0.0) {
-          float cell = textureLod(uNoise, qs * 3.5, max(lod + 1.8, 0.0)).g;
-          cell *= 2.0 - cell;
+          vec4 cn = textureLod(uNoise, vec3(qs.x * 3.5, 0.37, qs.z * 3.5), max(lod + 1.8, 0.0));
+          float cell = 0.65 * cn.g * (2.0 - cn.g) + 0.35 * textureLod(uNoise, vec3(qs.x * 10.0, 0.61, qs.z * 10.0), max(lod + 3.3, 0.0)).g;
           // (Beyond a few km they fade: seen so far aslant, they made streaks.)
-          hollow *= mix(1.0, clamp(exp(-3.0 * (cell - 0.712)), 0.6, 1.4), min(rise, 1.0) * (1.0 - smoothstep(2.0, 6.0, t)));
+          hollow *= mix(1.0, clamp(exp(-3.0 * (cell - 0.66)), 0.6, 1.4), min(rise, 1.0) * (1.0 - smoothstep(2.0, 6.0, t)));
         }
         float open = (0.6 - 0.4 * rise / sqrt(rise * rise + 2.0))
                    * mix(0.6, 1.0, clamp((heightAt(p) - CB) / 1.5, 0.0, 1.0));
@@ -1572,10 +1628,29 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // the sun low, less under a thicker cloud, and nothing on a top
         // itself.
         float through = THROUGH * column * (1.0 - exp(-0.1 * above)) * clamp(sunUp, 0.0, 1.0);
-        many = deepL * crease * hollow * billow * (shapeL * white * (SUNLIT * mix(0.15, 1.0, facing) * inc * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft))
-                                 + column * (SUNLIT * mix(DEEP * (1.0 - 0.5 * low), 1.0, facing) * p3 * exp(-0.05 * soft)
-                                 + p4 * exp(-0.03 * soft)) + 0.02 * bounce) + through);
-        amb = deepL * SKYLIT * crease * hollow * billow * (column * open * mix(1.0, white, 0.5) + 0.15 * bounce);
+        float sideways = SUNLIT * mix(0.15, 1.0, facing) * inc * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft));
+        float manyTop = shapeL * white * (sideways + column * (SUNLIT * mix(DEEP * (1.0 - 0.5 * low), 1.0, facing) * p3 * exp(-0.05 * soft)
+                                                   + p4 * exp(-0.03 * soft)) + 0.02 * bounce) + through;
+        float ambTop = SKYLIT * (column * open * mix(1.0, white, 0.5) + 0.15 * bounce);
+        // Seen from below, a cloud under more of itself shows the light
+        // that came down through it, the sun's and the sky's, spread out
+        // (throughDeck): a slab of optical depth above lets through
+        // 1 / (1 + COLUMN above) of what falls on it. So a base follows the
+        // depth over each place: dark
+        // under thick cells and rolls, light under thin gaps. It was lit
+        // as a top is, by the open sky (open), and went black at sunset.
+        // Inside a cloud (the eye in it), the light there is that of two
+        // streams in a slab, one down and one back up: from about all of
+        // it near the top to 1 / (1 + COLUMN above) at the base, as the
+        // depth under the place (under) is to the whole. (It was lit as a
+        // surface, and the fog was a dark, flat grey.)
+        if (fog && !again) under = overhead(ps, hash(gl_FragCoord.xy + 2.71 * uPass + 13.3), true);
+        float mu0 = clamp(sunUp, 0.0, 1.0), tDown = (1.0 + COLUMN * under) / (1.0 + COLUMN * (above + under));
+        vec2 deck = throughDeck(mu0, tDown, max(dot(d, upL), 0.0));
+        float below = fog ? 1.0 : (1.0 - smoothstep(-0.6, -0.1, dot(nL, upL))) * smoothstep(2.0, 6.0, above);
+        float manyBase = shapeL * white * sideways + deck.x;
+        many = deepL * crease * hollow * billow * mix(manyTop, manyBase, below);
+        amb = deepL * crease * hollow * billow * mix(ambTop, deck.y, below);
       }
       sOne += Tc * a * one;
       sMany += Tc * a * many;
@@ -1585,6 +1660,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       Tc *= 1.0 - a;
     } else {
       lit = false;
+      fog = false;
       next = clamp(-0.35 * f, FINE * dsIn, COARSE * dsAir);
       if (walk > 0) {
         next = min(next, ds);
@@ -1812,19 +1888,27 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   // Clouds in the mirror hide that sky (three samples up the layer tell how
   // much is left) and show their sides and bases: grey with skylight, and
   // whiter where the sun reaches around the sea.
-  float seen = 1.0;
+  float seen = 1.0, veil = 0.0;
   if (uCloud > 0.0) {
-    float veil = 0.0;
     for (int i = 0; i < 3; i++) {
       vec2 h = (CT - CB) * (i == 0 ? vec2(0.07, 0.14) : i == 1 ? vec2(0.23, 0.18) : vec2(0.47, 0.3));
       veil += cloudDensity(ps - eye() + up * ((CB + h.x) / dot(up, n)), 3.0, false) * h.y / dot(up, n);
     }
     seen = exp(-veil);
   }
+  // What the mirror shows of the clouds is their base, lit as clouds
+  // describes it (the sun's light and the sky's that came down through
+  // them, from their depth straight up: the slant depth of the veil times
+  // the cosine), seen aslant. It showed the sky's mean light, and under a
+  // deck the sea stayed blue below a grey ceiling.
+  vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * veil * dot(up, n)), dot(up, n));
   // Under a cloud less light comes down to the water, of any kind.
   for (int k = 0; k < 3; k++) {
     vec4 sky = uSunI * msS[k] + uMoonI * msM[k];
-    L[k] += T[k] * (Fm * mix(0.75 * sky + 0.035 * soft * c * lit[k], S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
+    vec4 base = deck.x * lit[k] + deck.y * 2.0 * sky;
+    // (Without clouds, the old blend: the picture stays as it was, bit for bit.)
+    vec4 hidden = uCloud > 0.0 ? base : 0.75 * sky + 0.035 * soft * c * lit[k];
+    L[k] += T[k] * (Fm * mix(hidden, S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
   }
 }
 

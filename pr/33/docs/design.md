@@ -306,8 +306,10 @@ as a sum:
   within a texel is first eased by a smoothstep (Quilez, "improved texture
   interpolation"), so that the map bends smoothly, in one read still:
   else the sides of clouds within a few km show those bends as upright
-  streaks. Where a pixel is finer than 4 m it is read through a cubic
-  B-spline (four filtered reads, Sigg and Hadwiger, GPU Gems 2 ch. 20);
+  streaks. Where a pixel is finer than 4 m, for the normals, the read moves
+  by up to half a texel each frame (`shake`), and the mean over the frames
+  smooths the bends (a cubic B-spline, four filtered reads, did the same at
+  four times the cost);
 - less what height costs: a dome over a flat base (`y` cubed over the
   cube of `top`), thicker where the map is higher. `top` follows G: each
   heap of the map is a dome 0.5 to 1.2 km over a deck between heaps and
@@ -333,11 +335,12 @@ as a sum:
   30 % deep in a body (over the field's first 0.6 inside), so that they
   shape its outside and cannot punch holes through it: with full
   billows everywhere, the forms from 4 km had dark pits.
-  Where a pixel is finer than 16 m, the reads that see the fine noise
-  (the surface, not the shadows) go through a cubic B-spline
-  (`noiseSpline`, eight filtered reads): the GPU's filter bends where its
-  texels meet, every 62 m, and lit and shaded sides showed the bends as
-  upright streaks and a grid of facets.
+  Where a pixel is finer than 16 m, the reads of the normals that see the
+  fine noise move by up to half a texel each frame (`shake`): the GPU's
+  filter bends where its texels meet, every 62 m, and lit and shaded sides
+  showed the bends as upright streaks and a grid of facets; the mean over
+  the frames is smooth. A cubic B-spline (eight filtered reads) did the
+  same, at 7 ms more among the tops at 1440p.
   `lump` says how far a place stands out of the billows; `body` how thick
   the cloud is there; `q.w` how rough.
 
@@ -455,17 +458,21 @@ slowly across the picture. So the hero draws `fs` twice a frame
 (`uStage`): stage 0, at half the width and height, marches each ray to
 the first cloud it meets and keeps the slow parts of its light there
 (`uLightA`: the distance, the depth towards the light past its first two
-steps with the long shadows below, the depth overhead, the hollows;
+steps with the long shadows below, the depth overhead (`overhead`), the hollows;
 `uLightB`: the billows' normal and how steep the field is), in two
 textures of half floats; stage 1 draws the picture and, at its first
 light, takes those from the four nearest texels whose ray met the cloud
 at the same distance (within 4 % plus 30 m: a bilateral upsampling, after
-Kopf et al. 2007). Where none did (along outlines), it works them out
+Kopf et al. 2007). It does so for any cloud along the ray whose distance
+matches, not only the first: a ray that grazes the fringe of a billow
+and goes on to the one behind it (along the outlines of billows seen
+against others) worked out the second in full, 4 ms of the frame among
+the tops. Where none did (along outlines), it works them out
 itself, without the hollows and the long shadows: a few such pixels made
 whole groups of their neighbours on the GPU wait. Deeper in the same
 cloud, the next light keeps the slow parts of the last. Without float
 targets there is one stage (`uStage` -1), which works out all of it.
-The smooth reads (the eased and spline weather map, the spline noise)
+The smooth reads (the eased weather map, and the shaken reads nearer)
 serve the normals only (`smoothReads`): along the march and towards the
 light, the bends of the GPU's filter move a surface by less than a metre,
 and they cost a third of the frame.
@@ -494,10 +501,12 @@ found between the last two samples. For each:
 - Beyond the light's own steps, three reads of the field without the fine
   noise, 0.5, 0.7 and 2 km long, find the next domes towards the light:
   they cast shadows into the gaps between them, as long as a dome is
-  high. Under a deck, with more than 8 to 14 of depth overhead and the
-  light above, the depth towards the light is that of a flat sheet
-  (`above / sunUp`, by degrees: a sudden change drew lines), and its steps
-  are not taken.
+  high. Under a deck, on what faces down, with more than 8 to 14 of depth
+  overhead and the light above, the depth towards the light is that of a
+  flat sheet (`above / sunUp`, by degrees: a sudden change drew lines), and
+  its steps are not taken. On a side under a bulge of its own heap the
+  sheet made the light's path run through all of the bulge: with the sun
+  low, such places were black pits on lit cloud.
 - The hollows (`cav`): three places 600 m off sideways and 150 m up, at
   angles that turn from pixel to pixel and from frame to frame; cloud there
   is a wall round the place, which then sees less of the sky and of the
@@ -535,26 +544,60 @@ found between the last two samples. For each:
   curve (a clamp left flat grey patches with sharp outlines, and `mid` was
   cut off where the field over the base passed 0.3: their edges).
   On a surface that faces down it also shows the cells of a deck: Worley
-  cells of the noise read at 3.5 times the tile's frequency (some 600 m
-  across, and texels of 18 m, whose facets do not show; the tile's own
-  62 m texels showed as blocks), darker in the thick middle of a cell and
-  lighter at its thin rim, by up to 40 %.
+  cells of the noise read at 3.5 and 10 times the tile's frequency (some
+  600 m and 100 m across; texels of 18 and 6 m, whose facets do not show),
+  darker in the thick middle of a cell and lighter at its thin rim, by up
+  to 40 %. They are read in one level layer of the noise: a base is nearly
+  level, and where it crossed from one layer to the next the bends of the
+  GPU's filter drew long straight lines.
 - The rise of the field without the fine noise towards the sky over
   `reach` gives `open`: how much skylight a place gets.
+- `above`, the depth straight up (`overhead`): steps of 60 m growing by
+  1.8 each (six, then one for the rest of the shell), so that the sheet
+  just over a base is read at the size of its cells; the mean of two
+  columns up to `SPREAD` = 150 m to either side, at angles new each frame
+  (light spreads sideways on its way down through a deck; read at one
+  place, the creases between the noise's Worley cells showed on a base as
+  tiles with straight edges, and one column a frame farther off left a
+  grain in flight); times
+  `(1 + relief)^2`, where `relief` is how far the sheet's cells and rolls
+  raise it, the mean of three samples 100 to 550 m up (in a cloud that rises as one, the water grows
+  with the height over the base, so the depth with the square of the
+  thickness). Five samples from the shell's bottom smoothed the field over
+  hundreds of metres: under a deck it was one value everywhere, and on
+  cloud tops it found cloud over them.
 - `column`: light that comes down through the cloud above, the sky's and
   the sun's that went deep, is what a slab of that depth lets through:
-  `1 / (1 + COLUMN (tau - 5))`, with `COLUMN` = 0.11 ((1 - g) 0.75 for
-  g = 0.85) and `tau` the depth straight up (`shadowDepth`, five samples),
-  once per cloud the ray enters (once per pixel left grey patches with
-  sharp outlines on the sides of towers).
-  Under a deck
-  its thick cells are darker than the thin gaps between them; a base under
-  a kilometre of cloud gets a tenth of the light of a top. `through` is
-  the sunlight that fell on the top and came down: `THROUGH` = 0.1 times
+  `1 / (1 + COLUMN (above - 5))`, with `COLUMN` = 0.11 ((1 - g) 0.75 for
+  g = 0.85), once per cloud the ray enters (once per pixel left grey
+  patches with sharp outlines on the sides of towers). `through` is the
+  sunlight that fell on the top and came down: `THROUGH` = 0.1 times
   `column`, times the sun's height over the horizon there (so little with
-  the sun low), and nothing on a top itself (`1 - exp(-0.1 above)`). Light
-  through a deck spreads; it does not die away with the slant depth to the
-  sun, as the terms below do.
+  the sun low), and nothing on a top itself (`1 - exp(-0.1 above)`).
+  Light through a deck spreads; it does not die away with the slant depth
+  to the sun, as the terms below do.
+- **Seen from below**, what faces down under more than 2 to 6 of depth
+  (`below`) shows the light that came down through the cloud, of the sun
+  and of the sky, spread out (`throughDeck`, which the sea's mirror uses
+  too): a slab lets through `tDown = 1 / (1 +
+  COLUMN above)` of what falls on it (two streams), the sun's light a
+  little more with the sun high (`0.5 + 0.75 mu0`), and what comes out of
+  the base is brighter overhead than aslant (`3 (1 + 2 cos) / 7`, the
+  overcast sky of the CIE). The sun's part has a gain of `BELOW` = 0.5,
+  set against photographs (with 1, a ceiling at the present exposure
+  under a deck was as white as the tops from above, and lighter than the
+  gap at the horizon); the sky's part none, plus the 6 % the sea sends
+  back up, so that a deck is a little blue against sunlit cloud, as in
+  photographs. So a base follows the depth over each place: dark under
+  thick cells and rolls, light under thin parts. It was lit as a top is,
+  by the open sky (`open`): nearly white, neutral and smooth by day, and
+  black at sunset, when only the sky's light is left.
+- **Inside a cloud** (the eye in it), the light is that of two streams in a
+  slab, one down and one back up: from about all of it near the top to
+  `tDown` at the base, as the depth under the place (`under`, `overhead`
+  straight down) is to the whole: `(1 + COLUMN under) / (1 + COLUMN
+  (above + under))`, brighter looking up. It was lit as a surface, and
+  the fog was a flat, dark grey.
 - `inc`: a thick cloud is lit once, and a few times (`p1`, `p2`), only
   where light falls on it, by the billows' normal: a side or a base that
   the light grazes gets little, though light runs in its fringe. With the
@@ -588,7 +631,7 @@ through the cirrus, `cirrusShadow`), plus skylight from the
 multiple-scattering table, plus airglow.
 
 **Shadows.** `shadowDepth` sums the clouds' depth towards the light from a
-point under their tops (ten samples, denser low down; five for `column`). `main` uses it for
+point under their tops (ten samples, denser low down). `main` uses it for
 the sea's shadow and the glare. Where the ray meets no sea, the air near
 the sea is dimmed by the cloud amount alone (`shade`). The light of the
 sky in the air below 2 km is dimmed by the cloud amount too, to `UNDER` =
@@ -615,7 +658,12 @@ towards the horizon, glowed as a pale-blue band.
 - **Mirrored sky.** `skyAt` marches 8 steps of air in the mirrored
   direction of the tilted footprint. Rough water mirrors less at grazing
   angles (the mean Fresnel factor of Bruneton et al., 2010). Three samples
-  of `cloudDensity` up the layer tell how much of that sky the clouds hide.
+  of `cloudDensity` up the layer tell how much of that sky the clouds hide;
+  in its place the mirror shows their base, lit as seen from below
+  (`tDown` from the depth of those samples straight up, the sun's part
+  times `BELOW`). It showed the sky's mean light, and under a deck the sea
+  stayed blue below a grey ceiling. Without clouds the old blend stays, so
+  that `cloud=0` draws as before, bit for bit.
 - **Light from below.** `SEA`: blue light scattered back out of clear water.
 - **Foam.** Whitecaps cover `2.95e-6 U^3.52` of the sea (Monahan and
   O'Muircheartaigh, 1980), as separate breakers in a grid of cells: counted

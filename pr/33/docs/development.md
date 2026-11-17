@@ -185,20 +185,22 @@ stages):
 
 | View | 1920 x 1080 | 2560 x 1440 |
 |---|---|---|
-| Default (cruise) | 9.8 (4.9) | 15.6 (8.1) |
-| `alt=2&cloud=0.7` | 24.3 (5.1) | 40.1 |
-| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 14.0 (3.5) | 23.5 (5.9) |
-| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 21.0 (5.1) | 34.7 (7.4) |
-| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 12.9 (5.8) | 21.2 (10.0) |
-| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 15.6 (4.7) | 25.8 (6.4) |
+| Default (cruise) | 9.5 (4.9) | 15.2 (8.1) |
+| `alt=2&cloud=0.7` | 21.1 (5.1) | 34.8 |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 13.4 (3.5) | 22.5 (5.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 18.1 (5.1) | 30.0 (7.4) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 14.4 (5.8) | 23.7 (10.0) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 14.6 (4.7) | 24.2 (6.4) |
 
 Where clouds fill the view from near, the scene costs three to five times
 what it did. Of the scene's own draw, the light of the clouds was three
 quarters: its slow parts are now worked out at a quarter of the pixels (see
-[design.md](design.md#low-clouds)), and the smooth reads of the noise serve
-the normals only. Closest to the tops (`alt=2`, among clouds at 1.8 km)
-the fine normals and the march are most of what is left, and the scene
-still takes over 25 ms at WQHD.
+[design.md](design.md#low-clouds)), any cloud along a ray takes them
+from there when its distance matches, and the normals smooth the reads of
+the maps over the frames instead of through splines. Closest to the tops
+(`alt=2`, among clouds at 1.8 km) the march (about 10 ms at WQHD), the
+fine normals (6 ms) and the light worked out in full along outlines are
+most of what is left, and the scene still takes 30 to 35 ms at WQHD.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
