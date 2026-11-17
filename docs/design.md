@@ -748,6 +748,43 @@ all dimmed and reddened by the air:
   takes only half of their light away: it scatters much of what it takes
   back towards the eye, and the sky from cruise brightens towards the
   horizon (by about 1.5 times at 5 degrees up) instead of staying flat.
+- **The zodiacal light** (`zodiacal`): sunlight scattered by the dust
+  between the planets, of the sun's colour, a cone along the ecliptic
+  that is brightest near the sun, a faint band along the rest of it, and
+  the gegenschein opposite the sun. It is a fit to the table of Leinert
+  et al. (1998, "The 1997 reference of diffuse night sky brightness",
+  A&AS 127, 1, Table 16: the brightness seen from the Earth at 500 nm, in
+  S10, stars of the 10th magnitude per square degree, by the ecliptic
+  latitude and the ecliptic longitude from the sun), within 4.5 % rms
+  and 13 % at most over its 182 values and the pole's 60: a falloff as
+  the power -2.46 of the angle from the sun, flattened towards the
+  ecliptic as seen around the sun (to a quarter square to it), over a
+  floor of 79, and two bumps at the point opposite the sun, one some 13
+  degrees across (the gegenschein) and one wider. Along the ecliptic it
+  is 9000 at 15 degrees from the sun, 1900 at 30, 400 at 60, 200 at 90,
+  140 at 135 and 180 opposite the sun; 60 at the ecliptic's poles. The
+  airglow (`NIGHT`) is about 130 overhead, and the Milky Way along its
+  plane about 65 away from its centre and 300 towards it (to 650 in its
+  brightest clouds). One S10 is
+  `S10` = 6.61e-12 of the sun's light per steradian (the sun at V =
+  -26.74). Inputs: the cosine of the angle from the sun (`uSun`) and the
+  sine of the ecliptic latitude, from the ecliptic's pole (`uEcliptic`,
+  set from `OBLIQUITY`); so it is the real ecliptic for the date, the
+  time and the place. Nearer the sun than the table goes (15 degrees on
+  the ecliptic), the power goes on, to 2 degrees. The air dims it as the
+  Milky Way. As the night eye comes in, its cone is raised as the Milky
+  Way is (`MILKY_EYE`), but only by what it stands above `ZODI_FLOOR` =
+  200, smoothly (`(z - 200)^2 / z`): so the cone reads about as bright as
+  the Milky Way's brighter parts, as the eye sees them, and the faint
+  band and floor elsewhere stay as they are. Raised in full, the floor
+  made the moonless sky some twice as bright, and the eye saw fewer
+  stars all over it (the faintest star seen depends on the sky behind
+  it). Nothing fades it: by day and in twilight the sky is far brighter
+  and the exposure hides it, and so does a moonlit sky. By day and down
+  to the sun 6 degrees below the horizon it moves no pixel by more than
+  one level (in at most 6 % of them, by their random rounding); it
+  comes out of the twilight glow as the sun goes from 12 to 18 degrees
+  down. It costs a few operations per pixel of sky.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
