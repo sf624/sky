@@ -613,11 +613,25 @@ itself, the one read that waits.
   exposure leap as the sun sets. The sky, not the median nor the darker
   quarter: the clouds and the sea below darken sooner than the sky after
   sunset, and an exposure that followed them brightened the sky through
-  sunset. In a time-lapse the whole picture stays about as bright as in
-  the afternoon away from the sun, and gets up to about 30 levels of 255
-  brighter towards it (the afternoon's is held down by the sun); the sky
-  alone rises, with the lift, between the sun at 0 and -2.5 degrees (at
-  11 km away from the sun from about 70 to 145), smoothly, and falls
+  sunset. But a view that holds the glow is exposed for the glow, as a
+  camera's meter does: where the highlights stand `GLOW_SPREAD` = 1.5 to
+  2.5 stops or more above the sky's level (towards the sun 2.2 to 3.9,
+  away from it 0.1 to 1), the lift goes and the highlights may stand only
+  `ABOVE_GLOW` = 0.5 stops above white, smoothly in between; and this
+  fades as the sun goes from `GLOW_SPAN` = -6 to -10 degrees, where the
+  brightest part is the pale arch over a thin band, which came out white
+  when exposed for. So towards the sun the sky is deep blue-grey over a
+  vivid band and the ground near black, 1 to 1.3 stops darker than before
+  at 11 km, as in photographs; with the lift it came out light, pastel and
+  washed out. Turning from the glow to the open sky, the exposure follows
+  the glow out of the view over some 7 to 15 degrees of the turn (about
+  0.45 stops for each 2.5 degrees at the most), and adapts as always. In a
+  time-lapse the whole picture stays about as bright as in the afternoon
+  away from the sun, and towards it at 11 km; at 0.3 km towards the sun it
+  gets up to about 17 levels of 255 brighter (the afternoon's is held down
+  by the sun; 40 before the glow was metered). The sky alone rises, with
+  the lift, between the sun at 0 and -2.5 degrees (at 11 km away from the
+  sun from about 70 to 145; towards it from 60 to 88), smoothly, and falls
   again after;
 - where the exposure stands above white's, the highlights (the band of
   glow at dusk, 7 to 9 stops above the sky over it) stand above white:
