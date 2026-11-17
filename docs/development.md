@@ -189,14 +189,19 @@ default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
-The clouds' shadow, measured the same way at 1920 x 1080 in November 2026
-(two sets of three runs, before and after it came in, alternated):
+The clouds' shadow, measured on the same GPU at 2560 x 1440 (`res=1`,
+flying) in November 2026, after the exposure and haze of round 10: three
+runs each, alternated with main, medians of the scene's GPU time:
 
 | View | Scene before | Scene after | Shadow map, per draw |
 |---|---|---|---|
-| Default (cruise, `date=320`) | 5.1 to 5.5 ms | 5.3 to 5.6 ms (+0.15) | 0.70 ms |
-| Under the base (`alt=0.4&cloud=0.6&time=15.5&date=320&haze=1.5`) | 8.1 ms | 8.4 to 8.5 ms (+0.35) | 1.08 ms |
-| `cloud=0` | 2.4 to 3.1 ms | 2.5 to 2.9 ms (the same) | not drawn |
+| Cruise (the defaults) | 12.4 to 12.7 ms | 13.0 to 13.2 ms (+0.55) | 0.71 ms |
+| 4 km, low sun (`alt=4&cloud=0.6&date=320&time=16.5&yaw=61.2&pitch=-5`) | 10.2 to 10.4 ms | 11.5 to 11.6 ms (+1.2) | 1.44 ms |
+| Under the base (`alt=0.3&cloud=0.7&date=320&time=15.5&yaw=51.2&pitch=4`) | 15.5 to 15.7 ms | 15.9 to 16.0 ms (+0.35) | 1.27 ms |
+| `cloud=0` | | the same picture and the same draws | not drawn |
+
+Of that, the soft shadow on the sea (`seaShadow`, eight reads of the map
+per pixel of sea) is about 0.12 ms in the 4 km view.
 
 In flight the map is drawn every 0.5 km (every 2 s at 900 km/h): it adds
 next to nothing to the mean. A frame whose light, altitude or cloud
@@ -215,6 +220,9 @@ The numbers to tune, all in `index.html`:
 | `SHADOW_DS` (`fs`) | 0.2 km | the length of a step along a line of the map (24 to 96 steps) |
 | `SHADOW_ENC` (`fs`) | 4 | the depth at which the stored value is one half |
 | `SHAFTS` (`fs`) | 16 | samples of the map along a view ray below the tops |
+| `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
+| `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
+| `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down

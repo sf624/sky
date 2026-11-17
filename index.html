@@ -1112,6 +1112,33 @@ float cloudShadow(vec3 p) {
   return tau.w * max(1.0 - (h - SHADOW_H.w) / (CT - SHADOW_H.w), 0.0);
 }
 
+// The same on the sea, with soft edges. The sun is a disc, and the light
+// that comes through the thin edge of a cloud is spread around it by the
+// droplets' forward scattering; so a cloud's shadow fades over a width that
+// grows with the way from the cloud down to the sea: SHADOW_PEN radians,
+// from clouds about SHADOW_OCC km high (a radius of some 60 m under a high
+// sun, 400 m under a low one; along the light it is longer on the sea, by
+// 1 / sin of the light's height). Read once, the map's contour was the
+// edge of the glitter: so bright that it shows white down to a hundredth
+// of the light, the glitter was cut along that contour, hard, and with a
+// low sun into blocks (a texel is drawn out along the light on the sea).
+// The light is averaged across the light instead, SHADOW_TAPS reads at new
+// places each frame (jitter), spaced evenly out from the middle (denser
+// there: a uniform disc left round blots), and only then made a depth.
+const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
+const int SHADOW_TAPS = 8;
+float seaShadow(vec3 p, float jitter) {
+  if (uCloud <= 0.0) return 0.0;
+  float r = min(SHADOW_PEN * SHADOW_OCC / max(uLight.y, 0.05), 0.75);
+  float lit = 0.0;
+  for (int i = 0; i < SHADOW_TAPS; i++) {
+    float a = 6.2832 * jitter + 2.39996 * float(i);   // the golden angle
+    float ri = r * (float(i) + jitter) / float(SHADOW_TAPS);
+    lit += exp(-cloudShadow(p + ri * (cos(a) * shX + sin(a) * shY)));
+  }
+  return -log(max(lit / float(SHADOW_TAPS), 1e-6));
+}
+
 // One texel of the map: the line of light through it, from where it rises
 // through the base (or its lowest point, if that is higher) to the tops.
 // The steps are about SHADOW_DS km long, as many as the light's height
@@ -1944,9 +1971,9 @@ void main() {
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
-    // The shadow on the sea: the clouds' (the map) and the thin cloud's.
+    // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
-    float shadow = uLightI > 0.0 ? cloudShadow(pg) + cirrusShadow(pg) : 0.0;
+    float shadow = uLightI > 0.0 ? seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + cirrusShadow(pg) : 0.0;
     addSea(pg, d, tmax, od, betaM, extM, vis, shadow, L, G);
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way and

@@ -599,7 +599,21 @@ What reads it:
   not in the map: as before, its shadow where the ray meets the sea
   (`ciShade`) dims the air below 2 km;
 - the sea: the shadow passed to `addSea`, with the cirrus's
-  (`cirrusShadow`);
+  (`cirrusShadow`). The sea reads it through `seaShadow`, with soft
+  edges: the light `exp(-tau)` is averaged over `SHADOW_TAPS` = 8 points
+  across the light, out to a radius of `SHADOW_PEN` (0.035) times the way
+  along the light from clouds `SHADOW_OCC` = 1.5 km high (at most 0.75 km),
+  spaced evenly out from the middle and turned by a new angle each frame
+  (`ign`), and only then made a depth again. That is about 60 m under a
+  high sun and 500 m under a sun 6 degrees high; on the sea the edge is
+  longer along the light by 1 / sin of its height. The sun is a disc, and
+  the light through a cloud's thin edge is spread around it by the
+  droplets' forward scattering: a real shadow on the sea fades over tens to
+  hundreds of metres. Read once, the map's contour was the edge of the
+  glitter, which shows white down to a hundredth of its light: the glitter
+  was cut out along it, hard, and with a low sun into blocks (one texel is
+  drawn out along the light on the sea). Points spaced evenly over a disc
+  left round blots; spaced evenly out from the middle, they weigh it more;
 - the glare: the clouds towards the sun dim it (`cloudShadow(o)`).
 
 The clouds' own light march (`lightDepth`) does not read it: it sees the
@@ -632,7 +646,7 @@ cloud around each sample in finer detail than the map can hold.
   sharp from near, averaged from far.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
-depth of the clouds (`cloudShadow`, the map) and of the cirrus
+depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
 (`cirrusShadow`) towards the light. It hides the glitter and the direct
 light on the water; the light that a cloud lets through diffusely
 (`soft`) falls more slowly.
