@@ -643,12 +643,14 @@ uniform float uLook;    // power of the "look" curve
 uniform vec2 uLogRange;
 uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
+uniform float uNightEye;    // how far the eye's night vision has come in, 0 by day to 1 (nightEyeFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
 uniform vec4 uWR[3];    // spectrum -> linear sRGB (solar spectrum folded in)
 uniform vec4 uWG[3];
 uniform vec4 uWB[3];
+uniform vec4 uWS[3];    // spectrum -> what the rods see (WS in the JS)
 // Multiple scattering per unit of scattering coefficient: NMU x (12 * NH)
 // texels, the three wavelength groups stacked in y; then the same for the
 // light of the sky on the low clouds (cloudSky); then the light's mean
@@ -717,7 +719,11 @@ const int NFAR = 16;            // ...and in the lit air beyond it (see shadowSp
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
-const float STAR_GAIN = 3.0;
+const float STAR_GAIN = 5.0;
+const float STAR_LIFT = 100.0;  // the most a star is raised against a bright sky (see main)
+const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
+const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones (see main)
+const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
 const int GRID = 128;
 const int SLOTS = 8;
@@ -2023,6 +2029,17 @@ void main() {
     float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
     float glow = uNight * (vanRhijn + milkyWay(c)) * (1.0 - moonMask);
     float stars = uNight * STAR_GAIN * (1.0 - moonMask);
+    // At night a star is seen against a brighter sky better than a screen
+    // shows it: the eye's threshold for a point grows with the square root
+    // of the sky's luminance (the de Vries-Rose law), a screen's in
+    // proportion. So as the night eye comes in, a star is raised by the
+    // square root of how much brighter the sky behind it is than the
+    // moonless sky (up to STAR_LIFT): under a quarter moon about as many
+    // stars show as the eye sees, not only the brightest few.
+    if (uNightEye > 0.0) {
+      float back = glow + dot(uWS[0], L[0]) + dot(uWS[1], L[1]) + dot(uWS[2], L[2]);
+      stars *= 1.0 + uNightEye * (sqrt(clamp(back / uNight, 1.0, STAR_LIFT * STAR_LIFT)) - 1.0);
+    }
     for (int k = 0; k < 3; k++) {
       vec4 t = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
       G[k] = t * sun;
@@ -2056,6 +2073,22 @@ void main() {
     dot(uWG[0], L[0]) + dot(uWG[1], L[1]) + dot(uWG[2], L[2]),
     dot(uWB[0], L[0]) + dot(uWB[1], L[1]) + dot(uWB[2], L[2]));
   col = max(col, 0.0);                               // colours outside sRGB
+  // The eye at night (after Krawczyk, Myszkowski and Seidel, 2005). Below
+  // a few cd/m2 the rods take over from the cones, and colours fade into
+  // the grey of what the rods see, which favours blue-green over red (the
+  // Purkinje shift): moonlit clouds and the moon's glitter are grey to the
+  // eye, and the moonlit sky a dark grey-blue, where a long exposure shows
+  // them in the colours of sunlight. The rods' share is ROD_HALF / (ROD_HALF
+  // + the pixel's luminance in cd/m2), as the night eye comes in (the
+  // paper's 0.04 greyed the sky of nautical twilight, which the eye still
+  // sees blue). Their grey is a little blue, as the night looks (the "blue
+  // shift" of Jensen et al., 2001), but less: neutral grey read as a black
+  // and white photograph.
+  if (uNightEye > 0.0) {
+    float rods = ISUN * (dot(uWS[0], L[0]) + dot(uWS[1], L[1]) + dot(uWS[2], L[2]));
+    float cd = CD * dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(col, max(rods, 0.0) * ROD_TINT, uNightEye * ROD_HALF / (ROD_HALF + cd));
+  }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
   // image run into white and exposes for the rest. Photographs from the air
@@ -2837,6 +2870,8 @@ const SkySound = (() => {
                                               // daylight's highlights, at most DROP lower...
   const GLOW_FREE = 3.5, GLOW_HOLD = 1;       // ...holding the sky down at most GLOW_HOLD stops for each stop the
                                               // band stands more than GLOW_FREE stops above the sky
+  const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
+                                       // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
   const MONO_DEEP = [-3, -6];                 // the first in civil twilight, the second from the sun MONO_DEEP[1] down
@@ -2894,6 +2929,12 @@ const SkySound = (() => {
   const yNorm = CMF.reduce((a, c, i) => a + c[1] * SOLAR[i], 0);
   const W = XYZ_TO_SRGB.map(m => CMF.map((c, i) => SOLAR[i] * (m[0] * c[0] + m[1] * c[1] + m[2] * c[2]) / yNorm));
   const WY = CMF.map((c, i) => SOLAR[i] * c[1] / yNorm);
+  // What the rods see, the same way, scaled so that sunlight gives them its
+  // luminance: the shape of the CIE's scotopic curve (peak at 507 nm), fitted
+  // here as a Gaussian in wavenumber, steeper on the red side.
+  const ROD = WL.map(l => Math.exp(-(l < 507 ? 12.6 : 36.7) * (1000 / l - 1000 / 507) ** 2));
+  const rodNorm = ROD.reduce((a, r, i) => a + r * SOLAR[i], 0);
+  const WS = ROD.map((r, i) => r * SOLAR[i] / rodNorm);
 
   // Optical depth from a point to the top of the atmosphere, towards the sun:
   // a table over altitude and the cosine of the sun's zenith angle.
@@ -3275,6 +3316,13 @@ const SkySound = (() => {
   const DAY_SATURATION = 1.3;
   const saturationFor = () => 1 + (DAY_SATURATION - 1) * smooth01((state.elev - DUSK[1]) / (DUSK[0] - DUSK[1]));
 
+  // The eye at night (uNightEye): the rods' grey and the stars raised against a
+  // bright sky (see main in fs) come in as the sun goes from NIGHT_EYE[0] to
+  // NIGHT_EYE[1] degrees. None by day; at -3 degrees the sky is still some 30
+  // cd/m2, too bright for the rods to matter.
+  const NIGHT_EYE = [-3, -6];
+  const nightEyeFor = () => smooth01((NIGHT_EYE[0] - state.elev) / (NIGHT_EYE[0] - NIGHT_EYE[1]));
+
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
   // - key: it opens up as the view darkens, but not all the way (EYE stops
@@ -3331,6 +3379,14 @@ const SkySound = (() => {
   //   (msData, at the eye's height) is darker now. Without it, the sky
   //   away from the sun rose by 70 levels of 255 from sunset to 2 degrees
   //   below, as the brighter twilight's exposure took over.
+  // - and at night the eye opens up no further than it can: the exposure
+  //   is at most NIGHT_OPEN when the sky's level (DUSK_SHARE) is at
+  //   NIGHT_SKY (a quarter moon's), and NIGHT_RATE stops more for each stop
+  //   that it is darker. So a half-moon night stays clearly dark, a full
+  //   moon is brighter, and a moonless night darker still. Without it the
+  //   floor held the median at the same shown level from dusk down to a
+  //   moonless night: a half moon's clouds came out nearly as light as by
+  //   day, as in a long exposure, yet with the stars of a short one.
   // Of the picture only its levels at five shares are needed: they are
   // sorted once, and the same view a stop brighter is the same shares a
   // stop higher.
@@ -3340,8 +3396,10 @@ const SkySound = (() => {
     const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const byDay = Math.max(Math.min(key, white), floor);
+    // The eye's limit (see NIGHT_OPEN), on the sky's level.
+    const eye = NIGHT_OPEN - NIGHT_RATE * (Math.max(st.sky + d, LOG_RANGE[0]) - NIGHT_SKY);
     const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
-    if (dusk === 0) return byDay;
+    if (dusk === 0) return Math.min(byDay, eye);
     // Twilight's: the sky's level shown, from the night's (nightMid
     // shown at nightShown) up to DUSK_SHOWN at DUSK_MID.
     const sky = Math.max(st.sky + d, NIGHT_LEVEL), peak = st.peak + d;
@@ -3352,7 +3410,7 @@ const SkySound = (() => {
     const byGlow = Math.max(WHITE + PEAK_ABOVE - peak - Math.min(DROP, DIM_BAND * Math.max(0, DAY_HIGH - peak)),
                             shown - sky - GLOW_HOLD * Math.max(0, peak - sky - GLOW_FREE));
     const byDusk = Math.min(shown - sky, WHITE - high + above, byGlow);
-    return byDay + (byDusk - byDay) * dusk;
+    return Math.min(byDay + (byDusk - byDay) * dusk, eye);
   }
   // log2 of the luminance of the air's mean light (msData) at height alt
   // with the sun at elevation e (degrees): how much darker the sky is.
@@ -3650,6 +3708,7 @@ const SkySound = (() => {
     gl.uniform4fv(U('uWR'), new Float32Array(W[0]));
     gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
     gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
+    gl.uniform4fv(U('uWS'), new Float32Array(WS));
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
     for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
@@ -3671,7 +3730,7 @@ const SkySound = (() => {
     const uLight = U('uLight'), uLightI = U('uLightI');
     const uJitter = U('uJitter'), uPass = U('uPass');
     gl.uniform2fv(U('uLogRange'), LOG_RANGE);
-    const uBalance = U('uBalance'), uSaturation = U('uSaturation');
+    const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye');
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
@@ -3707,6 +3766,7 @@ const SkySound = (() => {
       gl.uniform1f(uLook, v.look);
       gl.uniform3fv(uBalance, balanceFor());
       gl.uniform1f(uSaturation, saturationFor());
+      gl.uniform1f(uNightEye, nightEyeFor());
       gl.uniform1f(uAlt, v.alt);
       gl.uniform1f(uCloud, v.cloud);
       gl.uniform1f(uWind, state.wind);

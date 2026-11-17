@@ -222,6 +222,12 @@ the rate to real time, and plays.
   mattering.
 - One light for the clouds and the sea (`uLight`, `uLightI`): the sun while
   it is above -3 degrees, else the moon.
+- The eye's night vision (`nightEyeFor`, `uNightEye`) comes in from 0 to 1
+  as the sun goes from -3 to -6 degrees (`NIGHT_EYE`, a smoothstep): the
+  rods' grey ([Exposure and the tone curve](#exposure-and-the-tone-curve))
+  and the stars raised against a bright sky ([Sun, moon,
+  stars](#sun-moon-stars)). At -3 degrees the sky is still some 30 cd/m2,
+  far too bright for the rods to matter; by day nothing changes.
 - `state.sky` (`uSky`) turns J2000 equatorial directions into local axes.
 
 The date slider covers the current year. The moon's age starts from the
@@ -710,7 +716,18 @@ all dimmed and reddened by the air:
   (`starCell`). A star is a spot about a pixel wide, with a colour from its
   B-V index (Ballesteros's temperature, then a tilt of the spectrum) and a
   compressed brightness (a "look"). The brightest get diffraction spikes
-  fixed to the screen.
+  fixed to the screen. The core of a star of magnitude 6.5 is `STAR_GAIN`
+  = 5 times the radiance of the airglow (3 before the night's exposure was
+  capped: at the darker exposure of a moonless night, 3 showed about 160
+  stars in the upper part of a view from cruise, 5 shows some 330).
+  At night a star is raised against a bright sky: the eye's threshold for
+  a point grows with the square root of the sky's luminance (the de
+  Vries-Rose law), a screen's in proportion. As the night eye comes in
+  (`uNightEye`, below), each star is multiplied by the square root of how
+  much brighter the sky behind it (what the rods see of it, `uWS`, and the
+  airglow) is than the moonless sky (`uNight`), at most `STAR_LIFT` = 100.
+  Without it, a quarter moon's sky hid all but the brightest few stars,
+  and a full moon's all but two in a view from cruise.
 
 **Glare**: a glow of a few degrees around the sun, as strayed
 light in a lens, dimmed by the clouds (the shadow map at the eye) and the
@@ -836,7 +853,21 @@ itself, the one read that waits.
   degrees and lifted the picture by up to `DUSK_LIFT` = 1.2 stops (gone
   now): in a time-lapse the sky away from the sun went from 75 to 148
   (of 255) between sunset and 2 degrees below it, and the view towards
-  the sun from near the sea rose by 23 levels as the sun's disc set.
+  the sun from near the sea rose by 23 levels as the sun's disc set;
+- and at night the eye opens up no further than it can: the exposure is
+  at most `NIGHT_OPEN` = 16.75 when the sky's level (the level that the
+  brighter third passes, as in twilight) is `NIGHT_SKY` = -22.5, about a
+  quarter moon's, and `NIGHT_RATE` = 0.5 stops more for each stop that it
+  is darker (less for each stop brighter). By day and in twilight it is
+  far above the exposure and does nothing; it takes over in the last of
+  the twilight, with the sun 11 to 18 degrees down (sooner near the
+  sea). Before it, the floor held the median at about the same shown
+  level from dusk down to a moonless night, as a long exposure does:
+  under a quarter moon the clouds came out nearly as light as by day (150
+  of 255 from cruise), yet the sky showed only the brightest few stars.
+  Now they are at about 40 to 70 under a quarter moon and 110 under a
+  full moon, and a moonless night is darker still: black sky, stars, the
+  clouds below barely seen.
 
 `exposureFor` returns the exposure.
 
@@ -864,7 +895,24 @@ base has neither, and is compared as it comes.
 
 At the end of `main`:
 
-1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
+1. Spectrum to linear sRGB, times `ISUN`. At night the rods take over from
+   the cones (after Krawczyk, Myszkowski and Seidel, 2005): the colour is
+   mixed with the grey that the rods see (`uWS`: the shape of the CIE's
+   scotopic curve, peak at 507 nm, fitted as a Gaussian in wavenumber;
+   sunlight gives the rods the same luminance as the cones), a little
+   blue (`ROD_TINT`, the "blue shift" of the night in Jensen et al.,
+   2001, but less). The rods' share is `ROD_HALF / (ROD_HALF + Y)`, where Y
+   is the pixel's luminance in cd/m2 (`CD` = 6650 per unit: white paper in
+   the sun outside the air, 133,000 lux, is 1 / pi here) and `ROD_HALF` =
+   0.01 cd/m2 (the paper's 0.04 greyed the sky of nautical twilight,
+   which photographs and the eye see blue), times `uNightEye`. So the moonlit clouds (about 0.003 cd/m2
+   under a quarter moon) and the moon's glitter are grey to the eye, and
+   the moonlit sky a dark grey-blue, where a long exposure shows them in
+   the colours of sunlight; the twilight sky (0.1 cd/m2 and more with the
+   sun 10 degrees down) keeps its colour. Before, the light of a low moon,
+   reddened on its long way through the air and on the way back from the
+   far clouds, made tan clouds, a golden glitter and an orange-brown rim
+   along the far cloud tops at the horizon. The level for the meter is
    taken here; then times `uExposure`.
    No shoulder keeps the hue: each channel meets the curve of steps 4 to
    6 on its own, as on a camera's sensor.
