@@ -1538,7 +1538,8 @@ into smooth lobes, like putty; heads on stems, longer below than above,
 drew upright fins and streaks on the body's sides, like ice.) Drawn with
 `noise` slice by slice after the noise texture, the 128 slices take about
 as long again: on a desktop GPU the first picture comes about half a
-second later.
+second later (6.7 s after the navigation at 1280 x 720, against 6.1 to
+6.3 s with round 11's turrets, measured the same day).
 
 The Worley noise of the noise texture's G and B is rounded at each
 feature point over a quarter of a cell (`1 + r0 / 4 - sqrt(d^2 + r0^2)`,

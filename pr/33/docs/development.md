@@ -228,17 +228,23 @@ The numbers to tune, all in `index.html`:
 
 Those numbers are older than the detail of the low clouds near the eye
 (#33, November 2026), which trades time for the picture. Flying, `res=1`,
-the scene in ms at 2560 x 1440 (both stages; main in brackets, from
-before main's shadow map), minimum of two runs, 18 November 2026:
+the scene in ms at 2560 x 1440 (both stages; main in brackets), minimum of
+two runs, 18 November 2026, with the 3D body of heaps (round 12):
 
 | View | 2560 x 1440 |
 |---|---|
-| Default (cruise) | 20.4 (8.1) |
-| `alt=2&cloud=0.7` | 34.6 |
-| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 26.5 (5.9) |
-| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 31.0 (7.4) |
-| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 27.8 (10.0) |
-| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 28.9 (6.4) |
+| Default (cruise) | 33.3 (13.2) |
+| `alt=2&cloud=0.7` | 60.3 (11.7) |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 35.4 (9.7) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 56.2 (10.9) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 39.4 (12.8) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 43.5 (10.6) |
+
+Round 11's body (turrets alone) took 21.4, 42.9, 28.7, 40.8, 33.7 and
+34.3 ms in the same views: the envelope with its bumps costs 6 to 17 ms
+more, most where heaps fill the view (rays meet more surface, and every
+read of the body near a heap reads the map's slope), and moving the map's
+heaps and gathering them (`WARP`, `CLUMP`) 3 to 8 ms of that.
 
 Where clouds fill the view from near, the scene costs three to five times
 what it did. Of the scene's own draw, the light of the clouds was three
