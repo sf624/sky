@@ -235,6 +235,10 @@ the shell's lower bound, not the height of the bases: they stand 150 to
 300 m higher (below), so that nothing that reads `CB` (the march's range,
 the shade of the clouds on the sea and the low air) has to change.
 
+Places in the clouds are given from the eye (`p` less `eye()`), and
+`heightAt` finds their height. At the Earth's radius a float steps by half
+a metre, and the finest noise showed those steps as terraces.
+
 **The field.** A signed field says where cloud is: positive inside,
 rising by about 1 per km of depth under the surface. `cloudShape` builds it
 as a sum:
@@ -246,7 +250,8 @@ as a sum:
   within a texel is first eased by a smoothstep (Quilez, "improved texture
   interpolation"), so that the map bends smoothly, in one read still:
   else the sides of clouds within a few km show those bends as upright
-  streaks;
+  streaks. Where a pixel is finer than 4 m it is read through a cubic
+  B-spline (four filtered reads, Sigg and Hadwiger, GPU Gems 2 ch. 20);
 - less what height costs: a dome over a flat base (`y` cubed over the
   cube of `top`), thicker where the map is higher; the lowest 180 m
   rounded off (`rim`). `y` counts from the base's `level`: 150 to 300 m
@@ -255,6 +260,11 @@ as a sum:
 - plus the noise of the tile (`uNoise`, one tile per `BASE_KM` = 8 km),
   read at a depth that drifts from place to place (`far`) so that no two
   tiles look alike. Worley values are rounded into domes (`v (2 - v)`).
+  Where a pixel is finer than 16 m, the reads that see the fine noise
+  (the surface, not the shadows) go through a cubic B-spline
+  (`noiseSpline`, eight filtered reads): the GPU's filter bends where its
+  texels meet, every 62 m, and lit and shaded sides showed the bends as
+  upright streaks and a grid of facets.
   `lump` says how far a place stands out of the billows; `body` how thick
   the cloud is there; `q.w` how rough.
 
@@ -269,15 +279,21 @@ surface as smooth as a base). The cloud is the lesser of the two fields.
 `cloudDetail` gives the fine noise: `DETAIL` = 7 tiles per tile, billows
 of 300 m down to about 20 m. The 300 m billows stand out about a third of
 their width, the smaller ones up to a half, so that small billows sit on
-large ones: a cauliflower (equal weights made a foam). Nothing finer:
-light spreads over tens of metres in a cloud, and near the eye a cloud is
-a fog. `cloudField` adds it near the
+large ones: a cauliflower (equal weights made a foam). Near the eye the
+same noise, 8 and 64 times finer (billows of 36 m down to 1 m), adds
+smaller billows still, each only where a pixel is fine enough to show it
+(`MICRO`; turned about the vertical by whole numbers, so that it repeats in
+the tile). The weights fall by about 0.26 for each eighth of the size.
+Without them, clouds 0.3 to 3 km away had nothing smaller than 20 m, a
+texture blown up 20 to 60 times: soft mounds. `cloudField` adds it near the
 surface only (`min(f, base) > -0.25 * RELIEF`), more strongly on thin
 cloud:
 
 - on the sides and tops; not on the base, which is flat and shows its
   broad mottling only;
-- under the base where the noise swells most: shreds that hang below it.
+- under the base where the noise swells most: shreds that hang below it,
+  with a deep, faint fringe (`edge` 100 m), so that they are ragged and
+  thin.
 
 Fine noise carved into a base (Worley creases cut by a plane) looks like
 veined marble from under it; one height for every base makes a straight
@@ -297,8 +313,12 @@ where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
 leaves it at the cloud base; from under the base, such a ray has no
 clouds.
 
-- The steps grow with the distance: `ds = max(DS_MIN, t * min(DS_REL *
-  (1 + t / L), rel))`, with `DS_MIN` = 20 m and `DS_REL` = 0.0045. On a
+- The steps grow with the distance: `ds = max(DS_NEAR, t * min(DS_REL *
+  (1 + t / L), rel))`, with `DS_NEAR` = 8 m and `DS_REL` = 0.0045 (the
+  steps were 20 m up to 4.4 km). Strides through clear air are planned as
+  before, with `dsAir = max(DS_MIN, ds)` and `DS_MIN` = 20 m; so are the
+  steps under a base, which has no fine noise (rays that grazed it crept
+  along it). Steps of 3 m looked the same and cost half as much again. On a
   long path the march must end within its budget (`COARSE * 80` steps'
   worth). `rel` is the one rate for the whole ray that does so; `L` the
   distance past which steps of `DS_REL * t` grow by `1 + t / L` and do so
@@ -307,44 +327,64 @@ clouds.
   and as before far off. With `rel` alone, clouds 2 to 5 km off were
   marched in steps of 100 to 200 m on rays that end far away, and their
   edges came out as thin dark squiggles and a hatch. At most
-  `CLOUD_STEPS` = 160 steps, and the march stops when less than 1 % gets
-  through.
+  `CLOUD_STEPS` = 320 steps, and the march stops when less than 1 % gets
+  through. With 160, rays that pass under a deck towards the horizon ran
+  out of steps before they met it, and the sky behind showed as a thin
+  pale-blue line.
 - The plan must not jump where the end of the ray does: a ray that meets
   the sea is planned as if the sea were a mirror and the ray went on up to
   `CT`. So a cloud in front of the horizon looks the same above and below
   it.
 - In clear air the field tells roughly how far the next surface is: steps
-  of `0.35 * |f|`, between `FINE * ds` and `COARSE * ds`. A long stride
+  of `0.35 * |f|`, between `FINE * ds` and `COARSE * dsAir`. A long stride
   that lands inside a cloud steps back, and the next three steps in clear
   air are at most `ds`, so edges come out crisp. Inside, steps of
-  `0.5 * f`, at most `ds`.
+  `0.5 * f`, at most `ds` while more than 60 % gets through, growing to
+  `dsAir` where little does; in a faint fringe as long as takes a seventh
+  of the light, up to `dsAir`.
 - The detail of the noise read (`lod`) follows the pixel's footprint at
   that distance, or a fifth of the step if that is larger.
 - The start is jittered per pixel and per frame
-  (`ign(gl_FragCoord.xy + 5.588238 * uPass)`, interleaved gradient noise);
-  the mean over frames removes the noise.
+  (`ign(gl_FragCoord.xy + 5.588238 * uPass)`, interleaved gradient noise)
+  over a whole stride (`COARSE * dsAir`); the mean over frames removes the
+  noise. Jittered over a fine step only, the strides landed in the same
+  places frame after frame, and clouds 3 to 5 km off showed ripples.
 
-**The light** is worked out at each sample inside a cloud while more
-than 40 % of the light still gets through, and at the first sample
-of each cloud the ray enters; deeper samples share the last result. At a
+**The light** is worked out at the first sample of each cloud the ray
+enters, and again while more than 40 % of the light still gets through,
+each time a fifth more of it has gone (not at every step); deeper
+samples share the last result. At a
 sample just past the surface it is worked out on the surface itself,
 found between the last two samples. For each:
 
-- `lightDepth`: six steps towards the light, growing by 1.6 each. The first
-  two see the fine noise, smoothed over at least 15 m (`crisp`: soft
-  shadows of the small billows; light spreads over tens of metres in a
-  cloud). The last three are moved sideways each frame (`off`, up to
-  `PENUMBRA` = 60 m), each a third of a turn from the one before, at an
-  angle from interleaved gradient noise: over the frames the shadows
-  soften (white noise there leaves a grain in the settled picture). The
-  third step is not moved, and sees the fine noise smoothed over its own
-  level (40 m or more). From the field at the surface with the fine noise
-  smoothed as much (`fm`: `mid` is what that noise adds there) to the
-  third step's, the slope towards the light gives `facing`: the billows
-  of 100 to 300 m each turn a lit side to the sun, and their small creases
-  do not show (unsmoothed, they came out as thin dark lines).
-- `hollow` dims the hollows between those billows (where `mid` is
-  negative) to 55 %, and lifts their tops a little: soft, grey hollows.
+- `lightDepth`: steps towards the light, growing by 1.6 each, from
+  `0.00625 t` (at least `LIGHT_MIN` = 15 m, at most 50 m), until they reach
+  27.8 first steps' worth (six steps). The levels at which they read the
+  noise shrink with the first step below 50 m, so that a cloud 3 km off is
+  shaded as one 8 km off, at a third of the size. The first
+  two see the fine noise, smoothed over at least 15 m far off (`crisp`:
+  soft shadows of the small billows; light spreads over tens of metres in
+  a cloud), and so does the third. The later ones are moved sideways each
+  frame (`off`, up to `PENUMBRA` = 60 m), each a third of a turn from the
+  one before, at an angle from interleaved gradient noise: over the frames
+  the shadows soften (white noise there leaves a grain in the settled
+  picture).
+- `facing` comes from the normal: the gradient of the field with the fine
+  noise smoothed as for `mid` (below), over 1.5 first steps along the light and two
+  axes across it, normalised. The slope towards the light alone was lit or
+  dark and nothing between, as the field is steep: flat white with blue
+  patches, like snow. A wrap of 0.3 lets a side turned a little away still
+  catch some light.
+- `occ`: out along the normal, over 3 first steps, the field falls as fast
+  as it rises at the surface on a billow in the open, and less in a crease;
+  `crease` dims the light of a crease by up to `CREASE` = 50 %, and `open`
+  takes half its value from the normal's tilt towards the sky. Together
+  they give each billow a lit top and a grey underside, as cotton wool.
+- `hollow` dims the hollows between those billows (where `mid`, what the
+  fine noise smoothed over a few first steps adds at the surface, is
+  negative) towards 55 %, and lifts their tops towards 115 %, by a smooth
+  curve (a clamp left flat grey patches with sharp outlines, and `mid` was
+  cut off where the field over the base passed 0.3: their edges).
   On a surface that faces down it also shows the cells of a deck: Worley
   cells of the noise read at 3.5 times the tile's frequency (some 600 m
   across, and texels of 18 m, whose facets do not show; the tile's own
@@ -352,9 +392,19 @@ found between the last two samples. For each:
   lighter at its thin rim, by up to 40 %.
 - The rise of the field without the fine noise towards the sky over
   `reach` gives `open`: how much skylight a place gets.
+- `column`: light that comes down through the cloud above, the sky's and
+  the sun's that went deep, is what a slab of that depth lets through:
+  `1 / (1 + COLUMN (tau - 5))`, with `COLUMN` = 0.11 ((1 - g) 0.75 for
+  g = 0.85) and `tau` the depth straight up (`shadowDepth`, five samples).
+  Under a deck
+  its thick cells are darker than the thin gaps between them; a base under
+  a kilometre of cloud gets a tenth of the light of a top.
 - Five phase terms stand for the orders of scattering: `p0` (scattered
   once: two Henyey-Greenstein lobes, dimmed by the whole depth) and `p1` to
-  `p4` (scattered many times: wider lobes that go deeper). `white` makes
+  `p4` (scattered many times: wider lobes that go deeper). On a side turned
+  from the light, `p3` keeps `DEEP` = 50 % (light that went deep forgets
+  where it came from); `p3`, `p4` and the sky's light are dimmed by
+  `column`. `white` makes
   only thick clouds brilliant; `billow` lights the tops of the big billows
   far off, where the fine ones are below a pixel; `bounce` lights a side
   turned from the sun with the sunlit cloud around it.
@@ -367,9 +417,12 @@ through the cirrus, `cirrusShadow`), plus skylight from the
 multiple-scattering table, plus airglow.
 
 **Shadows.** `shadowDepth` sums the clouds' depth towards the light from a
-point under their tops (ten samples, denser low down). `main` uses it for
+point under their tops (ten samples, denser low down; five for `column`). `main` uses it for
 the sea's shadow and the glare. Where the ray meets no sea, the air near
-the sea is dimmed by the cloud amount alone (`shade`).
+the sea is dimmed by the cloud amount alone (`shade`). The light of the
+sky in the air below 2 km is dimmed by the cloud amount too, to `UNDER` =
+30 % under a full deck: else the air under a deck, a hundred km of it
+towards the horizon, glowed as a pale-blue band.
 
 ## The sea
 

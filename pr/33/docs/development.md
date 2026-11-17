@@ -91,6 +91,13 @@ not with other renderers or memory. Look at several views: the default,
 low sun, near the cloud tops, under the cloud base, cirrus overhead,
 night, haze, strong wind.
 
+A change of the picture is checked over a matrix of scenes, each beside a
+photograph of the same kind: altitude (about 0.3 km, 3 to 5 km, 11 km) by
+time (day, dusk, night) by clouds (low clouds, thin clouds, few and many),
+towards the sun and away from it, at rest and in flight. The rule and what
+to report are in [`CLAUDE.md`](https://github.com/sf624/sky/blob/main/CLAUDE.md).
+The picture comes before the processing load.
+
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
@@ -149,6 +156,13 @@ without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
+
+Those numbers are older than the detail of the low clouds near the eye
+(#33, November 2026), which trades time for the picture. At 1920 x 1080,
+flying, `res=1`: the default view 8.6 ms (was 5.1), `alt=2&cloud=0.7`
+16.7 ms (5.0), the tops from 4.6 km 8.2 ms (4.0), among clouds at 1.8 km
+15.8 ms (4.5), under a deck at 0.6 km 15.9 ms (6.0). Where the clouds
+fill the view from near, the scene costs about three times what it did.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down

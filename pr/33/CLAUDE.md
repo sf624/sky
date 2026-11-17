@@ -9,6 +9,33 @@ Read these before you touch this repository.
   simulation is a means, not a requirement: where it does not help the
   picture, it may be replaced or removed.
 - Judge a change by looking at it, against real photographs.
+- The picture comes before the processing load. Keep the page usable on a
+  desktop GPU, but do not trade detail for milliseconds.
+
+## Changes of the picture
+
+A pull request that changes what is drawn (sky, light, clouds, thin
+clouds, sea, exposure) is checked against real photographs before it is
+shown to the owner. Before and after pictures alone are not enough.
+
+- Cover the representative scenes: low, middle and high altitude (about
+  0.3 km, 3 to 5 km, 11 km), by day, at dusk and at night, with low clouds
+  and with thin clouds (few and many), looking towards the sun, away from
+  it, up and down. A change of one part still gets the whole matrix once:
+  exposure and light reach every scene.
+- For each scene, put a photograph of the same kind (same height, sun
+  height and framing, as near as can be found) beside the render, and
+  write down what still looks wrong: shape, outline, scale of detail,
+  colour, saturation, brightness, gradients. Then judge whether the pair
+  feels alike. Say plainly when it does not; do not report "better than
+  before" as "real".
+- Look in flight too, not only at stills, and at each altitude.
+- Photographs are for comparison only (for example from Wikimedia Commons,
+  with their source noted). They never go into the repository.
+- Put the photo-against-render sheets and the list of differences in the
+  pull request's description, and show them to the owner.
+
+See "Realism" in `docs/development.md`.
 
 ## Rules
 
