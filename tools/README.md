@@ -110,7 +110,7 @@ On one renderer, the same page gives the same trace byte for byte, run after run
 | `comments` | comments, blank lines and spacing in shader texts (for moves of shader code) |
 | `readback` | the hashes of what the frames drew |
 | `query` | calls that only ask (`get…`, `is…`, `checkFramebufferStatus`), for example a different order of `getUniformLocation` |
-| `start` | frames 0 and 1: a change to the loading may do the same work in another order, or do in frame 0 what the first frame did (make the pictures, upload a table). The frames after must be the same |
+| `start` | frames 0 and 1: a change to the loading may do the same work in another order, or do in frame 0 what the first frame did (make the pictures, upload a table, read the meter). The frames after must be the same |
 
 Example: `node tools/sky.mjs trace-diff a.trace b.trace --ignore shader,readback`. A difference is printed like this:
 
