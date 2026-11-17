@@ -57,9 +57,10 @@ over frames. It fills the window, and the page does not scroll.
   the fine noise per tile), the wave bands and the cells of the foam
   rounded to whole numbers per map (`rep`, `cells`), the swells with whole
   numbers of crests (`SWELL`), the cirrus frame stepping by whole numbers
-  (`CI_CELL`, `CI_FIB`, `ciNoise` with a whole `period`), and the
-  `bend` of the cirrus written with whole-number frequencies. The `bend`
-  sum appears twice, in `noise` and in `ciDepth`: change both together.
+  (`ciNoise` with a whole `period`, the tile of the fibres `CI_TILE`), and
+  the `bend` of the cirrus written with whole-number frequencies. The
+  `bend` sum appears twice, in `noise` and in `ciDensity`: change both
+  together.
 - Comments in the code are plain English sentences that say what and why.
 
 ## From the address bar to the first frame
@@ -347,84 +348,89 @@ towards the light.
 
 ## Cirrus
 
-`highCloud`. The cirrus fills a shell from `CI_LO` =
-12.2 to `CI_HI` = 12.8 km, but its pattern is drawn on one height: where
-the ray crosses the middle of the shell (or halfway along a ray that only
-grazes it).
+`highCloud`. The cirrus fills a shell from `CI_LO` = 12.2 to `CI_HI` =
+12.8 km. It is drawn on `CI_LAYERS` = 4 thin layers through the shell,
+each with fibres of its own, which the eye sees through one another: from
+near they part and cross, and in flight they slide over each other.
 
-The crossings of the eye's ray with `CI_LO`, `CI_HI` and the middle height
-come from `eyeSphere`, which takes them from the heights, not from
-`raySphere`: the slider stops on all three heights, and from an eye at a
-sphere's own height `raySphere` puts the near crossing a hair ahead or
-behind, ray by ray (see [development.md](development.md#glsl-rules)). From
-`CI_LO`, a ray down leaves the shell at once.
+Each layer is read where the ray crosses it (going up from below, going
+down from above; a ray that runs between two layers reads the nearest,
+halfway along). The crossings come from `eyeSphere`, which takes them from
+the heights, not from `raySphere`: the slider stops on the layers' heights,
+and from an eye at a sphere's own height `raySphere` puts the near crossing
+a hair ahead or behind, ray by ray (see
+[development.md](development.md#glsl-rules)).
 
 ![Cirrus seen from 11 km: ?date=319&pitch=28&cirrus=0.6&cloud=0.3](images/cirrus.jpg)
 
-- `ciDepth` gives the vertical optical depth at a place on the map, in
-  three parts.
+- `ciDensity` gives a layer's share of the vertical optical depth at a
+  place on the map.
   - **The weather.** A of the weather map, against a level set by
-    `uCirrus`, gives how much cirrus there is (`cov`), and its slope along
-    and across the wind. The level is set so that each step of the slider
-    covers about as much sky as the cirrus before the streaks did (a
-    smooth envelope), averaged over places and pitches: streaks reach out
-    beyond their heads, so the level is higher at the low end. Place by
-    place the two differ, since a streak lies downwind of where the
-    weather put its head. Over some 16 km (a coarse level of the map), it
-    tells where no streak can reach, and most of the sky costs little.
-  - **Streaks** (`ciStreaks`): fall streaks, each a small head with a
-    trail drawn out down the wind, wider and fainter as it goes, a little
-    off the wind and bent into a hook. One in each cell of 16 by 2 km
-    (`CI_CELL`) at a random place, 8 to 29 km long; the lattice is pushed
-    about by noise of 10 by 2 km, so that heads and ends do not line up
-    and the gaps between streaks are not clean ovals. A streak is there if the
-    cover at its head is above its own rank, so a thin patch has a few
-    whole streaks with sky between them, and a dense one many, overlapping;
-    and streaks reach out of a patch into clear sky. There is no outline:
-    the edge of a patch is the ends of its streaks. A sheet joins them where
-    the weather gives much, more of it as the slider goes up. The sheet,
-    and the streaks' mean from afar, read the cover pushed about by noise
-    drawn out like the streaks, so that their edges are ragged, not the
-    smooth outlines of the map.
-  - **Fibres**: six octaves of noise (`CI_FIB`), from 8 by 2 km down to
-    200 by 8 m, longer and thinner as they get finer, in a frame that
-    follows the streaks' tilt and bend and is pushed gently about by noise
-    of 4.5 km, more in some places than in others. A cascade: each octave
-    scales what the coarser ones left. The two coarsest are soft lumps;
-    the finer ones soft strands of varied width, 15 to 40 times longer
-    than wide, that come and go along their length, clearest where the
-    cloud is thin. Drawn out less, or as sharp ridges, the threads wiggled
-    and kinked and dense patches looked like flames; drawn out more, they
-    looked combed. Following the streaks' spread from the head kinked them
-    where streaks overlap. Where it is thin, a
-    little is also taken off, so that the threads part and the sky shows
-    between them.
+    `uCirrus`, gives how much cirrus there is. The level is set so that
+    each step of the slider covers about as much sky as the cirrus of
+    before (a smooth envelope) did, averaged over places and pitches. Over
+    some 16 km (a coarse level of the map) it tells where there is none,
+    and most of the sky costs little.
+  - **The flow.** The ice is drawn out along lines that run down the wind
+    and bend: the coordinate across them (`psi`) is the across-wind
+    coordinate pushed about by noise, gently enough that the lines never
+    close on themselves. In some places (noise of 27 by 13 km) they also
+    wave from side to side all together, by noise that changes faster
+    along the wind than across it. Where the lines crowd, the fibres crowd;
+    where they part, the fibres splay. Waves everywhere made a full sky
+    look like wood grain.
+  - **The body**: the weather's cover, plus wisps of 10 by 2 km down to 1.6
+    km by 340 m and bundles 1 to 3 km apart, all along the flow, through a
+    soft ramp (a smoothstep, squared). There is no outline: a patch thins
+    out over a good part of its width, and its fibres reach beyond it. The
+    more cirrus, the stronger the wisps, so that a full sky still has thin
+    places and thick.
+  - **The layers.** Ice falls out of the cloud and the wind shears it: the
+    pattern of a lower layer lies up to 2 km further up the wind. How the
+    ice lies through the shell (higher or lower, thicker or thinner) changes
+    from place to place, and gives each layer its share. The finest wisps
+    and the fibres differ from layer to layer.
+  - **The fibres** (`uFibres`, below): two reads of a tile of 8.1 by 4.05 km
+    at two sizes, along the flow, with their mean taken out. How much they
+    show changes from place to place (noise of some 16 by 5 km); in a
+    thick body they fade to a sheen, as in a milky sheet of cirrostratus.
+    Strong everywhere, they made a full sky look combed; weak in every
+    wisp, the wisps looked like soft brush strokes.
   - **The footprint.** `highCloud` gives the pixel's footprint along and
     across the wind (`fp`), drawn out on the sheet where the ray is aslant.
-    Each octave of the fibres fades out before it gets finer than it, and
-    the streaks widen and lower alike; where it is more than a fraction of
-    a cell, the streaks give way to their mean. So the pattern is filtered
-    rather than aliased, and from near there is always detail a few pixels
-    wide.
-  - The cells of the streaks and every octave of noise step by whole
-    numbers over the frame, which repeats ten times over the map; the
-    streaks' hash (`ciCell`) knows which of the ten a cell is in, so the
-    streaks repeat only with the map.
-- The depth along the ray is that times the path through the shell over
-  the shell's thickness.
+    Each octave of the body fades out before it gets finer than it; the
+    fibres are read with `textureGrad` over the same footprint, through the
+    mipmaps and, where the GPU has it, its anisotropic filter. So the
+    pattern is filtered rather than aliased.
+  - Every octave of noise steps by whole numbers over the frame, which
+    repeats ten times over the map, and the tile of the fibres a whole
+    number of times over a unit of the frame.
+- The depth along the ray is the layers' depth times the way through the
+  shell over its thickness (over the share of it that the layers crossed
+  stand for).
 - Light: forward scattering by ice (three Henyey-Greenstein lobes), the
   22-degree halo with the dispersion of ice, light scattered once with the
   sheet's own shadow, a share scattered many times, skylight from the
-  multiple-scattering table, and light from the low clouds below. A fibre
-  in a thick body of ice is lit through the body (`ciBody`, the depth
-  without the fibres), so dense patches are grey inside and their thin
-  edges bright.
+  multiple-scattering table, and light from the low clouds below, at the
+  mean distance of the layers seen. A fibre in a thick body of ice is lit
+  through the body (`ciBody`, the depth without the fibres), so dense
+  patches are grey inside and their thin edges bright.
 - `cirrusShadow` dims the direct light on the low clouds and the sea (half
   the depth counts: ice scatters mostly forward). It reads the mean of the
-  streaks, without the fibres (`cirrusDepth`), and so does the glare.
+  body over the shell, without the fibres (`cirrusDepth`), and so does the
+  glare.
 
 `highCloud` returns `Th`, `H` and `tHigh`; the march through the air treats
 it as its second layer.
+
+**The fibres' texture** (`uFibres`, 2048 x 1024, R8), drawn once at start
+by the `noise` shader (`uZ` = -2): lines of five sizes, in rows from 675 m
+apart down to 42 m, from 150 m wide down to 3 m (4 m a texel). Each line wanders across as it runs,
+so that it crosses its neighbours at small angles, and comes and goes along
+its length; the finer they are, the more they gather in bundles; a gentle
+wave bends each size by itself. Their mean is summed in the JS from the
+full texture (`uFibreMean`): the last level of the mipmaps rounds to 8 bits
+at every level, and differs from GPU to GPU.
 
 ## Sun, moon, stars
 
@@ -581,6 +587,7 @@ All are uploaded in `makeSky`:
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: towers; B: gusts on the sea; A: cirrus |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
+| `uFibres` | 10 | 2048 x 1024, R8, mipmapped, repeating, anisotropic where available | `noise` shader | The fibres of the cirrus (see [Cirrus](#cirrus)) |
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
 reads unit 6.
@@ -598,8 +605,10 @@ coordinates, packed into one word, plus the seed; the `waves` shader the
 number of the wave. The word, and its low 21 and 10 bits moved up, are
 three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
 `ciNoise` in `fs` uses the same hash per pixel: one word per lattice point,
-which with its low half moved up is the gradient; and `ciCell`, three
-words per cell of the streaks, twelve bytes of random numbers.
+which with its low half moved up is the gradient. It wraps the lattice by
+hand, not with `mod()`: on the GPU here, `mod()` of a whole number by itself
+gave the number back in places, and a seam ran along the lattice line there
+(seen as a difference from SwiftShader).
 
 ## Sound
 

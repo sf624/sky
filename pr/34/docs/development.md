@@ -91,6 +91,13 @@ not with other renderers or memory. Look at several views: the default,
 low sun, near the cloud tops, under the cloud base, cirrus overhead,
 night, haze, strong wind.
 
+A change of the picture is checked over a matrix of scenes, each beside a
+photograph of the same kind: altitude (about 0.3 km, 3 to 5 km, 11 km) by
+time (day, dusk, night) by clouds (low clouds, thin clouds, few and many),
+towards the sun and away from it, at rest and in flight. The rule and what
+to report are in [`CLAUDE.md`](https://github.com/sf624/sky/blob/main/CLAUDE.md).
+The picture comes before the processing load.
+
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
@@ -210,13 +217,18 @@ The shaders must run on any WebGL2. The code keeps these rules:
   - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
   - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
-    shader and in `fs` (`CI_UNIT`, the `bend` in `ciDepth`, the footprint
-    `fp` in `highCloud`, and the ten units of the map in `ciCell`).
+    shader and in `fs` (`CI_UNIT`, the `bend` in `ciDensity`, the
+    shear of the layers, and the footprint `fp` in `highCloud`).
 - **One flat loop over a neighbourhood.** On Mesa's D3D12 driver (WSL),
   two nested loops over the cells around a point (`for i in -2..0`, `for j
   in -1..1`) came out wrong: the cirrus's streaks were cut along the
   cells' edges, where the same sum written as one loop over nine cells
-  was right, and SwiftShader got both right. `ciStreaks` keeps one loop.
+  was right, and SwiftShader got both right. The code keeps one loop
+  over a neighbourhood where it needs one.
+- **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
+  of a whole number `x` equal to `p` gave `p` in places, not 0, and the
+  cirrus's noise had a seam along that lattice line. `ciNoise` wraps by
+  hand, `c - p * floor((c + 0.5) / p)`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
