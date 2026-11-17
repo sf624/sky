@@ -525,12 +525,14 @@ float heaps(vec2 uv, float freq, float seed) {
 }
 
 // Turrets, for the 3D body of heaps and towers (see cloudShape): each cell
-// of a jittered lattice of freq cells per tile is a bubble of rising cloud.
-// Round its point a head, a little flatter than it is wide; under it a stem,
-// narrower and longer, down into the cells below: each turret is wider above
-// than below, and its head overhangs its stem. 1 at the middle of a head,
-// falling with the square of the distance (a dome) to 0 at its rim. Where
+// of a jittered lattice of freq cells per tile holds a round head, a little
+// flatter than it is wide (its radius 0.45 to 0.75 of a cell): 1 at its
+// middle, falling as a sphere's height does to 0 at its rim, so that it
+// meets the next in a sharp crease (as a dome, falling with the square of
+// the distance, the heads melted into smooth lobes, like putty). Where
 // two meet, the higher value wins, with a crease between them: a cleft.
+// (Heads on stems, longer below than above, drew upright fins and streaks
+// on the body's sides, like ice.)
 const float SOFT = 0.2;   // how far a cleft is rounded, in units of the turrets
 float turrets(vec3 p, float freq, float seed) {
   p *= freq;
@@ -538,18 +540,14 @@ float turrets(vec3 p, float freq, float seed) {
   float m = 0.0;
   for (int x = -1; x <= 1; x++) {
     for (int z = -1; z <= 1; z++) {
-      // (A stem reaches down two cells at most, a head up one.)
-      for (int y = -1; y <= 2; y++) {
+      for (int y = -1; y <= 1; y++) {
         vec3 g = vec3(x, y, z);
         vec3 c = rnd(id + g, vec3(freq), seed);
         float rho = mix(0.45, 0.75, rnd(id + g, vec3(freq), seed + 7.0).x);
         // From the point (kept 0.15 of a cell off the cell's sides) to p.
-        vec3 r = f - g - (0.15 + 0.7 * c);
-        float u = r.y / rho;
-        float wide = u > 0.0 ? 1.0 : mix(1.0, 0.7, smoothstep(0.0, 1.4, -u));
-        float dv = u > 0.0 ? u / 0.85 : -u / 1.4;
-        float dh = length(r.xz) / (rho * wide);
-        float v = 1.0 - dh * dh - dv * dv, k = max(SOFT - abs(v - m), 0.0) / SOFT;
+        vec3 r = (f - g - (0.15 + 0.7 * c)) / rho;
+        r.y /= 0.85;
+        float d2 = dot(r, r), v = d2 < 1.0 ? sqrt(1.0 - d2) : 1.0 - d2, k = max(SOFT - abs(v - m), 0.0) / SOFT;
         m = max(m, v) + 0.25 * SOFT * k * k;
       }
     }
@@ -1047,9 +1045,14 @@ const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole n
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
 const float RELIEF = 0.85;          // the same for the fine noise
-const float BODY_G = 1.0;           // the heaps' 3D body: the field per unit of the turrets
-const float BODY_A = 1.0;           // how fast the envelope fills it with cloud
-const float BODY_B = 0.42;          // and how much more
+const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
+const vec4 BODY_K = vec4(0.7, 0.4, 0.25, 0.14); // how far the body's bumps of 2 km, 1 km, 500 m, 250 m stand out, km
+const float BODY_C = 0.45;          // the value of the turrets that neither raises nor lowers the surface
+const float BODY_B = -0.2;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
+const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
+const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
+const float CLEFT = 0.6;            // how much a cleft of the body dims the light scattered into it
+const float CLUMP = 2.0;            // how much the cover far off gathers heaps into clumps (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
 const int CLOUD_STEPS = 400;
 const vec4 MICRO = vec4(0.12, 0.07, 0.045, 0.05); // weights of the finer billows (cloudDetail)
@@ -1114,19 +1117,31 @@ float thin = 0.0;
 // And how much of the field there was the heaps' 3D body (solid), and how
 // high over its base (km).
 float solidAt = 0.0, overBase = 0.0;
+// And how high in its heap (0 at the base, 1 at the top of the heap's
+// envelope over this place).
+float heapUp = 0.0;
+// And the weights of the body's sizes of turrets there (see cloudShape).
+vec4 bodyW = vec4(0.0);
 
-vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
+// (The slope of the map, uSlope, is read the same way: the 3D body's
+// envelope is divided by it, and read through the GPU's filter alone, its
+// bends drew upright bands on the sides of heaps' 3D body.)
+vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine) {
   float ease = smoothReads ? clamp(-3.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) : 0.0;
-  if (ease == 0.0) return textureLod(uWeather, x / WEATHER_KM, lod - 2.0);
-  float N = float(textureSize(uWeather, 0).x);
+  if (ease == 0.0) return textureLod(map, x / WEATHER_KM, lod - 2.0);
+  float N = float(textureSize(map, 0).x);
   vec2 u = x * (N / WEATHER_KM) - 0.5, i = floor(u), f = u - i;
   // Nearer still, the eased map still bent enough for lit and shaded
   // sides to show upright streaks: there the read moves by up to half a
   // texel each frame (shake), and the mean over the frames is smooth. A
   // cubic B-spline (four filtered reads) did the same, at four times the
   // cost.
-  if (ease < 1.0 || !fine) return textureLod(uWeather, (i + mix(f, f * f * (3.0 - 2.0 * f), ease) + 0.5) / N, 0.0);
-  return textureLod(uWeather, (u + shake.xz + 0.5) / N, 0.0);
+  if (ease < 1.0 || !fine) return textureLod(map, (i + mix(f, f * f * (3.0 - 2.0 * f), ease) + 0.5) / N, 0.0);
+  return textureLod(map, (u + shake.xz + 0.5) / N, 0.0);
+}
+
+vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
+  return mapAt(uWeather, p, x, lod, fine);
 }
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -1145,10 +1160,27 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   relief = 0.0;
   thin = 0.0;
   solidAt = 0.0;
+  bodyW = vec4(0.0);
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
   vec2 x = p.xz + uDrift;
-  vec4 w = weather(p, x, lod, fine);
+  float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
+  float sheet = smoothstep(0.6, 0.85, uCloud + 0.6 * (region - 0.5));
+  // Where the cover breaks into heaps, the map is read at a place moved by
+  // up to WARP km: by the map's own cover and height of heaps (R, G) far
+  // from here, smoothed over 1.4 km (mip level 2.5): the heaps of the map
+  // are round domes, and from above the clouds were discs; moved, their
+  // outlines are lobed and drawn out. The noise repeats every few km, and
+  // a depth into it that drifts from place to place (far) keeps two tiles
+  // from showing the same clouds; its cover (R, over some 11 km, from
+  // elsewhere on the map) gathers the heaps (CLUMP): they grow and merge
+  // where it is more, and shrink, leaving open sea, where it is less.
+  // (Photographs from above show clusters of many sizes and bare gaps; the
+  // heaps of the map alone were spread evenly.)
+  vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
+  vec2 xw = x;
+  if (sheet < 1.0) xw += WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
+  vec4 w = weather(p, xw, lod, fine);
   // The level of the bases, where rising air condenses: 150 to 300 m over
   // CB, higher or lower across tens of km (the gusts' map, w.b, serves as
   // a slow pattern). The clouds stand on it; a base is a little higher or
@@ -1166,8 +1198,6 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // creases between them, or rows of rolls where the air waves. Where the
   // sheet lies follows the cover over some 20 km (the map's mip), so that
   // it breaks up first where the cover is less.
-  float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-  float sheet = smoothstep(0.6, 0.85, uCloud + 0.6 * (region - 0.5));
   // Near the top of the slider the heaps on it flatten, and few towers
   // stand out of it (they looked like mountains).
   float level1 = smoothstep(0.85, 1.0, uCloud + 0.3 * (region - 0.5));
@@ -1178,6 +1208,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float tg = clamp((w.g - 0.46) / 0.3, 0.0, 1.0), tw = tg * (2.0 - tg);
   float tower = tw * towers;
   float e = 3.0 * (w.r - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud))) + 1.5 * tower;
+  e += CLUMP * (1.0 - sheet) * (far.r - 0.5);
   // A dome over a flat base, with steep sides: a height costs its cube.
   // Wider clouds are thicker, up to a point; a deck swells where the map
   // is high.
@@ -1202,27 +1233,41 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // (The cells and billows on the sheet raise it by 0.9 of its depth at most.)
   float fsMax = 14.0 * sheetTop;
   // The heaps' 3D body (solid: how much of it; the rest is the field above,
-  // which the deck and the top of the slider keep): turrets (uBody) inside an
-  // envelope. The envelope (env) is how deep a place lies in its heap: 1 at
-  // the foot of a heap's middle, 0 where the top of its dome would stand,
-  // less outside. The turrets decide the surface: cloud where they rise over
-  // 1 - BODY_A env - BODY_B. Deep in a heap, all is cloud; nearer its outside,
-  // only the heads of the turrets, which overhang their stems, with clefts
-  // where two meet; outside, nothing (bodyMax: the field there, were the
-  // turrets at their highest). Over the top of the envelope the field falls
-  // fast: there a head of a turret whose middle lies outside the heap stood
-  // alone in the air, as a ball over the cloud. On a sheet, only towers
-  // have the 3D body: the heaps on it keep the field above (the sheet's
-  // cells from above were a carpet of small round heads).
+  // which the deck and the top of the slider keep): a broad envelope with
+  // turrets (uBody) on its surface. The envelope (env) is how deep a place
+  // lies in its heap: 1 at the foot of a heap's middle, 0 where the top of
+  // its dome would stand, less outside; divided by how fast it rises
+  // across its surface (below), a distance in km. Each size of turrets
+  // moves that surface out by up to BODY_K (in by less), so that smaller
+  // ones sit on larger ones: a cauliflower. (Turrets alone made the
+  // surface in round 11, inside an envelope that rose slowly across a
+  // heap's side: a cluster of free balls, with more standing off it.) On a
+  // sheet, only towers have the 3D body: the heaps on it keep the field
+  // above (the sheet's cells from above were a carpet of small round heads).
   float solid = (1.0 - max(deck, level1)) * max(1.0 - sheet, smoothstep(0.1, 0.5, tower));
   solidAt = solid;
   overBase = h - level;
-  float env = thick + swell - y * y * y / cube - 4.0 * max(y - 0.85, 0.0) - 0.2 * rim * rim;
-  float bodyMax = BODY_G * (BODY_A * env + BODY_B - 1.5 * max(-env - 0.15, 0.0));
+  // Where the body gives way to the field above (on a sheet, where towers
+  // end), it shrinks with its share: there the heap fills the whole sheet,
+  // and the body stood up as a plateau cut off by where towers grow, a
+  // pillar with upright walls.
+  float riseB = (thick + swell) * smoothstep(0.0, 0.6, max(1.0 - sheet, smoothstep(0.1, 0.5, tower)));
+  float env = riseB - y * y * y / cube - 4.0 * max(y - 0.85, 0.0) - 0.2 * rim * rim;
+  heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
+  // The sizes of turrets that the heap's dome may hold (half its height and
+  // more).
+  vec4 bw = BODY_K * smoothstep(vec4(0.5), vec4(1.5), top * (CT - CB) / vec4(2.0, 1.0, 0.5, 0.25));
+  bodyW = bw;
+  // (shift: with more cloud, less inward, so that the slider's cover stays.)
+  float bumpMax = dot(bw, vec4(1.0 - BODY_C)), shift = BODY_B + 0.12 * smoothstep(0.4, 0.7, uCloud);
+  // Over a dome's top, env rises by gTop per km; before the slope is known,
+  // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
+  float gTop = 3.0 / (top * (CT - CB));
+  float bodyMax = BODY_G * (env / (gTop * (env > 0.0 ? 0.7 : 6.0)) + bumpMax + shift);
   // (Not for the normals, which take differences of the field: where some
   // of their reads stopped early and some did not, the bound and the field
-  // differ by up to half a unit, and the normals pointed anywhere, drawing
-  // patches with sharp outlines.)
+  // differ, the normals pointed anywhere, drawing patches with sharp
+  // outlines.)
   float bodyEnd = smoothReads ? 9.0 : bodyMax;
   // No noise could make a cloud here, even on the steepest wall (below).
   steep = 1.0;
@@ -1238,21 +1283,27 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // The slope of the map (uSlope) gives the slope across; the derivatives
   // of the terms above follow it. (Taken at this place's own height, the
   // slope grew with the height over a wall's foot, and billows scaled by
-  // it stood above the walls as spikes.)
-  if (!coarse && solid < 1.0) {
-  vec4 sl = (textureLod(uSlope, x / WEATHER_KM, lod - 2.0) * 2.0 - 1.0) * uSlopeMax;
+  // it stood above the walls as spikes.) The 3D body needs it too: its
+  // envelope is a distance by it (coarse reads take it as over a top: it
+  // cost 1.5 to 3 ms of the frame at 1440p, and they smooth the bumps on a
+  // wall anyway).
+  float stB = 1.0;
+  if (!coarse) {
+  vec4 sl = ((solid > 0.0 ? mapAt(uSlope, p, xw, lod, fine) : textureLod(uSlope, x / WEATHER_KM, lod - 2.0)) * 2.0 - 1.0) * uSlopeMax;
   float dTower = towers * 2.0 * (1.0 - tg) / 0.3 * smoothstep(0.0, 0.15, tg);
   float rise = max(thick + swell, 0.01);
   // (Across: thick and the top's cube follow R and G, a tower G. The rise
   // per unit of y at yt = top rise^(1/3) is 4.8 rise^(2/3) / top.)
   vec2 across = (1.0 - thick) * (3.0 * sl.xy + 1.5 * dTower * sl.zw)
               + 4.8 * rise / top * (0.32 * (1.0 - 0.6 * max(deck, level1)) + 0.21 * dTower) * sl.zw;
-  steep = clamp(length(vec2(length(across) * (CT - CB) * top / 4.8, pow(rise, 2.0 / 3.0))), 0.7, 6.0);
+  float acrossT = length(across) * (CT - CB) * top / 4.8;
+  if (!coarse && solid < 1.0) steep = clamp(length(vec2(acrossT, pow(rise, 2.0 / 3.0))), 0.7, 6.0);
+  stB = clamp(length(vec2(acrossT, pow(max(riseB, 0.01), 2.0 / 3.0))), 0.7, 6.0);
   }
+  float dEnv = env / (gTop * stB);
+  bodyMax = BODY_G * (dEnv + bumpMax + shift);
+  bodyEnd = smoothReads ? 9.0 : bodyMax;
   if (mix(f + 0.6 * lumps * steep, bodyEnd, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
-  // The noise repeats every few km. Read it at a depth that drifts from
-  // place to place, so that no two tiles show the same clouds.
-  vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
   // Near the eye (a pixel finer than 16 m) the read moves by up to half a
   // texel each frame (shake), so that the mean over the frames smooths the
@@ -1300,25 +1351,24 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   f += billows;
   float lumpOld = lump;
   if (solid > 0.0) {
-    // The turrets: big heaps and towers have heads of 2 km and 1 km with
-    // smaller ones on them; small heaps, of 1 km down to 250 m.
+    // The turrets as bumps on the envelope (km): each size moves the
+    // surface by up to about a third of its width, so that a bump rises
+    // about as fast as the envelope falls and none stands alone over it.
+    // (body: the heads that overhang a heap's thin foot are as dense as its
+    // middle: from the column under them they were translucent, and the
+    // cloud behind showed through as patches with sharp outlines. lump: how
+    // far the bumps stand out here, for the light: low in a cleft. The fine
+    // noise weighs BODY_D on it, against a dome's top.)
     vec4 t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
-    float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
-    float tur = 0.85 * mix(max(t.g, 0.9 * t.b), max(t.r, 0.9 * t.g), big) + 0.15 * mix(0.5 * (t.b + t.a), 0.5 * (t.g + t.b), big);
-    float fb = BODY_G * (tur - 1.0 + BODY_A * env + BODY_B - 1.5 * max(-env - 0.15, 0.0));
+    float disp = dot(bw, t - BODY_C);
+    float fb = BODY_G * (dEnv + disp + shift);
     f = mix(f, fb, solid);
-    // (body sets how dense the cloud is: the heads that overhang the thin
-    // foot of a heap are as dense as its middle. From the column under
-    // them, they were translucent, and the cloud below showed through
-    // them as dark patches with sharp outlines. The heads of big heaps do
-    // not fray as the thin foot of a heap does (thin), and those of small
-    // ones less (cloudField): 100 m deep, the fringe was deeper than the
-    // field rises in a head, which became a veil.)
+    float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
     body = mix(body, max(pow(max(thick + swell, 0.0), 1.0 / 3.0), 0.7) * top / 0.28, solid);
     thin *= 1.0 - solid * big;
-    lump = mix(lump, clamp(tur - 0.5, -0.3, 0.3), solid);
+    lump = mix(lump, clamp(disp / max(bumpMax, 0.01), -0.3, 0.3), solid);
     billows *= 1.0 - solid;
-    steep = mix(steep, 1.0, solid);
+    steep = mix(steep, BODY_D, solid);
   }
   if (fs > -fsMax) {
     // The cells: domes of the noise's 1 and 2 km Worley cells, which meet
@@ -1397,6 +1447,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // fringe. Billows smaller than the edge melt into it: a deeper one made
   // every top look like cotton wool.
   edge = mix(EDGE, 0.01, smoothstep(0.45, 1.3, q.w));
+  // On the 3D body, crisp on the rising heads of its upper part (12 m:
+  // the body's field rises by BODY_G per km), and softer, a veil, on its
+  // lower sides, as in photographs.
+  edge = mix(edge, mix(0.07, 0.012, smoothstep(0.35, 0.8, heapUp)), solidAt);
   // Thin cloud (the edge of a heap's foot, and the fragments beside it)
   // frays: its fringe is deeper, some 100 m (the field rises by about 4
   // per km on a small heap's side). From 11 km, scattered cumulus were cut
@@ -1404,8 +1458,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // and ragged. Only from 4 to 10 km on: nearer, a fringe that deep is
   // many pixels wide, the march and the light crossed it in many steps
   // (it cost 18 ms of the frame at 1440p among the heaps at 2 km), and
-  // near heaps in photographs have crisp edges.
-  edge = mix(edge, mix(0.4, 0.12, solidAt), thin * smoothstep(4.0, 10.0, length(p)));
+  // near heaps in photographs have crisp edges. (On the 3D body, 30 m:
+  // deeper, small heaps from 5 km were a grainy fog.)
+  edge = mix(edge, mix(0.4, 0.06, solidAt), thin * smoothstep(4.0, 10.0, length(p)));
   // Shreds under a base are thin and ragged: a deep, faint fringe.
   edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
   bump = 0.0;
@@ -1775,6 +1830,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float step = max(clamp(0.00625 * t, LIGHT_MIN, 0.05), 0.6 * ds);
         float lm = max(lod, min(log2(step / 0.05), 0.0) - 0.5) + 1.0;
         vec3 qs = q.xyz + vec3(dp.x, heightAt(ps) - heightAt(p), dp.z) / BASE_KM;
+        // How far the body's bumps stand out here, smoothed over 250 m (the
+        // turrets two mip levels up): low in a cleft between them. (Read at
+        // the sample itself, it changed from frame to frame with where the
+        // steps fell, and the picture flickered.)
+        float cleftL = solidHere > 0.0 ? dot(bodyW, textureLod(uBody, qs, max(lod, 0.0) + 2.0) - BODY_C) / max(dot(bodyW, vec4(1.0 - BODY_C)), 0.01) : 0.0;
         // (Well under a base, mid is a shred's at most: not worth a read.)
         float mid = 0.0;
         if (q.w > 0.0 && fb < 0.3) {
@@ -2037,6 +2097,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         tau += crisp;
         float white = 1.12 * body / (body + 0.12);
         float billow = clamp(1.0 + 2.0 * smoothstep(5.0, 30.0, t) * lump, 0.6, 1.3);
+        // On the 3D body, a cleft between its bumps (cleftL low: the bumps
+        // there are at their lowest) sees less of the sky and of the light
+        // scattered in the cloud round it: grey, as in photographs.
+        billow *= 1.0 - CLEFT * solidHere * smoothstep(0.25, -0.3, cleftL);
         // A side turned from the light still sees the sunlit cloud around
         // it: white light, of the sun and of the sky, as that cloud sends.
         float bounce = (1.0 - facing) * clamp(dot(ps + eye(), uLight) / length(ps + eye()), 0.0, 1.0);
@@ -2059,7 +2123,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // overhangs it still sees the sky and the cloud round it: the
         // column of a deck dims what faces down only. (On every side, it
         // drew grey patches with sharp outlines under each head.)
-        column = mix(column, 1.0, solidHere * smoothstep(-0.6, -0.1, dot(nL, upL)));
+        column = mix(column, 1.0, solidHere);
         float through = THROUGH * column * (1.0 - exp(-0.1 * above)) * clamp(sunUp, 0.0, 1.0);
         float sideways = SUNLIT * mix(0.15, 1.0, facing) * inc * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft));
         float manyTop = shapeL * white * (sideways + column * (SUNLIT * mix(DEEP * (1.0 - 0.5 * low), 1.0, facing) * p3 * exp(-0.05 * soft)
