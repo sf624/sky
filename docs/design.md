@@ -515,11 +515,18 @@ drawn again at its exposure: the page starts adapted.
 - where the floor holds the exposure above white's, the highlights (the
   band of glow at dusk, 7 to 9 stops above the sky over it) stand above
   white: `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` =
-  5, which the tone curve's shoulder takes in (below).
+  5, which the tone curve's shoulder takes in (below);
+- `drop`: the band itself dims as the sun goes down. The shoulder's top
+  ends `DIM_BAND` = 0.2 stops below white for each stop that `high` is
+  below `DAY_HIGH`, at most `DROP` = 2.5 stops, so that deep in the
+  twilight the band is a faint glow, not the brightest thing the screen
+  can show. Only in twilight (the sun below the horizon and still
+  lighting the air, `sunOn`) and where the highlights stand above the
+  rest: never by day, nor for the moonlit clouds of a night.
 
-`exposureFor` returns the exposure and `shoulder`.
+`exposureFor` returns the exposure, `shoulder` and `drop`.
 
-**Adaptation.** Each frame the exposure, and `shoulder` on its own, move
+**Adaptation.** Each frame the exposure, `shoulder` and `drop` move
 towards their targets by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
 a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
 view) and `ADAPT_SLOW` = 0.5 s towards more. It starts when the target is
@@ -530,26 +537,21 @@ At the end of `main`:
 
 1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
    taken here; then times `uExposure`.
-   Then, where `uShoulder` (the adapted `shoulder`) is not 0, a long
-   shoulder: above `KNEE` = 0.5 the strongest channel is pressed together
-   in stops (y / (1 + c y), slope 1 at the knee) and the colour is scaled
-   as a whole, so that what stood `uShoulder` stops above 3 (all but white)
-   ends `DIM_TOP` = 0.25 stops below it for each stop taken in. The band
-   keeps its hue and its gradation, the brightest part of a dim view is
-   not white, and one curve serves the whole picture: no halos. By day
-   `uShoulder` is 0.
+   Then, where `uShoulder` (`shoulder`, `drop`) is not 0, a long
+   shoulder: above a knee (0.5, lower when the top is low) the strongest
+   channel is pressed together in stops (y / (1 + c y), slope 1 at the
+   knee) and the colour is scaled as a whole, so that what stood
+   `shoulder` stops above 3 (all but white) ends `drop` stops below 3.
+   The hue is kept; a colour pressed together by more stops also pales
+   towards white at its strongest channel (up to 40 %), as on film and
+   to the eye, which softens the small changes of hue within the band.
+   One curve serves the whole picture: no halos. By day `uShoulder` is 0.
 2. A daylight white balance, `vec3(0.932, 1.013, 1.074)`.
-3. Light far too strong for the screen turns towards white, as on film:
-   from 1 to 6 times white by day (the sun, its glitter, white-yellow as
-   on `main`). At dusk, as the long shoulder comes in (`dusk` =
-   smoothstep(0, 0.25, `uShoulder`)), the range moves smoothly to 3 to 30.
+3. Light far too strong for the screen (1 to 6 times white) turns towards
+   white, as on film.
 4. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
-5. Tone mapping `1 - exp(-col)`, channel by channel. At dusk, by `dusk`,
-   the strongest channel follows the curve and the others keep their
-   share of it above 0.5 to 2.5, so that a colour too bright for the
-   screen keeps its hue (a band of glow stays orange instead of running
-   to white). By day, where `uShoulder` is 0, this does not act: a bright
-   glitter runs to white as before. Then the display power `1 / 2.2`.
+5. Tone mapping `1 - exp(-col)`, channel by channel, then the display
+   power `1 / 2.2`. Steps 2 to 5 are those of `main`.
 6. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames
