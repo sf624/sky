@@ -103,9 +103,13 @@ The JS then runs once, at load, and does little:
        cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
        each. Read by `sunDepth()` in the JS only.
      - `starData` (`buildStars`): the star texture.
-     - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
-       (see [The air](#the-air)), for the haze given.
      - the table of `depthToTop` (`depthTable`, see [The air](#the-air)).
+     - `msData` (`buildMultiScatter(haze)`): the multiple-scattering table
+       (see [The air](#the-air)), for the haze given, the longest (0.2 to
+       0.3 s). It starts after the others and goes on in slices while the
+       GPU compiles the programs and draws the textures; the first frame
+       waits for it. Run before the programs, it held the first picture back
+       by some 0.7 s.
      - With them goes a constant, `NIGHT`: the moonless night sky
        (airglow), 8.59e-10 of the sun's irradiance, about 4e-8 of the
        daytime sky.
@@ -237,8 +241,10 @@ air, or to the sea. The air is three species, with densities from
 - Mie (aerosol): `exp(-h / HM)`, `HM` = 1.2 km, the haze of the lowest
   kilometres, plus two thin layers above it (`AERO_FREE`, `AERO_STRAT` in
   `fs`, `AERO_UP` and `mieDensity` in the JS): 0.7 of the sea level's
-  density at 6 km (half-width 5 km, the free troposphere) and 0.05 at
-  20 km (half-width 8 km, the stratosphere). Scattering `BETA_M` =
+  density at 6 km (half-width 5 km, the free troposphere) and 0.2 at
+  20 km (half-width 8 km, the stratosphere: an optical depth of 0.0045
+  at the default haze, about that of the stratosphere's background
+  aerosol, 0.004 to 0.01 at 525 nm, where it was 0.0011). Scattering `BETA_M` =
   3.996e-3 per km times `uHaze`, extinction `MIE_EXT` = 1.11 times that.
   Grey: the same at every wavelength. The layers matter in twilight: their
   forward scattering of the sun's light, from below the horizon, makes
@@ -249,7 +255,9 @@ air, or to the sea. The air is three species, with densities from
   from the Chappuis cross-sections (`OZONE`) for 300 Dobson units.
 
 Phase functions (`phases`): Rayleigh, and the Cornette-Shanks form for Mie
-with `g` = 0.8.
+with `g` = `MIE_G` = 0.7 (an asymmetry of 0.76, that of sulphate and
+continental aerosol, 0.6 to 0.75; `g` = 0.8 gave 0.84, a narrower and
+stronger aureole).
 
 **The march.** `NV` = 20 samples at
 `t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
@@ -310,8 +318,12 @@ each altitude (`NH` = 12 rows, squared spacing) and cosine of the sun's
 zenith angle (`NMU` = 40 columns from `MS_MU_MIN` = -0.35), the mean light
 that reaches a point, to be times the scattering coefficient there:
 
-- The light scattered once is gathered over the sphere as if scattering
-  were isotropic, with sunlight bounced off the ground (`ALBEDO` = 0.07):
+- The light scattered once is gathered over the sphere, with the phase
+  functions of the air and the aerosol for the sun's light scattered
+  towards the point, and with sunlight bounced off the ground (`ALBEDO` =
+  0.07). In twilight that light comes from the lit air towards the sun,
+  scattered forwards; gathered as if isotropic, the table held 0.65 to
+  0.75 of the reference's (below) in the planet's shadow, now 0.85 to 0.95:
   16 bands of height, narrower near the horizon (edges at `x |x|` for
   even `x`), each counted by its share of the sphere, times 4 directions
   over half the sphere, mirrored; 14 steps each. In twilight that light
@@ -353,6 +365,26 @@ readings (hnsky.org, "SQM twilight"): 0 degrees, 148 cd/m2 (216); -6, 0.89
 throughout. The layers and the cut change these figures by less than
 10 %: they matter for the colours low in the sky, not for these totals. Before the bands, the extra order and the shadow's runs, the
 zenith at -10 and -14 degrees was 3 and 6 times too dark.
+
+**Against a reference** (November 2026). A Monte Carlo solver of the same
+atmosphere (spherical shells, the twelve wavelengths, Rayleigh, both
+aerosol layers, ozone, a ground of albedo 0.07, every order; the
+light scattered once by a fine march, the rest by paths with a
+track-length estimate of the sun's light on each segment and the hero
+wavelength scheme of Wilkie et al., 2014), against a float64 copy of
+`fs`'s march with the page's own tables, over elevations -5 to 60
+degrees at 0, 90 and 180 degrees from the sun, from 0.3, 4 and 11 km,
+the sun at 2, -2, -4, -6 and -10 degrees. The light scattered once
+agrees within 2 % (towards the sun 0.96 to 1.00). The table's light is
+about 0.6 of the reference's towards the sun in twilight (the second
+scattering at the point is taken as isotropic, while that light comes
+from the glow, scattered forwards), 0.85 to 1.2 to the side and away;
+by day 0.6 to 0.95. Towards the sun it is 5 to 20 % of the sky, so the
+sky there is within 5 to 10 % of the reference, with its colour (the
+chromaticity within 0.02). So the thin band of glow is what this
+atmosphere gives: with the same air, the reference's band is as thin.
+The aerosol aloft and the tone curve (see [Exposure](#exposure-and-the-tone-curve))
+make the difference.
 
 ## Low clouds
 
@@ -613,60 +645,57 @@ itself, the one read that waits.
   exposure leap as the sun sets. The sky, not the median nor the darker
   quarter: the clouds and the sea below darken sooner than the sky after
   sunset, and an exposure that followed them brightened the sky through
-  sunset. But a view that holds the glow is exposed for the glow, as a
-  camera's meter does: where the highlights stand `GLOW_SPREAD` = 1.5 to
-  2.5 stops or more above the sky's level (towards the sun 2.2 to 3.9,
-  away from it 0.1 to 1), the lift goes and the highlights may stand only
-  `ABOVE_GLOW` = 0.5 stops above white, smoothly in between; and this
-  fades as the sun goes from `GLOW_SPAN` = -6 to -10 degrees, where the
-  brightest part is the pale arch over a thin band, which came out white
-  when exposed for. So towards the sun the sky is deep blue-grey over a
-  vivid band and the ground near black, 1 to 1.3 stops darker than before
-  at 11 km, as in photographs; with the lift it came out light, pastel and
-  washed out. Turning from the glow to the open sky, the exposure follows
-  the glow out of the view over some 7 to 15 degrees of the turn (about
-  0.45 stops for each 2.5 degrees at the most), and adapts as always. In a
-  time-lapse the whole picture stays about as bright as in the afternoon
-  away from the sun, and towards it at 11 km; at 0.3 km towards the sun it
-  gets up to about 17 levels of 255 brighter (the afternoon's is held down
-  by the sun; 40 before the glow was metered). The sky alone rises, with
-  the lift, between the sun at 0 and -2.5 degrees (at 11 km away from the
-  sun from about 70 to 145; towards it from 60 to 88), smoothly, and falls
-  again after;
-- where the exposure stands above white's, the highlights (the band of
-  glow at dusk, 7 to 9 stops above the sky over it) stand above white:
-  `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` = 5,
-  which the tone curve's shoulder takes in (below);
-- `drop`: the band itself dims as the sun goes down. The shoulder's top
-  ends `DIM_BAND` = 0.2 stops below white for each stop that `high` is
-  below `DAY_HIGH`, at most `DROP` = 2.5 stops, so that deep in the
-  twilight the band is a faint glow, not the brightest thing the screen
-  can show. Only in twilight (the sun below the horizon and still
-  lighting the air, `sunOn`) and where the highlights stand above the
-  rest: never by day, nor for the moonlit clouds of a night.
+  sunset. But the band of glow, the brightest part of a view towards the
+  sun (the level that only `PEAK_SHARE` = 0.2 % of the blocks pass, a
+  few rows of them), stands at most `PEAK_ABOVE` = 1 stop above white,
+  and `DIM_BAND` = 0.1 stops lower for each stop that it is dimmer than
+  daylight's highlights (`DAY_HIGH`), at most `DROP` = 1.5 stops lower.
+  As a camera's sensor does, the tone curve then takes each channel on
+  its own (below): the band's strongest channel runs into white at its
+  core, and it comes out white-yellow there, orange at its edges, pale
+  above, under a deep blue-grey sky and over a near-black ground, as in
+  photographs from the air; deep in the twilight it is a thin orange line
+  under a near-black sky (an A330's at about -8 degrees). A view away
+  from the glow holds no such peak and keeps the exposure of its sky.
+  Before (round 7), a view whose highlights stood well above its sky was
+  exposed for them, and a shoulder of the tone curve pressed the band
+  together keeping its hue: it stayed a thin saturated red-orange line
+  under a saturated blue sky, where photographs show a broad band, yellow
+  at its core; and from -6 degrees down that exposure gave way, so the
+  sky of deep twilight was lit up blue where photographs show it near
+  black. In a time-lapse the picture away from the sun is unchanged; towards
+  it, it darkens more in deep twilight, smoothly (the sky's mean level, of
+  255, at 11 km: 74 at -2 degrees, 30 at -6, 13 at -10, against 83, 62
+  and 52 before; at 0.3 km: 94, 49 and 37 against 113, 78 and 64).
 
-`exposureFor` returns the exposure, `shoulder` and `drop`.
+`exposureFor` returns the exposure.
 
-**Adaptation.** Each frame the exposure, `shoulder` and `drop` move
-towards their targets by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
+**Adaptation.** Each frame the exposure moves
+towards its target by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
 a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
 view) and `ADAPT_SLOW` = 0.5 s towards more. It starts when the target is
 `ADAPT_START` = 0.03 stops away and stops within `ADAPT_STOP` = 0.01, so
-that the noise of the picture does not keep it moving.
+that the noise of the picture does not keep it moving. In flight, which
+draws anyway, it keeps within `ADAPT_TRACK` = 0.002 of the meter.
+
+**The flight check and the meter.** A flight of 61 frames from the
+page's load (the tools' `flight` check) differs more from the still at
+the place reached than on main, where the exposure did not follow a
+meter (cruise 1.55 against 1.13 levels, 3 km 1.48 against 1.09). Nearly
+all of it is the exposure: each page starts at the meter of its first,
+single frame, the still keeps it (it lies within `ADAPT_START` of the
+settled picture's), and the flight follows the meter of its own, noisier
+picture from 240 m back; they end 0.01 to 0.02 stops apart, a uniform 1
+to 1.5 % (measured: -1.4465 against -1.4342 at cruise, -2.019 against
+-1.997 at 3 km). With the exposure held fixed in both, the flight is
+within main's margin (1.21 and 1.12).
 
 At the end of `main`:
 
 1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
    taken here; then times `uExposure`.
-   Then, where `uShoulder` (`shoulder`, `drop`) is not 0, a long
-   shoulder: above a knee (0.5, lower when the top is low) the strongest
-   channel is pressed together in stops (y / (1 + c y), slope 1 at the
-   knee) and the colour is scaled as a whole, so that what stood
-   `shoulder` stops above 3 (all but white) ends `drop` stops below 3.
-   The hue is kept; a colour pressed together by more stops also pales
-   towards white at its strongest channel (up to 40 %), as on film and
-   to the eye, which softens the small changes of hue within the band.
-   One curve serves the whole picture: no halos. By day `uShoulder` is 0.
+   No shoulder keeps the hue: each channel meets the curve of steps 3 to
+   5 on its own, as on a camera's sensor.
 2. The white balance `uBalance` (`balanceFor`). By day a camera's for
    daylight, `DAY_BALANCE` = (0.932, 1.013, 1.074). In twilight it goes
    `BALANCE_ADAPT` = 0.5 of the way (in log) towards the colour of the
