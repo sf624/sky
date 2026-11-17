@@ -267,7 +267,8 @@ the moon, `addLight`:
 - light scattered once, if the planet does not hide the source: the
   transmittance from the eye to the sample and from the sample to the top
   (`depthToTop`) times the phase functions, times `direct`,
-  which the shadow of the clouds lowers near the sea;
+  which the shadow of the clouds lowers near the sea, and times
+  `grazeCut`;
 - light scattered many times: the multiple-scattering table times the
   local scattering coefficient, times the transmittance to the eye.
 
@@ -277,6 +278,20 @@ ends a sample exactly there (`tLayer`), adds the layer's light (`C` or
 `H`) dimmed by the air before it, and multiplies what lies beyond by the
 layer's transmittance (`vis *= Tc` or `Th`). Behind a thick cloud
 (`vis` = 0) the march stops.
+
+**`grazeCut(p, s)`**: light from below the local horizon grazes the
+planet on its way, along hundreds of kilometres of the lowest air, where
+haze and cloud that the model does not draw (the deck below the aircraft
+among them) take it out. Light that passes lower than `GRAZE` = 1 km is
+cut, above 5 km kept, smoothly in between. It applies to the light
+scattered once in the air, to the sunlight on the low clouds and on the
+cirrus, and to the light gathered for the multiple-scattering table
+(`grazeCut` in the JS), not to the eye's own view of the sun. By day
+nothing changes. Without it the air just outside the planet's shadow was
+lit by deep red light that had passed a few hundred metres above the sea:
+from 11 km, the shadow's band came out pink, the sky over it lavender and
+the Belt of Venus magenta, where photographs show a blue-grey band, a pale
+blue sky and a pink to peach belt.
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
@@ -327,14 +342,16 @@ clouds. It depends on the haze, so `frame` rebuilds it when the haze
 changes, and the renderer uploads it again. `fs` reads it through the
 GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
 
-**Against measurements** (made before the thin aerosol layers were added). Integrated over the sky at sea level (haze
+**Against measurements** (a float64 copy of the model, with the aerosol
+layers and `grazeCut`). Integrated over the sky at sea level (haze
 0.35, 128 klx of sunlight outside the air), the model gives, against the
 horizontal illuminance table in Schlyter, "Radiometry and photometry in
-astronomy": sun at 0 degrees, 996 lx (measured 759); -6, 6.8 lx (3.4);
--12, 0.018 lx (0.008). The zenith, against a fit to sky quality meter
-readings (hnsky.org, "SQM twilight"): 0 degrees, 157 cd/m2 (216); -6, 0.95
-(0.63); -10, 0.015 (0.013); -14, 5.6e-4 (4.7e-4). Within a factor of two
-throughout. Before the bands, the extra order and the shadow's runs, the
+astronomy": sun at 0 degrees, 937 lx (measured 759); -6, 6.3 lx (3.4);
+-12, 0.016 lx (0.008). The zenith, against a fit to sky quality meter
+readings (hnsky.org, "SQM twilight"): 0 degrees, 148 cd/m2 (216); -6, 0.89
+(0.63); -10, 0.014 (0.013); -14, 5.1e-4 (4.7e-4). Within a factor of two
+throughout. The layers and the cut change these figures by less than
+10 %: they matter for the colours low in the sky, not for these totals. Before the bands, the extra order and the shadow's runs, the
 zenith at -10 and -14 degrees was 3 and 6 times too dark.
 
 ## Low clouds
@@ -585,16 +602,23 @@ itself, the one read that waits.
   when it stands at the night's (`NIGHT_LEVEL + MID_GAP`); in between
   along the power `DUSK_POW` = 0.7 of its distance from the night's, so
   that it darkens slowly at first: through civil and nautical twilight
-  the eye still sees colours. White gives way: the highlights may stand
+  the eye still sees colours. On top of that, the twilight's picture is
+  shown up to `DUSK_LIFT` = 1.2 stops brighter, as a camera on automatic
+  exposure brightens it relative to the light after sunset: growing from
+  the start of the blend (2.5 degrees) to `LIFT_SPAN` = -2.5 degrees, gone
+  again by -8. Without it the views of civil twilight were 1 to 3 stops
+  darker than photographs of them. White gives way: the highlights may stand
   up to `ABOVE` = 3.5 stops above white, an allowance that grows over
   `ABOVE_SPAN` = 5 degrees after the blend, so that it does not let the
   exposure leap as the sun sets. The sky, not the median nor the darker
   quarter: the clouds and the sea below darken sooner than the sky after
   sunset, and an exposure that followed them brightened the sky through
-  sunset. In a time-lapse at 0.3 km the sky now falls steadily (it rose
-  by about 20 levels of 255 with the median); at 11 km, where the sun's
-  disc sets later and holds the exposure down until then, it still rises
-  by about 30 levels between 2 and -3 degrees;
+  sunset. In a time-lapse the whole picture stays about as bright as in
+  the afternoon away from the sun, and gets up to about 30 levels of 255
+  brighter towards it (the afternoon's is held down by the sun); the sky
+  alone rises, with the lift, between the sun at 0 and -2.5 degrees (at
+  11 km away from the sun from about 70 to 145), smoothly, and falls
+  again after;
 - where the exposure stands above white's, the highlights (the band of
   glow at dusk, 7 to 9 stops above the sky over it) stand above white:
   `shoulder` = exposure + `high` - `WHITE` stops, at most `GLOW` = 5,
@@ -637,7 +661,11 @@ At the end of `main`:
    light with the sun at 30 degrees, as an automatic white balance does
    and as the eye adapts. Blended in as twilight's exposure is (`DUSK`),
    and out again as the sun goes from 4 to 9 degrees down
-   (`BALANCE_OUT`). Without it the sky away from the sun came out
+   (`BALANCE_OUT`), and with height, from 2 to 11 km (`BALANCE_HIGH`):
+   from cruise the view is the high sky and the deck far below, which
+   photographs keep as blue as by day; this correction, warm for the
+   light of the low air, turned that sky lavender-grey and the deck pink.
+   Without it the sky away from the sun came out
    lavender and the Belt of Venus magenta, where photographs show a pale
    blue sky and a pink belt; held into the deeper twilight, it turned the
    blue sky grey and the clouds brown.
