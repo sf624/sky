@@ -164,10 +164,12 @@ on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
 Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`; and at most every 100 ms a fourth, the
+texture, `mean`, and `show`; at most every 100 ms a fourth, the
 exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
 November 2026; reading it back costs about 2 ms of the main thread here,
-none of the GPU's). The scene is nearly all of it. Measured on an
+none of the GPU's); and a frame that needs a new map of the clouds'
+shadow draws it first (see
+[design.md](design.md#the-clouds-shadow)). The scene is nearly all of it. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The page had a scroll bar then, so the drawing sizes are
 those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
@@ -187,29 +189,68 @@ default view the low clouds take about half of the scene; the air, the
 sea and the sky take most of the rest; the cirrus costs little. Close over
 the clouds (`alt=3&cloud=0.7`) the scene took 4.5 ms.
 
+The clouds' shadow, measured on the same GPU at 2560 x 1440 (`res=1`,
+flying) in November 2026, after the exposure and haze of round 10: three
+runs each, alternated with main, medians of the scene's GPU time:
+
+| View | Scene before | Scene after | Shadow map, per draw |
+|---|---|---|---|
+| Cruise (the defaults) | 12.4 to 12.7 ms | 13.0 to 13.2 ms (+0.55) | 0.71 ms |
+| 4 km, low sun (`alt=4&cloud=0.6&date=320&time=16.5&yaw=61.2&pitch=-5`) | 10.2 to 10.4 ms | 11.5 to 11.6 ms (+1.2) | 1.44 ms |
+| Under the base (`alt=0.3&cloud=0.7&date=320&time=15.5&yaw=51.2&pitch=4`) | 15.5 to 15.7 ms | 15.9 to 16.0 ms (+0.35) | 1.27 ms |
+| `cloud=0` | | the same picture and the same draws | not drawn |
+
+Of that, the soft shadow on the sea (`seaShadow`, eight reads of the map
+per pixel of sea) is about 0.12 ms in the 4 km view.
+
+In flight the map is drawn every 0.5 km (every 2 s at 900 km/h): it adds
+next to nothing to the mean. A frame whose light, altitude or cloud
+amount changes draws it, so a time-lapse or a moving slider pays it on
+every frame. Its cost follows `SHADOW` squared and its steps (24 to 96,
+more for a low light); the scene's share is the `SHAFTS` samples.
+
+The numbers to tune, all in `index.html`:
+
+| Name | Value | What it sets |
+|---|---|---|
+| `SHADOW` (JS) | 1024 | texels per side of the map: its cost and sharpness |
+| `SHADOW_STALE` (JS) | 0.5 km | how far the aircraft flies before the map is drawn again |
+| `SHADOW_K` (`fs`) | 40 km | where the map's texels are four times as wide as at the eye |
+| `SHADOW_H` (`fs`) | 0.6, 1.3, 2.3, 3.5 km | the heights the map keeps a depth for |
+| `SHADOW_DS` (`fs`) | 0.2 km | the length of a step along a line of the map (24 to 96 steps) |
+| `SHADOW_ENC` (`fs`) | 4 | the depth at which the stored value is one half |
+| `SHAFTS` (`fs`) | 16 | samples of the map along a view ray below the tops |
+| `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
+| `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
+| `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
+
 The cirrus's map, ice, way of its fibres and fibres are built once, by
 their own program (`ice`), during the loading (or when cirrus is first
 shown, if the page starts without it). Measured with `perf` at 1920 x
-1080 on the RTX 3090 on 2026-11-17, after the metered exposure: the first
-picture came 4.6 to 4.8 s after navigation with `cirrus=0.5`, 3.75 to 3.8 s
-with `cirrus=0` (the ice program is then not compiled at all), against 3.4
-to 4.0 s for `main` in the same session (the machine's times drift by a few
-tenths from run to run and from day to day). The copies of the cirrus's
-density that the sun's light reads leave out the veil's noise and the
-tufts' fields (their means instead): with them, the first picture came
-0.2 s later. The scene takes 8.0 to 8.1 ms a frame at 1920 x 1080 with
-`cirrus=0.5`, 7.2 to 7.3 ms with `cirrus=0`, as `main`. Most of the difference is not the building (some
-0.25 s of GPU time for the ice, 15 ms for the fibres) but the driver
-finishing the large ice program at its first draw (about 0.3 s); it was
-1.7 s while the ice was part of the `noise` program, which every page
-draws. With the cirrus's code in the scene, the scene's own first draw
-also grew from 0.8 to 1.4 s, until the depth that the sun's light feels
-(`cirrusDepth`, four copies) left out the fibres. A renderer without a
-GPU builds the textures a quarter as wide (see
-[design.md](design.md#cirrus)): on SwiftShader a still at 480 x 270
-looking up at cirrus took 130 s from load (wall time, 2026-11-17, with
-other runs on the machine; 62 s for the round before, on a quieter run). Views
-with `cirrus=0` build nothing.
+1080 on the RTX 3090 on 2026-11-17 (round 11 of the cirrus, after the
+clouds' shadow map), three runs each, alternated: the first picture came
+5.1 to 5.3 s after navigation with `cirrus=0.5`, against 3.4 to 3.5 s for
+`main` and 4.7 to 4.9 s for round 10 on the same main; 3.9 to 4.0 s with
+`cirrus=0` (the ice program is then not compiled at all). The machine's
+times drift by a few tenths from run to run and with other work on the
+GPU. Round 11's march near the eye costs some 0.5 s of that, as code the
+driver finishes: each call of `ciDensity` is a copy, so the march, the
+second read of a long crossing and the depth the sun's light feels
+(`cirrusDepth`) read it `lite` (the depth alone, without the finest
+streaks; the fields of the bands passed in); the mean age is drawn as a
+second target of the ice's own pass (drawn again from each texel in a
+pass of its own, it cost some 0.5 s). The scene takes 8.6 to 8.7 ms a
+frame at 1920 x 1080 with `cirrus=0.5` at the default view (round 10: 8.3
+to 8.4; `main` 7.7), and 7.7 ms just under the shell looking up
+(`alt=11.9&pitch=28&cirrus=0.6`; round 10: 5.7): the march. Most of the
+rest is not the building (some 0.25 s of GPU time for the ice, 15 ms for
+the fibres) but the driver finishing the large ice program at its first
+draw (about 0.3 s); it was 1.7 s while the ice was part of the `noise`
+program, which every page draws. A renderer without a GPU builds the
+textures a quarter as wide (see [design.md](design.md#cirrus)): on
+SwiftShader two stills at 480 x 270 with cirrus (from the ground, and
+from just under the shell) took 171 s together (wall time, 2026-11-17,
+with other runs on the machine). Views with `cirrus=0` build nothing.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -237,7 +278,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `#extension`. The JS asks for:
   - `OES_texture_float_linear`: else the filtered tables are RGBA16F;
   - `EXT_color_buffer_half_float` or `EXT_color_buffer_float`: else the
-    frames are RGBA8, and also if the framebuffer turns out incomplete;
+    frames and the clouds' shadow map are RGBA8, and also if their
+    framebuffer turns out incomplete;
   - `EXT_texture_filter_anisotropic`: else the wave map is filtered
     without it.
 - **Patterns repeat in 256 km.** Anything read at `p.xz + uDrift` repeats a
@@ -263,10 +305,12 @@ The shaders must run on any WebGL2. The code keeps these rules:
   - The integer hash `ihash` (lowbias32): in the `noise`, `ice`, `waves`
     and `fs` shaders.
   - The layout of the cirrus's textures (the ice's four kinds in RGBA;
-    the way as the gradient at twice its angle; the map's channels):
+    the way as the gradient at twice its angle, and the ice's mean age
+    with its weight; the map's channels):
     `iceField`, `iceWay`, `iceFibres` and `ciMap` in the `ice` shader,
     `ciDensity` in `fs`.
   - `WEATHER_KM` and `ICE_KM`: in the `ice` shader too.
+  - erf after Winitzki: `iceErf` in the `ice` shader, `ciPhi` in `fs`.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
     (`BASE_KM / 128.0`).
   - The size of the weather map, 1024: `WEATHER` in the JS;
@@ -288,6 +332,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   cirrus's noise had a seam along that lattice line. `iceNoise` and the
   heads' cells in `icePlumes`, `iceRows` and `iceFlock` wrap by hand,
   `c - p * floor((c + 0.5) / p)`.
+- **`fs` is two programs.** `makeSky` compiles it a second time with
+  `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
+  same cloud field. A change to the field changes both. The program's
+  uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
+  field reads must be set there too.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

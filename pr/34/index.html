@@ -545,11 +545,13 @@ void main() {
 #version 300 es
 precision highp float;
 
-// Draws the cirrus's textures once: its map (uZ = -2), its ice (-3), the
-// way of the ice's fibres (-4) and the fibres (-5). Everything repeats.
+// Draws the cirrus's textures once: its map (uZ = -2), its ice (-3, and
+// the ice's age into a second target), the way of the ice's fibres and the
+// age (-4) and the fibres (-5). Everything repeats.
 uniform float uZ;
 uniform vec2 uSize;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outAge;
 
 // An integer hash: Wellons' lowbias32, as in the noise shader.
 uint ihash(uint x) {
@@ -912,7 +914,9 @@ float iceFlock(vec2 q0, vec2 q1, float a, vec2 e, uint seed) {
 // own way, hook and turn at its head (icePlumes), each row has its own
 // (iceRows).
 const float ICE_STORE = 1.0;   // the ice stored: sqrt(x / ICE_STORE)
-vec4 iceField(vec2 x, uint seed) {
+// ages: the four fields weighed by the age of their ice (in units of a
+// life), for its mean age (see iceWay).
+vec4 iceField(vec2 x, uint seed, out vec4 ages) {
   vec2 g;
   // How strong the eddies are, from slow noise over the tile.
   float n4 = iceNoise(x * (4.0 / ICE_KM), vec2(4.0), 0.0, seed + 14u, g);
@@ -921,6 +925,7 @@ vec4 iceField(vec2 x, uint seed) {
   vec2 p = x, p0 = x, D0 = vec2(0.0);
   float a0 = 0.0;
   vec4 sum = vec4(0.0);
+  ages = vec4(0.0);
   for (int j = 0; j < ICE_STEPS; j++) {
     float a = (float(j) + 0.5) * DA;
     // One step back through the eddies; the trails' drift at this age.
@@ -928,9 +933,11 @@ vec4 iceField(vec2 x, uint seed) {
     vec2 D1 = iceDrift(a, ICE_TH, ICE_VEER, ICE_REACH);
     vec2 e = vec2(cos(ICE_TH + ICE_VEER * a), sin(ICE_TH + ICE_VEER * a));
     // Each kind falls at its own speed: its trails are as many times as long.
-    sum += DA * vec4(icePlumes(p0, p, a0, a, 0.6, seed, 9.0, 1.25, 1.0), iceRows(p0, p, a0, a, ICE_REACH, seed),
-                     iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a, e, seed),
-                     2.5 * icePlumes(p0, p, a0, a, 1.1, seed + 50u, 4.0, 1.4, 0.0));
+    vec4 f = DA * vec4(icePlumes(p0, p, a0, a, 0.6, seed, 9.0, 1.25, 1.0), iceRows(p0, p, a0, a, ICE_REACH, seed),
+                       iceFlock(p0 - 0.35 * D0, p - 0.35 * D1, a, e, seed),
+                       2.5 * icePlumes(p0, p, a0, a, 1.1, seed + 50u, 4.0, 1.4, 0.0));
+    sum += f;
+    ages += a * f;
     p0 = p;
     D0 = D1;
     a0 = a;
@@ -962,8 +969,9 @@ vec4 ciMap(vec2 uv) {
   return clamp(vec4(w, 0.5 + 0.9 * rows, 0.5 + 0.9 * flocks), 0.0, 1.0);
 }
 
-// The ice, read back to find the way its fibres run (uZ = -4).
+// The ice, read back to find the way its fibres run (uZ = -4), and its age.
 uniform sampler2D uIceIn;
+uniform sampler2D uAgeIn;
 
 // The way the ice's fibres run at uv: the structure tensor of the ice (its
 // four fields together; the mean of its gradient times itself over 3 x 3
@@ -972,7 +980,7 @@ uniform sampler2D uIceIn;
 // twice its angle, so that a gradient and its opposite add up and the mean
 // over a footprint (the mipmaps) is the way most of it runs, with a length
 // below 1 where it runs many ways. The fibres run across it.
-vec2 iceWay(vec2 uv) {
+vec4 iceWay(vec2 uv) {
   float s[25];
   float lod = log2(float(textureSize(uIceIn, 0).x) / uSize.x);
   for (int i = 0; i < 25; i++) {
@@ -985,7 +993,19 @@ vec2 iceWay(vec2 uv) {
     float gx = 0.5 * (s[c + 1] - s[c - 1]), gy = 0.5 * (s[c + 5] - s[c - 5]);
     j += w * vec3(gx * gx, gy * gy, gx * gy);
   }
-  return 0.5 + 0.5 * vec2(j.x - j.y, 2.0 * j.z) / (j.x + j.y + 1e-4);
+  // And the mean age of the ice here, over this texel (see iceAge).
+  return vec4(0.5 + 0.5 * vec2(j.x - j.y, 2.0 * j.z) / (j.x + j.y + 1e-4), textureLod(uAgeIn, uv, lod).rg);
+}
+
+// The mean age of the ice (its four kinds weighed as the scene mostly
+// mixes them), from the sums iceField made: the ice falls as it ages, so
+// its age says how deep in its deck it lies. Stored with its weight (G, how
+// much ice; R, G times the age), so that the mipmaps average it where
+// there is ice.
+vec4 iceAge(vec4 f, vec4 ag) {
+  const vec4 W = vec4(1.0, 1.0, 0.5, 1.0);
+  float tot = dot(f, W), w = tot / (tot + 0.02);
+  return vec4(w * clamp(dot(ag, W) / max(tot, 1e-6), 0.0, 1.0), w, 0.0, 1.0);
 }
 
 // The way, read back to draw the fibres along it (uZ = -5).
@@ -1042,9 +1062,11 @@ void main() {
   if (uZ < -4.5) {
     outColor = vec4(iceFibres(uv), 0.0, 0.0, 1.0);
   } else if (uZ < -3.5) {
-    outColor = vec4(iceWay(uv), 0.0, 1.0);
+    outColor = iceWay(uv);
   } else if (uZ < -2.5) {
-    outColor = sqrt(clamp(iceField(uv * ICE_KM, 1000u) / ICE_STORE, 0.0, 1.0));
+    vec4 ag, f = iceField(uv * ICE_KM, 1000u, ag);
+    outColor = sqrt(clamp(f / ICE_STORE, 0.0, 1.0));
+    outAge = iceAge(f, ag);
   } else {
     outColor = ciMap(uv);
   }
@@ -1561,21 +1583,113 @@ float lightDepth(vec3 p, vec3 dir, float ds, float lod, float fc, float ff, vec3
   return tau;
 }
 
-// Optical depth of the clouds from a point on the sea, or anywhere under
-// their tops, towards the light.
-float shadowDepth(vec3 ps, vec3 dir) {
-  const int N = 10;
-  float t0 = max(raySphere(ps, dir, RG + CB).y, 0.0), len = raySphere(ps, dir, RG + CT).y - t0;
-  if (len <= 0.0) return 0.0;
-  float tau = 0.0, prev = 0.0;
-  for (int i = 0; i < N; i++) {                      // most clouds are low: denser samples there
-    float s1 = len * pow((float(i) + 1.0) / float(N), 1.5);
-    float ds = s1 - prev;
-    float lod = max(log2(0.5 * ds / TEXEL_KM), 0.0);
-    tau += cloudDensity(ps + dir * (t0 + prev + 0.5 * ds), lod, false) * ds;
-    prev = s1;
+// ---------- The clouds' shadow ----------
+// One map says, for everything outside the clouds, how deep in their shadow
+// a point is: the optical depth of the clouds towards the light. It lies on
+// a plane across the light, through the eye; each texel is a line of light,
+// marched once through the shell of the clouds. The same shader draws it,
+// with SHADOW_MAP defined, before a frame that needs it (see makeSky). After the
+// opacity shadow maps of Kim and Neumann (2001), with the depths kept at
+// heights instead of along the light.
+// The plane is warped so that its texels are fine near the eye and grow far
+// off, with no edge: x / (SHADOW_K + |x|) per axis, so SHADOW_K km away a
+// texel is four times as wide as at the eye, and the far edge is infinitely
+// far. A sun low in the sky lays its long shadows along few texels.
+// Along each line the depth is kept at the four heights SHADOW_H: all of it
+// below the base, less higher up; it is 0 at the tops. A point in between
+// takes the depth at its height, linearly.
+// Stored as tau / (tau + SHADOW_ENC): 8 bits keep both thin shadows and deep
+// ones apart.
+// The map is drawn again only when the aircraft has flown some way: it is
+// read where a point was when it was drawn, uShadowShift (km) away.
+uniform sampler2D uShadow;
+uniform vec2 uShadowShift;
+const float SHADOW_K = 40.0;
+const vec4 SHADOW_H = vec4(CB, 1.3, 2.3, 3.5);
+const float SHADOW_ENC = 4.0;
+// The map's axes across the light, set by main.
+vec3 shX, shY;
+void shadowAxes() {
+  shX = normalize(cross(uLight, abs(uLight.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  shY = cross(uLight, shX);
+}
+
+// The optical depth of the clouds from p towards the light.
+float cloudShadow(vec3 p) {
+  if (uCloud <= 0.0) return 0.0;
+  vec3 x = p + vec3(uShadowShift.x, -RG - uAlt, uShadowShift.y);
+  vec2 v = vec2(dot(x, shX), dot(x, shY));
+  vec4 u = textureLod(uShadow, 0.5 + 0.5 * v / (SHADOW_K + abs(v)), 0.0);
+  vec4 tau = SHADOW_ENC * u / max(1.0 - u, 1e-4);
+  float h = length(p) - RG;
+  if (h <= SHADOW_H.x) return tau.x;
+  if (h < SHADOW_H.y) return mix(tau.x, tau.y, (h - SHADOW_H.x) / (SHADOW_H.y - SHADOW_H.x));
+  if (h < SHADOW_H.z) return mix(tau.y, tau.z, (h - SHADOW_H.y) / (SHADOW_H.z - SHADOW_H.y));
+  if (h < SHADOW_H.w) return mix(tau.z, tau.w, (h - SHADOW_H.z) / (SHADOW_H.w - SHADOW_H.z));
+  return tau.w * max(1.0 - (h - SHADOW_H.w) / (CT - SHADOW_H.w), 0.0);
+}
+
+// The same on the sea, with soft edges. The sun is a disc, and the light
+// that comes through the thin edge of a cloud is spread around it by the
+// droplets' forward scattering; so a cloud's shadow fades over a width that
+// grows with the way from the cloud down to the sea: SHADOW_PEN radians,
+// from clouds about SHADOW_OCC km high (a radius of some 60 m under a high
+// sun, 400 m under a low one; along the light it is longer on the sea, by
+// 1 / sin of the light's height). Read once, the map's contour was the
+// edge of the glitter: so bright that it shows white down to a hundredth
+// of the light, the glitter was cut along that contour, hard, and with a
+// low sun into blocks (a texel is drawn out along the light on the sea).
+// The light is averaged across the light instead, SHADOW_TAPS reads at new
+// places each frame (jitter), spaced evenly out from the middle (denser
+// there: a uniform disc left round blots), and only then made a depth.
+const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
+const int SHADOW_TAPS = 8;
+float seaShadow(vec3 p, float jitter) {
+  if (uCloud <= 0.0) return 0.0;
+  float r = min(SHADOW_PEN * SHADOW_OCC / max(uLight.y, 0.05), 0.75);
+  float lit = 0.0;
+  for (int i = 0; i < SHADOW_TAPS; i++) {
+    float a = 6.2832 * jitter + 2.39996 * float(i);   // the golden angle
+    float ri = r * (float(i) + jitter) / float(SHADOW_TAPS);
+    lit += exp(-cloudShadow(p + ri * (cos(a) * shX + sin(a) * shY)));
   }
-  return tau;
+  return -log(max(lit / float(SHADOW_TAPS), 1e-6));
+}
+
+// One texel of the map: the line of light through it, from where it rises
+// through the base (or its lowest point, if that is higher) to the tops.
+// The steps are about SHADOW_DS km long, as many as the light's height
+// asks for, between 24 and 96: a low sun's lines climb the shell over tens
+// of km, and with fewer steps they missed most clouds. Half a step, or the
+// texel, sets how much the field is smoothed. A line that climbs the shell
+// under a sun on the horizon is some 240 km long: its shadows are as long,
+// and as smooth along the light.
+const float SHADOW_DS = 0.2;
+vec4 shadowTexel(vec2 w) {
+  vec2 v = SHADOW_K * w / (1.0 - abs(w));
+  vec3 q = vec3(0.0, RG + uAlt, 0.0) + v.x * shX + v.y * shY;
+  float top = raySphere(q, uLight, RG + CT).y;
+  vec4 s;                                            // where the line rises through each height
+  for (int k = 0; k < 4; k++) {
+    vec2 c = raySphere(q, uLight, RG + SHADOW_H[k]);
+    s[k] = c.y > c.x ? c.y : -dot(q, uLight);
+  }
+  if (top <= s.x) return vec4(0.0);
+  vec2 texel = (SHADOW_K + abs(v)) * (SHADOW_K + abs(v)) / SHADOW_K * 2.0 / uRes;
+  int steps = int(clamp((CT - CB) / max(uLight.y, 0.01) / SHADOW_DS, 24.0, 96.0));
+  float ds = (top - s.x) / float(steps);
+  float lod = max(log2(0.5 * max(0.5 * ds, max(texel.x, texel.y)) / TEXEL_KM), 0.0);
+  // The depth from the start to each height (below), and in all (sum).
+  float sum = 0.0;
+  vec4 below = vec4(0.0);
+  for (int i = 0; i < steps; i++) {
+    float a = s.x + float(i) * ds;
+    float den = cloudDensity(q + uLight * (a + 0.5 * ds), lod, false);
+    below += den * clamp(s - a, 0.0, ds);
+    sum += den * ds;
+  }
+  vec4 tau = sum - below;
+  return tau / (tau + SHADOW_ENC);
 }
 
 float hg(float mu, float g) {
@@ -1957,7 +2071,20 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
 const float CI_LO = 12.2, CI_HI = 12.8;    // km
 const float CI_TAU = 4.0;                  // the vertical optical depth of the ice, per unit of it
 const float CI_VEIL = 0.4;                 // and of the veil, its mean
+const float CI_BAND = 0.35;                // and of the body of a band of tufts, its median
 const int CI_LAYERS = 2;
+// The decks as volumes (km): the lower from 12.2 to 12.6, the upper from
+// 12.35 to 12.8. Each holds its ice by age (ciHeight).
+const vec2 CI_DECK[2] = vec2[2](vec2(12.2, 12.6), vec2(12.35, 12.8));
+// Near the eye the shell is marched (see highCloud): where the ray enters
+// it within CI_NEAR.x km fully, fading out by CI_NEAR.y, over CI_NEAR.z km
+// of the ray, in CI_STEPS steps.
+const vec3 CI_NEAR = vec3(2.0, 3.5, 3.0);
+const int CI_STEPS = 12;
+// The ice is never read over less than this (km): its streaks are soft at
+// some tens of metres (cirrus seen from an aircraft close by has no hairs),
+// and a finer read magnified the texels of the ice into rows of beads.
+const float CI_MINF = 0.02;
 const float CI_ROLL = 1.8;                 // the light scattered forward rolls off towards it
 // The share of the ice's extinction that is diffraction by its crystals
 // (some 100 um): light turned by less than a degree, which goes on as if
@@ -1970,6 +2097,7 @@ const float CI_FWD = 0.4;
 // feathers), B: flocks, A: large plumes. Each deck reads it in a frame of
 // its own (ciTile), and mixes the fields by the cirrus's map.
 uniform sampler2D uIce;
+const float ICE_KM = 40.477;   // the tile's side, as in the ice shader
 // The way the ice's fibres run, a quarter as wide (built with the ice, see
 // iceWay in the ice shader): the gradient of the ice at twice its angle.
 uniform sampler2D uIceWay;
@@ -2131,9 +2259,9 @@ vec2 ciTile(vec2 uv, int k, out mat2 J) {
 // falls by 0.8 an octave, as the spectrum of cloud does (-5/3), so that
 // seen from near the shell the veil still has thick and thin patches. An
 // octave fades out before its bands get narrower than a few footprints.
-const int CI_VEIL_N = 8;
-const vec3 CI_VEIL_OCT[CI_VEIL_N] = vec3[CI_VEIL_N](vec3(20.0, 5.0, 0.5), vec3(3.0, 12.0, 1.0), vec3(6.0, 30.0, 0.8),
-  vec3(12.0, 80.0, 0.64), vec3(24.0, 200.0, 0.51), vec3(40.0, 500.0, 0.3), vec3(80.0, 1200.0, 0.22), vec3(160.0, 3000.0, 0.15));
+const int CI_VEIL_N = 9;
+const vec3 CI_VEIL_OCT[CI_VEIL_N] = vec3[CI_VEIL_N](vec3(1.0, 6.0, 0.9), vec3(3.0, 12.0, 0.7), vec3(20.0, 5.0, 0.25),
+  vec3(6.0, 30.0, 0.35), vec3(12.0, 80.0, 0.3), vec3(24.0, 200.0, 0.3), vec3(40.0, 500.0, 0.25), vec3(80.0, 1200.0, 0.2), vec3(160.0, 3000.0, 0.15));
 float ciVeilNoise(vec2 tc, float gl, uint seed) {
   float n = 0.0;
   for (int o = 0; o < CI_VEIL_N; o++) {
@@ -2145,13 +2273,34 @@ float ciVeilNoise(vec2 tc, float gl, uint seed) {
   return n;
 }
 
+// How much veil (cirrostratus) the slider c and the map m make: from c =
+// 0.35 it grows to CI_VEIL of vertical depth at its median.
+float veilOn0(float c, float m) {
+  return CI_VEIL * pow(smoothstep(0.35, 1.0, c), 1.6) * m;
+}
+
 // The cirrus at x on the map (km), on deck k (0: the lower, 1: the upper),
 // seen over a footprint with the axes f1 and f2 (km on the map). In units
 // of the vertical optical depth of the whole shell: the deck's share of
 // it. Without `fibres`, as the light of the sun feels it over a wide
 // footprint, where the fibres average out: the code that reads them is
-// left out.
-float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float soft) {
+// left out. `lite`: the depth alone, without the finest streaks (which a
+// footprint of CI_MINF near the eye fades out anyway), for the steps of
+// the march near the eye and the second read of a long crossing; ciBody,
+// ciVeil, ciMean and ciWide are not set. Each call is a copy of this code
+// for the compiler, and the page's first picture waits for it.
+// Where the tufts gather (see ciDensity): in bands (x) and, with little
+// cirrus, in fields (y), at uv on the map, for deck k.
+vec2 ciFields(vec2 uv, int k) {
+  vec2 cfr = vec2(dot(uv, vec2(3.0, 1.0)), dot(uv, vec2(-1.0, 3.0))) + (k == 0 ? vec2(0.31, 0.57) : vec2(0.0));
+  float n5 = ciNoise(uv * 5.0, vec2(5.0), k == 0 ? 811u : 812u);
+  float bandN = ciNoise(cfr * vec2(2.0, 12.0), vec2(2.0, 12.0), k == 0 ? 821u : 822u) + 0.5 * ciNoise(cfr * vec2(3.0, 23.0), vec2(3.0, 23.0), 823u) + 0.6 * n5;
+  return vec2(smoothstep(0.25 - 0.6 * min(uCirrus, 0.65), 0.55 - 0.6 * min(uCirrus, 0.65), bandN),
+              smoothstep(-0.25, 0.25, n5 + 0.5 * ciNoise(uv * 11.0, vec2(11.0), 813u)));
+}
+vec2 ciFieldsOut = vec2(0.0);
+
+float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fieldsIn) {
   ciBody = 0.0;
   ciVeil = 0.0;
   ciMean = 0.0;
@@ -2172,17 +2321,28 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   // The kinds: plumes everywhere, fewer where rows are many; flocks or
   // large plumes.
   float sr = smoothstep(0.35, 0.75, cm.b), sf = smoothstep(0.45, 0.8, cm.a);
-  // The tufts gather in fields of some 40 to 60 km with wide gaps between
-  // (noise over the map): spread evenly, far off they stood in rows like
-  // the scales of a fish.
+  // The tufts gather in bands along the wind, some 40 km long and a few
+  // km wide, with clear lanes between (noise in the cirrus's frame, over
+  // the map), and in fields of some 50 km: seen from below, far off, they
+  // close up into long thin bands, as cirrus does at dusk; spread evenly
+  // (round 10), they stood in rows like the scales of a fish. As the
+  // slider goes up, the bands widen and join.
   // (Without the fibres, for the sun's light over a wide footprint, their
   // mean: the code is left out of those copies.)
-  float fields = fibres ? smoothstep(-0.25, 0.25, ciNoise(uv * 5.0, vec2(5.0), k == 0 ? 811u : 812u) + 0.5 * ciNoise(uv * 11.0, vec2(11.0), 813u)) : 0.55;
-  vec4 wk = vec4((1.0 - 0.5 * sr) * (0.15 + 1.1 * fields), sr, 0.5 * sf, (1.2 - 0.6 * sf) * (0.6 + 1.4 * smoothstep(0.15, 0.85, uCirrus)));
+  // Little cirrus is tufts in fields of some 50 km (spread: round 10's,
+  // kept: from the ground they stand apart with blue between); from 0.3
+  // the bands take over, though a field's tufts keep most of their weight.
+  // (Read once per deck and pixel, and passed to the march's reads as
+  // fieldsIn: they change over tens of km.)
+  vec2 fsp = !fibres ? vec2(0.55) : lite ? max(fieldsIn, 0.0) : ciFields(uv, k);
+  ciFieldsOut = fsp;
+  float fields = fsp.x, spread = fsp.y;
+  float banded = smoothstep(0.3, 0.6, uCirrus);
+  vec4 wk = vec4((1.0 - 0.5 * sr) * mix(0.15 + 1.1 * spread, 0.05 + 1.0 * max(fields, 0.7 * spread), banded), sr, 0.5 * sf, (1.2 - 0.6 * sf) * (0.6 + 1.4 * smoothstep(0.15, 0.85, uCirrus)) * mix(1.0, 0.1 + 0.8 * fields, banded));
   // The ice in the deck's frame. The footprint's axes go along, through
   // the mipmaps and the anisotropic filter.
   mat2 J;
-  vec2 tc = ciTile(uv, k, J) + length(J[0]) * shift, g1 = J * f1, g2 = J * f2;
+  vec2 tc = ciTile(uv, k, J), g1 = J * f1, g2 = J * f2;
   ciPixT = max(length(g2), 1e-7);
   vec4 si = textureGrad(uIce, tc, g1, g2);
   // A tuft of a flock is crisp: its thin edge is cut off and its core
@@ -2198,7 +2358,7 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
     float lw = log2(max(max(length(g1), length(g2)) * float(textureSize(uIceWay, 0).x), 1.0));
     vec2 way = textureLod(uIceWay, tc, lw + 1.0).rg * 2.0 - 1.0 + 0.5 * (textureLod(uIceWay, tc, lw + 4.0).rg * 2.0 - 1.0);
     float fib = textureGrad(uIceFib, tc, g1, g2).r * 2.0 - 1.0;
-    F = sqrt(max(1.0 + 0.6 * fib * (1.0 - 0.5 * smoothstep(0.3, 0.9, dense)) * smoothstep(0.1, 0.5, length(way)), 0.0) * ciFibres(tc, g1, g2, way, dense, k == 0 ? 3000u : 4000u));
+    F = sqrt(max(1.0 + 0.6 * fib * (1.0 - 0.5 * smoothstep(0.3, 0.9, dense)) * smoothstep(0.1, 0.5, length(way)), 0.0) * (lite ? 1.0 : ciFibres(tc, g1, g2, way, dense, k == 0 ? 3000u : 4000u)));
   }
   // The optical depth follows the ice: thin almost everywhere (some 0.05
   // to 0.5 seen straight up), the cores 1 to 2. Little cirrus is the same
@@ -2207,10 +2367,18 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   // outline of its own. The floor is soft (a square at first), so that the
   // depth grows smoothly from 0.
   float c = uCirrus;
-  float floor0 = 0.03 * pow(1.0 - c, 4.0) + 0.02 * (1.0 - m), knee = 0.5 * floor0 + 0.004;
+  float floor0 = 0.1 * pow(1.0 - c, 6.0) + 0.02 * (1.0 - m), knee = 0.5 * floor0 + 0.004;
   float gain = CI_TAU * (0.6 + 0.8 * c) * (0.3 + 0.7 * m);
   float fine = ice * F * F, y = max(fine - floor0, 0.0);
   float d = gain * y * y / (y + knee);
+  // The veil (cirrostratus), and in the bands a body of ice (from 0.2):
+  // both have the veil's banded noise as the exponent of their depth, so
+  // that a band is long and continuous with streaks along it, and tufts
+  // in it, not a row of separate dabs.
+  float vn = fibres && (veilOn0(c, m) > 0.0 || banded > 0.0) ? ciVeilNoise(tc, max(max(length(g1), length(g2)), 1e-7), k == 0 ? 600u : 700u) : 0.0;
+  float body = CI_BAND * smoothstep(0.2, 0.6, c) * fields * fields * m * exp(2.2 * vn - 0.4);
+  float sheet0 = (veilOn0(c, m) * (0.1 + 1.5 * fields * fields) * max(exp(2.2 * vn - 0.4) - 6.0 * pow(1.0 - c, 1.5) * (1.2 - fields), 0.0) + body) * mix(1.0, F * F, 0.7);
+  if (lite) return d + sheet0;
   // The ice over some 0.4 km (or four footprints, if that is wider): the
   // body that the light inside the sheet feels.
   float gl = max(max(length(g1), length(g2)), 1e-7);
@@ -2226,11 +2394,11 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   float s2 = max(1.0, 0.062 / gl), s3 = max(1.0, 0.25 / gl);
   vec4 sv2 = textureGrad(uIce, tc, g1 * s2, g2 * s2), svb = textureGrad(uIce, tc, g1 * s3, g2 * s3);
   float v2 = dot(sv2 * sv2, wk), vb = dot(svb * svb, wk);
-  float veilOn = CI_VEIL * pow(smoothstep(0.35, 1.0, c), 1.6) * m;
+  float veilOn = veilOn0(c, m);
   // Without the fibres (the sun's light through the sheet, over a wide
   // footprint) the veil's noise averages out: its median is enough, and
   // the code is left out of those copies.
-  float sheet = veilOn * max(exp(2.6 * (fibres ? ciVeilNoise(tc, gl, k == 0 ? 600u : 700u) : 0.0) - 0.4) - 6.0 * pow(1.0 - c, 1.5), 0.0) * mix(1.0, F * F, 0.7);
+  float sheet = sheet0;
   float ym = max(v2 - floor0, 0.0), yw = max(vb - floor0, 0.0);
   // The glow round the sun and the moon reads the veil's mean.
   float sheetM = veilOn;
@@ -2238,17 +2406,43 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, vec2 shift, float 
   ciVeil = sheet;
   ciMean = gain * ym * ym / (ym + knee) + sheetM;
   ciWide = gain * yw * yw / (yw + knee) + sheetM;
-  // Seen from within a few km (soft up to 1), the strands of tens to
-  // hundreds of metres would fill the view as long stripes: there the ice
-  // is a milky body with its strands as a gentler modulation.
-  return mix(d, db, soft) + sheet;
+  return d + sheet;
+}
+
+// The height (km) of the ice of deck k by its age: the heads near the top
+// of the deck, the ice lower as it ages (it falls), down to near the
+// deck's base by 0.6 of a life. And the spread round that height (the
+// standard deviation of a Gaussian, km): wider for older ice.
+float ciHeight(int k, float age) {
+  vec2 dk = CI_DECK[k];
+  return dk.y - (dk.y - dk.x) * (0.15 + 0.7 * clamp(age / 0.6, 0.0, 1.0));
+}
+float ciSpread(int k, float age) {
+  vec2 dk = CI_DECK[k];
+  return (dk.y - dk.x) * (0.08 + 0.14 * clamp(age / 0.6, 0.0, 1.0));
+}
+// The normal distribution's integral, through erf after Winitzki (2008;
+// within 1.2e-4), as in the ice shader.
+float ciPhi(float z) {
+  float x = 0.70710678 * z, x2 = x * x;
+  return 0.5 + 0.5 * sign(x) * sqrt(1.0 - exp(-x2 * (1.2732395 + 0.147 * x2) / (1.0 + 0.147 * x2)));
+}
+
+// The mean age of the ice of deck k at x on the map, seen over some foot
+// km (see iceWay in the ice shader): 0 at its head, 1 at the end of a
+// life. Where there is no ice, 0.3.
+float ciAge(vec2 x, int k, float foot) {
+  mat2 J;
+  vec2 tc = ciTile(x / WEATHER_KM, k, J);
+  vec2 v = textureLod(uIceWay, tc, log2(max(foot * length(J[0]) * float(textureSize(uIceWay, 0).x), 1.0))).ba;
+  return v.y > 0.02 ? v.x / v.y : 0.3;
 }
 
 // The depth as the light of the sun feels it, the ice seen over `foot`
 // km: the mean over the shell.
 float cirrusDepth(vec2 x, float foot) {
   vec2 f1 = vec2(foot, 0.0), f2 = vec2(0.0, foot);
-  return 0.5 * (ciDensity(x, 0, f1, f2, false, vec2(0.0), 0.0) + ciDensity(x, 1, f1, f2, false, vec2(0.0), 0.0));
+  return 0.5 * (ciDensity(x, 0, f1, f2, false, true, vec2(-1.0)) + ciDensity(x, 1, f1, f2, false, true, vec2(-1.0)));
 }
 
 // depthToTop in fewer steps, denser near p: enough for the light of one
@@ -2300,14 +2494,27 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   t1 = min(t1, tmax);
   if (t0 < 0.0 || t1 <= t0) return;
   float pix = 2.0 * uTan / uRes.y;
-  // Each deck where the ray crosses its middle height (or halfway along a
-  // ray that only grazes it), its depth times the way through the deck
-  // over the deck's thickness.
-  const float DECK = (CI_HI - CI_LO) / float(CI_LAYERS);
+  // Each deck is a volume (CI_DECK) that the ice fills by its age (ciAge,
+  // ciHeight): heads near its top, older ice lower down, as it has fallen;
+  // its vertical depth (ciDensity) is spread over the height round there
+  // (ciSpread), so that a column holds the depth a flat read gives.
+  // Far off, each deck is read once, where the ray crosses the height of
+  // its ice there (from the age where the ray crosses the deck's middle:
+  // one step of parallax mapping), its depth times the way through the
+  // deck over the deck's thickness.
   float tau = 0.0, tauV = 0.0, bodyT = 0.0, veilT = 0.0, meanT = 0.0, wideT = 0.0, wtt = 0.0, tSum = 0.0, nSum = 0.0;
+  // Near the eye (where the ray enters the shell within CI_NEAR.y km) the
+  // shell is marched over CI_NEAR.z km instead; the flat reads then cover
+  // only the part of each deck beyond the march. The two are blended (wn)
+  // as the shell's distance goes from CI_NEAR.x to CI_NEAR.y.
+  float wn = 1.0 - smoothstep(CI_NEAR.x, CI_NEAR.y, t0);
+  float tE = wn > 0.0 ? min(t1, t0 + CI_NEAR.z) : t0;
+  float tauR = 0.0, wttR = 0.0;
+  float colK[2] = float[2](0.0, 0.0), bodyK[2] = float[2](0.0, 0.0);
+  vec2 fieldsK[2] = vec2[2](vec2(-1.0), vec2(-1.0));
   for (int k = 0; k < CI_LAYERS; k++) {
-    float lo = CI_LO + DECK * float(k), hi = lo + DECK;
-    vec2 el = eyeSphere(o, d, lo), eh = eyeSphere(o, d, hi), em = eyeSphere(o, d, lo + 0.5 * DECK);
+    float lo = CI_DECK[k].x, hi = CI_DECK[k].y, th = hi - lo;
+    vec2 el = eyeSphere(o, d, lo), eh = eyeSphere(o, d, hi);
     float s0, s1;
     if (uAlt < lo) {
       s0 = el.y; s1 = eh.y;
@@ -2319,45 +2526,119 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
     s0 = max(s0, t0);
     s1 = min(s1, t1);
     if (s0 < 0.0 || s1 <= s0) continue;
-    float tm = uAlt < lo + 0.5 * DECK ? em.y : em.x;
+    float hm = 0.5 * (lo + hi);
+    vec2 em = eyeSphere(o, d, hm);
+    float tm = uAlt < hm ? em.y : em.x;
     if (tm < s0 || tm > s1) tm = 0.5 * (s0 + s1);
-    // Within a few km the deck is a volume: it is read at two heights, a
-    // quarter of its thickness above and below its middle, and the ice of
-    // the lower one has fallen further and drifted on (it is read 0.3 km
-    // back along the shear and 0.12 km across). Seen from near, the two
-    // stand apart (parallax), and the strands of one fill the gaps of the
-    // other. Farther off they close up into one, smoothly.
-    float near = 1.0 - smoothstep(1.5, 4.0, tm), way = (s1 - s0) / DECK;
-    for (int j = 0; j < 2; j++) {
-      if (j == 1 && near <= 0.0) break;
-      float wj = near > 0.0 ? 0.5 : 1.0, t = tm;
-      if (near > 0.0) {
-        float hj = lo + DECK * (0.5 + (j == 0 ? -0.25 : 0.25) * near);
-        vec2 ej = eyeSphere(o, d, hj);
-        t = uAlt < hj ? ej.y : ej.x;
-        if (t < s0 || t > s1) t = tm;
-      }
-      vec3 p = o + d * t, up = normalize(p);
-      float cv = abs(dot(d, up));
-      // The footprint on the deck: a pixel, drawn out along the ray's way over
-      // the map; and aslant, the way through the deck blurs the ice along it.
-      vec2 dh = d.xz - up.xz * dot(d, up);
+    float hc = ciHeight(k, ciAge((o + d * tm).xz + uDrift, k, max(pix * tm, CI_MINF)));
+    vec2 ec = eyeSphere(o, d, hc);
+    float t = ec.x > 1e8 ? tm : clamp(uAlt < hc ? ec.y : ec.x, s0, s1);
+    vec3 p = o + d * t, up = normalize(p);
+    float cv = abs(dot(d, up));
+    // The footprint on the deck: a pixel, drawn out along the ray's way over
+    // the map; and aslant, the way through the deck blurs the ice along it.
+    // Never under CI_MINF.
+    vec2 dh = d.xz - up.xz * dot(d, up);
+    float lh = length(dh);
+    vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
+    vec2 f1 = dn * max(pix * t / max(cv, 1e-3) + 0.08 * (s1 - s0) * lh, CI_MINF);
+    vec2 f2 = vec2(-dn.y, dn.x) * max(pix * t, CI_MINF);
+    float rho = ciDensity(p.xz + uDrift, k, f1, f2, true, false, vec2(-1.0)), way = (s1 - s0) / th;
+    float cBody = ciBody, cVeil = ciVeil, cMean = ciMean, cWide = ciWide;
+    fieldsK[k] = ciFieldsOut;
+    // A ray that grazes the deck crosses it over km: one read stood for all
+    // of that, while the march near the eye reads it all along, and where
+    // the two met, a patch of ice near the eye stood apart from the same
+    // ice read farther on. Over a long crossing a second read (of the
+    // depth alone) is averaged in, from the part the march leaves, a
+    // quarter of the way on from the first.
+    float ra = max(s0, tE), many = smoothstep(2.0, 4.0, way) * step(ra + 0.01, s1);
+    if (many > 0.0) {
+      float tj = clamp(t + 0.25 * (s1 - s0), ra, s1);
+      tj = tj - t < 0.1 * (s1 - s0) ? mix(ra, s1, 0.25) : tj;
+      rho = mix(rho, 0.5 * (rho + ciDensity((o + d * tj).xz + uDrift, k, f1 * (tj / t), f2 * (tj / t), true, true, fieldsK[k])), many);
+    }
+    tau += rho * way;
+    tauV += rho;
+    bodyT += cBody;
+    veilT += cVeil * way;
+    meanT += cMean * way;
+    wideT += cWide * way;
+    wtt += rho * way * t;
+    tSum += t;
+    nSum += 1.0;
+    colK[k] = rho;
+    bodyK[k] = cBody;
+    float wr = max(s1 - max(s0, tE), 0.0) / th;
+    tauR += rho * wr;
+    wttR += rho * wr * max(t, tE);
+  }
+  // The march near the eye: CI_STEPS steps over the shell from t0 to tE.
+  // In each, a deck's ice is read once over the step (its footprint drawn
+  // out along it), and the part of its column the step crosses is taken
+  // from the spread in closed form, so that no step shows. The light
+  // scattered once is summed step by step: what reaches a step from the
+  // light has crossed the column above it (or below it, for a low light
+  // from under the shell), so that the heads shade the ice under them and
+  // the tops of a deck are brighter than its base.
+  // The steps' bounds move from frame to frame by a fraction of a step
+  // (the first and the last step are parts of one): on a fixed grid, the
+  // edge of a band seen along a grazing ray stood in stairs, a step each.
+  float tauN = 0.0, onceN = 0.0, onceDN = 0.0, wttN = 0.0;
+  if (tE > t0) {
+    float dt = (tE - t0) / float(CI_STEPS), jit = ign(gl_FragCoord.xy + 2.718 * uPass + 5.0);
+    for (int i = 0; i <= CI_STEPS; i++) {
+      float ta = i == 0 ? t0 : t0 + dt * (float(i - 1) + jit), tb = i == CI_STEPS ? tE : t0 + dt * (float(i) + jit);
+      if (tb <= ta) continue;
+      float tmid = 0.5 * (ta + tb), dts = tb - ta;
+      vec3 pm = o + d * tmid, up = normalize(pm);
+      float ha = length(o + d * ta) - RG, hb = length(o + d * tb) - RG, hmid = length(pm) - RG;
+      float cv = dot(d, up), mus = dot(up, uLight);
+      vec2 dh = d.xz - up.xz * cv;
       float lh = length(dh);
       vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
-      vec2 f1 = dn * (pix * t / max(cv, 1e-3) + 0.08 * mix(1.0, 0.5, smoothstep(0.0, 0.2, near)) * (s1 - s0) * lh);
-      vec2 f2 = vec2(-dn.y, dn.x) * pix * t;
-      float rho = ciDensity(p.xz + uDrift, k, f1, f2, true, j == 0 ? near * vec2(-0.3, 0.12) : vec2(0.0), 0.3 * near);
-      tau += wj * rho * way;
-      tauV += wj * rho;
-      bodyT += wj * ciBody;
-      veilT += wj * ciVeil * way;
-      meanT += wj * ciMean * way;
-      wideT += wj * ciWide * way;
-      wtt += wj * rho * way * t;
-      tSum += t;
-      nSum += 1.0;
+      vec2 f1 = dn * max(max(dts * lh, pix * tmid), CI_MINF), f2 = vec2(-dn.y, dn.x) * max(pix * tmid, CI_MINF);
+      // The light comes from above (1) or below (0). A low sun runs along
+      // the decks and crosses as much ice as their whole columns (as the
+      // flat reads take it): there each step feels the whole column. With
+      // half of it, low sunlit ice near the eye was brighter than the same
+      // ice farther off, a patch with the outline of the ice; and a sharp
+      // switch at the sun's height 0 drew a seam.
+      float fromAbove = smoothstep(-0.1, 0.1, mus), steep = smoothstep(0.1, 0.35, abs(mus));
+      float tauS = 0.0, tsS = 0.0;
+      for (int k = 0; k < CI_LAYERS; k++) {
+        float lo = CI_DECK[k].x, hi = CI_DECK[k].y;
+        if (min(ha, hb) >= hi || max(ha, hb) <= lo) {
+          // The deck lies wholly above or below the step: its column shades
+          // the step if the light comes from that side.
+          tsS += max(colK[k], bodyK[k]) * mix(1.0, hmid < lo ? fromAbove : 1.0 - fromAbove, steep);
+          continue;
+        }
+        vec2 x = pm.xz + uDrift;
+        float col = ciDensity(x, k, f1, f2, true, true, fieldsK[k]);
+        if (col <= 0.0) continue;
+        float age = ciAge(x, k, max(pix * tmid, CI_MINF));
+        float hc = ciHeight(k, age), sg = ciSpread(k, age);
+        float pl = ciPhi((lo - hc) / sg), ph = ciPhi((hi - hc) / sg), nrm = max(ph - pl, 1e-3);
+        float qa = ciPhi((clamp(ha, lo, hi) - hc) / sg), qb = ciPhi((clamp(hb, lo, hi) - hc) / sg);
+        float dz = abs(hb - ha), z = (clamp(hmid, lo, hi) - hc) / sg;
+        // The column's share per km of height here, times the way.
+        float per = dz > 1e-4 * sg ? abs(qb - qa) / dz : 0.39894 * exp(-0.5 * z * z) / sg;
+        tauS += col * per / nrm * dts;
+        float qm = ciPhi(z);
+        tsS += max(col, bodyK[k]) * mix(1.0, mix(qm - pl, ph - qm, fromAbove) / nrm, steep);
+      }
+      if (tauS <= 0.0) continue;
+      float li = 1.0 / max(abs(mus), 0.15), tr = exp(-tauN - 0.5 * tauS) * tauS;
+      onceN += tr * exp(-0.6 * tsS * li);
+      onceDN += tr * exp(-0.15 * tsS * li);
+      wttN += tauS * tmid;
+      tauN += tauS;
     }
   }
+  float tauF = tau;
+  tau = mix(tauF, tauN + tauR, wn);
+  wtt = mix(wtt, wttN + wttR, wn);
   // Where there is no ice in the pixel but some around, the glow round
   // the sun or the moon is still drawn (below).
   if (tau <= 0.0 && wideT <= 0.0) return;
@@ -2388,7 +2669,10 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // does not cross the whole sheet edgewise: it finds its way in between
   // the clouds within some seven times the sheet's thickness.
   bool sameSide = (dot(d, up) < 0.0) == (mus > 0.0);
-  float once = ciOnce(tau, 0.6 * max(tauV, ciBody) / max(abs(mus), 0.15), sameSide);
+  // Near the eye, the march's own sum, and the flat reads behind it.
+  float li = 1.0 / max(abs(mus), 0.15);
+  float once = mix(ciOnce(tauF, 0.6 * max(tauV, ciBody) * li, sameSide),
+                   onceN + exp(-tauN) * ciOnce(tauR, 0.6 * max(tauV, ciBody) * li, sameSide), wn);
   // The narrow peak, a few degrees round the sun or the moon, is a round
   // glow (an aureole): it follows the sheet's depth over some 10 km, and
   // the ice just in front of the light only by a quarter. Drawn from the
@@ -2404,7 +2688,8 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // scattered once feels (1 - g of ice). With the depth of the single
   // scattering, thick ice towards a low sun went darker than the sky behind
   // it.
-  float onceD = ciOnce(tau, 0.15 * max(tauV, ciBody) / max(abs(mus), 0.15), sameSide);
+  float onceD = mix(ciOnce(tauF, 0.15 * max(tauV, ciBody) * li, sameSide),
+                    onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * max(tauV, ciBody) * li, sameSide), wn);
   // Light from below: the low clouds, lit by the same sun, add to the sea
   // that the mean sky already holds. Forward scattering sends more of it
   // to an eye below the sheet.
@@ -2446,7 +2731,15 @@ vec2 distanceCode(float t) {
   return vec2(high, c - 256.0 * high) / 255.0;
 }
 
+#ifdef SHADOW_MAP
+// The map of the clouds' shadow, uRes texels square.
 void main() {
+  shadowAxes();
+  outColor = shadowTexel(gl_FragCoord.xy / uRes * 2.0 - 1.0);
+}
+#else
+void main() {
+  shadowAxes();
   vec2 uv = ((gl_FragCoord.xy + uJitter) * 2.0 - uRes) / uRes.y;
   vec3 d = normalize(uCam * vec3(uv * uTan, 1.0));
   vec3 o = vec3(0.0, RG + uAlt, 0.0);
@@ -2495,21 +2788,32 @@ void main() {
     }
   }
 
-  // The shadow of the clouds: their depth towards the light where the ray
-  // meets the sea (shadow), and how much direct light is left in the air
-  // near the sea (shade).
-  float shadow = 0.0, shade = 1.0;
-  if (uLightI > 0.0 && (uCloud > 0.0 || uCirrus > 0.0)) {
-    if (!ground) {
-      // The ray runs on through far air, under all the clouds there are.
-      shade = mix(1.0, 0.2, smoothstep(0.4, 1.0, uCloud));
-    } else if (Tc > 0.0) {
-      vec3 pg = o + d * tmax;
-      if (uCloud > 0.0) shadow = shadowDepth(pg + 0.001 * normalize(pg), uLight);
-      shadow += cirrusShadow(pg);                      // the thin cloud shades the sea too
-      shade = exp(-shadow);
-    }
+  // The clouds shade the air below their tops (see cloudShadow). Light
+  // scattered once by the air there is sampled more finely than the march
+  // below: SHAFTS samples of the shadow over that part of the ray, ca to
+  // cb, denser near the eye, at new places each frame. Each step of the
+  // march takes the mean light of those that fall in it (weighed by the
+  // air's scattering there), or reads the map once if none does.
+  const int SHAFTS = 16;
+  float ca = 0.0, cb = -1.0;
+  if (uCloud > 0.0 && uLightI > 0.0) {
+    vec2 ct = eyeSphere(o, d, CT);
+    if (uAlt < CT) cb = ct.y;
+    else if (ct.x >= 0.0 && ct.x < 1e8) { ca = ct.x; cb = ct.y; }
+    cb = min(cb, tmax);
   }
+  float shaftJitter = ign(gl_FragCoord.xy + 3.137 * uPass + 11.0);
+  int shaft = 0;
+  // The thin cloud is not in the map: its shadow (cirrusShadow) where the
+  // ray meets the sea dims the air near the sea.
+  // The same depth shades the sea below (once: each call of cirrusShadow
+  // is a copy of the cirrus's code for the compiler).
+  float ciSea = 0.0;
+  if (uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0) ciSea = cirrusShadow(o + d * tmax);
+  float ciShade = exp(-ciSea);
+  // The map is the light's: in twilight the sun still lights the air
+  // while the moon lights the clouds and the sea.
+  bool sunLight = dot(uLight, uSun) > 0.999;
 
   // March along the view ray; samples are denser near the eye. An extra
   // sample ends at each layer, the nearer one first.
@@ -2562,10 +2866,26 @@ void main() {
     for (int k = 0; k < 3; k++) {
       Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     }
-    // Under a cloud the air near the sea is in its shadow too.
-    float direct = mix(1.0, shade, 1.0 - smoothstep(0.6, 2.0, h));
-    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, direct, phaseSun, d, Tv, L);
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * visX, direct, phaseMoon, d, Tv, L);
+    float direct = 1.0;
+    if (prev - dt < cb && prev > ca) {
+      float lit = 0.0, sum = 0.0;
+      for (int m = shaft; m < SHAFTS; m++) {
+        float f = (float(m) + shaftJitter) / float(SHAFTS);
+        float ts = ca + (cb - ca) * f * f;
+        if (ts >= prev) break;
+        shaft++;
+        if (ts < prev - dt) continue;
+        vec3 ps = o + d * ts;
+        vec3 w = density(length(ps) - RG);
+        float wt = uBR[1].z * w.x + betaM * w.y;
+        lit += wt * exp(-cloudShadow(ps));
+        sum += wt;
+      }
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
+    }
+    direct *= mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h));
+    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, sunLight ? direct : 1.0, phaseSun, d, Tv, L);
+    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * visX, sunLight ? 1.0 : direct, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
     if (atLayer) {
       bool isClouds = (layer == 0) == cloudsFirst;
@@ -2583,7 +2903,10 @@ void main() {
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
-    addSea(o + d * tmax, d, tmax, od, betaM, extM, visX, shadow, L, G);
+    // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
+    vec3 pg = o + d * tmax;
+    float shadow = uLightI > 0.0 ? seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea : 0.0;
+    addSea(pg, d, tmax, od, betaM, extM, visX, shadow, L, G);
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way and
     // stars, all dimmed and reddened by the air. By day the exposure hides
@@ -2645,7 +2968,7 @@ void main() {
   if (uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0) {
     float deg = degrees(acos(min(mu, 1.0)));
     float glare = 0.3 / (deg * deg + 0.3);
-    if (uCloud > 0.0 && uAlt < CT) glare *= exp(-shadowDepth(o, uSun));
+    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
       float hc = max(0.5 * (CI_LO + CI_HI), uAlt);
@@ -2729,6 +3052,7 @@ void main() {
   // then the mean over the frames is right. The same for the level.
   outColor = floor(clamp(vec4(col, level), 0.0, 1.0) * uSteps + hash(gl_FragCoord.xy + 31.7 * uPass)) / uSteps;
 }
+#endif
 </script>
 
 <script id="mean" type="x-shader/x-fragment">
@@ -4052,10 +4376,13 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
-    const link = id => {
+    // `defs`: lines put after the #version line of the fragment shader.
+    const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
+      let fsrc = document.getElementById(id).textContent.trim();
+      if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
-        [gl.FRAGMENT_SHADER, document.getElementById(id).textContent.trim()]]) {
+        [gl.FRAGMENT_SHADER, fsrc]]) {
         shaders.push(compile(type, src));
         gl.attachShader(prog, shaders[shaders.length - 1]);
       }
@@ -4074,6 +4401,8 @@ const SkySound = (() => {
     const prog = link('fs'), noiseProgram = link('noise'), wavesProgram = link('waves');
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const mean = link('mean'), show = link('show'), meter = link('meter');
+    // fs again, as the map of the clouds' shadow (see cloudShadow).
+    const shadowProg = link('fs', '#define SHADOW_MAP');
     gl.flush();
 
     // Waits, a frame at a time, until the GPU has done all that it was
@@ -4183,7 +4512,7 @@ const SkySound = (() => {
         uSize = gl.getUniformLocation(draw, 'uSize');
       };
       const parts = () => {
-        let frame;
+        let frame, age;
         // A texture to draw into, bound to its unit.
         const target = (unit, format, size) => {
           gl.activeTexture(gl.TEXTURE0 + unit);
@@ -4197,13 +4526,13 @@ const SkySound = (() => {
           smooth(gl.TEXTURE_2D);
           if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
         };
-        const pieces = z => {
+        const pieces = (z, size) => {
           const parts = [[0, () => {
             gl.uniform1f(uZ, z);
             gl.enable(gl.SCISSOR_TEST);
           }]];
-          for (let y = 0; y < iceSize; y += ICE_PIECE) {
-            for (let x = 0; x < iceSize; x += ICE_PIECE) {
+          for (let y = 0; y < size; y += ICE_PIECE) {
+            for (let x = 0; x < size; x += ICE_PIECE) {
               parts.push([ICE_PIECE * ICE_PIECE / (NOISE * NOISE), () => {      // weighed as slices of the noise of as many texels
                 gl.scissor(x, y, ICE_PIECE, ICE_PIECE);
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -4227,20 +4556,34 @@ const SkySound = (() => {
           [0, () => {
             gl.useProgram(draw);
             gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+            // The ice's age, a second target while the ice is drawn (unit
+            // 15, for a while): it folds into uIceWay.
+            gl.activeTexture(gl.TEXTURE15);
+            age = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, age);
+            gl.texStorage2D(gl.TEXTURE_2D, Math.log2(iceSize) + 1, gl.RG8, iceSize, iceSize);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, age, 0);
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
             target(10, gl.RGBA8, iceSize);
           }],
-          ...pieces(-3),
+          ...pieces(-3, iceSize),
           [0, () => {
             sharp();
-            target(11, gl.RG8, iceSize / 4);
-            gl.uniform1f(uZ, -4);
+            gl.activeTexture(gl.TEXTURE15);
+            smooth(gl.TEXTURE_2D);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+            target(11, gl.RGBA8, iceSize / 4);
             gl.uniform1i(gl.getUniformLocation(draw, 'uIceIn'), 10);
+            gl.uniform1i(gl.getUniformLocation(draw, 'uAgeIn'), 15);
+            gl.uniform1f(uZ, -4);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
+            gl.deleteTexture(age);
             smooth(gl.TEXTURE_2D);
             target(12, gl.R8, iceSize);
             gl.uniform1i(gl.getUniformLocation(draw, 'uWayIn'), 11);
           }],
-          ...pieces(-5),
+          ...pieces(-5, iceSize),
           [0, () => {
             sharp();
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -4530,6 +4873,41 @@ const SkySound = (() => {
       waiting = null;
       readMeter();
     };
+
+    // The map of the clouds' shadow (see cloudShadow in fs), on unit 14,
+    // SHADOW texels square. fs itself draws it (shadowProg),
+    // before a frame whose light, altitude or clouds have changed, or once
+    // the aircraft has flown SHADOW_STALE km since; until then the frames
+    // read it where things were (uShadowShift). Half floats where the GPU
+    // can draw to them, else 8 bits.
+    const SHADOW = 1024, SHADOW_STALE = 0.5;
+    const S = {};
+    gl.useProgram(shadowProg);
+    for (const n of ['uRes', 'uAlt', 'uLight', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
+    gl.uniform2f(S.uRes, SHADOW, SHADOW);
+    const shadowTarget = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowTarget);
+    gl.activeTexture(gl.TEXTURE14);
+    for (const format of fine ? [gl.RGBA16F, gl.RGBA8] : [gl.RGBA8]) {
+      const map = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, map);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, format, SHADOW, SHADOW);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+        [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
+        gl.texParameteri(gl.TEXTURE_2D, k, v);
+      }
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, map, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) break;
+      gl.deleteTexture(map);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(prog);
+    gl.uniform1i(U('uShadow'), 14);
+    const uShadowShift = U('uShadowShift');
+    let shadowFor = '', shadowAt = [0, 0];
     // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
     const picture = (old, w, h) => {
       if (old && old.w === w && old.h === h) return old;
@@ -4654,6 +5032,25 @@ const SkySound = (() => {
       gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
       gl.uniform1f(uPass, pass);
       gl.uniform1f(uSteps, steps);
+      // The shadow map, for this frame's light and clouds, and a place near enough.
+      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
+      let shift = [wrapped(state.drift[0] - shadowAt[0]), wrapped(state.drift[1] - shadowAt[1])];
+      if (shade && (shade !== shadowFor || Math.hypot(shift[0], shift[1]) > SHADOW_STALE)) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowTarget);
+        gl.viewport(0, 0, SHADOW, SHADOW);
+        gl.useProgram(shadowProg);
+        gl.uniform1f(S.uAlt, v.alt);
+        gl.uniform3fv(S.uLight, state.light);
+        gl.uniform2fv(S.uDrift, state.drift);
+        gl.uniform1f(S.uCloud, v.cloud);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.useProgram(prog);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+        shadowFor = shade;
+        shadowAt = [state.drift[0], state.drift[1]];
+        shift = [0, 0];
+      }
+      gl.uniform2fv(uShadowShift, shift);
       draw(v, cam, w, h);
 
       // The picture: the mean so far, and this frame.

@@ -51,7 +51,9 @@ See "Realism" in `docs/development.md`.
   branch of this repository gets a preview at
   `https://sf624.github.io/sky/pr/N/`.
 - Plans, follow-ups and known flaws go to the issues
-  (https://github.com/sf624/sky/issues), not into the repository.
+  (https://github.com/sf624/sky/issues), not into the repository. Their
+  order is on the project board; read `docs/roadmap.md` before starting
+  work, and keep the board current.
 - `docs/` describes the code as it is. Update it in the same pull request
   when a change alters what it says.
 
@@ -62,3 +64,4 @@ See "Realism" in `docs/development.md`.
 - `docs/design.md`: how a frame is made.
 - `docs/development.md`: running, URL parameters, judging a change, GLSL
   rules, GPU time, publishing, licences.
+- `docs/roadmap.md`: where the planned work and its order are kept.
