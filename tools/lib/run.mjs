@@ -154,10 +154,15 @@ export async function drive(session, root, script, size) {
   }
 }
 
-// Real time, no fake clock: the time from navigation to the first drawArrays of each canvas, the frame rate, and
-// per canvas and kind of draw (target, size, program) the GPU time (EXT_disjoint_timer_query_webgl2).
+// Real time, no fake clock: the time from navigation to the first drawArrays of each canvas and to its first
+// picture (the first draw to the canvas itself), the long tasks of the main thread until then, the frame rate,
+// and per canvas and kind of draw (target, size, program) the GPU time (EXT_disjoint_timer_query_webgl2).
 const PERF = `(() => {
-  const G = window.__perf = { first: {}, kinds: {}, on: false };
+  const G = window.__perf = { first: {}, picture: {}, long: [], kinds: {}, on: false };
+  try {
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) G.long.push([e.startTime, e.duration]); })
+      .observe({ type: 'longtask', buffered: true });
+  } catch (e) {}
   const P = WebGL2RenderingContext.prototype, draw = P.drawArrays, use = P.useProgram, bind = P.bindFramebuffer, vp = P.viewport;
   const pend = [];
   let ids = 0;
@@ -167,6 +172,8 @@ const PERF = `(() => {
   P.drawArrays = function (...a) {
     const id = this.canvas.id || '?';
     if (!(id in G.first)) G.first[id] = performance.now();
+    // The first picture: the first draw to the canvas once the page says it has loaded (data-sky, see page.mjs).
+    if (!this.__fb && !(id in G.picture) && (document.querySelector('[data-sky]') || { dataset: {} }).dataset.sky !== 'loading') G.picture[id] = performance.now();
     if (this.__ext === undefined) this.__ext = this.getExtension('EXT_disjoint_timer_query_webgl2');
     const key = id + (this.__fb ? ' offscreen ' : ' canvas ') + (this.__vp || '?') + ' prog' + this.__prog;
     if (!G.on || !this.__ext) return draw.apply(this, a);
@@ -196,7 +203,10 @@ export async function perf(session, root, { q, size, seconds }) {
   await s('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: false });
   await s('Page.addScriptToEvaluateOnNewDocument', { source: PERF });
   await s('Page.navigate', { url: session.server.url(root) + (q || '') });
-  for (let i = 0; i < 600 && (await ev('document.readyState')) !== 'complete'; i++) await sleep(100);
+  // Until the load event, the end of the page's loading (data-sky, see page.mjs) and a first picture.
+  const READY = `document.readyState === 'complete' && (document.querySelector('[data-sky]') || { dataset: {} }).dataset.sky !== 'loading'
+    && (!document.querySelector('canvas') || Object.keys(window.__perf.picture).length > 0)`;
+  for (let i = 0; i < 1200 && !(await ev(READY)); i++) await sleep(50);
   await sleep(1500);
   await ev('window.__perf.on = true, 0');
   const fps = await ev(`new Promise((res) => { let n = 0, t0 = performance.now(), last = t0, worst = 0;
@@ -205,7 +215,12 @@ export async function perf(session, root, { q, size, seconds }) {
     requestAnimationFrame(f); })`);
   await sleep(300);
   const g = await ev('JSON.stringify(window.__perf)').then(JSON.parse);
-  console.log(`first draw (ms after navigation start): ${Object.entries(g.first).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ')}`);
+  const ms = (o) => Object.entries(o).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ') || 'none';
+  console.log(`first draw (ms after navigation start): ${ms(g.first)}`);
+  console.log(`first picture on a canvas (ms after navigation start): ${ms(g.picture)}`);
+  const until = Math.max(0, ...Object.values(g.picture)), long = g.long.filter(([t]) => t <= until);
+  console.log(`main thread until then: ${long.length} tasks over 50 ms` + (long.length ? `, the longest ${Math.max(...long.map(([, d]) => d)).toFixed(0)} ms,`
+    + ` blocked ${long.reduce((a, [, d]) => a + d - 50, 0).toFixed(0)} ms (the time over 50 ms)` : ''));
   console.log(`frame rate: ${fps.fps} per second, longest gap ${fps.worstMs} ms`);
   for (const [k, a] of Object.entries(g.kinds).sort()) {
     a.sort((x, y) => x - y);
