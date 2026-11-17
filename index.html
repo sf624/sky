@@ -641,9 +641,10 @@ uniform float uLook;    // power of the "look" curve
 // The frame's alpha holds the luminance before exposure, for the meter: log2
 // of it, from uLogRange.x (0) to uLogRange.y (1).
 uniform vec2 uLogRange;
-// How many stops above white the shoulder of the tone curve takes in (0
-// by day; see main).
-uniform float uShoulder;
+// The long shoulder of the tone curve, at dusk (see main): how many stops
+// above white it takes in, and how many stops below white its top ends
+// (both 0 by day).
+uniform vec2 uShoulder;
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -1835,46 +1836,40 @@ void main() {
   col = max(col, 0.0);                               // colours outside sRGB
   float level = (log2(max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
-  // A long shoulder, at dusk: the band of glow on the horizon stands up to
-  // uShoulder stops above white when the rest of the view is exposed as
-  // the eye would. Above KNEE the strongest channel is pressed together in
-  // stops, smoothly (slope 1 at KNEE, y / (1 + c y)), and the colour is
-  // scaled as a whole: the band keeps its hue and its gradation. What
-  // stood uShoulder stops above TOP (all but white) ends DIM_TOP stops
-  // below it for each stop taken in: the brightest part of a dim view is
-  // not white either, and the band does not brighten the view as dusk
-  // deepens. By day uShoulder is 0 and nothing changes. One curve for the
-  // whole picture: no halos.
-  if (uShoulder > 0.0) {
-    const float KNEE = 0.5, TOP = 2.585, DIM_TOP = 0.25;   // TOP: log2(3 / KNEE)
-    float y = log2(max(max(col.r, max(col.g, col.b)), 1e-30) / KNEE);
+  // A long shoulder, at dusk. The band of glow on the horizon stands up to
+  // uShoulder.x stops above white (3 here) when the rest of the view is
+  // exposed as the eye would; and the band itself grows dimmer as the sun
+  // goes down, so its top is to end uShoulder.y stops below white. Above
+  // the knee the strongest channel is pressed together in stops, smoothly
+  // (slope 1 at the knee, y / (1 + c y)), and the colour is scaled as a
+  // whole, so the hue is kept; the curve below then pales what comes near
+  // white, as by day. One curve for the whole picture: no halos.
+  if (uShoulder.x > 0.0 || uShoulder.y > 0.0) {
+    float top = 3.0 * exp2(-uShoulder.y), knee = min(0.5, 0.5 * top);
+    float span = log2(3.0 / knee) + uShoulder.x, kept = log2(top / knee);
+    float y = log2(max(max(col.r, max(col.g, col.b)), 1e-30) / knee);
     if (y > 0.0) {
-      float span = TOP + uShoulder, c = (span / (TOP - DIM_TOP * uShoulder) - 1.0) / span;
-      col *= exp2(y / (1.0 + c * y) - y);
+      // Pressed together by `less` stops, a colour also pales towards white
+      // at its strongest channel, as on film and to the eye: a strong band
+      // of glow keeps its hue but not all of its saturation, it stays the
+      // brightest part, and the small changes of hue within it, which the
+      // pressing would leave as stripes of colour, are softened.
+      float less = y - y / (1.0 + (span / kept - 1.0) / span * y);
+      col *= exp2(-less);
+      col = mix(col, vec3(max(col.r, max(col.g, col.b))), 0.4 * (1.0 - exp(-less / 3.0)));
     }
   }
   // A camera's white balance for daylight: sunlit cloud, a little yellow on
   // a screen whose white is D65, comes out white, and the sea a deeper blue.
   col *= vec3(0.932, 1.013, 1.074);
   // Light far too strong for the screen turns white, as on film, instead
-  // of a flat saturated colour (the sun, its glitter on the sea). At dusk,
-  // as the long shoulder comes in (dusk: 0 by day, when uShoulder is 0
-  // exactly, and 1 from a quarter of a stop of it), only far stronger light
-  // does, and a band of glow a few times too bright keeps its colour (see
-  // below).
-  float dusk = smoothstep(0.0, 0.25, uShoulder);
+  // of a flat saturated colour (the glitter of a low sun would be yellow).
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(col, vec3(lum), 0.85 * smoothstep(mix(1.0, 3.0, dusk), mix(6.0, 30.0, dusk), lum));
+  col = mix(col, vec3(lum), 0.85 * smoothstep(1.0, 6.0, lum));
 
   // A "look", not physics: a per-channel power deepens the colour, as film does.
   col = pow(col, vec3(uLook));
-  // Tone mapping, 1 - exp(-x), channel by channel: a bright colour runs to
-  // white as its strongest channel fills and the others catch up, as the
-  // sun's glitter does by day. At dusk, in the shoulder, the strongest
-  // channel follows the curve and the others keep their share of it: a
-  // band of glow too bright for the screen stays orange.
-  float top = max(col.r, max(col.g, col.b));
-  col = mix(1.0 - exp(-col), col * ((1.0 - exp(-top)) / max(top, 1e-6)), dusk * smoothstep(0.5, 2.5, top));
+  col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
   // enough of what is behind or give enough of its light, or else as far
@@ -2607,7 +2602,8 @@ const SkySound = (() => {
   const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
   const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
-  const GLOW = 5;                         // the most stops above white the shoulder takes in
+  const GLOW = 5;                         // the most stops above white the shoulder takes in...
+  const DIM_BAND = 0.2, DROP = 2.5;       // ...and its top: DIM_BAND stops lower per stop dimmer, at most DROP
   const ADAPT_FAST = 0.2, ADAPT_SLOW = 0.5;  // s: towards less exposure, towards more
   const ADAPT_STOP = 0.01, ADAPT_START = 0.03;   // stops
 
@@ -2881,7 +2877,11 @@ const SkySound = (() => {
   //   brighten the sky again;
   // - where the floor holds the exposure above white's, the highlights
   //   (the band of glow at dusk) stand above white: the shader's shoulder
-  //   takes in that many stops, up to GLOW, keeping their hue.
+  //   takes in that many stops, up to GLOW, keeping their hue; and, as the
+  //   white point does, it ends DIM_BAND stops lower for each stop that
+  //   they are dimmer than daylight's, so the band dims as dusk deepens
+  //   (but by no more than DROP stops, so a faint glow stays), also late in
+  //   the twilight, when it no longer stands above white.
   function exposureFor(v) {
     const q = Float64Array.from(v).sort();
     const share = k => {
@@ -2894,8 +2894,13 @@ const SkySound = (() => {
     const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const exposure = Math.max(Math.min(key, white), floor);
-    // The exposure, and the stops for the shoulder.
-    return [exposure, Math.min(GLOW, Math.max(0, exposure + high - WHITE))];
+    // The exposure, and the shoulder's stops above white and below it.
+    // The top's drop is for the band of twilight: the sun below the
+    // horizon but still lighting the air (not the moonlit clouds of a night,
+    // nor anything by day), and highlights above the rest.
+    const band = Math.min(1, Math.max(0, (high - low - 1.5) / 2)) * state.sunOn * Math.min(1, Math.max(0, -state.elev));
+    return [exposure, Math.min(GLOW, Math.max(0, exposure + high - WHITE)),
+      Math.min(DROP, DIM_BAND * Math.max(0, DAY_HIGH - high)) * band * band * (3 - 2 * band)];
   }
 
   // ---------- Drawing ----------
@@ -3168,8 +3173,8 @@ const SkySound = (() => {
     const uShoulder = U('uShoulder');
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered),
-    // and the stops for the shoulder.
-    let logE = null, shoulder = 0;
+    // and the shoulder's stops above white and below it (uShoulder).
+    let logE = null, shoulder = 0, drop = 0;
     // Draws the view v, w by h pixels, into the bound framebuffer.
     const draw = (v, cam, w, h) => {
       if (tableHaze !== builtHaze) {
@@ -3257,14 +3262,14 @@ const SkySound = (() => {
     const levels = new Float64Array(METER[0] * METER[1]);
     // The exposure the meter last asked for (log2) and its stops for the
     // shoulder; the frames since the blocks were drawn (null: none waiting).
-    let target = null, targetShoulder = 0, waiting = null;
+    let target = null, targetShoulder = 0, targetDrop = 0, waiting = null;
     const readMeter = () => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.readPixels(0, 0, METER[0], METER[1], gl.RGBA, gl.UNSIGNED_BYTE, meterBytes);
       for (let i = 0; i < levels.length; i++) {
         levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
       }
-      [target, targetShoulder] = exposureFor(levels);
+      [target, targetShoulder, targetDrop] = exposureFor(levels);
     };
     // Meters the picture p; with wait, at once, else METER_LAG frames later (poll).
     const meterPicture = (p, wait) => {
@@ -3354,11 +3359,12 @@ const SkySound = (() => {
         // ADAPT_STOP, so that it does not lag the place by up to
         // ADAPT_START. The shoulder follows in the same way (more of it is
         // less light).
-        const d = target - logE, ds = targetShoulder - shoulder;
-        adapting = Math.max(Math.abs(d), Math.abs(ds)) > (adapting || state.speed > 0 ? ADAPT_STOP : ADAPT_START);
+        const d = target - logE, ds = targetShoulder - shoulder, dd = targetDrop - drop;
+        adapting = Math.max(Math.abs(d), Math.abs(ds), Math.abs(dd)) > (adapting || state.speed > 0 ? ADAPT_STOP : ADAPT_START);
         if (adapting) {
           logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
           shoulder += ds * (1 - Math.exp(-dt / (ds > 0 ? ADAPT_FAST : ADAPT_SLOW)));
+          drop += dd * (1 - Math.exp(-dt / (dd > 0 ? ADAPT_FAST : ADAPT_SLOW)));
         }
       }
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
@@ -3406,7 +3412,7 @@ const SkySound = (() => {
       gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
       gl.uniform1f(uPass, pass);
       gl.uniform1f(uSteps, steps);
-      gl.uniform1f(uShoulder, shoulder);
+      gl.uniform2f(uShoulder, shoulder, drop);
       draw(v, cam, w, h);
 
       // The picture: the mean so far, and this frame.
@@ -3446,6 +3452,7 @@ const SkySound = (() => {
         meterPicture(cur, true);
         logE = target;
         shoulder = targetShoulder;
+        drop = targetDrop;
         restart = true;
         turn = 1 - turn;
         return true;
