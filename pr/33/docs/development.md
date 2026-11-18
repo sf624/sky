@@ -346,6 +346,21 @@ The shaders must run on any WebGL2. The code keeps these rules:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
   cannot see (November 2026).
+- **Long loops, and loops with large bodies, too.** ANGLE on Direct3D 11
+  (Chrome and Edge on Windows) gives the program to Microsoft's HLSL
+  compiler (FXC), which inlines every call and may unroll any loop of
+  constant bounds; ANGLE marks no loop to stop it. The scene's program
+  then takes far longer to compile (on the owner's Windows machine main
+  took 10 to 15 s to its first picture, against 3.5 s here). The marches
+  (`LONG_N`: the clouds, the air, the sky over the sea) run to bounds the
+  compiler cannot know: with the cloud march of 400 steps unrolled, `fs`
+  was some 93 million tokens once every call is inlined, 0.64 million
+  without (main: 1.6 million). No such loop writes an array at its index:
+  FXC may have to unroll a loop that writes an array at an index it
+  cannot know (its warning X3550), and it cannot unroll one whose bound
+  it cannot know (error X3511). Write a vector instead (ANGLE turns a
+  vector's index into a switch), or give the loop constant bounds and a
+  small body. This machine cannot run FXC: check new loops by these rules.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

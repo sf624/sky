@@ -1177,7 +1177,7 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const float GEO_S = 0.3;           // the fine noise on the body: the seams of the heads of 71, 36, 18 m (cloudDetail)
+const float GEO_S = 0.15;          // the fine noise on the body: the seams of the heads of 71, 36, 18 m (cloudDetail)
 const float RELIEF = 0.85;          // the same for the fine noise
 const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
 const vec3 BODY_K = vec3(0.7, 0.4, 0.6); // how far the body's bumps of 2 km and 1 km stand out, and how deep its heads' seams go, km
@@ -1187,7 +1187,7 @@ const float BODY_D = 1.3;           // the fine noise's weight on it, against a 
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
-const float ERO_F = 0.12;           // the same for the fine heads: ERO_C times GEO_S
+const float ERO_F = 0.71 * GEO_S;  // the same for the fine heads: their deepest seam (B of uBody is 0.71 at most), see cloudField
 const float SKIN_F = 0.1;           // and over what depth they fade out deeper than their weight, km
 const float WISP = 0.6;             // how much the fine turrets carve the heads' middles low on a heap (wisps)
 const vec2 TOWER = vec2(0.34, 0.4);  // towers rise over G (the map's height of heaps) from x to x + y
@@ -1196,6 +1196,11 @@ const float PILE = 0.2;             // how far a tower's stacked thermals swell,
 const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
 const int CLOUD_STEPS = 400;
+// The long marches (the clouds, the air, the sky over the sea) run to
+// bounds the compiler cannot know (uRes is never negative), so that it
+// keeps them as loops: Direct3D's compiler (ANGLE on Windows) may unroll a
+// loop of constant bounds, which makes the program far longer to compile.
+#define LONG_N(n) ((n) + int(min(uRes.x, 0.0)))
 const vec4 MICRO = vec4(0.12, 0.07, 0.045, 0.05); // weights of the finer billows (cloudDetail)
 const float LIGHT_MIN = 0.015;       // the first step towards the light, at least (km)
 // The light in a cloud (see clouds), fitted once to a Monte Carlo of
@@ -1708,7 +1713,12 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   bump = 0.0;
   // (Scaled as the billows are: see steep.) On the heaps' 3D body the fine
   // turrets only carve: its surface stands out by fat for them, their
-  // seams go in from there, and they fade within SKIN_F of it.
+  // seams go in from there down to the body's surface, no deeper, and they
+  // fade within SKIN_F of it. (Round 18's seams went in twice as deep,
+  // some 150 m for heads of 71 m and less, and up to 90 m below the body's
+  // surface: near towers had flat patches with stepped outlines in their
+  // sides, where the seams cut through the skin of heads to the smooth body
+  // under it.)
   float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = carved * geoNear;
   float fat = steep * RELIEF * rough * sg * ERO_F;
   if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
@@ -2051,12 +2061,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // met a cloud at another step made the others wait through its light
   // in turn.
   int i = 0;
-  for (int pass = 0; pass < CLOUD_STEPS; pass++) {
+  for (int pass = 0; pass < LONG_N(CLOUD_STEPS); pass++) {
     bool need = false;
     float y, bump, body, edge, lump, fb, lod, f, stp, solidHere, next, a;
     vec3 p;
     vec4 q;
-    for (; i < CLOUD_STEPS; i++) {
+    for (; i < LONG_N(CLOUD_STEPS); i++) {
       if (t >= tb || Tc < 0.01) {
         // (A cloud still waiting for its point takes the light of the last
         // sample.)
@@ -2487,7 +2497,7 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
   vec3 od = vec3(0.0);
   vec4 Tv[3];
   float prev = 0.0;
-  for (int i = 0; i < NS; i++) {
+  for (int i = 0; i < LONG_N(NS); i++) {
     float f = (float(i) + 1.0) / float(NS);
     float t1 = tmax * f * f;
     float dt = t1 - prev;
@@ -3328,7 +3338,7 @@ void main() {
     if (sa <= 0.0) j = NV;
   }
   int layer = 0;
-  for (int i = 0; i < NV + NSHADE + NFAR + 2; i++) {
+  for (int i = 0; i < LONG_N(NV + NSHADE + NFAR + 2); i++) {
     if (j >= n) break;
     float t1;
     if (j < NV) {
@@ -5832,7 +5842,7 @@ const SkySound = (() => {
       if (logE === null) {
         const from = [w, h, cam, v.fov, v.alt, v.cloud, v.look, state.sun, state.sunOn, state.moon, state.moonI,
           state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, state.lightShare, builtHaze, fine].join();
-        meterPicture(cur, probe || from === primed ? null : 'now');
+        if (!probe) meterPicture(cur, from === primed ? null : 'now');
         if (probe) {
           primed = from;
           return true;
@@ -5895,6 +5905,14 @@ const SkySound = (() => {
       const drew = render(true, performance.now(), true);
       [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
       if (!drew) return;                     // the canvas has no place on the page yet
+      // Its meter, once the GPU has drawn it: metered at once after its
+      // draws (the first of each program), the meter sometimes read the
+      // picture before it was drawn (WSL's Direct3D 12 driver under ANGLE,
+      // about one load in fifteen with the 256^3 body): it read black, the
+      // first frame began some 17 stops too bright, and the still after 46
+      // frames was another picture.
+      await settle();
+      meterPicture(pictures[turn], null);
       // And show, which only the second frame draws: into the meter's
       // blocks (8 bits, as the canvas), without a pixel (the scissor).
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);

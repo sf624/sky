@@ -129,8 +129,11 @@ The JS then runs once, at load, and does little:
      (`render` as a probe, which then puts its state back), and `show` once
      without a pixel (the scissor). Some drivers finish a program only at
      its first draw, which can take a second: that happens now. Once a
-     fence says the GPU is done, the meter of that frame is read: the read
-     does not wait.
+     fence says the GPU is done, that frame is metered, and once another
+     says the meter is drawn, it is read: the read does not wait. (Metered
+     right after its draws, the meter sometimes read the picture before it
+     was drawn, about one load in fifteen on the test machine with the
+     256^3 body: the first frame then began some 17 stops too bright.)
 3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
    without WebGL2 or if a program failed: the error goes to the console,
    the loading state fades out, and the canvas keeps its CSS gradient).
@@ -670,11 +673,15 @@ smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cov
 - The fine noise (`cloudDetail`) is weighed `BODY_D` = 1.3 on the body
   (`steep` there). On the body it is the heads of `uBody` again, read 7
   times finer (`DETAIL`): heads of 71, 36 and 18 m, their seams `GEO_S` =
-  0.3 deep in all, so that the heads go on down in the same form, a
+  0.15 deep in all, so that the heads go on down in the same form, a
   cauliflower from 2 km to 18 m (the `MICRO` noise adds smaller billows
-  near). They carve too: the surface stands out by `fat` (`ERO_F` = 0.4 of
-  their weight), their seams go in from there, and deeper than their
-  weight they fade out over `SKIN_F` = 100 m. Low on a heap's sides
+  near). They carve too: the surface stands out by `fat` (`ERO_F`: their
+  deepest seam, 0.71 of their weight), their seams go in from there down
+  to the body's surface and no deeper, and deeper than their weight they
+  fade out over `SKIN_F` = 100 m. (In round 18 the seams went twice as
+  deep and the surface stood out by their mean, 0.4: the seams of heads of
+  71 m and less went 90 m under the body's surface, and cut the skin of
+  heads through to the smooth body in patches with stepped outlines.) Low on a heap's sides
   (`heapUp` under 0.15 to 0.45) they carve the heads' middles instead
   (`WISP` = 0.6 of the way), and leave the seams as ragged wisps. All this
   within 4 km of the eye, fading out by 8 km; farther the body has no fine
