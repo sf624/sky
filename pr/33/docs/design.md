@@ -147,6 +147,8 @@ The JS then runs once, at load, and does little:
      right after its draws, the meter sometimes read the picture before it
      was drawn, about one load in fifteen on the test machine with the
      256^3 body: the first frame then began some 17 stops too bright.)
+     With cirrus the frame is drawn and metered a second time, at the
+     exposure the first reading gave (see [Exposure](#exposure-and-the-tone-curve)).
    - A context lost meanwhile (`webglcontextlost`: the GPU process
      restarted, or its driver gave up) ends the loading with an error at the
      next wait, instead of waiting for a fence for ever.
@@ -2245,7 +2247,13 @@ the page starts adapted. The loading has drawn that frame before and read
 its meter without waiting (`prime`, see
 [From the address bar](#from-the-address-bar-to-the-first-frame)); only if
 something changed since (a resize, say) does the first frame read it
-itself, the one read that waits.
+itself, the one read that waits. With cirrus, `prime` draws and meters it
+twice, the second time at the exposure the first reading gave: the light
+the cirrus scatters forward rolls off on the screen (`CI_ROLL`, after the
+exposure), so a bright sheet near the sun meters darker at an exposure of
+1 than it is shown; metered once, the default view started 0.1 stops too
+bright (-0.73 against the -0.84 its picture asks for) and faded down over
+its first 37 frames, so that at rest it drew 76 frames where 40 do.
 
 **The exposure the picture asks for** (`exposureFor`, log2) comes from the
 2304 block levels, sorted:

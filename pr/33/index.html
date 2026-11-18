@@ -7213,8 +7213,9 @@ const SkySound = (() => {
     C('uniform1i', 'uLightMap', 18);
     C('uniform2fv', 'uLogRange', LOG_RANGE);
     let tableHaze = null;
-    // The exposure, log2 (null until the first picture has been metered).
-    let logE = null;
+    // The exposure, log2 (null until the first picture has been metered),
+    // and what the first picture is drawn at to meter it (see prime).
+    let logE = null, firstE = 0;
     // ?expo=L in the address pins it at L (log2, for tests: the tools compare
     // a flight with a still at the exposure the flight ended with). Without
     // it, expo is null and the meter sets the exposure. window.__exposure
@@ -7255,12 +7256,12 @@ const SkySound = (() => {
         ['uniform1f', 'uMoonI', state.moonI * moonAirFor()],
         ['uniformMatrix3fv', 'uSky', false, state.sky],
         ['uniform1f', 'uHaze', state.haze],
-        ['uniform1f', 'uExposure', 2 ** (logE ?? 0)],
+        ['uniform1f', 'uExposure', 2 ** (logE ?? firstE)],
         ['uniform1f', 'uLook', v.look],
         ['uniform3fv', 'uBalance', balanceFor()],
         ['uniform1f', 'uSaturation', saturationFor()],
-        ['uniform1f', 'uNightEye', nightEyeFor(logE ?? 0)],
-        ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? 0)],
+        ['uniform1f', 'uNightEye', nightEyeFor(logE ?? firstE)],
+        ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? firstE)],
         ['uniform1f', 'uAlt', v.alt],
         ['uniform1f', 'uCloud', v.cloud],
         ['uniform1f', 'uWind', state.wind],
@@ -7868,11 +7869,20 @@ const SkySound = (() => {
     // meter read once the GPU has drawn it: so the first frame need not
     // wait for the GPU. On drivers that finish a program at its first draw,
     // this also gets that out of the way before the first frame.
-    const prime = async () => {
+    // With cirrus it is drawn twice: at an exposure of 1, then at the
+    // exposure that metered, and metered again. The light the cirrus
+    // scatters forward rolls off on the screen (see cirrusLight): metered at
+    // 1 alone, a bright sheet near the sun read darker than it is shown, and
+    // the page started a tenth of a stop too bright and faded down over its
+    // first second, drawing for 76 frames at rest where 40 do.
+    const probe = () => {
       const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn];
       const drew = render(true, performance.now(), true);
       [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
-      if (!drew) return;                     // the canvas has no place on the page yet
+      return drew;
+    };
+    const prime = async () => {
+      if (!probe()) return;                  // the canvas has no place on the page yet
       // Its meter, once the GPU has drawn it: metered at once after its
       // draws (the first of each program), the meter sometimes read the
       // picture before it was drawn (WSL's Direct3D 12 driver under ANGLE,
@@ -7890,6 +7900,13 @@ const SkySound = (() => {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
       gl.useProgram(prog);
+      await settle();
+      readMeter();
+      if (pin !== null || target === null || !(state.cirrus > 0)) return;
+      firstE = target;
+      probe();
+      await settle();
+      meterPicture(pictures[turn], null);
       await settle();
       readMeter();
     };
