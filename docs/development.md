@@ -54,6 +54,7 @@ These are read directly.
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
+| `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
 With `date` and no `moon`, the moon's age follows the given date.
@@ -138,6 +139,20 @@ these rules, and new work at start should too:
 - GPU work at start goes in `batches`, with a fence after each.
 - No `readPixels`, `getError` or `finish` that waits for the GPU while the
   page loads.
+- On Windows (ANGLE on Direct3D 11) a program is compiled at link for one
+  target, and again at its first draw into two or more, on the GPU
+  process's main thread: the whole browser waits, and a long compile
+  there loses the context (7d1a635's scene: 124 s at link and 121 s
+  more at its first frame, measured; on the owner's browser,
+  `CONTEXT_LOST_WEBGL` right then). So the large programs draw into one target: the
+  scene writes its distance as the depth, the cirrus's pass its numbers
+  as the bits of one target and the depth (see
+  [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
+  ice program needs three targets: it is drawn once into a pixel of three
+  as soon as it links (`warm`), and its second compile runs while the
+  scene's programs still compile. `?timing` prints where the time goes;
+  `node tools/sky.mjs d3d` measures it on Windows from WSL (see
+  [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
@@ -230,6 +245,80 @@ The numbers to tune, all in `index.html`:
 | `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
 | `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
 
+The cirrus's map, ice and way are built once, by their own program
+(`ice`), during the loading (or when cirrus is first shown, if the page
+starts without it). Measured with `perf` at 1920 x 1080 on the RTX 3090 on
+2026-11-18 (round 13 of the cirrus), two runs each, alternated: the first
+picture came 5.25 to 5.33 s after navigation with `cirrus=0.5`, as round
+12 (5.25 to 5.32 s), against 3.69 to 3.84 s for `main`; with `cirrus=0`,
+4.33 to 4.39 s against round 12's 4.47 to 4.53 s and `main`'s 3.59 to
+3.77 s (the ice program is then not compiled, but the scene's program
+holds the cirrus's code). Round 16 (the stirred frame, the erosion,
+the sheets' turned cells, frayed heads and broken strands) made the ice
+program larger: the first picture with `cirrus=0.5` came 0.75 s later
+than round 15's. Most of that was not the GPU's time (without the ice's
+work, the first picture came only some 0.15 s sooner) but the driver
+finishing the larger program: its three calls of `iceSystems` and two
+of `iceStrands` were each a copy, and every loop was unrolled. Round 17
+calls each once and keeps the ice's loops as loops (`ICE_N`); measured
+on 2026-11-18, two runs each, alternated, all on main f2b0707 except
+round 15 (on 0d4e736), at 1920 x 1080: the first picture with
+`cirrus=0.5` came 5.41 to 5.73 s after navigation, against round 16's
+6.78 to 6.85 s, round 15's 5.79 to 6.08 s and main's 3.91 to 3.93 s
+(the machine was some 0.4 s slower that hour than in the morning); the
+frame took 8.76 to 8.79 ms at the default view (round 16: 8.79 to
+8.83), 9.95 to 10.01 ms just under the shell (round 16: 10.36 to 10.43,
+round 15: 9.98 to 10.05) and, at 2560 x 1440 at the cruise view
+(`date=319&at=150,90`), 15.61 to 15.67 ms (round 16: 15.57 to 15.62,
+main 13.70 to 13.71). Round 18 (the depth a low sun's light meets read
+towards the sun: one more `lite` read of both decks, where the sun is
+under some 30 degrees), measured the same day against round 17 and main
+in the same hour, two runs each: the first picture with `cirrus=0.5`
+4.93 to 4.97 s (round 17: 5.00 to 5.01, main 3.46); the frame 8.93 to
+8.94 ms at the default view (8.82 to 8.84; main 7.78), 10.14 to 10.15 ms
+under the shell (10.02 to 10.06; main 5.00 to 5.07), 15.78 to 15.82 ms
+at the cruise view at 2560 x 1440 (15.66 to 15.70; main 13.72 to
+13.77), and at dusk 7.50 to 7.52 ms from the ground and 9.31 to 9.34 ms
+from 11 km (7.34 to 7.37 and 9.17 to 9.21). Round 19 (the turning wind,
+`ciWarp`, read at every place the cirrus is read, and where the cirrus
+and its tails gather, `ciGather`, once per deck and pixel), measured the
+same day against round 18 and main in the same hour, two runs each: the
+first picture with `cirrus=0.5` 5.38 to 5.48 s (round 18: 4.95 to 5.03;
+main 3.48 to 3.50) and with `cirrus=0` 4.51 to 4.63 s (4.10 to 4.12);
+the frame 9.53 ms at the default view (8.87 to 8.94; main 7.71 to
+7.73), 11.67 to 11.80 ms under the shell (10.07 to 10.12; main 5.00 to
+5.07) and 16.78 to 16.82 ms at the cruise view at 2560 x 1440 (15.79 to
+15.82; main 13.72 to 13.75). Gradient noise of some 128 and 51 km for the
+turning wind took the frame under the shell to 17.3 ms and the first
+picture to 7.5 s: four shear waves (`CI_WAVES`) replaced it. The loops
+with bounds the compiler cannot know (`LONG_N`, the cirrus's march)
+changed nothing here, measured on 2026-11-19 against round 19,
+two runs each: the same stills and GL trace, the frame 15.1 to 15.4 ms at
+the default view at 2560 x 1440, 20.3 to 20.4 ms under the shell and 16.7
+to 16.8 ms at the cruise view, and the first picture 5.6 to 5.7 s at 1920
+x 1080 (Mesa did not unroll those loops). The cirrus's own pass
+(`CIRRUS_PASS`), measured on 2026-11-19 against 7d1a635 at 2560 x 1440,
+two runs each, the pass and the scene together: the frame 15.1 to 15.2 ms
+at the default view (15.2 to 15.3), 18.5 to 18.7 ms under the shell
+(20.3 to 20.4) and 16.5 ms at the cruise view (16.7), and the first
+picture 5.6 to 6.4 s (6.6 to 7.0). The machine's times drift by several tenths
+from run to run and with other work on the GPU. The cirrus's loops are
+kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
+more to finish the scene's program). Each call of `ciDensity` is a copy,
+so the march, the second read of a long crossing and the depth the sun's
+light feels (`cirrusDepth`) read it `lite`; the mean age and the strands'
+phase are drawn as further targets of the ice's own pass. The scene takes
+8.8 ms a frame at 1920 x 1080 with `cirrus=0.5` at the default view
+(round 12: 9.1; `main` 7.7), and 9.0 ms just under the shell looking up
+(`alt=11.9&pitch=28&cirrus=0.6`; round 12: 14.3, round 11: 7.6): the
+hairs are three reads of a texture (`uIcePhase`) where round 12 drew
+explicit strands on two ways in three octaves. Most of the rest is not the building
+(some 0.25 s of GPU time for the ice) but the driver finishing the large
+ice program at its first draw (about 0.3 s); it was 1.7 s while the ice
+was part of the `noise` program, which every page draws. A renderer
+without a GPU builds the textures a quarter as wide (see
+[design.md](design.md#cirrus)). Views with `cirrus=0` build nothing.
+
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
 to 0.35 of the canvas per side (see
@@ -278,28 +367,82 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
     `MIE_EXT`, `MIE_PHASE`, `MIE_G_UP`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
-    `LN_FLUX_MAX` and `WEATHER_KM`. `RG` is also in the `mean` shader.
-  - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
-    `fs` shaders.
+    `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
+    earthshine). `RG` is also in the `mean` shader.
+  - The integer hash `ihash` (lowbias32): in the `noise`, `ice`, `waves`
+    and `fs` shaders.
+  - The layout of the cirrus's textures (the ice's four kinds in RGBA;
+    the way as the gradient at twice its angle, and the ice's mean age
+    with its weight; the map's channels):
+    `iceField`, `iceWay`, `iceFibres` and `ciMap` in the `ice` shader,
+    `ciDensity` in `fs`.
+  - `WEATHER_KM` and `ICE_KM`: in the `ice` shader too.
+  - erf after Winitzki: `iceErf` in the `ice` shader, `ciPhi` in `fs`.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
-    (`BASE_KM / 128.0`) and the cirrus's `T0`, `T1`, `T2`.
+    (`BASE_KM / 128.0`).
   - The size of the weather map, 1024: `WEATHER` in the JS;
     `WEATHER_KM / 1024.0` in `addSea`.
   - The wind's direction, towards (2, 1): in the `noise` shader (`pw`), in
     the `waves` shader (`WIND`, an angle) and in `fs` (`WIND`, a vector).
-  - The cirrus's frame, along (3, 1) and across (-1, 3): in the `noise`
-    shader and in `fs` (`CI_DIR`, `CI_UNIT`, and the `bend` in `ciDepth`).
-- **`fs` is two programs.** `makeSky` compiles it a second time with
+  - The cirrus's frames, along (3, 1) and across (-1, 3) for the upper
+    deck, along (1, 1) for the lower: in the `ice` shader (the bands of
+    `ciMap`, and `ICE_KM`, half a unit of the upper frame) and in `fs`
+    (`ciTile`).
+- **One flat loop over a neighbourhood.** On Mesa's D3D12 driver (WSL),
+  two nested loops over the cells around a point (`for i in -2..0`, `for j
+  in -1..1`) came out wrong: the cirrus's streaks were cut along the
+  cells' edges, where the same sum written as one loop over nine cells
+  was right, and SwiftShader got both right. The code keeps one loop
+  over a neighbourhood where it needs one.
+- **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
+  of a whole number `x` equal to `p` gave `p` in places, not 0, and the
+  cirrus's noise had a seam along that lattice line. `iceNoise` and the
+  heads' cells in `iceSystems` and the strands' cells in `iceSheets`
+  wrap by hand,
+  `c - p * floor((c + 0.5) / p)`.
+- **`fs` is three programs.** `makeSky` compiles it again with
   `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
-  same cloud field. A change to the field changes both. The program's
+  same cloud field. A change to the field changes both. That program's
   uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
-  field reads must be set there too.
+  field reads must be set there too. And with `CIRRUS_PASS` defined: that
+  `main` draws the cirrus along each ray (`highCloud`) before the scene,
+  which reads it (`cirrusLight`). It gets the scene's uniforms by name:
+  the fixed ones (`C`, then `fixedFor`) and the view's (`view` in `draw`).
 - **Loops in code that rarely runs get a bound the compiler cannot know.**
   The compiler unrolls a loop of constant bounds, and the unrolled code
   makes the whole shader heavier for the GPU even where a branch skips it:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
   cannot see (November 2026).
+- **Each program small enough for Microsoft's compiler.** ANGLE on
+  Direct3D 11 (Chrome and Edge on Windows) gives each program to
+  Microsoft's HLSL compiler (FXC), which inlines every call: each call of
+  a function is a copy. Its time grows far faster than the program.
+  Measured on the owner's machine (RTX 3090, 2026-11-19; `D3DCompile` of
+  ANGLE's HLSL, timed alone): main's scene 7.8 s; the scene with the
+  cirrus of round 19 162 s, of 7d1a635 165 s; that scene without the
+  cirrus 11.8 s, the cirrus alone (its pass, as below) 27.3 s. So the
+  cirrus is a program of its own (`CIRRUS_PASS`), compiled beside the
+  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciHair`,
+  `cirrusDepth`) in either program shows as seconds there: make it in a
+  loop that already makes it (as the scene reads the clouds' and the
+  sea's shadows and the glare's depth in one loop: 13.7 s with three
+  calls, 8.4 s with one), or in the other program. Measured on the scene
+  of 7d1a635 (165 s): its flat reads as a loop the compiler cannot unroll
+  133 s (one copy of their body, not two); the last place and warp kept
+  from call to call in globals (`ciPlace`, `ciWarp`), removed, 105 s;
+  both 57 s. Global state that many copies read and write costs much:
+  keep such functions pure. Unrolling small loops did not help (the
+  gather unrolled 180 s; every small loop of the cirrus's pass unrolled
+  26 s against 21). In the whole scene, the bounds the compiler cannot
+  know (`LONG_N`, `CI_N`) and vectors in place of arrays written at a
+  loop's index (round 19 to 7d1a635) changed nothing measurable (162
+  against 165 s). In the cirrus's pass alone, the march and the veil's
+  octaves with constant bounds (as in round 19) took 15.3 s against 10.1:
+  the cirrus's loops keep `CI_N`. `LONG_N` changed nothing (the scene 8.1
+  s with it and without). Measure
+  a change of `fs` there: `node tools/sky.mjs d3d programs --base
+  origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
