@@ -255,7 +255,16 @@ frame took 8.76 to 8.79 ms at the default view (round 16: 8.79 to
 8.83), 9.95 to 10.01 ms just under the shell (round 16: 10.36 to 10.43,
 round 15: 9.98 to 10.05) and, at 2560 x 1440 at the cruise view
 (`date=319&at=150,90`), 15.61 to 15.67 ms (round 16: 15.57 to 15.62,
-main 13.70 to 13.71). The machine's times drift by several tenths
+main 13.70 to 13.71). Round 18 (the depth a low sun's light meets read
+towards the sun: one more `lite` read of both decks, where the sun is
+under some 30 degrees), measured the same day against round 17 and main
+in the same hour, two runs each: the first picture with `cirrus=0.5`
+4.93 to 4.97 s (round 17: 5.00 to 5.01, main 3.46); the frame 8.93 to
+8.94 ms at the default view (8.82 to 8.84; main 7.78), 10.14 to 10.15 ms
+under the shell (10.02 to 10.06; main 5.00 to 5.07), 15.78 to 15.82 ms
+at the cruise view at 2560 x 1440 (15.66 to 15.70; main 13.72 to
+13.77), and at dusk 7.50 to 7.52 ms from the ground and 9.31 to 9.34 ms
+from 11 km (7.34 to 7.37 and 9.17 to 9.21). The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
