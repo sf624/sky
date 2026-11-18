@@ -618,12 +618,17 @@ envelope from the weather map, with a 3D shape on its surface.
   balls, with more of them standing off the heap.
 - On that surface stand the turrets of `uBody` (see
   [Textures made at start](#textures-made-at-start)), read at the same
-  place in the noise as the billows (`q`), as bumps: each size moves the
-  surface out by up to `BODY_K` (700, 400, 250 and 140 m for the turrets
-  of 2 km, 1 km, 500 m and 250 m), in by less (`BODY_C` = 0.45 is the
-  value that moves it neither way). So the smaller ones sit on the larger
-  ones, a cauliflower; each bump rises about as fast as the envelope
-  falls, so a bump cannot stand alone in the air. A size counts only on
+  place in the noise as the billows (`q`). The two largest shape it, as
+  bumps: each moves the surface out by up to `BODY_K` (700 and 400 m for
+  the turrets of 2 km and 1 km), in by less (`BODY_C` = 0.45 is the value
+  that moves it neither way). The 500 m and 250 m ones only carve it
+  (erosion, after Schneider's clouds for games, 2015 to 2017): the body's
+  surface stands `ERO_C` = 0.55 of their weights (250 and 140 m) out for
+  them, a head's crown reaches it, and the seam between two heads goes in
+  by up to the weight. Deeper than that they fade out over `SKIN` = 150
+  m, so the core is whole. So the smaller ones sit on the larger ones, a
+  cauliflower, and nothing stands out of the body's surface but the large
+  lobes, which rise about as fast as the envelope falls. A size counts only on
   heaps whose dome may be as high as half of it and more
   (`smoothstep(0.5, 1.5, top (CT - CB) / size)`); on a sheet as if the
   dome were up to twice as high, with the 500 and 250 m sizes weighed 0.6
@@ -638,19 +643,32 @@ envelope from the weather map, with a 3D shape on its surface.
 - The fine noise (`cloudDetail`) is weighed `BODY_D` = 1.3 on the body
   (`steep` there). On the body it is the turrets of `uBody` again, read 7
   times finer (`DETAIL`): heads of 290, 140, 70 and 36 m, weighed `GEO_W`
-  (each stands out about a third of its width), so that the turrets go on
-  down in the same form, a cauliflower from 2 km to 36 m (the `MICRO`
-  noise adds smaller billows near), within 4 km of the eye, giving way to
+  = 0.15, 0.2, 0.12 and 0.05, so that the turrets go on down in the same
+  form, a cauliflower from 2 km to 36 m (the `MICRO` noise adds smaller
+  billows near). They carve too: the surface stands out by `fat` (`ERO_F`
+  = 0.55 of their weights), their seams go in from there, and deeper than
+  their weights they fade out over `SKIN_F` = 100 m. With the 290 m heads
+  weighed most (0.3, 0.18, 0.08, 0.03 before), close heaps were large,
+  soft lobes. Low on a heap's sides (`heapUp` under 0.15 to 0.45) they
+  carve the heads' middles instead (`WISP` = 0.6 of the way), and leave
+  the seams as ragged wisps. All this within 4 km of the eye, giving way to
   the Worley billows by 8 km (farther, where the heads are a pixel or
   less, a flight differed from a still at the place reached by more than
-  the `flight` check allows: 1.53 against 1.26). With the Worley billows of the sheet
+  the `flight` check allows: 1.53 against 1.26; with the turrets carving
+  only, 1.37 against 1.25 low, and 1.19 with a hazy rim 50 m deep on heaps
+  under 600 m, which cost 7 ms of the frame at 2 km). With the Worley billows of the sheet
   there, close heaps were smooth cream, like whipped cream or wax: large
   soft lobes. The 70 and 36 m heads weigh 0.08 and 0.03 (at 0.1 and 0.06
   the heaps were a busy grey rubble). On the body the cloud is at least
   0.9 rough (`q.w`): older, smoother cloud left some heaps without relief
-  (rough 0.45). At 1, the heads were smooth lobes, like putty; at 4,
+  (rough 0.45). At 1 (round 14), the heads were smooth lobes, like putty; at 4,
   ragged, with shreds round them; at 1.6 and more, a flight differed from a
   still at the place reached by more than the `flight` check allows.
+- The extinction in the body grows with the height over its base
+  (`cloudExtinction`), as the water does in air that rises and cools
+  without mixing (adiabatic), with its 2/3 power: `clamp((h - base /
+  1 km)^(2/3), 0.3, 1.2)` of `SIGMA`; elsewhere `0.45` at the base to 1 at
+  1.1 km. So a small heap is thin, and a tower's top dense.
 - `body` (how dense the cloud is) is at least 0.7 of the heap's top over
   the whole body: from the column under them, the heads that overhang a
   heap's thin foot were translucent, and the cloud behind showed through
@@ -658,7 +676,9 @@ envelope from the weather map, with a 3D shape on its surface.
   (`thin`).
 - The edge (`cloudField`) is 12 m deep on the upper part of a heap (its
   rising heads) and 70 m on its lower sides (a veil), by `heapUp`, the
-  height over the base against the envelope's top there. From 15 to 45 km
+  height over the base against the envelope's top there (crisper, 4 m
+  above the lowest sixth, a flight differed from a still by more than the
+  `flight` check allows). From 15 to 45 km
   away on, every edge of the body becomes a veil 150 m deep: from 11 km,
   small cumulus were cut out of the sea with hard outlines.
 - The early ways out of `cloudShape` take the field as if the bumps were
@@ -929,8 +949,13 @@ each cloud, not on its surface; no normal of the field enters it.
   map of the clouds' shadow (`cloudShadow`, read where the steps ended: it
   holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low; `tauB`,
-  away from the light, out to 1.55 km (five steps of 50 m growing by 2): how
-  much of the mass lies behind the place, as the light sees it; `P`, how
+  away from the light, out to 1.58 km (six steps of 25 m growing by 2, the
+  first three with the fine noise, the sideways stray growing over the
+  first 300 m): how much of the mass lies behind the place, as the light
+  sees it, so that the side of a head turned from the light, with little
+  behind it, is grey, as the Monte Carlo has it for small spheres (read
+  without the fine noise, the heads were lit as their smooth body: soft
+  lobes like cream); `P`, how
   deep the point lies under the surface: its view depth over that of
   `DARK_KM` = 70 m of dense cloud, eased (from the field smoothed over 70 m,
   `P` came out in blotches: 0 or 1 over whole billows). Under a deck, on
@@ -954,12 +979,18 @@ each cloud, not on its surface; no normal of the field enters it.
   that comes through the cloud along directions drawn over the sky's
   hemisphere by the cosine to the up, new for each pixel and frame, two of
   them mirrored about the vertical (on a wall, one goes into it and one
-  away), each through four steps out to 2.4 km and `1 / (1 + SKYV.y tau)`.
+  away), each through five steps out to 2.4 km (30, 90, 270 and 810 m,
+  then the rest; the first two with the fine noise, so that a seam
+  between heads sees less of the sky than a crown) and `1 / (1 + SKYV.y
+  tau)`.
   The mean over the frames is the whole sky: a top sees all of it, a wall
   half, a base under a deep cloud the little that comes through it. It has
   the gain `SKYV.x` and is less near the surface as above (`SKYV.z`). The
-  same directions, times how far each lies towards the sun's side, give
-  the sky's lean with the sun low (`skyLean`; `main` adds it with the lean
+  same directions, times how far each lies towards the sun's side and
+  `e^-tau` that way (only the sky seen unscattered keeps its direction;
+  through the two streams, a face turned from the glow got nearly as much
+  as one turned to it, and a deck at dusk had no relief), give the sky's
+  lean with the sun low (`skyLean`; `main` adds it with the lean
   of the mean light, `msLean`, so that a face towards the glow gets 1.4
   times the mean at +2 degrees, as a Monte Carlo study found; 3 pi / 4
   makes a wall towards the sun's side get what it got by its normal). Not
@@ -987,9 +1018,21 @@ each cloud, not on its surface; no normal of the field enters it.
   0.014. The same form fails on slabs (their tops 2 to 4 times too bright
   with the sun 10 degrees high, half as bright with it 60 degrees high: it
   has no factor for the light per unit area of a flat top), so decks keep
-  their own terms (below). The sky's unit (`SKY_UNIT` = 0.35) was measured
-  on the picture: a white matt surface lit by `2 cloudSky` came out as
-  bright as the sky 25 to 50 degrees up only at 0.3 to 0.4 of it.
+  their own terms (below). The sky's unit, a white matt surface facing up
+  under the sky as drawn, is worked out (`uSkyLight`, below), against `2
+  cloudSky`: 0.29 to 0.71 of it, more low down and at dusk. (Round 15 took
+  0.35, measured on the picture by day; it is right at 3 km by day, but
+  the cosine-weighted mean of `skyAt` over the sky, which matches the sky
+  as drawn within 2 %, is 1.7 times that at 0.6 km and 1.5 to 2 times
+  from sunset to 3 degrees after, and a deck at dusk was a dark slab.)
+  The moon's and the night's light on the clouds keep 0.35.
+- *`uSkyLight`*: 16 heights from `CB` to `CT` by the three `vec4` of
+  wavelengths; each texel the sun's part of the sky's light on a white
+  matt surface facing up (64 directions by the cosine, `skyAt`), over `2
+  uSunI cloudSky`. `fs` draws it (`uStage` 2, `skyLightTexel`) before a
+  frame whose sun or haze has changed. The light through a deck seen from
+  under it keeps its unit of `2 cloudSky` (it was set against
+  photographs).
 - *Seen from below*, the lower part of a cloud (`basal`) under more than
   2 to 6 of depth (`below`) shows the light that came down through the
   cloud, of the sun and of the sky, spread out (`throughDeck`, which the
@@ -1754,7 +1797,11 @@ Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
 and `meter` read unit 6. Units 10 to 12 hold the first stage of the
 clouds' light (see Low clouds). Unit 14 holds the clouds' shadow map
 (`uShadow`, `SHADOW` texels square, RGBA16F or RGBA8, linear), drawn
-while the page runs (see [The clouds' shadow](#the-clouds-shadow)).
+while the page runs (see [The clouds' shadow](#the-clouds-shadow)). Unit
+21 holds the sky's light on the clouds (`uSkyLight`, 16 x 3, RGBA16F or
+RGBA8 at a quarter, linear), drawn by `fs` (`uStage` 2) before a frame
+whose sun or haze has changed (see Low clouds); it too is off its unit
+while the draw writes it.
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km

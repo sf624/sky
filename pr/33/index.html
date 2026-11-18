@@ -1103,13 +1103,18 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const vec4 GEO_W = vec4(0.3, 0.18, 0.08, 0.03); // the fine noise on the body: turrets of 290, 140, 70, 36 m (cloudDetail)
+const vec4 GEO_W = vec4(0.15, 0.2, 0.12, 0.05); // the fine noise on the body: turrets of 290, 140, 70, 36 m (cloudDetail)
 const float RELIEF = 0.85;          // the same for the fine noise
 const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
 const vec4 BODY_K = vec4(0.7, 0.4, 0.25, 0.14); // how far the body's bumps of 2 km, 1 km, 500 m, 250 m stand out, km
 const float BODY_C = 0.45;          // the value of the turrets that neither raises nor lowers the surface
 const float BODY_B = -0.15;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
 const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
+const float ERO_C = 0.55;           // how far out the body's surface stands for the turrets that carve it, of their weight
+const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
+const float ERO_F = 0.286;          // the same for the fine turrets: (1 - BODY_C) times the sum of GEO_W
+const float SKIN_F = 0.1;           // and over what depth they fade out deeper than their weight, km
+const float WISP = 0.6;             // how much the fine turrets carve the heads' middles low on a heap (wisps)
 const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
 const float CLUMP = 2.0;            // how much the cover far off gathers heaps into clumps (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
@@ -1131,10 +1136,11 @@ const float MS_UP = 0.704;
 const vec3 MSD = vec3(5.0, 0.0074, 0.039);
 const float DARK = 0.589, DARK_KM = 0.07;
 const vec3 SKYV = vec3(2.205, 0.0382, 0.317);
-// The sky's light on the clouds (main) is 2 sAmb times cloudSky; a white
-// matt surface under the sky as drawn is 0.35 of that (measured on the
-// picture: such a surface came out as bright as the sky 25 to 50 degrees
-// up only at 0.3 to 0.4). The Monte Carlo's unit is that surface.
+// The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
+// what a white matt surface facing up under the sky as drawn sends out, of
+// 2 cloudSky (uSkyLight: 0.3 to 0.7, more low down and at dusk). The Monte
+// Carlo's unit is that surface. By the moon and at night, 0.35 of it
+// (SKY_UNIT), as by day at 3 km.
 const float SKY_UNIT = 0.35;
 // The view's optical depth into a cloud within which the light is worked
 // out (see clouds).
@@ -1325,7 +1331,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // ones (the low heaps that stand out of it were a rubble of small heads).
   vec4 bw = BODY_K * smoothstep(vec4(0.5), vec4(1.5), top * (CT - CB) * (1.0 + sheet) / vec4(2.0, 1.0, 0.5, 0.25)) * vec4(1.0, 1.0, 1.0 - 0.4 * sheet, 1.0 - 0.5 * sheet);
   // (shift: with more cloud, less inward, so that the slider's cover stays.)
-  float bumpMax = dot(bw, vec4(1.0 - BODY_C)), shift = BODY_B + 0.09 * smoothstep(0.4, 0.7, uCloud);
+  float bumpMax = (bw.x + bw.y) * (1.0 - BODY_C) + ERO_C * (bw.z + bw.w), shift = BODY_B + 0.09 * smoothstep(0.4, 0.7, uCloud);
   // Over a dome's top, env rises by gTop per km; before the slope is known,
   // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
   float gTop = 3.0 / (top * (CT - CB));
@@ -1428,7 +1434,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // far the bumps stand out here, for the light: low in a cleft. The fine
     // noise weighs BODY_D on it, against a dome's top.)
     vec4 t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
-    float disp = dot(bw, t - BODY_C);
+    // The 2 km and 1 km turrets shape the body (its lobes). The 500 m and
+    // 250 m ones only carve it: the seams between their heads go in by up
+    // to their weight, their crowns stay where the body's surface is
+    // (ERO_C of their weight out of it, so that the cover stays), and
+    // deep in the body they carve nothing. So no head stands off the body
+    // as a ball, and heads meet in narrow seams.
+    float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * (bw.z + bw.w);
+    float disp = u - dEnv - shift - (bw.z * (1.0 - t.z) + bw.w * (1.0 - t.w)) * (1.0 - smoothstep(0.0, SKIN, u - bw.z - bw.w));
     float fb = BODY_G * (dEnv + disp + shift);
     f = mix(f, fb, solid);
     float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
@@ -1490,7 +1503,9 @@ float cloudDetail(vec3 q, float lod, float rough) {
   // (Only within 4 to 8 km: farther, where they are a pixel or less, a
   // flight differed from a still at the place reached by more than the
   // flight check allows, and the Worley billows serve. So too with the
-  // light taken from depths alone: 1.32 against a limit of 1.26 in cruise.)
+  // light taken from depths alone, 1.32 against a limit of 1.26 in cruise,
+  // and with the turrets carving only: 1.37 against 1.25 low, 1.19 with a
+  // hazy rim 50 m deep on heaps under 600 m, which cost 7 ms at 2 km.)
   float f = 0.0, sg = solidAt * geoNear;
   if (sg < 1.0) {
     vec4 d = textureLod(uNoise, q * DETAIL, lod + 1.7);
@@ -1498,8 +1513,12 @@ float cloudDetail(vec3 q, float lod, float rough) {
     f = 0.15 * (d.r - 0.571) + 0.4 * (d.g - 0.712) + 0.3 * (d.b - 0.715) + 0.2 * (d.a - 0.715);
   }
   if (sg > 0.0) {
+    // They only carve (see cloudField): seams in, crowns where the surface
+    // is. Low on a heap's sides they carve the heads' middles instead,
+    // leaving the seams as ragged wisps.
     vec4 tb = textureLod(uBody, q * DETAIL, lod + 1.7);
-    f = mix(f, dot(GEO_W, tb - BODY_C), sg);
+    tb = mix(tb, 1.0 - tb, WISP * (1.0 - smoothstep(0.15, 0.45, heapUp)));
+    f = mix(f, dot(GEO_W, tb - 1.0), sg);
   }
   // Near the eye, smaller billows on those: the same noise 8 times finer
   // (billows of 36 m down to 2 m), and 8 times finer again, each turned
@@ -1538,7 +1557,8 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   edge = mix(EDGE, 0.01, smoothstep(0.45, 1.3, q.w));
   // On the 3D body, crisp on the rising heads of its upper part (12 m:
   // the body's field rises by BODY_G per km), and softer, a veil, on its
-  // lower sides, as in photographs.
+  // lower sides, as in photographs. (Crisper, 4 m above the lowest sixth,
+  // a flight differed from a still by more than the flight check allows.)
   edge = mix(edge, mix(0.07, 0.012, smoothstep(0.35, 0.8, heapUp)), solidAt);
   // Thin cloud (the edge of a heap's foot, and the fragments beside it)
   // frays: its fringe is deeper, some 100 m (the field rises by about 4
@@ -1556,15 +1576,20 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // Shreds under a base are thin and ragged: a deep, faint fringe.
   edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
   bump = 0.0;
-  // (Scaled as the billows are: see steep.)
-  if (fine && q.w > 0.0 && c > -0.25 * RELIEF * steep) {
-    float d = cloudDetail(q.xyz, lod, q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)));
+  // (Scaled as the billows are: see steep.) On the heaps' 3D body the fine
+  // turrets only carve: its surface stands out by fat for them, their
+  // seams go in from there, and they fade within SKIN_F of it.
+  float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = solidAt * geoNear;
+  float fat = steep * RELIEF * rough * sg * ERO_F;
+  if (fine && q.w > 0.0 && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
+    float d = cloudDetail(q.xyz, lod, rough), fo = f + fat;
     // The sides and tops have billows; a base is flat, and only its broad
     // mottling shows. Here and there a shred hangs below it.
     // (On the heaps' 3D body, whose turrets reach higher values, only the
     // highest: with 0.12 there, small heaps seen from under them had flat,
     // bright shreds with sharp outlines round their bases.)
-    bump = min(f + steep * d, base + 0.8 * max(d - mix(0.12, 0.3, solidAt), 0.0)) - c;
+    bump = min(fo + steep * d * (1.0 - sg * smoothstep(fat / ERO_F, fat / ERO_F + BODY_G * SKIN_F, fo)),
+               base + 0.8 * max(d + fat / steep - mix(0.12, 0.3, solidAt), 0.0)) - c;
   }
   return c + bump;
 }
@@ -1582,14 +1607,19 @@ float cloudExtinction(float f, float lod, float y, float body, float edge) {
   // The edge thins slowly at first, as a fringe of wisps; seen from afar it
   // is smoothed over the pixel, and the smoothing sets its width.
   float s = 1.5 * TEXEL_KM * exp2(lod), x = clamp(f / max(edge, s), 0.0, 1.0);
-  return SIGMA * x * mix(x, 1.0, min(s / edge, 1.0))
-       * mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)) * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
+  // In a heap's 3D body the water grows with the height over its base, as
+  // in air that rises and cools without mixing (adiabatic), and the
+  // extinction with its 2/3 power: a small heap is thin and grey, a tower's
+  // top dense.
+  float up = mix(mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)), clamp(pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2), solidAt);
+  return SIGMA * x * mix(x, 1.0, min(s / edge, 1.0)) * up * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
 }
 
-// Extinction (per km) at p. fine: with the fine noise.
+// Extinction (per km) at p. fine: with the fine noise and the slope (else
+// as a read that sums a depth over long steps: see coarse).
 float cloudDensity(vec3 p, float lod, bool fine) {
   float y, bump, body, edge;
-  coarse = true;
+  coarse = !fine;
   float f = cloudField(p, lod, fine, y, bump, body, edge);
   coarse = false;
   return f > 0.0 ? cloudExtinction(f, lod, y, body, edge) : 0.0;
@@ -1645,6 +1675,14 @@ float lightDepth(vec3 p, vec3 dir, float ds, float lod, vec3 off, int i0, int i1
 // The map is drawn again only when the aircraft has flown some way: it is
 // read where a point was when it was drawn, uShadowShift (km) away.
 uniform sampler2D uShadow;
+// The sky's light on a white matt surface facing up at 16 heights from CB
+// to CT (x), for the four wavelengths of each of the three vec4 (y), of 2
+// cloudSky there (8 bits: a quarter of it, uSkyEnc 4). fs draws it (uStage
+// 2) when the sun or the haze has changed: the table of the mean light is
+// smooth in the sky's directions and missed up to 2 / 3 of it at dusk.
+uniform sampler2D uSkyLight;
+uniform float uSkyEnc;
+bool skyMoon = true;
 uniform vec2 uShadowShift;
 const float SHADOW_K = 40.0;
 const vec4 SHADOW_H = vec4(CB, 1.3, 2.3, 3.5);
@@ -2105,7 +2143,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // directions mirrored about the vertical: on a wall one goes into
         // it and one away. skyLean: the same times how far each direction
         // lies towards the sun's side (the lean of the sky's light with the
-        // sun low).
+        // sun low), only as far as the sky shows through unscattered that
+        // way: the light that came through cloud has forgotten where it
+        // came from. (Through the two streams, a face turned from the glow
+        // got nearly as much of it as one turned to it, and a deck at dusk
+        // had no relief.)
         // (Not where the light that came down through a deck takes over,
         // seen from under it or from inside a cloud: there neither is used.)
         bool under0 = fog || basal * smoothstep(2.0, 6.0, above) > 0.999;
@@ -2118,15 +2160,18 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         for (int k = 0; k < 2; k++) {
           if ((k == 1 && behind) || under0) break;
           vec3 w = (k == 0 ? 1.0 : -1.0) * (h.x * eastL + h.y * northL) + sqrt(1.0 - u1) * upL;
-          float tw = 0.0, sw = 0.0, dw = 0.06;
-          for (int j = 0; j < 4; j++) {
-            tw += cloudDensity(ps + w * (sw + 0.5 * dw), max(log2(0.5 * dw / TEXEL_KM), lod), false) * dw;
+          // (The first two steps, 30 and 90 m, see the fine turrets: a seam
+          // between heads sees less of the sky than a crown.)
+          float tw = 0.0, sw = 0.0, dw = 0.03;
+          for (int j = 0; j < 5; j++) {
+            if (j == 4) dw = 2.4 - sw;
+            tw += cloudDensity(ps + w * (sw + 0.5 * dw), max(log2(0.5 * dw / TEXEL_KM), lod), j < 2) * dw;
             sw += dw;
             dw *= 3.0;
           }
           float tk = skyThrough(tw);
           sky += tk;
-          skyLean += tk * dot(w, sunSide);
+          skyLean += exp(-tw) * dot(w, sunSide);
         }
         if (!behind) {
           sky *= 0.5;
@@ -2137,10 +2182,13 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // went into a big mass comes back out of its lit face; a small one
         // lets it through.
         tauB = 0.0;
-        float sb = 0.0, db = 0.05;
-        for (int j = 0; j < 5; j++) {
+        // (The first three steps, out to 175 m, see the fine turrets: the
+        // side of a head away from the light has little behind it, and is
+        // grey, as the Monte Carlo has it for small spheres.)
+        float sb = 0.0, db = 0.025;
+        for (int j = 0; j < 6; j++) {
           if (under0) break;
-          tauB += cloudDensity(ps - uLight * (sb + 0.5 * db) + off, max(log2(0.5 * db / TEXEL_KM), lod), false) * db;
+          tauB += cloudDensity(ps - uLight * (sb + 0.5 * db) + off * min(sb / 0.3, 1.0), max(log2(0.5 * db / TEXEL_KM), lod), j < 3) * db;
           sb += db;
           db *= 2.0;
         }
@@ -2255,7 +2303,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // less cloud surrounds the point, as the sun's light scattered many
       // times.
       float skyDark = mix(SKYV.z, 1.0, P);
-      amb = mix(SKY_UNIT * SKYV.x * sky * skyDark, cells * deck.y, below);
+      // (The light through a deck, seen from under it or inside, keeps the
+      // unit it was set in against photographs, 2 cloudSky: main scales all
+      // of this by the white surface's light, unit.)
+      float unitHere = below > 0.0 ? uSkyEnc * textureLod(uSkyLight, vec2(clamp((heightAt(ps) - CB) / (CT - CB), 0.0, 1.0) * 15.0 / 16.0 + 0.5 / 16.0, 0.5), 0.0).y : 1.0;
+      amb = mix(SKYV.x * sky * skyDark, cells * deck.y / unitHere, below);
       // With the sun low, the sky's light comes more from the sun's side
       // (the glow) than from the other: what sees the sky on that side gets
       // more of it, warm, and what sees it on the other side less, the blue
@@ -2265,7 +2317,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // with the mean light alone. (3 pi / 4: a wall towards the sun's side
       // gets as much as it did by its normal.)
       float low = 1.0 - smoothstep(0.05, 0.35, uLight.y);
-      lean = (1.0 - below) * low * SKY_UNIT * SKYV.x * skyDark * 2.356 * skyLean;
+      lean = (1.0 - below) * low * SKYV.x * skyDark * 2.356 * skyLean;
       // The samples that waited for this point take its light.
       sOne += pend * one;
       sMany += pend * many;
@@ -2320,7 +2372,7 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
       Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     }
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI, 1.0, 1.0, phaseSun, dir, Tv, S);
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI, 1.0, 1.0, phaseMoon, dir, Tv, S);
+    if (uMoonI > 0.0 && skyMoon) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI, 1.0, 1.0, phaseMoon, dir, Tv, S);
     od += 0.5 * dens.xyz;
   }
 }
@@ -3002,7 +3054,31 @@ void main() {
   outColor = m;
 }
 #else
+// One texel of uSkyLight: the sky's light (the sun's part) on a white
+// matt surface facing up (its irradiance over pi), from 64 directions over
+// the sky by the cosine, against 2 cloudSky.
+vec4 skyLightTexel(ivec2 ij) {
+  float h = CB + (CT - CB) * float(ij.x) / 15.0;
+  vec3 pc = vec3(0.0, RG + h, 0.0);
+  vec4 ms[3], S[3];
+  cloudSky(h, uSun.y, ms);
+  vec4 E = vec4(0.0);
+  skyMoon = false;
+  for (int j = 0; j < 64; j++) {
+    float u1 = (float(j / 8) + 0.5) / 8.0, a = 2.0 * PI * (float(j % 8) + 0.5 * float(j / 8 % 2)) / 8.0;
+    skyAt(pc, vec3(sqrt(u1) * vec2(cos(a), sin(a)), sqrt(1.0 - u1)).xzy, BETA_M * uHaze, BETA_M * uHaze * MIE_EXT, S);
+    E += (ij.y == 0 ? S[0] : ij.y == 1 ? S[1] : S[2]) / 64.0;
+  }
+  vec4 m = 2.0 * uSunI * (ij.y == 0 ? ms[0] : ij.y == 1 ? ms[1] : ms[2]);
+  return mix(vec4(SKY_UNIT), E / max(m, 1e-30), step(1e-30, m)) / uSkyEnc;
+}
+
 void main() {
+  if (uStage == 2.0) {
+    outColor = skyLightTexel(ivec2(gl_FragCoord.xy));
+    outAux = vec4(0.0);
+    return;
+  }
   shadowAxes();
   // (Stage 0 draws every second pixel's ray, of the picture's uRes.)
   vec2 uv = ((gl_FragCoord.xy * (uStage == 0.0 ? 2.0 : 1.0) + uJitter) * 2.0 - uRes) / uRes.y;
@@ -3045,15 +3121,17 @@ void main() {
       cloudSky(rc - RG, dot(pc, uSun) / rc, msS);
       cloudSky(rc - RG, dot(pc, uMoon) / rc, msM);
       msLean(rc - RG, dot(pc, uSun) / rc, lhS, lvS);
+      float sh = clamp((rc - RG - CB) / (CT - CB), 0.0, 1.0) * 15.0 / 16.0 + 0.5 / 16.0;
       for (int k = 0; k < 3; k++) {
+        vec4 unit = uSkyEnc * textureLod(uSkyLight, vec2(sh, (float(k) + 0.5) / 3.0), 0.0);
         // The sky's light on a face is the mean light plus twice its lean
         // along the face's normal (a first moment: msLean); the light from
         // above is in the table already, so only the lean towards the sun's
         // side is added here (sLean). A face turned away keeps at least a
         // quarter: there the sky above still lights it, where a first moment
         // would leave nothing of the red.
-        vec4 sky = max(2.0 * sAmb * msS[k] + 4.0 * sLean * lhS[k], 0.5 * sAmb * msS[k]);
-        C[k] = uSunI * sky + sAmb * (2.0 * uMoonI * msM[k] + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
+        vec4 sky = unit * max(2.0 * sAmb * msS[k] + 4.0 * sLean * lhS[k], 0.5 * sAmb * msS[k]);
+        C[k] = uSunI * sky + SKY_UNIT * sAmb * (2.0 * uMoonI * msM[k] + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
         if (lit) C[k] += uLightI * (sOne + sMany) * dim * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
       }
     }
@@ -5236,6 +5314,33 @@ const SkySound = (() => {
     gl.activeTexture(gl.TEXTURE0);
     gl.useProgram(prog);
     gl.uniform1i(U('uShadow'), 14);
+    // The sky's light on the clouds (see uSkyLight in fs), on unit 21, 16 by
+    // 3 texels: fs draws it (uStage 2) before a frame whose sun or haze has
+    // changed. Half floats where the GPU can draw to them, else 8 bits (a
+    // quarter of it).
+    const skyLightTarget = gl.createFramebuffer();
+    let skyLightFor = '', skyLightMap = null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, skyLightTarget);
+    gl.activeTexture(gl.TEXTURE21);
+    for (const format of fine ? [gl.RGBA16F, gl.RGBA8] : [gl.RGBA8]) {
+      const map = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, map);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, format, 16, 3);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+        [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
+        gl.texParameteri(gl.TEXTURE_2D, k, v);
+      }
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, map, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+        gl.uniform1f(U('uSkyEnc'), format === gl.RGBA8 ? 4 : 1);
+        skyLightMap = map;
+        break;
+      }
+      gl.deleteTexture(map);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U('uSkyLight'), 21);
     // The map of the tops (see uTops in fs), on unit 16, one texel for each
     // of the weather map's: fs draws it (topsProg) in two draws, the tops
     // over each texel into a first texture (on unit 17), then the highest of
@@ -5478,6 +5583,20 @@ const SkySound = (() => {
       gl.uniform1f(uSteps, steps);
       // The map of the tops, for this frame's clouds.
       if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
+      // The sky's light on the clouds, for this frame's sun and haze.
+      const skyKey = v.cloud > 0 ? [...state.sun, state.sunOn, state.haze].join() : '';
+      if (skyKey && skyKey !== skyLightFor) {
+        // (Its unit is free while the draw writes it; draw expects unit 0.)
+        bind(21, null);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, skyLightTarget);
+        gl.uniform1f(uStage, 2);
+        draw(v, cam, 16, 3);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+        bind(21, skyLightMap);
+        gl.activeTexture(gl.TEXTURE0);
+        skyLightFor = skyKey;
+      }
       // The shadow map, for this frame's light and clouds, and a place near enough.
       const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
       let shift = [wrapped(state.drift[0] - shadowAt[0]), wrapped(state.drift[1] - shadowAt[1])];
