@@ -161,10 +161,25 @@ function programsOf(html) {
   return list;
 }
 
+// The Chrome processes started with a profile (by its path on their command line).
+const processesOf = (prof) => win('powershell.exe', ['-NoProfile', '-Command',
+  `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${prof}*' } | ForEach-Object { $_.ProcessId }`])
+  .split('\n').map((s) => s.trim()).filter(Boolean);
+const kill = (pids) => {
+  for (const pid of pids) { try { win('taskkill.exe', ['/PID', pid, '/T', '/F']); } catch {} }
+};
+// The run going on, for the exit handler: an interrupted run kills its Chrome too.
+let current = null;
+process.on('exit', () => {
+  if (!current) return;
+  try { kill(processesOf(current.prof)); fs.rmSync(current.dir, { recursive: true, force: true }); } catch {}
+});
+
 // One headless Windows Chrome on Direct3D 11 at url, until the page reports `done` or `limit` s pass.
 async function runChrome(url, reports, id, { limit, size }) {
   const temp = winTemp(), prof = `sky-d3d-${process.pid}-${id}`;
   fs.mkdirSync(path.join(temp.wsl, prof));
+  current = { prof, dir: path.join(temp.wsl, prof) };
   const child = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', `--user-data-dir=${temp.win}\\${prof}`,
     '--disable-gpu-shader-disk-cache', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     `--window-size=${size.w},${size.h}`, url], { cwd: '/mnt/c', stdio: 'ignore' });
@@ -172,21 +187,19 @@ async function runChrome(url, reports, id, { limit, size }) {
   const t0 = Date.now();
   while (Date.now() - t0 < limit * 1000 && !reports.some((r) => r.ev === 'done')) await sleep(250);
   const timedOut = !reports.some((r) => r.ev === 'done');
-  const mine = () => win('powershell.exe', ['-NoProfile', '-Command',
-    `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${prof}*' } | ForEach-Object { $_.ProcessId }`])
-    .split('\n').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < 10; i++) {
-    const pids = mine();
+    const pids = processesOf(prof);
     if (!pids.length) break;
-    for (const pid of pids) { try { win('taskkill.exe', ['/PID', pid, '/T', '/F']); } catch {} }
+    kill(pids);
     await sleep(1000);
   }
   child.kill();
   for (let i = 0; i < 10; i++) {
     try { fs.rmSync(path.join(temp.wsl, prof), { recursive: true, force: true }); break; } catch { await sleep(1000); }
   }
-  const left = mine();
+  const left = processesOf(prof);
   if (left.length) throw new Error(`d3d: Chrome processes of ${prof} left: ${left.join(' ')}`);
+  current = null;
   return timedOut;
 }
 
@@ -255,6 +268,8 @@ function print(name, run, mode, got, timedOut, limit) {
     return;
   }
   for (const g of got.filter((g) => g.ev === 'console')) console.log(`  ${g.msg}`);
+  const shown = got.find((g) => g.ev === 'shown');
+  if (shown) console.log(`  ${shown.failed ? 'failed' : 'first picture'} at ${shown.at.toFixed(2)} s (since the navigation)`);
   const f = got.find((g) => g.ev === 'frames');
   if (f?.median) console.log(`  GPU time per frame at ${f.w} x ${f.h}: median ${f.median.toFixed(2)} ms, p90 ${f.p90.toFixed(2)} ms`);
 }

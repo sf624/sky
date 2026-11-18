@@ -195,10 +195,13 @@ not lose the context even where a draw held the GPU process for 143 s
 (also with `--gpu-watchdog-timeout-seconds=2`), where a browser with a
 window does: watch the times of the second compiles, not for a loss.
 
-Measured on the owner's machine on 2026-11-19 (`d3d programs`, a program
-alone): main's `fs` links in 7.7 to 9.8 s and takes as long again at its
-first draw into its two targets; 7d1a635's `fs` 138 to 152 s, and 143 s
-more at that draw.
+Measured on the owner's machine on 2026-11-19 (`d3d programs`, each
+program alone, in s: its link, then its first draw into all its targets):
+main's `fs` 6.4 and 6.0; round 19's 98.9 and 114.9; 7d1a635's 124.0 and
+121.5; now `fs` 8.9 and `fs (CIRRUS_PASS)` 9.7, one target each, and
+`ice` 3.9 and 4.4 (three targets). `d3d page`, three runs each at
+2560 x 1440, the first picture: main 17.1 to 18.7 s, round 19 253 to
+297 s, 7d1a635 252 to 292 s, now 13.4 to 17.2 s.
 
 ## Timings and limits
 
