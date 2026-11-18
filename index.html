@@ -1596,9 +1596,15 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   float rep = max(round(WEATHER_KM / (0.0096 * uWind * uWind)), 1.0) / WEATHER_KM;
   vec2 slope = vec2(0.0);
   float hidden = 0.0, crest = 0.0;
+  // A footprint as wide as the waves averages them all (R, G 0.5, B 0.125).
+  // The read still has some of the longest in it at 0.12 of the map: it
+  // fades into that mean over the factor of three before, so that no edge
+  // shows where the read stops. The fade is of R, G and B, and h is taken
+  // after it: what slope loses, hidden gains.
   for (int i = 0; i < 3; i++) {
-    vec4 w = vec4(0.5, 0.5, 0.125, 0.0);             // a footprint as wide as the waves averages them all
-    if (along * rep < 0.12) w = textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep);
+    float far = smoothstep(-1.585, 0.0, log2(along * rep / 0.12));
+    vec4 w = vec4(0.5, 0.5, 0.125, 0.0);
+    if (far < 1.0) w = mix(textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep), w, far);
     vec2 s = 8.0 * w.rg - 4.0;
     float h = max(8.0 * w.b - dot(s, s), 0.0);
     slope += s;
@@ -2329,8 +2335,11 @@ void main() {
     }
     vec3 ol = depthToTop(o, uSun);
     for (int k = 0; k < 3; k++) {
-      G[k] += uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
-      L[k] += G[k];
+      // Only the glare is new here: G already holds the sun's disc or its
+      // glitter, and L has it.
+      vec4 g = uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
+      G[k] += g;
+      L[k] += g;
     }
   }
 

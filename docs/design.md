@@ -639,7 +639,11 @@ cloud around each sample in finer detail than the map can hold.
   Reads use `textureGrad` with the pixel's footprint on the sea (long when
   seen aslant). What the footprint averages away stays in the variance
   (`hidden`, from B of the wave map), so the glitter has the same light
-  from near and from far.
+  from near and from far. A band is no longer read where the footprint is
+  0.12 of its tile or wider: it is the map's mean there. The read still
+  holds some of the longest waves at that size, so it fades into the mean
+  over the factor of three before (R, G and B together, and `hidden` after
+  the fade): no edge shows where the read stops.
 - **Glitter.** The share of slopes that mirror the light to the eye, with
   Fresnel and Smith's shadowing term (`waveShade`, in the rational form of
   Walter et al., 2007).
@@ -885,7 +889,9 @@ all dimmed and reddened by the air:
 
 **Glare**: a glow of a few degrees around the sun, as strayed
 light in a lens, dimmed by the clouds (the shadow map at the eye) and the
-cirrus towards the sun.
+cirrus towards the sun. It is drawn within 26 degrees of the sun
+(`mu > 0.9`), and added to `L` and to `G` alone: `G` already holds the
+sun's disc or its glitter, which `L` has.
 
 ## Exposure and the tone curve
 
