@@ -54,6 +54,7 @@ These are read directly.
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
+| `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
 With `date` and no `moon`, the moon's age follows the given date.
@@ -138,6 +139,11 @@ these rules, and new work at start should too:
 - GPU work at start goes in `batches`, with a fence after each.
 - No `readPixels`, `getError` or `finish` that waits for the GPU while the
   page loads.
+- On Windows (ANGLE on Direct3D 11) a program is compiled again at its
+  first draw into two or more targets, while the GPU process waits (see
+  [design.md](design.md#from-the-address-bar-to-the-first-frame)): the
+  scene's program is compiled twice there. `?timing` prints where the
+  time goes.
 
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
@@ -275,7 +281,13 @@ the frame 9.53 ms at the default view (8.87 to 8.94; main 7.71 to
 5.07) and 16.78 to 16.82 ms at the cruise view at 2560 x 1440 (15.79 to
 15.82; main 13.72 to 13.75). Gradient noise of some 128 and 51 km for the
 turning wind took the frame under the shell to 17.3 ms and the first
-picture to 7.5 s: four shear waves (`CI_WAVES`) replaced it. The machine's times drift by several tenths
+picture to 7.5 s: four shear waves (`CI_WAVES`) replaced it. The loops
+kept from Direct3D's unrolling (`LONG_N`, the cirrus's march, the GLSL
+rules) changed nothing here, measured on 2026-11-19 against round 19,
+two runs each: the same stills and GL trace, the frame 15.1 to 15.4 ms at
+the default view at 2560 x 1440, 20.3 to 20.4 ms under the shell and 16.7
+to 16.8 ms at the cruise view, and the first picture 5.6 to 5.7 s at 1920
+x 1080 (Mesa did not unroll those loops). The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
@@ -385,6 +397,21 @@ The shaders must run on any WebGL2. The code keeps these rules:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
   cannot see (November 2026).
+- **Long loops, and loops with large bodies, too.** ANGLE on Direct3D 11
+  (Chrome and Edge on Windows) gives the program to Microsoft's HLSL
+  compiler (FXC), which inlines every call and may unroll any loop of
+  constant bounds; ANGLE marks no loop to stop it. The scene's program
+  then takes far longer to compile (on the owner's Windows machine main
+  took 10 to 15 s to its first picture, against 3.5 s here, and the
+  cirrus of round 19 did not start within minutes). The marches
+  (`LONG_N`: the clouds, the air, the sky over the sea) and the cirrus's
+  loops (`CI_N`, `ICE_N`) run to bounds the compiler cannot know. No such
+  loop writes an array at its index: FXC may have to unroll a loop that
+  writes an array at an index it cannot know (its warning X3550), and it
+  cannot unroll one whose bound it cannot know (error X3511). Write a vector instead (ANGLE turns a
+  vector's index into a switch), or give the loop constant bounds and a
+  small body. This machine cannot run FXC: check new loops by these rules,
+  and ask for a run with `?timing` on Windows.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
