@@ -748,6 +748,100 @@ all dimmed and reddened by the air:
   takes only half of their light away: it scatters much of what it takes
   back towards the eye, and the sky from cruise brightens towards the
   horizon (by about 1.5 times at 5 degrees up) instead of staying flat.
+- **The zodiacal light** (`zodiacal`): sunlight scattered by the dust
+  between the planets, of the sun's colour, a cone along the ecliptic
+  that is brightest near the sun, a faint band along the rest of it, and
+  the gegenschein opposite the sun. It is a fit to the table of Leinert
+  et al. (1998, "The 1997 reference of diffuse night sky brightness",
+  A&AS 127, 1, Table 16: the brightness seen from the Earth at 500 nm, in
+  S10, stars of the 10th magnitude per square degree, by the ecliptic
+  latitude and the ecliptic longitude from the sun), within 4.5 % rms
+  and 13 % at most over its 182 values and the pole's 60: a falloff as
+  the power -2.46 of the angle from the sun, flattened towards the
+  ecliptic as seen around the sun (to a quarter square to it), over a
+  floor of 79, and two bumps at the point opposite the sun, one some 13
+  degrees across (the gegenschein) and one wider. Along the ecliptic it
+  is 9000 at 15 degrees from the sun, 1900 at 30, 400 at 60, 200 at 90,
+  140 at 135 and 180 opposite the sun; 60 at the ecliptic's poles. The
+  airglow (`NIGHT`) is about 130 overhead, and the Milky Way along its
+  plane about 65 away from its centre and 300 towards it (to 650 in its
+  brightest clouds). One S10 is
+  `S10` = 6.61e-12 of the sun's light per steradian (the sun at V =
+  -26.74). Inputs: the cosine of the angle from the sun (`uSun`) and the
+  sine of the ecliptic latitude, from the ecliptic's pole (`uEcliptic`,
+  set from `OBLIQUITY`); so it is the real ecliptic for the date, the
+  time and the place. Nearer the sun than the table goes (15 degrees on
+  the ecliptic), the power goes on, to 2 degrees. `zodiacal` returns the
+  cone (the power term) and the rest (the floor and the bumps) apart, and
+  for the cone as it is drawn (below) its brightness along the ecliptic
+  and its shape across it.
+
+  It is drawn only at night, once the night eye comes in (`uNightEye`):
+  by day and in civil twilight the sky is thousands of times brighter,
+  and leaving it out keeps every picture with the sun above -3 degrees as
+  it was. The air dims it as the Milky Way. Its floor and the gegenschein
+  are drawn as they are. Its cone is drawn as the eye sees it, a look like
+  the Milky Way's:
+  - **Shape.** Along the ecliptic it keeps the fit's brightness. Across
+    it, the fit widens with the angle from the sun (it is flattened by
+    the same ratio at every angle), and drawn so the cone spread into a
+    fan and read as a soft glow on the horizon. The eye sees a cone
+    instead, widest and brightest at its base, whose sides close in all
+    the way to its tip (Trouvelot's drawing of 1876, reports from dark
+    sites). So it is drawn as a band of half width (to 1/e) 20 degrees
+    at 15 degrees from the sun, narrowing fastest near the sun, towards 2
+    far from it (`ZODI_BAND`; 15 at 24 degrees, 9 at 50, 4 at 80), with
+    a skirt twice as wide (0.15 of it).
+  - **Brightness** (`zodiacalSeen`). It starts from the contrast c of
+    the cone's brightness along the ecliptic over what lies behind it
+    (the sky, the Milky Way and the rest of the zodiacal light), as the
+    rods see them: the airglow, bluer than sunlight, is brighter to them.
+    From `ZODI_SEEN` = 0.25 on, with a soft knee, the drawn sum of sky
+    and cone on its axis grows as c (so the cone is drawn some four
+    times its own light), and then levels off towards `ZODI_MOST` = 6
+    times the sky: the eye's response to so faint a glow is compressive,
+    and a cone 3 and one 10 times the sky look nearly alike. Without
+    that, the base near the sun burned out while the cone faded within 30
+    degrees of it. Across, that raise takes the band's shape, so the cone
+    is brightest on its axis and falls off smoothly to its sides. Made
+    the other way round (the contrast of the cone in its shape, then
+    levelled off), its lower half was a column with a flat top across
+    (round 3). The log of the sum never rises faster than the log of c,
+    so where the sky behind brightens faster than the cone (the last of
+    the twilight at the horizon) the sum does not darken: a steeper rise
+    (tried first: a smoothstep over the contrast) left a dark rim between
+    the cone and the glow at the horizon.
+  - **The moon.** A moon above the horizon fades the cone by 1 / (1 +
+    (m / `ZODI_MOON`)^2), m the moonlight (`uMoonI`); `ZODI_MOON` =
+    1.1e-7 of sunlight is about half a first quarter's. The eye loses so
+    faint a glow in moonlight sooner than its contrast says: from cruise,
+    where the moonlit air above is thin, the contrast alone left a
+    first-quarter moon's cone plain (42 levels over 29). Now a crescent
+    (age 4) leaves nine tenths of it, a first quarter a fifth, a full
+    moon nothing. The moon's veil in the eye is not in c: nothing draws
+    the veil, and counted in, it cut a dark hole into the cone around a
+    crescent standing in it.
+  - **What it leaves alone.** The exposure meter does not count the
+    zodiacal light (a faint glow over part of the sky does not change
+    how the rest is exposed): the exposure is the same as without it.
+    The Milky Way is raised by its contrast with the sky and the moon's
+    veil alone, as before. The faintest star seen counts the cone's own
+    light in its drawn shape, but not the floor nor the fit's wide
+    profile: counted in, they took 3 to 6 % of the stars all over the
+    sky, which were set to look right without them.
+
+  On a moonless spring evening (sun 18 degrees down, 35 degrees north)
+  the cone stands, over a sky of 7 to 22 levels of 255, about 25 (from
+  0.3 km) to 48 (from 11 km) levels at its base, 17 at 30 degrees up,
+  12 at 40, 9 at 50 and 5 at 60, and fades out by about 75 degrees up.
+  At half its height on the axis it is some 22 degrees wide near the
+  base, 14 at 30 degrees up and 9 at 60; where it stands 3 levels over
+  the sky, 37 to 41 near the base and 8 at 60. The Milky Way's brightest
+  clouds stand 17 to 26. On an autumn evening, with the ecliptic low, it
+  is a slanting band along the western horizon, 11 to 17 levels near its
+  base. Under a first-quarter moon it is a trace, under 10 levels from
+  cruise and 2 near the sea; under a full moon it is not drawn. It costs
+  a few operations per pixel of sky.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
@@ -809,7 +903,10 @@ in it at only `METER_GLINT` = 0.15 of their light (`G` in `main` and
 exposes for the rest. Photographs from cruise keep the sky as light
 facing the sun as away from it (h11-vueling01 and 03); counted in full,
 the glitter held the view towards the sun 1.5 to 2.4 stops below the
-view away, and the sky there was navy (round 10).
+view away, and the sky there was navy (round 10). The zodiacal light, as
+drawn, does not count at all (`zodiY`): with it counted, a spring
+evening's view of its cone was exposed 0.25 to 0.56 stops darker than
+without.
 
 **The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
 texels (`METER`): each is a block of the picture and holds the mean level

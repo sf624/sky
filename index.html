@@ -631,6 +631,7 @@ uniform float uSunI;    // 1, or 0 when the sun is too far down to matter
 uniform vec3 uMoon;     // unit vector towards the moon
 uniform float uMoonI;   // moonlight relative to sunlight (0 when it does not matter)
 uniform mat3 uSky;      // rotation of the stars since noon
+uniform vec3 uEcliptic; // the ecliptic's north pole, equatorial (J2000)
 uniform float uEarth;   // earthshine on the dark side of the moon
 // Star catalogue: a grid over the sphere (octahedral map), SLOTS stars per
 // cell. Texel: direction (J2000 equatorial), colour index + brightness.
@@ -726,6 +727,11 @@ const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands o
 const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
 const float MILKY_EYE = 6.5;    // the Milky Way raised at night (see main)...
 const vec2 MILKY_SEEN = vec2(0.08, 0.8);   // ...over this range of its contrast with the sky behind it
+const float ZODI_SEEN = 0.25;   // the zodiacal cone's contrast over the sky, to the rods, where the eye starts to see it (zodiacalSeen)...
+const float ZODI_MOST = 6.0;    // ...and the most it raises the sky behind it, as drawn
+const vec2 ZODI_BAND = vec2(20.0, 2.0);   // the cone's half width as drawn, degrees, at 15 degrees from the sun and far from it (zodiacal)
+const float ZODI_MOON = 1.1e-7;  // moonlight (of sunlight, uMoonI) that halves the cone as drawn: a first-quarter moon, up, leaves a fifth
+const float S10 = 6.61e-12;     // radiance of one star of the 10th magnitude per square degree, of the sun's light (V = -26.74)
 const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
 const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
 const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
@@ -832,6 +838,59 @@ float milkyWay(vec3 c) {
   float near = 0.5 + 0.5 * dot(c, CENTRE);
   float clouds = 0.5 * noise3(c * 5.0) + 0.3 * noise3(c * 11.0) + 0.2 * noise3(c * 23.0);
   return (0.8 + 3.0 * near * near) * exp(-b * b / (0.02 + 0.03 * near)) * (0.25 + 1.5 * clouds * clouds);
+}
+
+// The zodiacal light: sunlight scattered by the dust between the planets,
+// in S10 (stars of the 10th magnitude per square degree), from x, the cosine
+// of the angle from the sun, and y, the sine of the ecliptic latitude. A fit
+// to the table of Leinert et al. (1998, "The 1997 reference of diffuse night
+// sky brightness", A&AS 127, 1, Table 16: from the Earth, at 500 nm), within
+// 4.5 % rms and 13 % at most of its 182 values and the pole's 60: a cone that
+// falls off as the power -2.46 of the angle from the sun, flattened towards
+// the ecliptic as seen around the sun (x of the result), over a floor and
+// the gegenschein (some 13 degrees across) on a wider glow at the point
+// opposite the sun (y). And for the cone as it is drawn at night (see
+// zodiacalSeen), a look: z, its brightness along the ecliptic at this
+// angle from the sun, and w, its shape across: a band of half width
+// ZODI_BAND (to 1/e), 20 degrees at 15 degrees from the sun, narrowing
+// fastest near the sun towards 2 (15 at 24 degrees, 9 at 50, 4 at 80),
+// with a skirt twice as wide. The fit widens with the
+// angle from the sun (it is flattened by the same ratio at every angle):
+// drawn as it is, the cone spread into a fan and read as a soft glow on
+// the horizon, where the eye sees a cone, widest and brightest at its
+// base, whose sides close in all the way to its tip (Trouvelot's drawing
+// of 1876; reports from dark sites).
+vec4 zodiacal(float x, float y) {
+  float e = max(acos(clamp(x, -1.0, 1.0)), 0.035);  // from the sun, radians (at least 2 degrees)
+  float s = min(abs(y) * inversesqrt(max(1.0 - x * x * step(0.0, x), 1e-6)), 1.0);   // 0 on the ecliptic, 1 square to it
+  float across = 0.252 + 0.748 * exp(-pow(s / 0.419, 1.34));
+  float cone = 345.0 * pow(e, -2.46);
+  float b = degrees(asin(min(abs(y), 1.0))) / (ZODI_BAND.y + (ZODI_BAND.x - ZODI_BAND.y) * exp(-max(degrees(e) - 15.0, 0.0) / 30.0));
+  return vec4(cone * across,
+              78.6 * across + 19.3 * exp(-(1.0 + x) / 0.01) + 62.3 * exp(-(1.0 + x) / 0.511),
+              cone, 0.85 * exp(-b * b) + 0.15 * exp(-0.25 * b * b));
+}
+
+// How far the zodiacal cone raises the sky behind it on its axis, as drawn
+// at night (the drawn contrast), from c, the contrast of its brightness
+// along the ecliptic over that sky as the rods see it (the rest of the
+// zodiacal light included). A look for the eye's view, as the Milky Way is
+// raised: the eye sees so large and soft a glow from about ZODI_SEEN over
+// the sky, and then plainly, but its response to it is compressive. So the
+// drawn sum, sky and cone, grows as the cone's own contrast from ZODI_SEEN
+// on, with a soft knee (nothing is drawn well below it), and levels off
+// towards ZODI_MOST times the sky: a cone 3 times the sky and one 10 times
+// it look nearly alike. Its log never rises faster than the log of c, so
+// that where the sky behind brightens faster than the cone (the last
+// twilight at the horizon, the Milky Way) the sum still brightens: a
+// steeper rise left a dark rim along the horizon. Across the ecliptic the
+// raise takes the band's shape (zodiacal): applied after the levelling
+// off, it keeps a bright axis and soft sides, where levelling off the
+// shaped cone gave a column with a flat top.
+float zodiacalSeen(float c) {
+  float u = log(1.0 + pow(min(c, 1e4) / ZODI_SEEN, 6.0)) / 6.0;   // ln(c / ZODI_SEEN) above the knee
+  float top = log(ZODI_MOST);
+  return uNightEye * (exp(u * pow(1.0 + pow(u / top, 3.0), -1.0 / 3.0)) - 1.0);
 }
 
 // The faintest star the dark-adapted eye can see against a sky of b cd/m2
@@ -2020,6 +2079,7 @@ void main() {
   L[0] = vec4(0.0); L[1] = vec4(0.0); L[2] = vec4(0.0);
   G[0] = vec4(0.0); G[1] = vec4(0.0); G[2] = vec4(0.0);
   vec3 starCol = vec3(0.0);                          // the stars at night, added after the exposure
+  vec2 zodiY = vec2(0.0);                            // the zodiacal light as drawn, to the cones and to the rods (not metered)
   vec4 Tv[3];
   float prev = 0.0, vis = 1.0;
   bool cloudsFirst = tHigh < 0.0 || (tBar > 0.0 && tBar <= tHigh);
@@ -2133,7 +2193,12 @@ void main() {
     }
     // The stars as the eye sees them at night (see starsSeen): the faintest
     // it can see against this sky, and the faintest whose colour it sees.
+    // The zodiacal light (zodiacal), of the sun's colour, only at night: its
+    // floor and the gegenschein as they are, its cone as the eye sees it
+    // (zodiacalSeen). By day and in twilight until the night eye comes in,
+    // the sky hides it.
     vec2 seen = vec2(0.0);
+    float zodi = 0.0;
     if (uNightEye > 0.0) {
       float y = 0.0, ym = 0.0;
       for (int k = 0; k < 3; k++) {
@@ -2147,8 +2212,41 @@ void main() {
       // the moon is uMoonI of the sun's 133000 lux).
       float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
       float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
+      // The zodiacal cone's contrast to the rods, over the sky, the Milky Way
+      // and the rest of the zodiacal light behind it (the airglow, bluer
+      // than the zodiacal light, is brighter to them).
+      vec4 z = zodiacal(dot(d, uSun), dot(c, uEcliptic));
+      z.xyz *= 1.0 - moonMask;
+      float ys = 0.0, yz = 0.0, yzs = 0.0;
+      for (int k = 0; k < 3; k++) {
+        ys += dot(uWS[k], L[k] + tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0)) * (vanRhijn + milky));
+        yz += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], tg[k]);
+        yzs += dot(uWS[k], tg[k]);
+      }
+      // Drawn: zodiacalSeen of the contrast of the cone's brightness along
+      // the ecliptic (z.z) gives how far it raises that sky on its axis;
+      // across, it takes the band's shape (z.w), so that it is brightest on
+      // its axis and falls off smoothly to the sides, with no flat top. A
+      // moon up fades it (ZODI_MOON): the eye loses so faint a glow in
+      // moonlight sooner than its contrast says, and from cruise, where the
+      // moonlit air above is thin, the contrast alone left a first-quarter
+      // moon's cone plain. The moon's veil in the eye is left out of that
+      // contrast: nothing draws the veil, and counted in, it cut a dark
+      // hole into the cone around a crescent moon standing in it. Which
+      // stars the eye sees depends on the cone's
+      // light in its drawn shape. The floor and the fit's own wide profile
+      // are left out: the stars were set to look right against a sky
+      // without them, and they took 3 to 6 % of the stars all over the sky.
+      // The Milky Way is raised by its contrast with the sky and the moon's
+      // veil alone, as before the zodiacal light was drawn: counted in, it
+      // dimmed the Milky Way all over the sky.
+      float behind = ys + S10 * z.y * yzs;
+      float moonUp = uMoonI * smoothstep(-0.1, 0.2, uMoon.y) / ZODI_MOON;
+      float shape = z.w / (1.0 + moonUp * moonUp);
+      zodi = S10 * z.y + zodiacalSeen(S10 * z.z * yzs / max(behind, 1e-30)) * shape * behind / max(yzs, 1e-30);
+      zodiY = ISUN * zodi * vec2(yz, yzs);
       float back = CD * ISUN * y + veil;
-      seen = starsSeen(back + CD * ISUN * ym);
+      seen = starsSeen(back + CD * ISUN * (ym + S10 * z.z * z.w * yz));
       // The dark-adapted eye sees the Milky Way plainly where it stands well
       // over the sky and the moon's veil behind it, and not where its
       // contrast with them is under its threshold: raised MILKY_EYE times
@@ -2194,7 +2292,7 @@ void main() {
     float stars = uNight * STAR_GAIN * (1.0 - moonMask) * (1.0 - uNightEye);
     for (int k = 0; k < 3; k++) {
       G[k] = tk[k] * sun;
-      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0));
+      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0)) + tg[k] * zodi;
       else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
     }
     // At night as the eye sees them: a star at the faintest magnitude the
@@ -2266,7 +2364,9 @@ void main() {
     // mirrors it; the moonlit clouds and the glitter stay grey.
     float bluer = col.r > 0.0 ? smoothstep(0.0, 0.3, col.b / col.r * (ROD_TINT.r / ROD_TINT.b) - 1.0) : 0.0;
     float blue = uNightGrey * bluer * smoothstep(log(SKY_BLUE.x), log(SKY_BLUE.y), log(max(cd, 1e-12)));
-    col = mix(col, max(rods, 0.0) * mix(ROD_TINT, ROD_BLUE, blue), rodShare);
+    vec3 tint = mix(ROD_TINT, ROD_BLUE, blue);
+    col = mix(col, max(rods, 0.0) * tint, rodShare);
+    zodiY.x = mix(zodiY.x, zodiY.y * dot(tint, vec3(0.2126, 0.7152, 0.0722)), rodShare);
   }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
@@ -2278,7 +2378,10 @@ void main() {
     dot(uWR[0], G[0]) + dot(uWR[1], G[1]) + dot(uWR[2], G[2]),
     dot(uWG[0], G[0]) + dot(uWG[1], G[1]) + dot(uWG[2], G[2]),
     dot(uWB[0], G[0]) + dot(uWB[1], G[1]) + dot(uWB[2], G[2])));
-  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * max(glintY, 0.0);
+  // Nor does it count the zodiacal light (zodiacal): a faint glow over a
+  // part of the night sky, drawn as the eye sees it, does not change how
+  // the rest is exposed.
+  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - zodiY.x - (1.0 - METER_GLINT) * max(glintY, 0.0);
   float level = (log2(max(metered, 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
   // The stars at night (starCol), as the eye sees them: one at the eye's
@@ -3913,6 +4016,7 @@ const SkySound = (() => {
     gl.uniform4fv(U('uWL'), new Float32Array(WL.map(l => l / 550)));
     gl.uniform4fv(U('uMA'), new Float32Array(MA));
     gl.uniform1f(U('uNight'), NIGHT);
+    gl.uniform3f(U('uEcliptic'), 0, -Math.sin(OBLIQUITY), Math.cos(OBLIQUITY));
     gl.uniform4fv(U('uWR'), new Float32Array(W[0]));
     gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
     gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
