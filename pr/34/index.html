@@ -1353,12 +1353,23 @@ uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
 uniform sampler3D uNoise;
 // Weather map, repeating. R: cloud cover, G: towers, B: gusts on the sea.
 uniform sampler2D uWeather;
+#ifdef CIRRUS_PASS
+// The cirrus's pass (see highCloud): tHigh and lk, as their bits, and Th as
+// the depth. One target: see below.
+layout(location = 0) out uvec4 outCirrus;
+#else
 layout(location = 0) out vec4 outColor;
+#endif
+// The cirrus's pass, read by the scene: the bits of tHigh and lk, and Th.
+uniform highp usampler2D uCiPass;
+uniform sampler2D uCiDepth;
 // The aircraft's frames go on to the shader that joins them into a picture
-// (see there), with the distance of what each pixel shows (outAux). They are
-// kept in steps of 1 / uSteps.
+// (see there), with the distance of what each pixel shows as the depth
+// (distanceCode). They are kept in steps of 1 / uSteps.
+// (The distance is not a second target: ANGLE on Direct3D 11 compiles a
+// program again, while the GPU process waits, at its first draw into more
+// than one target, and this program takes seconds to compile.)
 uniform float uSteps;
-layout(location = 1) out vec4 outAux;
 
 const float PI = 3.14159265359;
 // The parameters of the air follow Bruneton's demo (2017): see THIRD_PARTY_NOTICES.md.
@@ -2543,11 +2554,10 @@ vec2 ciTile(vec2 uv, int k, out mat2 J) {
 }
 
 // Deck k's tile at x on the map (km): its coordinates there (ciTile), and
-// J, them over km on the map. The last place asked about is kept: the
-// hairs, the ice and its age are often read at the same place.
-vec3 ciPlaceKey = vec3(1e9);
-vec2 ciPlaceTc = vec2(0.0);
-mat2 ciPlaceJ = mat2(0.0);
+// J, them over km on the map.
+// (Not kept from call to call: kept, the last place and its warp
+// (ciWarp) took Microsoft's compiler (ANGLE on Direct3D 11) more than half
+// as long again over the cirrus's pass.)
 // The wind turns from region to region. The places the cirrus is read at
 // (its ice, its map, its bands) are moved by a smooth displacement over the
 // map, so that its forms turn with the region by some 0.3 rad (a standard
@@ -2563,35 +2573,25 @@ mat2 ciPlaceJ = mat2(0.0);
 // km), for the footprints.
 const vec3 CI_WAVES[4] = vec3[4](vec3(1.0, 2.0, 0.7), vec3(3.0, -1.0, 2.1), vec3(2.0, 3.0, 4.0), vec3(4.0, 1.0, 5.3));
 const float CI_SHEAR = 0.3;
-vec2 ciWarpKey = vec2(1e9), ciWarpX = vec2(0.0);
 mat2 ciWarpM = mat2(1.0);
 vec2 ciWarp(vec2 x) {
-  if (x != ciWarpKey) {
-    vec2 uv = x / WEATHER_KM, w = vec2(0.0);
-    mat2 g = mat2(0.0);
-    // (Unrolled: as a loop, the frame under the shell took some 0.4 ms more.)
-    for (int i = 0; i < 4; i++) {
-      vec3 wv = CI_WAVES[i];
-      float kl = length(wv.xy), ph = 6.2831853 * dot(wv.xy, uv) + wv.z;
-      vec2 kn = wv.xy / kl, across = vec2(-kn.y, kn.x);
-      w += CI_SHEAR * WEATHER_KM / (6.2831853 * kl) * (sin(ph) - sin(wv.z)) * across;
-      g += CI_SHEAR * cos(ph) * outerProduct(across, kn);
-    }
-    ciWarpX = x + w;
-    ciWarpM = mat2(1.0) + g;
-    ciWarpKey = x;
+  vec2 uv = x / WEATHER_KM, w = vec2(0.0);
+  mat2 g = mat2(0.0);
+  // (Unrolled: as a loop, the frame under the shell took some 0.4 ms more.)
+  for (int i = 0; i < 4; i++) {
+    vec3 wv = CI_WAVES[i];
+    float kl = length(wv.xy), ph = 6.2831853 * dot(wv.xy, uv) + wv.z;
+    vec2 kn = wv.xy / kl, across = vec2(-kn.y, kn.x);
+    w += CI_SHEAR * WEATHER_KM / (6.2831853 * kl) * (sin(ph) - sin(wv.z)) * across;
+    g += CI_SHEAR * cos(ph) * outerProduct(across, kn);
   }
-  return ciWarpX;
+  ciWarpM = mat2(1.0) + g;
+  return x + w;
 }
 vec2 ciPlace(vec2 x, int k, out mat2 J) {
-  vec3 key = vec3(x, float(k));
-  if (key != ciPlaceKey) {
-    ciPlaceTc = ciTile(ciWarp(x) / WEATHER_KM, k, ciPlaceJ);
-    ciPlaceJ = ciPlaceJ * ciWarpM;
-    ciPlaceKey = key;
-  }
-  J = ciPlaceJ;
-  return ciPlaceTc;
+  vec2 tc = ciTile(ciWarp(x) / WEATHER_KM, k, J);
+  J = J * ciWarpM;
+  return tc;
 }
 
 // The veil's thickness at tc (tile units of deck k's frame, where x runs
@@ -3032,16 +3032,6 @@ float cirrusDepth(vec2 x, float foot) {
   return cirrusDepth(x, vec2(foot, 0.0), vec2(0.0, foot));
 }
 
-// The depth of the thin cloud between a point under it and the light, as
-// direct light feels it. Ice scatters mostly forward, and that light still
-// arrives: half of the depth counts. The width of the sun and the light
-// scattered forward blur the fibres' shadows into their mean.
-float cirrusShadow(vec3 p) {
-  if (uCirrus <= 0.0) return 0.0;
-  vec3 pc = p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
-  return 0.5 * cirrusDepth(pc.xz + uDrift, 0.5) / max(dot(normalize(pc), uLight), 0.05);
-}
-
 // Light scattered once by a sheet of depth te along the view, lit through a
 // depth ts: the sheet sends te times the mean of exp(-t - ts(t)) along the
 // view, lit on the side the eye is on (sameSide), or through it.
@@ -3069,10 +3059,13 @@ vec2 ciLowSun(vec3 pc) {
   return vec2(duskK, tauP);
 }
 
-void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float tHigh, out vec4 H[3]) {
+// The cirrus along the ray (drawn by its own pass, CIRRUS_PASS): what it
+// lets through (Th), the distance its light comes from (tHigh; negative:
+// none), and three numbers of that light (lk, see cirrusLight).
+void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out vec3 lk) {
   Th = 1.0;
   tHigh = -1.0;
-  H[0] = vec4(0.0); H[1] = vec4(0.0); H[2] = vec4(0.0);
+  lk = vec3(0.0);
   // Where the ray is inside the shell: t0 to t1. From its base, a ray down
   // leaves it at once (lo.x is 0).
   vec2 lo = eyeSphere(o, d, CI_LO), hi = eyeSphere(o, d, CI_HI);
@@ -3113,9 +3106,10 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // Per deck (x: the lower, y: the upper; the fields, one vector a deck).
   vec2 colK = vec2(0.0), bodyK = vec2(0.0);
   vec4 fieldsK0 = vec4(-1.0), fieldsK1 = vec4(-1.0);
-  // (Two decks, constant bounds: the compiler may unroll it, twice. As a
-  // loop, the moonlit sheet came out a level of 8 bits apart in places.)
-  for (int k = 0; k < CI_LAYERS; k++) {
+  // (A loop the compiler cannot unroll: unrolled, its two copies took
+  // Microsoft's compiler, ANGLE on Direct3D 11, half as long again over the
+  // cirrus's pass.)
+  for (int k = 0; k < CI_N(CI_LAYERS); k++) {
     float lo = CI_DECK[k].x, hi = CI_DECK[k].y, th = hi - lo;
     vec2 el = eyeSphere(o, d, lo), eh = eyeSphere(o, d, hi);
     float s0, s1;
@@ -3302,10 +3296,7 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // which a min-deviation prism of ice draws.
   float mu = dot(d, uLight);
   float ph = 0.4 * hg(mu, 0.7) + 0.25 * hg(mu, -0.3), peak = 0.35 * hg(mu, 0.99);
-  float th = acos(clamp(mu, -1.0, 1.0));
   float mus = dot(up, uLight);
-  bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
-  vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
   // Sunlight dims on its way into the sheet (less the forward peak, which
   // goes on as if not scattered): its depth ts there, against te along
   // the view. Scattered once, the sheet sends to the eye te times the mean
@@ -3356,15 +3347,6 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // it.
   float onceD = mix(ciOnce(tauF, 0.15 * tsV * li, sameSide),
                     onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * tsV * li, sameSide), wn);
-  // Light from below: the low clouds, lit by the same sun, add to the sea
-  // that the mean sky already holds. Forward scattering sends more of it
-  // to an eye below the sheet.
-  float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
-  float wBelow = 0.5 + 0.35 * dot(d, up);
-  vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS;
-  float rc = length(pc);
-  if (uSunI > 0.0) multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
-  if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
   // The halo needs smooth hexagonal crystals, which thin cirrus has: it
   // shows faintly in thin fibrous cirrus (as in photographs of halos in
   // cirrus fibratus), more in a thin, even veil (cirrostratus), and fades
@@ -3390,15 +3372,40 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   float haloW = mix(0.17 + 0.08 * smoothstep(0.03, 0.3, veilT), 0.03 * smoothstep(0.1, 0.4, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
   float aL = mix(a, 1.0 - exp(-wideT), nightK);
   float onceL = mix(once, onceW, nightK);
+  // The light scattered forward, by wavelength, is uLightI times the
+  // sunlight that reaches the sheet times lk.y + lk.z times the halo's
+  // shape there (cirrusLight); lk.x is the share of the light from round
+  // about (aL).
+  float u = (1.0 - many) * onceL;
+  lk = vec3(aL, ph * u + (spread + 0.3 * hg(mu, 0.5)) * many * mix(onceD, onceW, nightK) + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
+}
+
+// The light of the cirrus (H) at tHigh along the ray, from the numbers lk
+// of its pass (see highCloud).
+void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3]) {
+  vec3 pc = o + d * tHigh, up = normalize(pc);
+  float mu = dot(d, uLight), th = acos(clamp(mu, -1.0, 1.0));
+  float mus = dot(up, uLight);
+  bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
+  vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
+  // Light from below: the low clouds, lit by the same sun, add to the sea
+  // that the mean sky already holds. Forward scattering sends more of it
+  // to an eye below the sheet.
+  float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
+  float wBelow = 0.5 + 0.35 * dot(d, up);
+  vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS;
+  float rc = length(pc);
+  if (uSunI > 0.0) multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
+  if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
   vec4 F[3];
   for (int k = 0; k < 3; k++) {
     vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
     vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
-    vec4 halo = haloW * mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
+    vec4 halo = mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
     vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z)) : vec4(0.0);
-    H[k] = aL * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k] + uNight * pow(uWL[k], vec4(-3.0)))
+    H[k] = lk.x * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k] + uNight * pow(uWL[k], vec4(-3.0)))
                 + uLightI * sun * wBelow * below);
-    F[k] = uLightI * sun * ((ph + halo) * (1.0 - many) * onceL + (spread + 0.3 * hg(mu, 0.5)) * many * mix(onceD, onceW, nightK) + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK));
+    F[k] = uLightI * sun * (lk.y + lk.z * halo);
   }
   // Towards the sun the sheet sends far more light than the sky round it
   // (thirty to fifty times, ten degrees off), more than the screen can
@@ -3412,14 +3419,31 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
 }
 
 // A distance (km; negative: infinitely far) as a number from 0 to 1, in 16
-// bits over two channels of 8.
-vec2 distanceCode(float t) {
+// bits: the depth of the frame, c / 65536 (exact in its 32-bit floats).
+float distanceCode(float t) {
   float c = floor((t > 0.0 ? clamp(0.5 + log2(t) / 20.0, 0.0, 0.99) : 1.0) * 65535.0 + 0.5);
-  float high = floor(c / 256.0);
-  return vec2(high, c - 256.0 * high) / 255.0;
+  return c / 65536.0;
 }
 
-#ifdef SHADOW_MAP
+#ifdef CIRRUS_PASS
+// The cirrus along each ray, before the scene: its program alone is the
+// size of the rest of the scene's, and ANGLE on Direct3D 11 compiles the
+// two at once, where the whole took minutes (Microsoft's compiler takes
+// far longer than twice as long for a program twice the size).
+void main() {
+  vec2 uv = ((gl_FragCoord.xy + uJitter) * 2.0 - uRes) / uRes.y;
+  vec3 d = normalize(uCam * vec3(uv * uTan, 1.0));
+  vec3 o = vec3(0.0, RG + uAlt, 0.0);
+  float tmax = raySphere(o, d, RT).y;
+  vec2 tg = raySphere(o, d, RG);
+  if (tg.x > 0.0 && tg.x < 1e8) tmax = tg.x;
+  float Th, tHigh;
+  vec3 lk;
+  highCloud(o, d, tmax, Th, tHigh, lk);
+  outCirrus = floatBitsToUint(vec4(tHigh, lk));
+  gl_FragDepth = Th;
+}
+#elif defined(SHADOW_MAP)
 // The map of the clouds' shadow, uRes texels square.
 void main() {
   shadowAxes();
@@ -3447,9 +3471,20 @@ void main() {
   // layer at distance tBar: it sends the light C and lets Tc through. The
   // high, thin cloud is a second layer: tHigh, H, Th.
   float Tc = 1.0, tBar = -1.0, Th = 1.0, tHigh = -1.0;
+  // The sunlight on the clouds (lit, its depth through the air above, and
+  // sOne + sMany): added once the thin cloud's shadow on them is known.
+  bool cloudLit = false;
+  vec3 cloudOl = vec3(0.0);
+  float cloudSun = 0.0;
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
-  if (uCirrus > 0.0) highCloud(o, d, tmax, extM, Th, tHigh, H);
+  if (uCirrus > 0.0) {
+    ivec2 here = ivec2(gl_FragCoord.xy);
+    uvec4 ci = texelFetch(uCiPass, here, 0);
+    Th = texelFetch(uCiDepth, here, 0).r;
+    tHigh = uintBitsToFloat(ci.x);
+    if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, uintBitsToFloat(ci.yzw), H);
+  }
   if (uCloud > 0.0) {
     vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
     float ta = max(uAlt > CT ? top.x : uAlt < CB ? base.y : 0.0, 0.0);
@@ -3464,14 +3499,14 @@ void main() {
       vec3 pc = o + d * tBar;
       float rc = length(pc);
       bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
-      vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
-      float dim = lit ? exp(-cirrusShadow(pc)) : 1.0;   // the thin cloud above shades them
+      cloudOl = lit ? depthToTop(pc, uLight) : vec3(0.0);
+      cloudLit = lit;
+      cloudSun = sOne + sMany;
       vec4 msS[3], msM[3];
       cloudSky(rc - RG, dot(pc, uSun) / rc, msS);
       cloudSky(rc - RG, dot(pc, uMoon) / rc, msM);
       for (int k = 0; k < 3; k++) {
         C[k] = sAmb * (2.0 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.5 * uNight * pow(uWL[k], vec4(-3.0)));
-        if (lit) C[k] += uLightI * (sOne + sMany) * dim * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
       }
     }
   }
@@ -3492,12 +3527,34 @@ void main() {
   }
   float shaftJitter = ign(gl_FragCoord.xy + 3.137 * uPass + 11.0);
   int shaft = 0;
-  // The thin cloud is not in the map: its shadow (cirrusShadow) where the
-  // ray meets the sea dims the air near the sea.
-  // The same depth shades the sea below (once: each call of cirrusShadow
-  // is a copy of the cirrus's code for the compiler).
-  float ciSea = 0.0;
-  if (uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0) ciSea = cirrusShadow(o + d * tmax);
+  // The thin cloud is not in the map: its shadow on the clouds (dim), and
+  // where the ray meets the sea, which dims the air near the sea and shades
+  // the sea below; and its depth towards the sun, which dims the glare (see
+  // there). The shadow is the depth between the point and the light, as
+  // direct light feels it: ice scatters mostly forward, and that light
+  // still arrives, so half of the depth counts; the width of the sun and
+  // the light scattered forward blur the fibres' shadows into their mean.
+  // One loop reads them all: each call of cirrusDepth is a copy of the
+  // cirrus's code for the compiler, and Microsoft's (ANGLE on Direct3D 11)
+  // took 13.7 s over the scene's program with three copies, 8 s with one.
+  float ciCloud = 0.0, ciSea = 0.0, ciGlare = 0.0;
+  bool glareCi = uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0 && uCirrus > 0.0 && uAlt < CI_HI;
+  vec3 glarePc = o + uSun * raySphere(o, uSun, RG + max(0.5 * (CI_LO + CI_HI), uAlt)).y;
+  for (int i = 0; i < CI_N(3); i++) {
+    bool want = i == 0 ? cloudLit && uCirrus > 0.0 : i == 1 ? uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0 : glareCi;
+    if (!want) continue;
+    vec3 p = i == 0 ? o + d * tBar : o + d * tmax;
+    vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
+    float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
+    if (i == 0) ciCloud = shade;
+    else if (i == 1) ciSea = shade;
+    else ciGlare = depth;
+  }
+  if (cloudLit) {
+    float dim = exp(-ciCloud);   // the thin cloud above shades them
+    for (int k = 0; k < 3; k++) C[k] += uLightI * cloudSun * dim * exp(-(uBR[k] * cloudOl.x + extM * uMA[k] * cloudOl.y + uBO[k] * cloudOl.z));
+  }
   float ciShade = exp(-ciSea);
   // The map is the light's: in twilight the sun still lights the air
   // while the moon lights the clouds and the sea.
@@ -3689,10 +3746,9 @@ void main() {
     if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
-      float hc = max(0.5 * (CI_LO + CI_HI), uAlt);
-      vec3 pc = o + uSun * raySphere(o, uSun, RG + hc).y;
-      float slant = (CI_HI - max(uAlt, CI_LO)) / (CI_HI - CI_LO) / max(dot(normalize(pc), uSun), 0.05);
-      glare *= exp(-cirrusDepth(pc.xz + uDrift, 0.3) * slant);
+      // (ciGlare: read above.)
+      float slant = (CI_HI - max(uAlt, CI_LO)) / (CI_HI - CI_LO) / max(dot(normalize(glarePc), uSun), 0.05);
+      glare *= exp(-ciGlare * slant);
     }
     vec3 ol = depthToTop(o, uSun);
     for (int k = 0; k < 3; k++) {
@@ -3812,7 +3868,7 @@ void main() {
     wHigh = max(wHigh, dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30));
   }
   if (wHigh > (tSeen < 0.0 ? 0.1 : 0.5)) tSeen = tHigh;
-  outAux = vec4(distanceCode(tSeen), 0.0, 1.0);
+  gl_FragDepth = distanceCode(tSeen);
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
   // would be too dark. So round up or down at random, anew each frame:
@@ -3833,7 +3889,7 @@ precision highp sampler2D;
 // moves, each pixel finds what it shows now in that picture, where it was a
 // frame ago.
 uniform sampler2D uFrame;     // the new frame, as shown, and its level before exposure (a)
-uniform sampler2D uFrameAux;  // the distance of what each pixel shows, coded (r, g)
+uniform sampler2D uFrameAux;  // the distance of what each pixel shows, coded (the depth, r)
 uniform sampler2D uPast;      // the picture so far
 uniform sampler2D uPastAux;   // its distances (r, g), and the number of frames in the mean / 64 (b)
 uniform vec2 uRes;
@@ -3885,7 +3941,7 @@ vec2 whence(float inv) {
 void main() {
   ivec2 here = ivec2(gl_FragCoord.xy);
   vec4 col = texelFetch(uFrame, here, 0);
-  float code = decode(texelFetch(uFrameAux, here, 0).rg);
+  float code = texelFetch(uFrameAux, here, 0).r * 65536.0 / 65535.0;
   float inv = nearness(code);
   // Things at different distances pass each other as the eye moves: by
   // `parallax` pixels a frame for a difference of 1 in one over the distance.
@@ -5257,6 +5313,9 @@ const SkySound = (() => {
     // The ice program only if the page starts with cirrus (see buildIce): a
     // sky without cirrus does not wait for its compiler.
     const prog = link('fs'), noiseProgram = link('noise'), wavesProgram = link('waves');
+    // The cirrus's pass (see CIRRUS_PASS in fs), on the same terms as the
+    // ice program.
+    let ciProg = state.cirrus > 0 ? link('fs', '#define CIRRUS_PASS') : null;
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const mean = link('mean'), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
@@ -5333,6 +5392,37 @@ const SkySound = (() => {
     await slices([buildStars(), depthTable()], share => done(0.13 + 0.17 * share), soon);
     mark('tables built');
 
+    // The triangle that covers the view, for every program.
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    // ANGLE on Direct3D 11 compiles a program again at its first draw into
+    // more than one target, and the GPU process waits for it: the ice
+    // program took 4.6 s there. Drawn into a pixel of three targets as soon
+    // as it is done, it is compiled again while the scene's program still
+    // compiles, instead of after it.
+    const warm = p => {
+      const frame = gl.createFramebuffer(), pixels = [];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+      for (let i = 0; i < 3; i++) {
+        pixels.push(gl.createTexture());
+        gl.bindTexture(gl.TEXTURE_2D, pixels[i]);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, pixels[i], 0);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+      gl.viewport(0, 0, 1, 1);
+      gl.useProgram(p);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.useProgram(null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(frame);
+      for (const t of pixels) gl.deleteTexture(t);
+      gl.flush();
+    };
+
     // The programs. Without the extension, asking waits until a program is
     // done: one a frame.
     for (let left = programs, told = performance.now(); left.length;) {
@@ -5341,6 +5431,7 @@ const SkySound = (() => {
         if (!parallel) return false;
         if (!gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)) return true;
         mark(`program ${names.get(p)} compiled`);
+        if (p === iceProgram && gl.getProgramParameter(p, gl.LINK_STATUS)) warm(p);
         return false;
       });
       done(0.3 + 0.3 * (1 - left.length / programs.length));
@@ -5357,11 +5448,6 @@ const SkySound = (() => {
         await nextFrame();
       }
     }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Builds a texture's mipmaps, and reads it through them.
     const smooth = target => {
@@ -5489,6 +5575,9 @@ const SkySound = (() => {
           locate(link('ice'));
           check(programs[programs.length - 1]);
           for (const [, part] of parts()) part();
+          ciProg = link('fs', '#define CIRRUS_PASS');
+          check(programs[programs.length - 1]);
+          fixedFor(ciProg);
         };
       }
     }
@@ -5593,46 +5682,50 @@ const SkySound = (() => {
     gl.activeTexture(gl.TEXTURE0);
     gl.useProgram(prog);
     const U = n => gl.getUniformLocation(prog, n);
-    gl.uniform1i(U('uDepth'), 5);
-    gl.uniform1i(U('uNoise'), 2);
-    gl.uniform1i(U('uWeather'), 3);
-    gl.uniform1i(U('uWaves'), 4);
-    gl.uniform1i(U('uIce'), 10);
-    gl.uniform1i(U('uIceWay'), 11);
-    gl.uniform1i(U('uIcePhase'), 12);
-    gl.uniform1i(U('uCiMap'), 13);
-    gl.uniform4fv(U('uBR'), new Float32Array(BR));
-    gl.uniform4fv(U('uBO'), new Float32Array(BO));
-    gl.uniform4fv(U('uWL'), new Float32Array(WL.map(l => l / 550)));
-    gl.uniform4fv(U('uMA'), new Float32Array(MA));
-    gl.uniform1f(U('uNight'), NIGHT);
-    gl.uniform3f(U('uEcliptic'), 0, -Math.sin(OBLIQUITY), Math.cos(OBLIQUITY));
-    gl.uniform4fv(U('uWR'), new Float32Array(W[0]));
-    gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
-    gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
-    gl.uniform4fv(U('uWS'), new Float32Array(WS));
+    // The uniforms that stay, set on the scene's program and kept to set
+    // on the cirrus's pass (fixedFor), which is built from the same shader.
+    const fixed = [];
+    const C = (method, name, ...args) => {
+      fixed.push([method, name, args]);
+      gl[method](U(name), ...args);
+    };
+    const fixedFor = p => {
+      gl.useProgram(p);
+      for (const [method, name, args] of fixed) gl[method](gl.getUniformLocation(p, name), ...args);
+      gl.useProgram(prog);
+    };
+    C('uniform1i', 'uDepth', 5);
+    C('uniform1i', 'uNoise', 2);
+    C('uniform1i', 'uWeather', 3);
+    C('uniform1i', 'uWaves', 4);
+    C('uniform1i', 'uIce', 10);
+    C('uniform1i', 'uIceWay', 11);
+    C('uniform1i', 'uIcePhase', 12);
+    C('uniform1i', 'uCiMap', 13);
+    C('uniform4fv', 'uBR', new Float32Array(BR));
+    C('uniform4fv', 'uBO', new Float32Array(BO));
+    C('uniform4fv', 'uWL', new Float32Array(WL.map(l => l / 550)));
+    C('uniform4fv', 'uMA', new Float32Array(MA));
+    C('uniform1f', 'uNight', NIGHT);
+    C('uniform3f', 'uEcliptic', 0, -Math.sin(OBLIQUITY), Math.cos(OBLIQUITY));
+    C('uniform4fv', 'uWR', new Float32Array(W[0]));
+    C('uniform4fv', 'uWG', new Float32Array(W[1]));
+    C('uniform4fv', 'uWB', new Float32Array(W[2]));
+    C('uniform4fv', 'uWS', new Float32Array(WS));
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
     for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
       gl.texParameteri(gl.TEXTURE_2D, k, v);
     }
-    gl.uniform1i(U('uMS'), 0);
+    C('uniform1i', 'uMS', 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, GRID * SLOTS, GRID, 0, gl.RGBA, gl.FLOAT, starData);
-    gl.uniform1i(U('uStars'), 1);
+    C('uniform1i', 'uStars', 1);
     gl.activeTexture(gl.TEXTURE0);
-    const uRes = U('uRes'), uCam = U('uCam'), uTan = U('uTan'), uSun = U('uSun');
-    const uHaze = U('uHaze'), uExposure = U('uExposure'), uLook = U('uLook');
-    const uSunI = U('uSunI'), uMoon = U('uMoon'), uMoonI = U('uMoonI'), uSky = U('uSky');
-    const uAlt = U('uAlt'), uCloud = U('uCloud'), uWind = U('uWind');
-    const uDrift = U('uDrift'), uCirrus = U('uCirrus');
-    const uLight = U('uLight'), uLightI = U('uLightI'), uLightShare = U('uLightShare');
-    const uJitter = U('uJitter'), uPass = U('uPass');
-    gl.uniform2fv(U('uLogRange'), LOG_RANGE);
-    const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye'), uNightGrey = U('uNightGrey');
+    C('uniform2fv', 'uLogRange', LOG_RANGE);
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
@@ -5644,37 +5737,92 @@ const SkySound = (() => {
     const pin = pinned !== null && pinned !== '' && isFinite(pinned) ? +pinned : null;
     Object.defineProperty(window, '__exposure', { configurable: true, get: () => logE });
     // Draws the view v, w by h pixels, into the bound framebuffer.
-    const draw = (v, cam, w, h) => {
+    // The uniforms of fs's programs (the scene's, the cirrus's pass), by name.
+    const places = new Map();
+    const place = (p, name) => {
+      let m = places.get(p);
+      if (!m) places.set(p, m = new Map());
+      if (!m.has(name)) m.set(name, gl.getUniformLocation(p, name));
+      return m.get(name);
+    };
+    const set = (p, list) => {
+      for (const [method, name, ...args] of list) gl[method](place(p, name), ...args);
+    };
+    // Draws the frame into shot (see render), with the uniforms of the
+    // frame `each` (its jitter and number) besides the view's. The cirrus's
+    // pass first, into ciShot (see CIRRUS_PASS).
+    const draw = (v, cam, w, h, each) => {
       if (tableHaze !== builtHaze) {
         gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NMU, 12 * NH, 0, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, w, h);
-      gl.uniform2f(uRes, w, h);
-      gl.uniformMatrix3fv(uCam, false, cam);
-      gl.uniform1f(uTan, Math.tan(v.fov / 2));
-      gl.uniform3fv(uSun, state.sun);
-      gl.uniform1f(uSunI, state.sunOn);
-      gl.uniform3fv(uMoon, state.moon);
-      gl.uniform1f(uMoonI, state.moonI * moonAirFor());
-      gl.uniformMatrix3fv(uSky, false, state.sky);
-      const exposure = 2 ** (logE ?? 0);
-      gl.uniform1f(uHaze, state.haze);
-      gl.uniform1f(uExposure, exposure);
-      gl.uniform1f(uLook, v.look);
-      gl.uniform3fv(uBalance, balanceFor());
-      gl.uniform1f(uSaturation, saturationFor());
-      gl.uniform1f(uNightEye, nightEyeFor(logE ?? 0));
-      gl.uniform1f(uNightGrey, nightGreyFor(logE ?? 0));
-      gl.uniform1f(uAlt, v.alt);
-      gl.uniform1f(uCloud, v.cloud);
-      gl.uniform1f(uWind, state.wind);
-      gl.uniform2fv(uDrift, state.drift);
-      gl.uniform1f(uCirrus, state.cirrus);
-      gl.uniform3fv(uLight, state.light);
-      gl.uniform1f(uLightI, state.lightI);
-      gl.uniform1f(uLightShare, state.lightShare);
+      const view = [
+        ['uniform2f', 'uRes', w, h],
+        ['uniformMatrix3fv', 'uCam', false, cam],
+        ['uniform1f', 'uTan', Math.tan(v.fov / 2)],
+        ['uniform3fv', 'uSun', state.sun],
+        ['uniform1f', 'uSunI', state.sunOn],
+        ['uniform3fv', 'uMoon', state.moon],
+        ['uniform1f', 'uMoonI', state.moonI * moonAirFor()],
+        ['uniformMatrix3fv', 'uSky', false, state.sky],
+        ['uniform1f', 'uHaze', state.haze],
+        ['uniform1f', 'uExposure', 2 ** (logE ?? 0)],
+        ['uniform1f', 'uLook', v.look],
+        ['uniform3fv', 'uBalance', balanceFor()],
+        ['uniform1f', 'uSaturation', saturationFor()],
+        ['uniform1f', 'uNightEye', nightEyeFor(logE ?? 0)],
+        ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? 0)],
+        ['uniform1f', 'uAlt', v.alt],
+        ['uniform1f', 'uCloud', v.cloud],
+        ['uniform1f', 'uWind', state.wind],
+        ['uniform2fv', 'uDrift', state.drift],
+        ['uniform1f', 'uCirrus', state.cirrus],
+        ['uniform3fv', 'uLight', state.light],
+        ['uniform1f', 'uLightI', state.lightI],
+        ['uniform1f', 'uLightShare', state.lightShare],
+        ...each,
+      ];
+      // The depth test lets the shaders' depth be written (Th, the distance).
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.ALWAYS);
+      if (state.cirrus > 0 && ciProg) {
+        ciShot = cirrusTarget(ciShot, w, h);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, ciShot.target);
+        gl.useProgram(ciProg);
+        set(ciProg, view);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.useProgram(prog);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+      }
+      set(prog, view);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.DEPTH_TEST);
+    };
+    // The cirrus's pass for a frame of w by h pixels: `old` if it has that
+    // size, else a new one in its place. Its numbers on unit 16, Th (the
+    // depth) on unit 17, where the scene reads them.
+    let ciShot = null;
+    const cirrusTarget = (old, w, h) => {
+      if (old && old.w === w && old.h === h) return old;
+      if (old) {
+        gl.deleteFramebuffer(old.target);
+        gl.deleteTexture(old.bits);
+        gl.deleteTexture(old.depth);
+      }
+      const c = { w, h, target: gl.createFramebuffer(), bits: gl.createTexture(), depth: gl.createTexture() };
+      for (const [unit, texture, format] of [[16, c.bits, gl.RGBA32UI], [17, c.depth, gl.DEPTH_COMPONENT32F]]) {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, format, w, h);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, c.target);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, c.bits, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, c.depth, 0);
+      return c;
     };
     // Fits the canvas to its place on the page. Returns 0 when it has no
     // place, 2 when its size has changed, else 1.
@@ -5790,11 +5938,16 @@ const SkySound = (() => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.useProgram(prog);
-    gl.uniform1i(U('uShadow'), 14);
+    C('uniform1i', 'uShadow', 14);
+    C('uniform1i', 'uCiPass', 16);
+    C('uniform1i', 'uCiDepth', 17);
+    if (ciProg) fixedFor(ciProg);
     const uShadowShift = U('uShadowShift');
     let shadowFor = '', shadowAt = [0, 0];
-    // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
-    const picture = (old, w, h) => {
+    // A picture of w by h pixels: `old` if it has that size, else a new one
+    // in its place. The frame (`depth`) keeps its distances as its depth
+    // (see distanceCode), the pictures as a second target.
+    const picture = (old, w, h, depth = false) => {
       if (old && old.w === w && old.h === h) return old;
       if (old) {
         gl.deleteFramebuffer(old.target);
@@ -5803,7 +5956,7 @@ const SkySound = (() => {
       }
       const p = { w, h, target: gl.createFramebuffer(), colour: gl.createTexture(), aux: gl.createTexture() };
       gl.activeTexture(gl.TEXTURE6);
-      for (const [texture, format, filter] of [[p.colour, fine ? gl.RGBA16F : gl.RGBA8, gl.LINEAR], [p.aux, gl.RGBA8, gl.NEAREST]]) {
+      for (const [texture, format, filter] of [[p.colour, fine ? gl.RGBA16F : gl.RGBA8, gl.LINEAR], [p.aux, depth ? gl.DEPTH_COMPONENT32F : gl.RGBA8, gl.NEAREST]]) {
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texStorage2D(gl.TEXTURE_2D, 1, format, w, h);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
@@ -5815,12 +5968,12 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, p.target);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, p.colour, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, p.aux, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, depth ? gl.DEPTH_ATTACHMENT : gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, p.aux, 0);
+      gl.drawBuffers(depth ? [gl.COLOR_ATTACHMENT0] : [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
       if (fine && gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
         fine = false;                                  // the extension did not keep its word
         p.w = 0;
-        return picture(p, w, h);
+        return picture(p, w, h, depth);
       }
       return p;
     };
@@ -5885,7 +6038,7 @@ const SkySound = (() => {
       if (moved || lit) lastStir = now;
       const small = now - lastStir < 150 ? scale : 1;
       const w = Math.max(1, Math.round(canvas.width * small)), h = Math.max(1, Math.round(canvas.height * small));
-      shot = picture(shot, w, h);
+      shot = picture(shot, w, h, true);
       const cur = pictures[turn] = picture(pictures[turn], w, h);
       const past = pictures[1 - turn] || (pictures[1 - turn] = picture(null, w, h));
       // A sharper picture than the past one, at rest: the past counts as one frame.
@@ -5914,8 +6067,7 @@ const SkySound = (() => {
       // where its samples lie.
       gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       const k = drawn++ % 1024 + 1;
-      gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
-      gl.uniform1f(uPass, pass);
+      const each = [['uniform2f', 'uJitter', halton(k, 2) - 0.5, halton(k, 3) - 0.5], ['uniform1f', 'uPass', pass]];
       gl.uniform1f(uSteps, steps);
       // The shadow map, for this frame's light and clouds, and a place near enough.
       const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
@@ -5936,7 +6088,7 @@ const SkySound = (() => {
         shift = [0, 0];
       }
       gl.uniform2fv(uShadowShift, shift);
-      draw(v, cam, w, h);
+      draw(v, cam, w, h, each);
 
       // The picture: the mean so far, and this frame.
       gl.bindFramebuffer(gl.FRAMEBUFFER, cur.target);

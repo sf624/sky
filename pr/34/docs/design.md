@@ -17,7 +17,7 @@ blocks. It loads no other file.
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. With `SHADOW_MAP` defined, the map of the clouds' shadow. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. With `SHADOW_MAP` defined, the map of the clouds' shadow; with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)). |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
@@ -137,9 +137,11 @@ The JS then runs once, at load, and does little:
      without a pixel (the scissor). Some drivers finish a program only at
      its first draw, which can take a second: that happens now. ANGLE on
      Direct3D 11 (Chrome and Edge on Windows) compiles a program at link
-     for one target, and again at its first draw into two or more (the
-     scene's frames, the ice's pieces): the scene's second compile is this
-     first frame, and the GPU process waits for it. Once a
+     for one target, and again at its first draw into two or more, while
+     the GPU process waits: the scene and the cirrus's pass draw into one
+     target each (and the depth), and the ice program, which draws into
+     three, is drawn once into a pixel of three as soon as it is linked
+     (`warm`), while the others still compile. Once a
      fence says the GPU is done, the meter of that frame is read: the read
      does not wait.
    - A context lost meanwhile (`webglcontextlost`: the GPU process
@@ -587,7 +589,7 @@ found between the last two samples. For each:
 scattered once (`sOne`) and many times (`sMany`), per unit of skylight
 (`sAmb`), and the mean distance it comes from (`tBar`). `main` turns them
 into the spectrum `C` at `tBar`: sunlight through the air above (and
-through the cirrus, `cirrusShadow`), plus skylight from the
+through the cirrus, its shadow), plus skylight from the
 table of the sky's light on the clouds (`cloudSky`, see
 [The air](#the-air)), plus airglow.
 
@@ -644,7 +646,7 @@ What reads it:
   not in the map: as before, its shadow where the ray meets the sea
   (`ciShade`) dims the air below 2 km;
 - the sea: the shadow passed to `addSea`, with the cirrus's
-  (`cirrusShadow`). The sea reads it through `seaShadow`, with soft
+  (`ciSea`). The sea reads it through `seaShadow`, with soft
   edges: the light `exp(-tau)` is averaged over `SHADOW_TAPS` = 8 points
   across the light, out to a radius of `SHADOW_PEN` (0.035) times the way
   along the light from clouds `SHADOW_OCC` = 1.5 km high (at most 0.75 km),
@@ -725,7 +727,7 @@ cloud around each sample in finer detail than the map can hold.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
 depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
-(`cirrusShadow`) towards the light. It hides the glitter and the direct
+(`ciSea`) towards the light. It hides the glitter and the direct
 light on the water; the light that a cloud lets through diffusely
 (`soft`) falls more slowly.
 
@@ -1393,18 +1395,35 @@ on the map.
   bright round zone round the sun, as in a photograph. The rest of the
   cirrus's light is untouched. The aureole follows the ice in front by
   0.4 (0.25 before).
-- `cirrusShadow` dims the direct light on the low clouds and the sea (half
-  the depth counts: ice scatters mostly forward). It reads the mean of the
-  two decks over 0.5 km (`cirrusDepth`), and so does the glare. These
-  calls leave out the hairs and the veil's noise (`ciDensity` with
-  `fibres` false), which average out over such a footprint: each call is
-  a copy for the compiler. The cirrus's loops (the hairs, the bends) run
+- The cirrus's shadow dims the direct light on the low clouds and the sea
+  (half the depth counts: ice scatters mostly forward). It reads the mean
+  of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
+  over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
+  `ciGlare`), as each call is a copy for the compiler. These calls leave
+  out the hairs and the veil's noise (`ciDensity` with `fibres` false),
+  which average out over such a footprint. The cirrus's loops (the hairs, the bends) run
   to bounds the compiler cannot know (`CI_N`), so that it keeps them as
   loops: unrolled, they added some 0.6 s to the time the driver took to
   finish the scene's program, on every page.
 
-`highCloud` returns `Th`, `H` and `tHigh`; the march through the air treats
-it as its second layer.
+**Its own pass.** `highCloud` runs in a program of its own (`fs` with
+`CIRRUS_PASS`), drawn before the scene into one target of the frame's
+size (`ciShot`, RGBA32UI, unit 16) and its depth (unit 17): what the sheet
+lets through (`Th`) as the depth, and as bits the distance its light comes
+from (`tHigh`) and three numbers of that light (`lk`: the share of the
+light from round about, `aL`; the light scattered forward, without its
+halo and with it, by unit of the sunlight that reaches the sheet). The
+scene reads them at its pixel and makes the light `H` (`cirrusLight`:
+the sunlight through the air to `tHigh`, the skylight there, the halo's
+shape by wavelength). Microsoft's compiler (ANGLE on Direct3D 11) took
+165 s over the scene with the cirrus in it; apart, the two programs
+compile at once, in 11 and 8.4 s (see the GLSL rules in
+[development.md](development.md)). One target and the depth, not four
+targets: ANGLE there compiles a program again at its first draw into
+more than one target, and the GPU process waits for it. The light
+scattered forward is the same sum as before in another order: a few
+pixels in a picture differ by one level of 8 bits.
+The march through the air treats the cirrus as its second layer.
 
 **The ice's textures.** They are drawn by the `ice` program, which is
 apart from `noise`: the driver here finishes a program at its first draw,
@@ -1832,11 +1851,11 @@ At the end of `main`:
 One frame of the hero is noisy: each frame shifts the rays within the
 pixel (`uJitter`, Halton (2, 3)) and the samples through the clouds
 (`uPass`). The picture is the mean of many frames. `makeSky` keeps three
-textures for it, each with a second 8-bit texture beside it (`aux`):
+textures for it, each with a second texture beside it (`aux`):
 
-- `shot`: the new frame, drawn by `fs` into two outputs: the colour with
-  the level in alpha (`outColor`) and the distance of what each pixel
-  shows (`outAux`);
+- `shot`: the new frame, drawn by `fs`: the colour with the level in alpha
+  (`outColor`), and the distance of what each pixel shows as its depth
+  (`gl_FragDepth`, a 32-bit float texture: one target, see the loading);
 - two `pictures` that take turns: the one so far is read while the next is
   drawn by `mean`; then `show` copies the new one to the canvas.
 
@@ -1848,7 +1867,8 @@ that the mean neither bands nor sinks. `show` dithers by one 8-bit step
 when the picture is in half floats.
 
 **The distance code** (`distanceCode`, read back by `decode` and
-`nearness`): `0.5 + log2(t) / 20`, in 16 bits over two 8-bit channels; the
+`nearness`): `0.5 + log2(t) / 20`, in 16 bits: the frame's depth holds
+them over 65536, the pictures' `aux` over two 8-bit channels; the
 sky is infinitely far (code 1, nearness 0). The pixel's distance is that
 of the clouds if they hide a tenth of what is behind or give a twentieth
 of its light (`C` against `L`, in one band of wavelengths: a wisp in
