@@ -848,10 +848,10 @@ channel, which the scene mixes by the cirrus's map (below):
   or, in 30 % of them, along it (ribs off a spine, cirrus vertebratus).
   Each tail is 4 to 24 km long, even in the logarithm (many short, a few
   long), and is two arcs (`iceTailNear`, `iceArcNear`): the ice leaves the
-  head turned by up to 0.5 to 1.4 rad (more for a larger system) and comes
-  round to the flow over some 0.1 of the tail (a comma, the hook of cirrus
-  uncinus), then turns by its own amount over the rest, as it falls into
-  wind of another way: the turn comes from noise over the tile (a group's
+  head turned by 0.4 to 1.2 rad at most (more for a larger system) and
+  comes round to the flow over some 0.1 of the tail (a comma, the hook of
+  cirrus uncinus), then turns by its own amount over the rest, as it
+  falls into wind of another way: the turn comes from noise over the tile (a group's
   tails run and curve alike, as in photographs of mares' tails), less for
   a long tail. Where the two arcs are nearly as near, the tail's
   coordinates blend from the one to the other, and near the centre of a
@@ -863,15 +863,23 @@ channel, which the scene mixes by the cirrus's map (below):
   body: a Gaussian of its width and a faint one some 1.6 times as wide
   (0.2 of it), so that the thin edge fades into the blue instead of
   ending as lines. It is strands all along (`iceStrands`, below), from
-  the head on, as strong as the ice is fibrous there (above), 2 to 9 to
-  its half width (strands of very different widths from tail to tail).
+  the head on, as strong as the ice is fibrous there (above), and in the
+  core (under half a width) 0.4 as strong as at the edges, so that a dense
+  tail is a soft bright body whose fibres show at its thin edges (as
+  strong in the core, its strands stood as a braided rope seen from
+  below); 2 to 9 to its half width (strands of very different widths from tail to tail).
   The head is the start of
   the tail, dense along its hook, made of ragged tufts (noise at a third,
   an eighth and a twentieth of its size, cut: knots with blue between),
   and ahead of it each strand sticks out by its own way, so that its front
   is frayed, not round. The tail fades to nothing before 4.5 of its widths
   (cut there, a strong tail drew a hard edge seen from near the deck).
-  Hooks turn by 0.4 to 1.2 rad (0.5 to 1.4 in round 16).
+  The hook turns the same way as the rest of the tail (a fall streak
+  curves one way, as the shear below it turns; hooked the other way, as
+  up to round 17, tails stood as S-shaped folds), by 0.4 to 1 of its
+  most, and never tighter than 2.5 widths of the tail where the hook
+  ends: tighter, the outer strands on its inside folded back over the
+  head, a liquid curl in wide plumes (round 17's c5 and k3).
 - **Feathers** (in 6 % of the tails' systems): wide plumes (up to 1.6
   times a tail's width) whose fine barbs leave the spine aslant and sweep
   back by some 40 to 60 degrees, curving with the distance out, on one
@@ -1055,9 +1063,10 @@ the ice was built with:
   gradient and its opposite then add up, so the mipmaps average the way
   over a footprint, and its length says how much the ice runs one way
   (near 1 along a trail, near 0 in a round head).
-- **Strength.** Thin ice breaks up into hairs: the scene takes its floor
-  off after the hairs, so the edge of a tuft dissolves into separate
-  hairs; dense cores (`1 - exp(-7 ice)` from 0.25 to 0.75) keep only 0.15
+- **Strength.** Thin ice breaks up into hairs: they shape the depth the
+  scene makes of the ice after its floor is taken off (taken off after
+  them, as up to round 17, at a thin edge only the hairs' cores passed the
+  floor, and stood as short bright dashes beyond the body); dense cores (`1 - exp(-7 ice)` from 0.25 to 0.75) keep only 0.15
   of them: a tuft has a soft, dense white core that dissolves into hairs
   at its edges.
 - **Where it is read.** Far off, once per deck at the place read, with a
@@ -1095,7 +1104,11 @@ on the map.
   by B and A: tails everywhere (fewer where sheets are many); sheets and
   streets, which come in from `c` = 0.15 to 0.65 (`smoothstep`), so that
   little cirrus is a few tails and more is streets and sheets; flocks or
-  large systems, these from 1 at little cirrus to twice at 0.85. The
+  large systems, these from 1 at little cirrus to twice at 0.85. Under
+  `c` = 0.45 (a `smoothstep` from 0.1) the tails weigh down to 0.45 and
+  the large systems up to 1.8: little cirrus is a few large sweeps (with
+  the tails' full weight, only their dense cores passed the floor and
+  stood as many small spindles with sharp ends). The
   faint trace under the sheets is taken off (0.035 of ice) up to `c` =
   0.6, and less up to 0.95, where the sheets become a streaky veil.
 - **The ice** is read in each deck's frame (`ciTile`): the upper deck
@@ -1242,6 +1255,22 @@ on the map.
   skylight from the multiple-scattering table (less the share `CI_FWD`,
   below), and light from the low clouds below, at the mean distance of
   the decks seen.
+- **A low sun** (`duskK`, a `smoothstep` of `li`, 1 over the sine of the
+  sun's height where it is capped at 0.15, from 2 to 6: the sun from some
+  30 degrees down; and by day only) runs along the decks: its light
+  reaches the ice through the ice on its way in, not through the column
+  above it alone. The depth it meets, for the light scattered once and the
+  light scattered many times, is read over the way towards the sun
+  (`tauP`: both decks, `CI_PATH` = 0.45 km a unit of `li`, some 3 km at
+  dusk, `CI_PATHW` = 0.3 km across, centred half of it on), and the share
+  scattered many times is `1 - exp(-0.3 li tauP)`, as the light that has
+  gone that way in, with an even phase (`CI_DIFF` = 0.08, isotropic):
+  light spreads through the sheet over km, so a whole band glows at
+  dusk, its thin parts with its dense ones. Read through the local
+  column (as up to round 17), the light scattered many times grew as the
+  cube of the depth: only the dense cores were lit, and dusk stood as a
+  field of bright dashes and hooked heads on a grey sky. The march near
+  the eye keeps its own light, step by step.
 - **At night** (`nightK`, up to 0.9 as the light goes over from the sun to
   the moon: no switch, `0.9 (1 - smoothstep(0.02, 0.3, uLightI))`; the
   halo blends between its day and night strengths by the same) the light

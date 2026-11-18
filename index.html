@@ -878,7 +878,10 @@ float iceSystems(vec2 w, vec2 cells, vec2 len, vec2 wid, float head, float heads
     float veer = clamp(2.0 * bend + 0.8 * (r3.z - 0.5), -1.0, 1.0) * min(1.4 * C.y / L, 1.8) * (feather ? 0.4 : 1.0);
     // (A feather has no hook and turns less: its barbs reach far across,
     // and near the centre of a tight turn they were cut, as U-shaped holes.)
-    float hook = (fan ? 0.3 : feather ? 0.0 : 0.4 + 0.8 * sz) * (2.0 * r3.w - 1.0);
+    // The hook turns the same way as the tail (a fall streak curves one
+    // way, as the shear below it turns): hooked the other way, tails stood
+    // as S-shaped folds.
+    float hook = (fan ? 0.3 : feather ? 0.0 : 0.4 + 0.8 * sz) * (0.4 + 0.6 * r3.w) * (veer > 0.0 ? -1.0 : 1.0);
     float str = 0.5 * (0.25 + r2.y * r2.y) * (0.5 + 0.7 * smoothstep(gate.x, gate.y + 0.4, group));
     // The heads of the system along its spine.
     float nh = 1.0 + floor(r4.y * heads);
@@ -901,12 +904,17 @@ float iceSystems(vec2 w, vec2 cells, vec2 len, vec2 wid, float head, float heads
       float w1 = Lj * mix(wid.x, wid.y, r4.x) * (fan ? 2.0 : 1.0), w0 = (feather ? 1.0 : 0.4) * rj0;
       // (A feather is wider, but stays within the cells searched.)
       if (feather) w1 = min(1.6 * w1, 0.18 * C.y);
+      // The hook turns no tighter than some 2.5 widths of the tail where it
+      // ends: tighter, the outer strands on its inside folded back over
+      // the head (a liquid curl in wide plumes).
+      float hk = hook * (j == 0 ? 1.0 : 0.6 + 0.6 * rj.x), hkMax = lh / (2.5 * (w0 + (w1 - w0) * pow(min(lh / Lj, 1.0), 0.8)));
+      hk = clamp(hk, -hkMax, hkMax);
       // Quick reject: farther than the tail can reach (5 of its widths, 7 for
       // a feather, at 1.4 times its mean width: cut nearer, it drew a hard
       // curved line with a string of beads seen from just under the deck).
       float reach = Lj + lh + (feather ? 10.0 : 7.0) * (w1 + rj0);
       if (dot(dl, dl) > reach * reach) continue;
-      vec3 t = iceTailNear(w, hj, th + (j == 0 ? 0.0 : 0.15 * (rj.w - 0.5)), hook * (j == 0 ? 1.0 : 0.6 + 0.6 * rj.x), lh, veer, Lj);
+      vec3 t = iceTailNear(w, hj, th + (j == 0 ? 0.0 : 0.15 * (rj.w - 0.5)), hk, lh, veer, Lj);
       float T = t.x / Lj;
       // (None near the centre of a tight turn, where the nearest point of
       // the tail jumps: from just under the deck, a large system drew a hard
@@ -974,7 +982,10 @@ float iceSystems(vec2 w, vec2 cells, vec2 len, vec2 wid, float head, float heads
       // (The strands are a texture on the body, as strong as the tail is
       // fibrous there: everywhere at their full strength (round 16), the
       // forms were crisp lines with blue between.)
-      float fib = mix(1.0, st.x / 0.42, (0.3 + 0.55 * fcl) * (0.85 + 0.15 * smoothstep(0.5, 1.8, abs(u))));
+      // (Fainter in the core, under half a width: a dense tail is a soft
+      // bright body whose fibres show at its thin edges; as strong in the
+      // core, its strands stood as a braided rope seen from below.)
+      float fib = mix(1.0, st.x / 0.42, (0.3 + 0.55 * fcl) * (0.4 + 0.6 * smoothstep(0.3, 1.6, abs(u))));
       // Before the head the strands stick out each by its own way (the
       // front of a tuft is ragged, not round).
       float fr = iceValue(vec2(3.0 * u + 7.0 * rj.x, 1.5), seed + 115u);
@@ -2386,6 +2397,10 @@ const float CI_ROLL = 1.8;                 // the light scattered forward rolls 
 // clouds) shows through by that share as well, softened; a point (the
 // sun, the moon, a star) is spread into the glow round it instead.
 const float CI_FWD = 0.4;
+// The way a low sun's light runs through the shell to reach the ice (km
+// a unit of 1 / sin of its height), how wide that read is, and the phase of
+// the light that has spread through the sheet (see highCloud).
+const float CI_PATH = 0.45, CI_PATHW = 0.3, CI_DIFF = 0.08;
 // The ice (uIce, built at start by the ice shader): a tile of ICE_KM
 // (40.5 km) of four fields of ice, R: heads with tails, G: sheets and
 // streets, B: flocks, A: large systems. Each deck reads it in a frame of
@@ -2690,9 +2705,13 @@ vec2 ciFieldsOut = vec2(0.0);
 
 // The weights of the ice's four kinds (see ciDensity), by the bands and
 // fields, the shares of sheets (sr) and of flocks (sf), and how banded the
-// cirrus is.
+// cirrus is. Little cirrus (under 0.45) is more of the large systems and
+// fewer tails: a few large sweeps, as photographs of thin cirrus show;
+// with the tails' full weight, their dense cores alone passed the floor
+// (see ciDensity) and stood as many small spindles with sharp ends.
 vec4 ciKinds(float fields, float spread, float sr, float sf, float banded) {
-  return vec4((1.0 - 0.5 * sr) * mix(0.15 + 1.1 * spread, 0.05 + 0.75 * max(fields, 0.7 * spread), banded),
+  float few = 1.0 - smoothstep(0.1, 0.45, uCirrus);
+  return vec4(1.0 - 0.55 * few, 1.0, 1.0, 1.0 + 0.8 * few) * vec4((1.0 - 0.5 * sr) * mix(0.15 + 1.1 * spread, 0.05 + 0.75 * max(fields, 0.7 * spread), banded),
               (0.25 + 0.9 * sr) * smoothstep(0.15, 0.65, uCirrus) * mix(1.0, 0.4 + 0.8 * fields, banded), 0.5 * sf,
               (1.2 - 0.6 * sf) * (1.0 + 1.0 * smoothstep(0.15, 0.85, uCirrus)) * mix(1.0, 0.1 + 0.8 * fields, banded));
 }
@@ -2764,16 +2783,19 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec2 fi
   // ice less a floor: the weak tails and the thin edges go first, and
   // what is left fades in from nothing along its own fibres, with no
   // outline of its own. The floor is soft (a square at first), so that the
-  // depth grows smoothly from 0.
+  // depth grows smoothly from 0. The hairs shape the depth after the floor:
+  // laid on the ice before it, at a thin edge their cores alone passed it
+  // and stood as short bright dashes beyond the body (from 11 to 12 km,
+  // looking out at the edge of a plume).
   float c = uCirrus;
   float floor0 = 0.1 * pow(1.0 - c, 6.0) + 0.02 * (1.0 - m), knee = 0.5 * floor0 + 0.004;
   float gain = CI_TAU * (0.6 + 0.8 * c) * (0.3 + 0.7 * m);
-  float fine = ice * F, y = max(fine - floor0, 0.0);
+  float y = max(ice - floor0, 0.0);
   // Dense cores up to 1.5 times as deep (from 0.04 to 0.3 of ice above the
   // floor): a tuft has a dense white body under its feathered edges, as
   // photographs show; the edges, and so the cover, are as before. (Twice
   // as deep, large plumes near the deck stood as opaque white masses.)
-  float d = gain * y * y / (y + knee) * (1.0 + 0.5 * smoothstep(0.04, 0.3, y));
+  float d = gain * y * y / (y + knee) * (1.0 + 0.5 * smoothstep(0.04, 0.3, y)) * F;
   // The veil (cirrostratus), and in the bands a body of ice (from 0.2):
   // both have the veil's banded noise as the exponent of their depth, so
   // that a band is long and continuous with streaks along it, and tufts
@@ -2869,11 +2891,16 @@ float ciAge(vec2 x, int k, float foot) {
   return (v.x + 0.3 * 0.03) / (v.y + 0.03);
 }
 
-// The depth as the light of the sun feels it, the ice seen over `foot`
-// km: the mean over the shell.
+// The depth as the light of the sun feels it, the ice seen over the
+// footprint f1, f2 (km on the map): the mean over the shell. (One loop over
+// the decks: each call of ciDensity is a copy for the compiler.)
+float cirrusDepth(vec2 x, vec2 f1, vec2 f2) {
+  float s = 0.0;
+  for (int k = 0; k < CI_N(CI_LAYERS); k++) s += ciDensity(x, k, f1, f2, false, true, vec2(-1.0), 1.0);
+  return 0.5 * s;
+}
 float cirrusDepth(vec2 x, float foot) {
-  vec2 f1 = vec2(foot, 0.0), f2 = vec2(0.0, foot);
-  return 0.5 * (ciDensity(x, 0, f1, f2, false, true, vec2(-1.0), 1.0) + ciDensity(x, 1, f1, f2, false, true, vec2(-1.0), 1.0));
+  return cirrusDepth(x, vec2(foot, 0.0), vec2(0.0, foot));
 }
 
 // The depth of the thin cloud between a point under it and the light, as
@@ -3128,8 +3155,28 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   bool sameSide = (dot(d, up) < 0.0) == (mus > 0.0);
   // Near the eye, the march's own sum, and the flat reads behind it.
   float li = 1.0 / max(abs(mus), 0.15);
-  float once = mix(ciOnce(tauF, 0.6 * max(tauV, ciBody) * li, sameSide),
-                   onceN + exp(-tauN) * ciOnce(tauR, 0.6 * max(tauV, ciBody) * li, sameSide), wn);
+  // A low sun (from some 30 degrees down) runs along the decks: its light
+  // reaches the ice through the ice on its way in, CI_PATH km a unit of
+  // li towards the sun, not through the column above it alone. So the
+  // light it meets, and the share of it scattered more than once, which
+  // spreads through the sheet, follow the depth over that way (tauP, read
+  // over it, CI_PATHW across), smooth over km: at dusk a whole band glows,
+  // its thin parts with its dense ones. Read through the local column, only
+  // the dense cores were lit by the light scattered many times (it grew as
+  // the cube of the depth), and dusk stood as a field of bright dashes and
+  // hooked heads. The light so scattered goes about evenly (CI_DIFF, the
+  // isotropic phase).
+  float duskK = smoothstep(2.0, 6.0, li) * smoothstep(0.02, 0.3, uLightI), tauP = 0.0;
+  if (duskK > 0.0) {
+    vec2 sh = uLight.xz - up.xz * mus;
+    sh = length(sh) > 1e-6 ? normalize(sh) : vec2(1.0, 0.0);
+    float L = CI_PATH * li;
+    vec2 f1 = sh * (0.5 * L), f2 = vec2(-sh.y, sh.x) * CI_PATHW, xs = pc.xz + uDrift + sh * (0.5 * L);
+    tauP = 2.0 * cirrusDepth(xs, f1, f2);
+  }
+  float tsV = mix(max(tauV, bodyT), tauP, duskK);
+  float once = mix(ciOnce(tauF, 0.6 * tsV * li, sameSide),
+                   onceN + exp(-tauN) * ciOnce(tauR, 0.6 * tsV * li, sameSide), wn);
   // The narrow peak, a few degrees round the sun or the moon, is a round
   // glow (an aureole): it follows the sheet's depth over some 10 km, and
   // the ice just in front of the light only by 0.4 (0.1 at night: by
@@ -3145,14 +3192,14 @@ void highCloud(vec3 o, vec3 d, float tmax, float extM, out float Th, out float t
   // ice glows, and does not stand dark against thinner ice.
   // (At night the eye sees the moonlit sheet over some 10 km: nightK, below.)
   float dayK = smoothstep(0.02, 0.3, uLightI), nightK = 0.9 * (1.0 - dayK);
-  float many = 1.0 - exp(-0.3 * mix(tau, wideT, nightK)), spread = 0.15 * tauV / (tauV + 0.3);
+  float many = mix(1.0 - exp(-0.3 * mix(tau, wideT, nightK)), 1.0 - exp(-0.3 * tauP * li), duskK), spread = mix(0.15 * tauV / (tauV + 0.3), CI_DIFF, duskK);
   // The light scattered many times has mostly gone forward at each step: on
   // its way in it fades with a quarter of the depth that the light
   // scattered once feels (1 - g of ice). With the depth of the single
   // scattering, thick ice towards a low sun went darker than the sky behind
   // it.
-  float onceD = mix(ciOnce(tauF, 0.15 * max(tauV, ciBody) * li, sameSide),
-                    onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * max(tauV, ciBody) * li, sameSide), wn);
+  float onceD = mix(ciOnce(tauF, 0.15 * tsV * li, sameSide),
+                    onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * tsV * li, sameSide), wn);
   // Light from below: the low clouds, lit by the same sun, add to the sea
   // that the mean sky already holds. Forward scattering sends more of it
   // to an eye below the sheet.
