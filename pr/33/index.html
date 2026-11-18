@@ -3695,6 +3695,9 @@ const float CI_FWD = 0.4;
 // through it over some 0.5 km (see highCloud).
 const float CI_SHADE = 0.3;
 const float CI_PATH = 0.45, CI_PATHW = 0.3, CI_DIFF = 0.08;
+// The light scattered more than once, per unit of its share and path (see
+// highCloud): so much that the sheet sends out all the sunlight it takes.
+const float CI_MANY = 2.3;
 // The ice (uIce, built at start by the ice shader): a tile of ICE_KM
 // (40.5 km) of four fields of ice, R: heads with tails, G: sheets and
 // streets, B: flocks, A: large systems. Each deck reads it in a frame of
@@ -4301,6 +4304,18 @@ float ciOnce(float te, float ts, bool sameSide) {
        : abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
 }
 
+// The phase of ice crystals without their diffraction peak: rough compact
+// aggregates of columns, which retrievals find in most cirrus (Cole et al.
+// 2014), scatter smoothly, with no halo and little light back: a lobe
+// forward and a broad part to the side, together of mean cosine 0.59, so
+// that with the peak (CI_FWD) the mean cosine is 0.75, as retrieved. (Up to
+// round 19, a lobe of 0.7 and one back of -0.3 had 0.55 with the peak: the
+// sheet sent three times as much light back as such ice does, and less to
+// within 40 degrees of the sun.)
+float ciGeo(float mu) {
+  return 0.733 * hg(mu, 0.75) + 0.267 * hg(mu, 0.15);
+}
+
 // How much a low sun runs along the decks at pc (x, from some 30 degrees
 // down: a smoothstep of 1 / sin of its height, by day only), and the depth
 // its light meets on its way in there (y, tauP: both decks, read over
@@ -4551,12 +4566,11 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
 
   // Light. Ice crystals scatter forward: a narrow peak (diffraction by
   // crystals of some 100 um, within a degree or two of the sun, so that the
-  // glow round the sun stays small), a broad one (refraction), and a flat
-  // part to the side and back (some 0.3 of the mean, as ray tracing of ice
-  // crystals gives it); and the halo at 22 degrees from the sun, red inside,
-  // which a min-deviation prism of ice draws.
+  // glow round the sun stays small), CI_FWD of the light, and the rest by
+  // refraction and reflection (ciGeo); and the halo at 22 degrees from the
+  // sun, red inside, which a min-deviation prism of ice draws.
   float mu = dot(d, uLight);
-  float ph = 0.4 * hg(mu, 0.7) + 0.25 * hg(mu, -0.3), peak = 0.35 * hg(mu, 0.99);
+  float ph = (1.0 - CI_FWD) * ciGeo(mu), peak = CI_FWD * hg(mu, 0.99);
   float mus = dot(up, uLight);
   // Sunlight dims on its way into the sheet (less the forward peak, which
   // goes on as if not scattered): its depth ts there, against te along
@@ -4595,12 +4609,20 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   float onceW = ciOnce(wideT, 0.6 * wideT / max(abs(mus), 0.15), sameSide);
   // Along a long path most light is scattered more than once, which
   // spreads the peak and the halo out; a thicker sheet sends more back.
-  // Scattered twice or more, the light still goes mostly forward (as by a
-  // narrower lobe, g 0.5 for ice's 0.7): next to the moon or the sun dense
-  // ice glows, and does not stand dark against thinner ice.
+  // Scattered twice or more, the light still goes mostly forward, as by a
+  // lobe of mean cosine 0.5 that widens as the sheet thickens round about
+  // (phM, by the body: by the depth at the pixel, each dense strand next to
+  // the sun stood as a dark stroke on the bright veil): next
+  // to the moon or the sun dense ice glows, and does not stand dark against
+  // thinner ice. CI_MANY sets its amount so that the sheet sends out the
+  // sunlight it takes. (Up to round 19 most of it went evenly, as much back
+  // as forward: a thick sheet was as bright away from the sun as near it,
+  // a milky veil without depth.) At dusk, where the low sun's light has
+  // spread along the sheet, it goes about evenly (CI_DIFF, below).
   // (At night the eye sees the moonlit sheet over some 10 km: nightK, below.)
   float dayK = smoothstep(0.02, 0.3, uLightI), nightK = 0.9 * (1.0 - dayK);
-  float many = mix(1.0 - exp(-0.3 * mix(tau, wideT, nightK)), 1.0 - exp(-0.3 * tauP * li), duskK), spread = mix(0.15 * tauV / (tauV + 0.3), CI_DIFF, duskK);
+  float many = mix(1.0 - exp(-0.3 * mix(tau, wideT, nightK)), 1.0 - exp(-0.3 * tauP * li), duskK);
+  float phM = mix(CI_MANY * hg(mu, 0.5 / (1.0 + 0.25 * bodyT)), CI_DIFF + 0.3 * hg(mu, 0.5), duskK);
   // The light scattered many times has mostly gone forward at each step: on
   // its way in it fades with a quarter of the depth that the light
   // scattered once feels (1 - g of ice). With the depth of the single
@@ -4637,8 +4659,15 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // sunlight that reaches the sheet times lk.y + lk.z times the halo's
   // shape there (cirrusLight); lk.x is the share of the light from round
   // about (aL).
+  // Where the halo shows, a share haloW of the crystals is smooth, and
+  // smooth prisms send no light between their diffraction peak and the
+  // ring: the light scattered once is less there. (With the rough ice's
+  // lobe there in full, the inside of the moon's ring filled up, and from
+  // 11 km the ring lost half its contrast; with twice haloW, it stood out
+  // three times as much as in a photograph of a lunar halo.)
   float u = (1.0 - many) * onceL;
-  lk = vec3(aL, ph * u + (spread + 0.3 * hg(mu, 0.5)) * many * mix(onceD, onceW, nightK) + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
+  ph *= 1.0 - haloW * smoothstep(0.92, 0.94, mu) * (1.0 - smoothstep(0.985, 0.995, mu));
+  lk = vec3(aL, ph * u + phM * many * mix(onceD, onceW, nightK) + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
 }
 
 // The light of the cirrus (H) at tHigh along the ray, from the numbers lk

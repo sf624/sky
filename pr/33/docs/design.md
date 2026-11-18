@@ -1916,16 +1916,22 @@ on the map.
   deck along the ray (not across it: blurred across too, the strands of
   distant plumes averaged out to smooth patches); from the ground the
   blur is about a pixel. Near the eye the march takes its place.
-- Light: forward scattering by ice (a narrow diffraction peak within a
-  degree or two of the sun, so that the glow round the sun stays small;
-  it is a round aureole: it follows the sheet's depth over some 10 km
-  (`ciWide`), and the ice just in front of the light only by 0.4,
-  and it is drawn where there is ice around even if there is none in the
-  pixel. Drawn from the ice in front, a plume round the moon lit up as a
-  bright patch of its own shape; from the depth over 2.5 km, as a smooth
-  bright lens; a
-  broad refraction lobe; and a flat part to the side and back, some 0.3 of
-  the mean, as ray tracing of ice crystals gives it), the 22-degree halo
+- Light: forward scattering by ice. A narrow diffraction peak within a
+  degree or two of the sun, `CI_FWD` = 0.4 of the light scattered once,
+  so that the glow round the sun stays small; it is a round aureole: it
+  follows the sheet's depth over some 10 km (`ciWide`), and the ice just
+  in front of the light only by 0.4, and it is drawn where there is ice
+  around even if there is none in the pixel. (Drawn from the ice in
+  front, a plume round the moon lit up as a bright patch of its own shape;
+  from the depth over 2.5 km, as a smooth bright lens.) The rest goes by
+  the phase of rough compact aggregates of columns (`ciGeo`), the ice that
+  retrievals find in most cirrus (Cole et al. 2014; their mean cosine
+  0.77 with the peak): a lobe forward and a broad
+  part to the side, `0.733 hg(mu, 0.75) + 0.267 hg(mu, 0.15)`, mean cosine
+  0.59, so 0.75 with the peak, little light back (some 0.15 of the mean
+  beyond 120 degrees, against 0.6 up to round 19, whose lobe of 0.7 and
+  part back of -0.3 had a mean cosine of 0.55), and no halo of its own
+  (the halo below is drawn apart). Then the 22-degree halo
   with the dispersion of ice (soft, some 1.4 degrees inside; by day only
   0.03 and only where there is a veil, from a depth of 0.1, since
   photographs of much cirrus towards the sun mostly show none: 0.05 to
@@ -1935,17 +1941,34 @@ on the map.
   10 km and here; it fades as the ice scatters the light again, as the
   rest of the light scattered once does: taken by that twice, and at 0.03
   to 0.07, the ring did not show at night through a veil, where
-  photographs show it),
+  photographs show it; and where it shows, that share of the crystals is
+  smooth, and the light scattered once by the rough ice is less by it
+  between some 8 and 21 degrees, where smooth prisms send none: with the
+  rough ice's lobe there in full, the inside of the moon's ring filled
+  up, and from 11 km the ring stood out half as much; now the ring is
+  1.04 to 1.22 times the sky just inside it over the night views, against
+  1.00 to 1.15 up to round 19 and 1.10 in a photograph of a lunar halo),
   light
   scattered once with the sheet's own shadow (a low sun enters the sheet
   within some seven times its thickness, between the clouds, so cirrus at
-  sunset is lit gold), a share scattered many times (its sunlight fades
-  with a quarter of the depth, as ice sends most of it on forward: with
-  the full depth, thick ice towards a low sun went darker than the sky
-  behind it; and it keeps a forward lobe, `0.3 hg(mu, 0.5)` over the flat
-  part: with the flat part alone, dense ice next to the moon stood dark
-  against the thin ice round it),
-  skylight from the multiple-scattering table (less the share `CI_FWD`,
+  sunset is lit gold), a share scattered many times (`1 - exp(-0.3
+  tau)`; its sunlight fades with a quarter of the depth, as ice sends most
+  of it on forward: with the full depth, thick ice towards a low sun went
+  darker than the sky behind it). That light still goes forward, by
+  `hg(mu, 0.5 / (1 + 0.25 ciBody))`, a lobe that widens as the sheet
+  thickens round about (by the depth at the pixel, each dense strand next
+  to the sun stood as a dark stroke on the bright veil), `CI_MANY` = 2.3
+  times as much as its share and path give, so that the sheet sends out
+  the sunlight it takes: integrated over the sphere, what it sends is 0.94
+  to 1.02 of what it takes out of the sun's beam, at vertical depths from
+  0.05 to 4 and the sun 38 degrees up, and of a sheet of depth 1, 0.25 of
+  that goes back up. (Up to round 19 most of it went evenly, `0.15 tauV /
+  (tauV + 0.3)` over the sphere and `0.3 hg(mu, 0.5)`: of a sheet of
+  depth 1, 0.4 of the light went back up, of depth 2, half, and a thick
+  sheet was as bright away from the sun as near it, a milky veil. A lobe
+  of its own keeps dense ice next to the moon from standing dark against
+  the thin ice round it.) At dusk it goes evenly (below). And the sheet
+  sends skylight, from the multiple-scattering table (less the share `CI_FWD`,
   below), and light from the low clouds below, at the mean distance of
   the decks seen.
 - **A low sun** (`duskK`, a `smoothstep` of `li`, 1 over the sine of the
