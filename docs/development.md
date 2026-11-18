@@ -142,8 +142,9 @@ these rules, and new work at start should too:
 - On Windows (ANGLE on Direct3D 11) a program is compiled at link for one
   target, and again at its first draw into two or more, on the GPU
   process's main thread: the whole browser waits, and a long compile
-  there loses the context (round 19's scene took some 150 s, then
-  `CONTEXT_LOST_WEBGL`). So the large programs draw into one target: the
+  there loses the context (7d1a635's scene: 124 s at link and 121 s
+  more at its first frame, measured; on the owner's browser,
+  `CONTEXT_LOST_WEBGL` right then). So the large programs draw into one target: the
   scene writes its distance as the depth, the cirrus's pass its numbers
   as the bits of one target and the depth (see
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
@@ -295,7 +296,12 @@ changed nothing here, measured on 2026-11-19 against round 19,
 two runs each: the same stills and GL trace, the frame 15.1 to 15.4 ms at
 the default view at 2560 x 1440, 20.3 to 20.4 ms under the shell and 16.7
 to 16.8 ms at the cruise view, and the first picture 5.6 to 5.7 s at 1920
-x 1080 (Mesa did not unroll those loops). The machine's times drift by several tenths
+x 1080 (Mesa did not unroll those loops). The cirrus's own pass
+(`CIRRUS_PASS`), measured on 2026-11-19 against 7d1a635 at 2560 x 1440,
+two runs each, the pass and the scene together: the frame 15.1 to 15.2 ms
+at the default view (15.2 to 15.3), 18.5 to 18.7 ms under the shell
+(20.3 to 20.4) and 16.5 ms at the cruise view (16.7), and the first
+picture 5.6 to 6.4 s (6.6 to 7.0). The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
