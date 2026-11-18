@@ -521,9 +521,11 @@ instead, below):
   cube of `top`), thicker where the map is higher. `top` follows G: each
   heap of the map is a dome 0.5 to 1.2 km over a deck between heaps and
   up to 1.9 km over its base on the highest heaps; the tallest (G over
-  0.55) are towers, a kilometre higher still. A tower rises over its
+  0.46) are towers, a kilometre higher still. A tower rises over its
   heap as a dome, `t (2 - t)` of its height with `t` going from 0 to 1 as G
-  goes from 0.42 to 0.87 (0.46 to 0.76 before round 17: with G a dome of
+  goes from 0.34 to 0.74 (`TOWER`; 0.42 to 0.87 in round 17, when 0.1 % of
+  the map was a third of the way up a tower or more, and few towers stood
+  anywhere; 0.46 to 0.76 before round 17: with G a dome of
   each heap, its wall stood over a quarter of the heap's radius, a cliff),
   70 to 100 % as high as the heap's G says: when
   its top rose with G in a straight line, towers were cones, like
@@ -535,7 +537,9 @@ instead, below):
   the tile made all the forms: one size of lumps with pits in them, like
   crumpled paper. Where the cover is thickest (`deck`) the domes flatten
   to a third of their height and the noise's 500 m cells take over
-  (stratocumulus). A deck swells a little where the map is high
+  (stratocumulus); a tower's own rise does not count towards `deck` (with
+  it, towers in a thick cover flattened into the deck, and at `cloud` 0.7
+  to 0.8 hardly one stood). A deck swells a little where the map is high
   (`swell`, a share of the height, not a fixed one); the lowest 180 m
   rounded off (`rim`). `y` counts from the base's `level`: 150 to 300 m
   over `CB`, higher or lower across tens of km (it follows the gusts'
@@ -596,7 +600,9 @@ turret, and its walls are the walls of the dome whatever the billows do:
 towers and big heaps came out as lumpy columns, scattered cumulus as round
 heaps of one size. So where the cover breaks into heaps (no sheet, below),
 and for towers wherever they stand, the heaps have a 3D body instead
-(`solid`: `(1 - max(deck, level1)) max(1 - sheet, tower, stand)`, smoothly;
+(`solid`: the larger of `(1 - max(deck, level1)) (1 - sheet)` and
+`(1 - level1) max(stand, tower)`, smoothly: a tower and a heap that stands
+out of a sheet or a deck have it there too;
 `stand` is how far the heap's dome stands out of the sheet, 0 to 250 m
 (250 to 600 m before round 17: the lower heaps on a sheet were the field
 above, smooth domes among the sheet's heads, like stones under a sheet):
@@ -622,52 +628,63 @@ envelope from the weather map, with a 3D shape on its surface.
   As `env` itself, the surface of round 11 had a gentle slope across the
   side of a heap, and the turrets alone made its outside: a union of free
   balls, with more of them standing off the heap.
-- On that surface stand the turrets of `uBody` (see
-  [Textures made at start](#textures-made-at-start)), read at the same
-  place in the noise as the billows (`q`). The two largest shape it, as
-  bumps: each moves the surface out by up to `BODY_K` (700 and 400 m for
-  the turrets of 2 km and 1 km), in by less (`BODY_C` = 0.45 is the value
-  that moves it neither way). The 500 m and 250 m ones only carve it
-  (erosion, after Schneider's clouds for games, 2015 to 2017): the body's
-  surface stands `ERO_C` = 0.55 of their weights (250 and 140 m) out for
-  them, a head's crown reaches it, and the seam between two heads goes in
-  by up to the weight. Deeper than that they fade out over `SKIN` = 150
-  m, so the core is whole. So the smaller ones sit on the larger ones, a
-  cauliflower, and nothing stands out of the body's surface but the large
-  lobes, which rise about as fast as the envelope falls. A size counts only on
-  heaps whose dome may be as high as half of it and more
-  (`smoothstep(0.5, 1.5, top (CT - CB) / size)`); on a sheet as if the
-  dome were up to twice as high, with the 500 and 250 m sizes weighed 0.6
-  and 0.5 (the low heaps that stand out of a sheet were a rubble of small
-  heads; in photographs they are broad, bulging domes).
+- **A tower is thermals stacked one on another**: its envelope swells
+  and narrows by `PILE` = 0.2 of `rise` every 0.9 km of height (the phase
+  drifts from place to place with `far`), and is up to a quarter wider
+  towards its top. With one envelope from base to top, the walls of towers
+  read as pillars. Every heap **leans** with the wind's shear: the map is
+  read `LEAN` = (0.06, 0.03) km upwind for each km of height (twice that
+drew towers seen from above as teardrops with a pointed tail).
+- On that surface stand the turrets and heads of `uBody` (see
+  [Textures made at start](#textures-made-at-start)), one read at the same
+  place in the noise as the billows (`q`). The turrets of 2 km and 1 km
+  shape it, as bumps: each moves the surface out by up to `BODY_K` (700
+and 400 m), in by less (`BODY_C` = 0.45 is the value that moves it
+neither way; with 600 and 300 m, heaps from above were round blobs). The heads baked on them
+  (500, 250 and 125 m) only carve it (erosion, after Schneider's clouds
+  for games, 2015 to 2017): their seams go in by up to `BODY_K.z` = 600 m
+  in all, the body's surface stands `ERO_C` = 0.4 of that out for them
+  (their mean, so that the cover stays), and a crown of every size reaches
+  it. Deeper than that they fade out over `SKIN` = 150 m, so the core is
+  whole. They carve nothing on the lowest part of a heap (`heapUp` under
+  0.03, all of it from 0.25): seen from below, its base and the foot of
+  its sides were a rubble of heads; in photographs a base is flat. The
+  heads count only on heaps whose dome may be 250 m high and more
+  (`smoothstep(0.5, 1.5, top (CT - CB) / 0.5 km)`), each turret on heaps
+  half its size high; on a sheet as if the dome were up to twice as high,
+  with the heads weighed 0.55 (the low heaps that stand out of a sheet
+  were a rubble of small heads; in photographs they are broad, bulging
+  domes). (Until round 17 the carving was turrets of 500 m and 250 m, 250
+  and 140 m deep, read per step from two channels; heads of 125 m came
+  only from the fine noise within 4 to 8 km, and a tower seen from 8 km
+  was a few large, soft lobes.)
 - The field is `BODY_G (dEnv + bumps + shift)`, with `BODY_G` = 2 per km.
-  `shift` (`BODY_B` = -60 m, 90 m less from `cloud` 0.4 to 0.7) moves the
-  surface in a little. (Round 16 had -150 m, for the cover of the slider;
+  `shift` (`BODY_B` = -60 m, 90 m less from `cloud` 0.4 to 0.7, and 50 m
+less below 0.15, easing to none by 0.4: the heads of round 18 ate the
+smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cover of the slider;
   with the heaps of round 17, most of them small, it ate the heaps under
   500 m.) The cover of the slider: over 100 by 100 km round the eye
-  (column depth over 1, 200 m pixels), 0.5, 1.8, 4.3, 5.8, 8.8, 14.4,
-  21.0, 83.6, 96.5 and 98.7 % at `cloud` 0.1 to 1 (round 16: 0.5, 1.6,
-  4.0, 6.1, 8.7, 15.2, 33.8, 86.6, 98.6, 99.6 %).
+  (column depth over 1, 200 m pixels), 0.4, 2.1, 4.0, 4.8, 7.8, 13.4,
+  19.5, 85.3, 97.1 and 98.7 % at `cloud` 0.1 to 1 (round 17: 0.5, 1.8,
+  4.3, 5.8, 8.8, 14.4, 21.0, 83.6, 96.5, 98.7 %).
 - The fine noise (`cloudDetail`) is weighed `BODY_D` = 1.3 on the body
-  (`steep` there). On the body it is the turrets of `uBody` again, read 7
-  times finer (`DETAIL`): heads of 290, 140, 70 and 36 m, weighed `GEO_W`
-  = 0.15, 0.2, 0.12 and 0.05, so that the turrets go on down in the same
-  form, a cauliflower from 2 km to 36 m (the `MICRO` noise adds smaller
-  billows near). They carve too: the surface stands out by `fat` (`ERO_F`
-  = 0.55 of their weights), their seams go in from there, and deeper than
-  their weights they fade out over `SKIN_F` = 100 m. With the 290 m heads
-  weighed most (0.3, 0.18, 0.08, 0.03 before), close heaps were large,
-  soft lobes. Low on a heap's sides (`heapUp` under 0.15 to 0.45) they
-  carve the heads' middles instead (`WISP` = 0.6 of the way), and leave
-  the seams as ragged wisps. All this within 4 km of the eye, giving way to
-  the Worley billows by 8 km (farther, where the heads are a pixel or
-  less, a flight differed from a still at the place reached by more than
-  the `flight` check allows: 1.53 against 1.26; with the turrets carving
-  only, 1.37 against 1.25 low, and 1.19 with a hazy rim 50 m deep on heaps
-  under 600 m, which cost 7 ms of the frame at 2 km). With the Worley billows of the sheet
-  there, close heaps were smooth cream, like whipped cream or wax: large
-  soft lobes. The 70 and 36 m heads weigh 0.08 and 0.03 (at 0.1 and 0.06
-  the heaps were a busy grey rubble). On the body the cloud is at least
+  (`steep` there). On the body it is the heads of `uBody` again, read 7
+  times finer (`DETAIL`): heads of 71, 36 and 18 m, their seams `GEO_S` =
+  0.3 deep in all, so that the heads go on down in the same form, a
+  cauliflower from 2 km to 18 m (the `MICRO` noise adds smaller billows
+  near). They carve too: the surface stands out by `fat` (`ERO_F` = 0.4 of
+  their weight), their seams go in from there, and deeper than their
+  weight they fade out over `SKIN_F` = 100 m. Low on a heap's sides
+  (`heapUp` under 0.15 to 0.45) they carve the heads' middles instead
+  (`WISP` = 0.6 of the way), and leave the seams as ragged wisps. All this
+  within 4 km of the eye, fading out by 8 km; farther the body has no fine
+  noise at all (until round 17 the Worley billows of the sheet took over
+  there and blurred the body's heads). (Read out to 8 km and farther,
+  where they are a pixel or less, round 14's fine turrets made a flight
+  differ from a still at the place reached by more than the `flight`
+  check allows: 1.53 against 1.26.) With the Worley billows of the sheet
+  near, close heaps were smooth cream, like whipped cream or wax: large
+  soft lobes. On the body the cloud is at least
   0.9 rough (`q.w`): older, smoother cloud left some heaps without relief
   (rough 0.45). At 1 (round 14), the heads were smooth lobes, like putty; at 4,
   ragged, with shreds round them; at 1.6 and more, a flight differed from a
@@ -682,11 +699,11 @@ envelope from the weather map, with a 3D shape on its surface.
   heap's thin foot were translucent, and the cloud behind showed through
   them as patches with sharp outlines. The heads of big heaps do not fray
   (`thin`).
-- The edge (`cloudField`) is 12 m deep on the upper part of a heap (its
-  rising heads) and 70 m on its lower sides (a veil), by `heapUp`, the
-  height over the base against the envelope's top there (crisper, 4 m
-  above the lowest sixth, a flight differed from a still by more than the
-  `flight` check allows). From 15 to 45 km
+- The edge (`cloudField`) is 6 m deep on the upper part of a heap (its
+  rising heads) and 35 m on its lower sides, by `heapUp`, the height over
+  the base against the envelope's top there (12 and 70 m until round 17:
+  photographs of towers have crisper outlines; then, with the fine heads
+  read out to 8 km, 4 m failed the `flight` check). From 15 to 45 km
   away on, every edge of the body becomes a veil 150 m deep: from 11 km,
   small cumulus were cut out of the sea with hard outlines.
 - The early ways out of `cloudShape` take the field as if the bumps were
@@ -737,10 +754,10 @@ below. Its top is 250 to 720 m over the bases. Its surface is packed heads
 (`SHEET_H`): the turrets of `uBody` of 2 km and 1 km raise it (0.8 of
 its depth times their value less `BODY_C`), and meet in seams that go
 down to 40 % of its depth (deeper, they cut it through, and under a deck
-the march met many clouds in one ray: 4 ms more); the 500 m and 250 m
-turrets carve the heads as they carve the body (seams up to 300 and 170
-m deep, fading `SKIN` deeper), and the fine turrets of `cloudDetail` carve
-it too (`carved`). All of this only where the sheet is whole (`whole`,
+the march met many clouds in one ray: 4 ms more); the heads of `uBody` (500 m to 125 m) carve them as they carve the body
+(seams up to 400 m deep in all, `SHEET_H.z`, fading `SKIN` deeper; in
+round 17 turrets of 500 m and 250 m, 300 and 170 m deep), and the fine
+heads of `cloudDetail` carve it too (`carved`). All of this only where the sheet is whole (`whole`,
 `sheet` from 0.2 to 0.6): at its first edges the crowns alone stood out
 of it, a speckle of small dots that shimmered in flight. The heaps that flatten into a deck (`deck`) have the
 same heads and seams. (Until round 17 the top was domes of the noise's
@@ -749,7 +766,10 @@ through it.) Over more than half of it (`far.a`) rows of
 rolls 1.2 km apart across the wind (whole numbers of them across the map,
 bent over tens of km), each swelling and thinning every 2 km along its
 length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. The heaps on the sheet
+photographs of stratocumulus from above show them. Each roll swells more
+in some places than in others (0.35 to 1 of its depth, by the noise's 2
+km cells): rolls of one depth over tens of km were straight, regular
+stripes from 13 km. The heaps on the sheet
 stand in the same ranks, with smaller billows (`rank`); with rolls in a
 few places only, the sheet from above was lumps without order. The
 billows of the tile lie on top. Sheet and
@@ -1792,7 +1812,7 @@ All are made during the loading, in `makeSky`:
 | `uPop` | 22, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uBody` | 15 | 128^3, RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' turrets (`turrets`), at 4, 8, 16 and 32 cells per tile (2 km to 250 m) |
+| `uBody` | 15 | 256^3 (128^3 on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A free |
 | `uSlope` | 13 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
@@ -1846,7 +1866,7 @@ towers. Then gusts on the sea, and
 the patches and bands of cirrus. The wave map is a sum of plane waves, each
 a whole number of times across the map.
 
-The turrets of `uBody` are cells of a jittered lattice (each point kept
+The turrets of `uBody` (and of its heads) are cells of a jittered lattice (each point kept
 0.15 of a cell off the cell's sides), each a round head of a radius of
 0.45 to 0.75 of a cell, a little flatter than wide (its height over the
 point counts 1 / 0.85). A cell holds the height of a sphere of that
@@ -1854,11 +1874,25 @@ shape (`sqrt(1 - d^2)`; outside it, `1 - d^2`, below nought), so that two
 heads meet in a sharp crease; where two meet the higher wins, rounded over
 0.2 (`SOFT`): a cleft between them. (As domes, `1 - d^2`, the heads melted
 into smooth lobes, like putty; heads on stems, longer below than above,
-drew upright fins and streaks on the body's sides, like ice.) Drawn with
-`noise` slice by slice after the noise texture, the 128 slices take about
-as long again: on a desktop GPU the first picture comes about half a
-second later (6.7 s after the navigation at 1280 x 720, against 6.1 to
-6.3 s with round 11's turrets, measured the same day).
+drew upright fins and streaks on the body's sides, like ice.) B holds the heads that cover the body (`heads`): turrets of 500, 250 and
+125 m (16, 32 and 64 cells per tile), each carving seams into the surface
+(1 - the turret's value, weighed `HEADS_W` = 0.4, 0.33 and 0.27), so that
+B is 0 on a crown of every size and 1 in the deepest seam. Each size
+carves the crowns and flanks of the size above it fully and its seams
+less (`HEADS_GATE` = 0.6 there, by `smoothstep(0, 0.5, t)` of the size
+above, from the 1 km turret down): a seam between two large heads stays
+one clean crease. (Heads that fill their cells, from the distances to
+the nearest two lattice points, left the surface all crowns with narrow
+cracks between, smooth from a few km.) The texture is 256 texels a side
+(31 m: the 125 m heads need it) on the GPU, 67 MB (77 MB with its mips,
+against 9.6 MB for round 17's 128^3); a renderer on the CPU
+(`WEBGL_debug_renderer_info` says SwiftShader, llvmpipe or software)
+draws it at 128, as before, where the 125 m heads are blurred. `fs` is
+compiled with `BODY_LOD`, the level of its texels as a level of the noise
+(1 or 0). Drawn with `noise` slice by slice after the noise texture, in
+the same batches, it holds the first picture back by about 0.6 s on the
+test GPU (0.2 to 1.2 s; 7.9 against 7.3 s after the navigation at 1280 x
+720, four runs each, measured in round 18).
 
 The Worley noise of the noise texture's G and B is rounded at each
 feature point over a quarter of a cell (`1 + r0 / 4 - sqrt(d^2 + r0^2)`,
