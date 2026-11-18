@@ -203,6 +203,15 @@ main's `fs` 6.4 and 6.0; round 19's 98.9 and 114.9; 7d1a635's 124.0 and
 2560 x 1440, the first picture: main 17.1 to 18.7 s, round 19 253 to
 297 s, 7d1a635 252 to 292 s, now 13.4 to 17.2 s.
 
+The low clouds of #33, round 21 (2026-11-19, against main a257ec2):
+`d3d programs`, link in s: `fs (CLOUD_PASS)` 3.9, `fs` 7.4 (main 6.8),
+`fs (CIRRUS_PASS)` 8.5, `fs (SKY_LIGHT)` 2.6, `fs (TOPS_MAP)` 1.3, one
+target each (the harness's draw of `fs` alone ends in GL error 1282; the
+page draws it). Round 20 rebased on that main did not link: its `fs`
+read 20 textures, where Direct3D 11 allows 16. `d3d page`, three runs at
+2560 x 1440: the first picture 12.5 to 13.7 s (main 10.9 to 12.8 s), the
+GPU time per frame 24.1 to 24.9 ms (main 16.5 to 16.9 ms).
+
 ## Timings and limits
 
 Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.

@@ -178,13 +178,17 @@ flies: at rest the page draws nothing. Fix the drawing scale with
 on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
-Each frame of the hero is three draws: the scene (`fs`) into the frame
-texture, `mean`, and `show`; at most every 100 ms a fourth, the
-exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
+Each frame of the hero is six draws: the first stage of the clouds'
+light (the low clouds' pass, `fs` with `CLOUD_PASS` and `uStage` 0, a
+quarter of the pixels), the cirrus's pass and the low clouds' (with
+`CIRRUS_PASS`, `CLOUD_PASS`), the scene (`fs`) into the frame texture,
+`mean`, and `show` (the passes only with their clouds); at most every 100 ms a
+fifth, the exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
 November 2026; reading it back costs about 2 ms of the main thread here,
 none of the GPU's); and a frame that needs a new map of the clouds'
 shadow draws it first (see
-[design.md](design.md#the-clouds-shadow)). The scene is nearly all of it. Measured on an
+[design.md](design.md#the-clouds-shadow)). The two draws of `fs` are
+nearly all of it; the numbers below for the scene are their sum. Measured on an
 NVIDIA RTX 3090 (median GPU time per frame, default view, flying), in
 November 2026. The page had a scroll bar then, so the drawing sizes are
 those of 2560 x 1440 and 3840 x 2160 windows less a scroll bar; the first
@@ -234,16 +238,107 @@ The numbers to tune, all in `index.html`:
 
 | Name | Value | What it sets |
 |---|---|---|
-| `SHADOW` (JS) | 1024 | texels per side of the map: its cost and sharpness |
-| `SHADOW_STALE` (JS) | 0.5 km | how far the aircraft flies before the map is drawn again |
-| `SHADOW_K` (`fs`) | 40 km | where the map's texels are four times as wide as at the eye |
-| `SHADOW_H` (`fs`) | 0.6, 1.3, 2.3, 3.5 km | the heights the map keeps a depth for |
+| `SHADOW` (JS) | 1024 | texels per side of the light's map: its cost and sharpness |
+| `COLUMN` (JS) | 512 | texels per side of the map of the columns (straight up) |
+| `SHADOW_STALE` (JS) | 0.5 km | how far the aircraft flies before a map is drawn again |
+| `SHADOW_K` (`fs`) | 40 km | where the maps' texels are four times as wide as at the eye |
+| `SHADOW_N` (`fs`) | 16 | the heights a map keeps a depth for, every 275 m from `CB` (four to a layer) |
 | `SHADOW_DS` (`fs`) | 0.2 km | the length of a step along a line of the map (24 to 96 steps) |
 | `SHADOW_ENC` (`fs`) | 4 | the depth at which the stored value is one half |
 | `SHAFTS` (`fs`) | 16 | samples of the map along a view ray below the tops |
 | `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
 | `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
 | `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
+
+Those numbers are older than the detail of the low clouds near the eye
+(#33, November 2026), which trades time for the picture. Flying, `res=1`,
+the scene in ms at 2560 x 1440 (both stages; main in brackets, one stage),
+median of two runs, 18 November 2026, round 13 of #33 on main 005ecb2:
+
+| View | 2560 x 1440 |
+|---|---|
+| Default (cruise) | 22.0 (18.0) |
+| `alt=2&cloud=0.7` | 30.2 (16.4) |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 14.4 (12.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 28.0 (15.1) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 26.3 (17.8) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 19.1 (14.2) |
+
+Round 12 (the 3D body of heaps) took 33.3, 60.2, 35.1, 56.3, 39.3 and 43.4
+ms in the same views on its own main (06d2cad), and a third more rebased
+on this one.
+Round 13 kept its picture and took half the time, where it went:
+
+- The clouds' light was worked out inside the march's loop, and each
+  pixel of a group the GPU runs together that met a cloud at another step
+  made the others wait through its light in turn. It is worked out after
+  the loop now: the first stage took a third of the time (17.5 to 5.8 ms
+  at `alt=2`), the same picture.
+- Along outlines, a few pixels whose first-stage texels had met another
+  cloud worked their light out in full and made their whole group wait
+  (12 ms at `alt=2`). They take the best of the twelve texels round
+  those now.
+- Rays marched clear air in steps of at most 60 m near the eye. Above the
+  tops of `uTops` they stride down to them; the second stage starts each
+  ray at the nearest cloud that the first stage's rays round it met, and
+  skips the march where none of them met any (see design.md).
+- What was worked out before the march (the cirrus, the phases) was held
+  in registers through it, and fewer pixels ran at once. Code that is
+  never run counts too: a search of sixteen texels in the second stage
+  made the first stage 5 ms slower. Round 12 rebased on main with the
+  night's work took a third longer for that alone.
+- The moved weather map (`WARP`) cost a read that the next two waited for
+  on every step; it is made once per amount of cloud (`uWarped`).
+
+Round 20 of #33 (19 November 2026, on main f2b0707) measured where the
+time of the clouds goes, with debug builds that leave one term of their
+light out or make it a constant (2560 x 1440, `res=1`, flying, mean of two
+runs; the first stage at half size, then the second):
+
+| View | Both stages | All the light's marches | Of which: second stage's fallback |
+|---|---|---|---|
+| `alt=2&cloud=0.7` | 4.5 + 32.8 ms | 6.1 ms | 3.5 ms |
+| Among clouds at 1.8 km | 4.3 + 29.5 ms | 5.0 ms | 2.6 ms |
+| Under a deck at 0.6 km | 7.8 + 22.6 ms | 2.5 ms | 0.9 ms |
+| Cruise | 3.3 + 15.3 ms | 0.8 ms | 0 ms |
+
+So the march to the clouds and through them is most of it (some 28 ms at
+`alt=2`), not their light: the light's steps cost a fifth at most, and
+most of that in the second stage, where a few pixels along outlines work
+their light out in full (the fallback) and make their group wait. Each
+term alone (the depth towards the light, the sky's, the depth behind,
+the column, the first two fine steps) is 1 to 2 ms there. Round 20
+replaced the marched columns (`overhead`) and the far part of the depth
+behind by the depth maps (see design.md), which took 1 to 2.6 ms off:
+
+| View | main | round 16 | round 19 | round 20 |
+|---|---|---|---|---|
+| Default (cruise) | 13.2 | 22.6 | 18.5 | 17.4 |
+| `alt=2&cloud=0.7` | 11.6 | 34.2 | 36.4 | 34.1 |
+| Tops from 4.6 km | 9.6 | 14.6 | 17.7 | 16.8 |
+| Among clouds at 1.8 km | 10.8 | 32.7 | 33.6 | 31.2 |
+| Under a deck at 0.6 km | 12.5 | 26.4 | 30.8 | 29.0 |
+| 5 km, looking down 20 degrees | 11.1 | 20.6 | 22.2 | 20.7 |
+| 4 km, `cloud=0.8&time=12&pitch=-15` | 11.9 | 22.0 | 22.6 | 21.0 |
+
+(One run each, the same session; others share the GPU, and a second
+session gave 1 to 1.7 ms between rounds 19 and 20.) A layer of the light's
+map takes 0.4 to 1.2 ms (median), the lowest up to 2.9 ms, as the whole
+map of round 19 did; the column's 0.1 to 0.2 ms. In flight one layer is
+drawn a frame, four every 0.5 km of each map; a change of the light (the
+time-lapse) draws the light's four layers in one frame, some 4 to 5 ms
+(round 19: 1 to 3 ms), and a change of the cloud amount both maps.
+
+Round 21 (19 November 2026, on main a257ec2, whose cirrus is a pass of
+its own) moved the low clouds into a pass of their own (`CLOUD_PASS`) to
+start on Direct3D 11; the frame costs the same as round 20 rebased there
+(2560 x 1440, `res=1`, flying, one run each, ms; main a257ec2 in
+brackets): cruise 21.0 (16.0), `alt=2` 37.0 (14.0), tops from 4.6 km
+20.0 (11.7), among clouds at 1.8 km 34.6 (13.5), under a deck 33.3
+(16.6), 5 km looking down 23.3 (12.4), 4 km 23.5 (13.4); round 20 on its
+own main took 1.5 to 4.3 ms less, as main's cirrus does there. The first
+picture comes 6.9 to 7.2 s after navigation (main 4.9 s, round 20 on its
+main 6.1 s, rebased 7.6 to 7.8 s).
 
 The cirrus's map, ice and way are built once, by their own program
 (`ice`), during the loading (or when cirrus is first shown, if the page
@@ -345,7 +440,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `#extension`. The JS asks for:
   - `OES_texture_float_linear`: else the filtered tables are RGBA16F;
   - `EXT_color_buffer_half_float` or `EXT_color_buffer_float`: else the
-    frames and the clouds' shadow map are RGBA8, and also if their
+    frames and the clouds' depth maps are RGBA8, and also if their
     framebuffer turns out incomplete;
   - `EXT_texture_filter_anisotropic`: else the wave map is filtered
     without it.
@@ -400,14 +495,20 @@ The shaders must run on any WebGL2. The code keeps these rules:
   heads' cells in `iceSystems` and the strands' cells in `iceSheets`
   wrap by hand,
   `c - p * floor((c + 0.5) / p)`.
-- **`fs` is three programs.** `makeSky` compiles it again with
-  `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
-  same cloud field. A change to the field changes both. That program's
-  uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
-  field reads must be set there too. And with `CIRRUS_PASS` defined: that
-  `main` draws the cirrus along each ray (`highCloud`) before the scene,
-  which reads it (`cirrusLight`). It gets the scene's uniforms by name:
-  the fixed ones (`C`, then `fixedFor`) and the view's (`view` in `draw`).
+- **`fs` is six programs.** `makeSky` compiles it again with
+  `CLOUD_PASS` defined: that `main` draws the low clouds along each ray
+  (`clouds`, both stages of their light) before the scene, which reads
+  them; with `SHADOW_MAP`: the clouds' depth maps (the shadow and the
+  columns) with the same cloud field; with `TOPS_MAP` (the map of the
+  tops, and the warped weather map). A change to the field changes all
+  of these, and the scene's (the sea reads it). The depth maps' program
+  has its uniforms set apart (`S` in `makeSky`): a new uniform that the
+  cloud field reads must be set there too. With `CIRRUS_PASS`: the cirrus
+  along each ray (`highCloud`) before the scene, which reads it
+  (`cirrusLight`); with `SKY_LIGHT`: the sky's light on the clouds. The
+  passes and `SKY_LIGHT` get the scene's uniforms by name: the fixed ones
+  (`C`, then `fixedFor`) and the view's and the frame's (`view` in
+  `draw`). Set a fixed uniform of `fs` with `C`, never on `prog` alone.
 - **Loops in code that rarely runs get a bound the compiler cannot know.**
   The compiler unrolls a loop of constant bounds, and the unrolled code
   makes the whole shader heavier for the GPU even where a branch skips it:
@@ -440,7 +541,25 @@ The shaders must run on any WebGL2. The code keeps these rules:
   against 165 s). In the cirrus's pass alone, the march and the veil's
   octaves with constant bounds (as in round 19) took 15.3 s against 10.1:
   the cirrus's loops keep `CI_N`. `LONG_N` changed nothing (the scene 8.1
-  s with it and without). Measure
+  s with it and without). No loop whose bound the compiler cannot know
+  writes an array at its index: FXC must unroll a loop that writes an
+  array at an index it cannot know (its warning X3550), and cannot unroll
+  one whose bound it cannot know (error X3511). Write a vector instead
+  (ANGLE turns a vector's index into a switch). Several loops in the
+  clouds' march, each with its read of the field (the sky's two
+  directions, `tauB`, the light's steps), stopped the compiler with that
+  error (X3511, on the march's loop) in round 20 of #33; one loop with
+  one read compiles. A program reads at most 16 textures there
+  (`MAX_TEXTURE_IMAGE_UNITS`; the scene of round 20 rebased on the
+  cirrus's pass read 20 and did not link): pass a map to a function as an
+  argument (`mapDepth`) so that a program counts only the maps it reads,
+  and keep what passes hand on in layers of one texture (`uPasses`).
+  Round 21 of #33 (2026-11-19, `d3d programs`, link in s): the scene 7.4
+  to 8.2, the low clouds' pass 3.9 to 4.7, the cirrus's pass 8.5 to 8.6,
+  `SKY_LIGHT` 2.6 to 2.7 (5.7 more in the scene's program, timed alone
+  with FXC), `TOPS_MAP` 1.3 to 1.4. The GPU process compiles
+  several at once, and the first picture waits for their sum more than
+  for the longest. Measure
   a change of `fs` there: `node tools/sky.mjs d3d programs --base
   origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **Comments** are plain English sentences that say what and why. No
