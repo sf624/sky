@@ -240,12 +240,22 @@ picture came 5.25 to 5.33 s after navigation with `cirrus=0.5`, as round
 3.77 s (the ice program is then not compiled, but the scene's program
 holds the cirrus's code). Round 16 (the stirred frame, the erosion,
 the sheets' turned cells, frayed heads and broken strands) made the ice
-dearer to build: the first picture with `cirrus=0.5` came 5.97 to 6.03 s
-after navigation against round 15's 5.19 to 5.26 s (same day, both on
-main f2b0707, whose own first picture came at 3.47 to 3.51 s), the frame
-unchanged at the default view (8.78 to 8.85 ms against 8.80 to 8.85 ms)
-and 0.4 ms more just under the shell (10.36 to 10.42 against 9.98 to
-9.99 ms). The machine's times drift by several tenths
+program larger: the first picture with `cirrus=0.5` came 0.75 s later
+than round 15's. Most of that was not the GPU's time (without the ice's
+work, the first picture came only some 0.15 s sooner) but the driver
+finishing the larger program: its three calls of `iceSystems` and two
+of `iceStrands` were each a copy, and every loop was unrolled. Round 17
+calls each once and keeps the ice's loops as loops (`ICE_N`); measured
+on 2026-11-18, two runs each, alternated, all on main f2b0707 except
+round 15 (on 0d4e736), at 1920 x 1080: the first picture with
+`cirrus=0.5` came 5.41 to 5.73 s after navigation, against round 16's
+6.78 to 6.85 s, round 15's 5.79 to 6.08 s and main's 3.91 to 3.93 s
+(the machine was some 0.4 s slower that hour than in the morning); the
+frame took 8.76 to 8.79 ms at the default view (round 16: 8.79 to
+8.83), 9.95 to 10.01 ms just under the shell (round 16: 10.36 to 10.43,
+round 15: 9.98 to 10.05) and, at 2560 x 1440 at the cruise view
+(`date=319&at=150,90`), 15.61 to 15.67 ms (round 16: 15.57 to 15.62,
+main 13.70 to 13.71). The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
