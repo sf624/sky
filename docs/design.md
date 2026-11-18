@@ -779,8 +779,9 @@ all dimmed and reddened by the air:
   The Milky Way is drawn `EYE_GAIN` = 6 times its light, at every hour,
   and so is the zodiacal cone: large faint glows that the dark-adapted
   eye sees plainly, where a screen's dark end would hide them. One gain
-  for both keeps their ratio. On a moonless night (the view `night-dark`)
-  its brightest parts stand at about 40 of 255 over a sky of 10; under a
+  for both keeps their ratio. On a moonless night, towards Sagittarius
+  from cruise (`date=200&time=1.5&moon=0&yaw=20&pitch=8`), its brightest
+  parts stand at about 47 of 255 over a sky of 10; under a
   quarter moon it is faint, and under a full moon it is lost in the
   moonlit sky. Before, it was raised up to 6.5 times more as the night eye
   came in, by its contrast with the sky and the moon's glare in the eye
