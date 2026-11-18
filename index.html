@@ -629,10 +629,9 @@ uniform float uTan;     // tan(vertical fov / 2)
 uniform vec3 uSun;      // unit vector towards the sun
 uniform float uSunI;    // 1, or 0 when the sun is too far down to matter
 uniform vec3 uMoon;     // unit vector towards the moon
-uniform float uMoonI;   // moonlight relative to sunlight (0 when it does not matter)
+uniform float uMoonI;   // moonlight relative to sunlight (0 once the moon is far below the horizon)
 uniform mat3 uSky;      // rotation of the stars since noon
 uniform vec3 uEcliptic; // the ecliptic's north pole, equatorial (J2000)
-uniform float uEarth;   // earthshine on the dark side of the moon
 // Star catalogue: a grid over the sphere (octahedral map), SLOTS stars per
 // cell. Texel: direction (J2000 equatorial), colour index + brightness.
 uniform sampler2D uStars;
@@ -644,8 +643,8 @@ uniform float uLook;    // power of the "look" curve
 uniform vec2 uLogRange;
 uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
-uniform float uNightEye;    // how far the eye's night vision has come in, 0 by day to 1 (nightEyeFor)
-uniform float uNightGrey;   // how far the night's wider grey has come in, 0 to 1 (nightGreyFor)
+uniform float uNightEye;    // how far the eye's night vision has come in, from its adaptation: 0 by day to 1 (nightEyeFor)
+uniform float uNightGrey;   // how far the night's wider grey has come in, from its adaptation: 0 to 1 (nightGreyFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -666,6 +665,7 @@ uniform float uCloud;   // cloud amount: 0 (none) to 1 (overcast)
 uniform float uWind;    // wind over the sea, m/s
 uniform vec3 uLight;    // what lights the clouds and the sea: the sun, or the moon at night
 uniform float uLightI;
+uniform float uLightShare;   // how far that light has come in, 0 to 1, as the sun hands over to the moon (see celestial)
 // The view from the aircraft is a mean over frames: each frame shifts the
 // rays within the pixel (uJitter, in pixels) and the samples through the
 // clouds (uPass, the number of the frame).
@@ -721,22 +721,20 @@ const int NFAR = 16;            // ...and in the lit air beyond it (see shadowSp
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
-const float STAR_GAIN = 3.0;
+const float STAR_GAIN = 20.0;   // the core of a star of magnitude 6.5, of the airglow's radiance (see main)
 const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
-const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands over the sky, shown (0 to 1)
-const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
-const float MILKY_EYE = 6.5;    // the Milky Way raised at night (see main)...
-const vec2 MILKY_SEEN = vec2(0.08, 0.8);   // ...over this range of its contrast with the sky behind it
-const float ZODI_SEEN = 0.25;   // the zodiacal cone's contrast over the sky, to the rods, where the eye starts to see it (zodiacalSeen)...
-const float ZODI_MOST = 6.0;    // ...and the most it raises the sky behind it, as drawn
+const float EYE_GAIN = 6.0;     // the Milky Way and the zodiacal cone, of their brightness (see main)
 const vec2 ZODI_BAND = vec2(20.0, 2.0);   // the cone's half width as drawn, degrees, at 15 degrees from the sun and far from it (zodiacal)
-const float ZODI_MOON = 1.1e-7;  // moonlight (of sunlight, uMoonI) that halves the cone as drawn: a first-quarter moon, up, leaves a fifth
+const float EARTHSHINE = 1e-6;  // the moon's dark side, lit by the earth (of sunlight per steradian)
 const float S10 = 6.61e-12;     // radiance of one star of the 10th magnitude per square degree, of the sun's light (V = -26.74)
 const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
 const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
 const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
 const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
 const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
+const float DARK_LOOK = 2.0;    // ...and as the eye adapts to a darker night (DARK_EYE), steeper...
+const float DARK_PIVOT = 0.07;  // ...about this level
+const vec2 DARK_EYE = vec2(15.5, 17.5);   // the exposure (log2) over which the night's curve turns to DARK_LOOK
 const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)...
 const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
 const vec2 SKY_BLUE = vec2(0.001, 0.01);
@@ -849,8 +847,8 @@ float milkyWay(vec3 c) {
 // falls off as the power -2.46 of the angle from the sun, flattened towards
 // the ecliptic as seen around the sun (x of the result), over a floor and
 // the gegenschein (some 13 degrees across) on a wider glow at the point
-// opposite the sun (y). And for the cone as it is drawn at night (see
-// zodiacalSeen), a look: z, its brightness along the ecliptic at this
+// opposite the sun (y). And for the cone as it is drawn (see main), a
+// look: z, its brightness along the ecliptic at this
 // angle from the sun, and w, its shape across: a band of half width
 // ZODI_BAND (to 1/e), 20 degrees at 15 degrees from the sun, narrowing
 // fastest near the sun towards 2 (15 at 24 degrees, 9 at 50, 4 at 80),
@@ -869,41 +867,6 @@ vec4 zodiacal(float x, float y) {
   return vec4(cone * across,
               78.6 * across + 19.3 * exp(-(1.0 + x) / 0.01) + 62.3 * exp(-(1.0 + x) / 0.511),
               cone, 0.85 * exp(-b * b) + 0.15 * exp(-0.25 * b * b));
-}
-
-// How far the zodiacal cone raises the sky behind it on its axis, as drawn
-// at night (the drawn contrast), from c, the contrast of its brightness
-// along the ecliptic over that sky as the rods see it (the rest of the
-// zodiacal light included). A look for the eye's view, as the Milky Way is
-// raised: the eye sees so large and soft a glow from about ZODI_SEEN over
-// the sky, and then plainly, but its response to it is compressive. So the
-// drawn sum, sky and cone, grows as the cone's own contrast from ZODI_SEEN
-// on, with a soft knee (nothing is drawn well below it), and levels off
-// towards ZODI_MOST times the sky: a cone 3 times the sky and one 10 times
-// it look nearly alike. Its log never rises faster than the log of c, so
-// that where the sky behind brightens faster than the cone (the last
-// twilight at the horizon, the Milky Way) the sum still brightens: a
-// steeper rise left a dark rim along the horizon. Across the ecliptic the
-// raise takes the band's shape (zodiacal): applied after the levelling
-// off, it keeps a bright axis and soft sides, where levelling off the
-// shaped cone gave a column with a flat top.
-float zodiacalSeen(float c) {
-  float u = log(1.0 + pow(min(c, 1e4) / ZODI_SEEN, 6.0)) / 6.0;   // ln(c / ZODI_SEEN) above the knee
-  float top = log(ZODI_MOST);
-  return uNightEye * (exp(u * pow(1.0 + pow(u / top, 3.0), -1.0 / 3.0)) - 1.0);
-}
-
-// The faintest star the dark-adapted eye can see against a sky of b cd/m2
-// (x), and the faintest its cones alone can see (y), in magnitudes. After
-// Schaefer (1990): the threshold illuminance grows as (1 + sqrt(k b))^2,
-// with one pair of constants for the rods and one for the cones; the eye
-// takes the lower. A dark sky (2e-4 cd/m2) gives 6.6, a moonlit sky at
-// 0.005 about 4.2, twilight at 1 cd/m2 about 3, the day sky -4.
-vec2 starsSeen(float b) {
-  float nl = 3.1416e5 * b;                           // nanolamberts
-  float cones = 4.305 - 5.0 * log(1.0 + sqrt(1.259e-6 * nl)) / log(10.0);
-  float rods = 7.93 - 5.0 * log(1.0 + sqrt(0.01259 * nl)) / log(10.0);
-  return vec2(max(rods, cones), cones);
 }
 
 float cornetteShanks(float g, float mu) {
@@ -1371,7 +1334,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float billow = clamp(1.0 + 2.0 * smoothstep(5.0, 30.0, t) * lump, 0.6, 1.3);
         // A side turned from the light still sees the sunlit cloud around
         // it: white light, of the sun and of the sky, as that cloud sends.
-        float bounce = (1.0 - facing) * clamp(dot(ps, uLight) / length(ps), 0.0, 1.0);
+        float bounce = uLightShare * (1.0 - facing) * clamp(dot(ps, uLight) / length(ps), 0.0, 1.0);
         one = p0 * exp(-tau);
         many = billow * white * (0.66 * mix(0.15, 1.0, facing) * clamp(1.0 + 6.0 * bump, 0.5, 1.1)
                                  * (p1 * exp(-0.4 * tau) + p2 * exp(-0.15 * soft) + p3 * exp(-0.05 * soft))
@@ -1476,7 +1439,7 @@ const vec4 SWELL[SWELLS] = vec4[SWELLS](
 const float FACET = 0.0005;
 const float FACET_TOL = 0.02;
 const float SPOT = 0.1;
-float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
+float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc, int one) {
   float tau2 = tol * s2r;
   float mean = tau2 / (s2r + tau2) * exp(-dot(zh, zh) / (s2r + tau2));
   float n = round(WEATHER_KM / size);                // facets to the map's side (a power of 2 times 1000)
@@ -1485,8 +1448,8 @@ float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2
   vec3 cov = vec3(ha.x * ha.x + hc.x * hc.x, ha.x * ha.y + hc.x * hc.y, ha.y * ha.y + hc.y * hc.y) + vec3(SPOT * SPOT, 0.0, SPOT * SPOT);
   float det = cov.x * cov.z - cov.y * cov.y;
   float sum = 0.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
+  for (int j = -1; j <= one; j++) {
+    for (int i = -1; i <= one; i++) {
       vec2 c = mod(g0 + vec2(i, j), n);
       vec2 lo = mod(c, 1000.0), hi = floor(c / 1000.0);
       vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
@@ -1515,12 +1478,12 @@ float sparkleCell(vec2 c, float n, float size) {
   vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
   return sqrt(-2.0 * log(max(hash3(h + 0.29), 1e-7))) * cos(2.0 * PI * hash3(h + 0.83));
 }
-float sparkleCount(float size, float p, vec2 x, vec2 fa) {
+float sparkleCount(float size, float p, vec2 x, vec2 fa, int one) {
   float lam = p * (size / FACET) * (size / FACET);
   float v = min(log(1.0 + GRAIN / max(lam, 1e-6)), 2.5), s = sqrt(v);
   float n = round(WEATHER_KM / size);
   float sum = 0.0;
-  for (int i = 0; i < GRAIN_N; i++) {
+  for (int i = 0; i < GRAIN_N * one; i++) {
     vec2 g = (x + fa * ((float(i) + 0.5) / float(GRAIN_N) - 0.5)) / size - 0.5;
     vec2 g0 = floor(g), f = g - g0;
     vec4 e = exp(s * vec4(sparkleCell(g0, n, size), sparkleCell(g0 + vec2(1.0, 0.0), n, size),
@@ -1538,19 +1501,23 @@ float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
   float across = length(fc), along = length(fa);
   float count = smoothstep(0.0, 3.0, log2(along * across / (FACET * FACET) * FACET_TOL / (1.0 + FACET_TOL)));
   float s = 0.0, c = 0.0;
+  // The loops below run to a bound the compiler cannot know (one is 1):
+  // unrolled, they made the whole shader heavier for the GPU even by day,
+  // when no sparkle is drawn (4.5 ms of 17 at 2560 x 1440, November 2026).
+  int one = int(step(0.0, uNightEye));
   if (count < 1.0) {
     float level = max(log2(along / FACET), 0.0);
     float k = floor(level), f = level - k;
     float tol = FACET_TOL * exp2(2.0 * k);
     float many = smoothstep(2.0, 32.0, FACET_TOL * exp2(2.0 * level));   // so many facets: their mean
-    s = many >= 1.0 ? 1.0 : mix(mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc),
-                                    sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc), f), 1.0, many);
+    s = many >= 1.0 ? 1.0 : mix(mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc, one),
+                                    sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc, one), f), 1.0, many);
   }
   if (count > 0.0) {
     // Cells about as wide as the footprint, or a GRAIN_N-th of its length.
     float level = max(log2(max(across, along / float(GRAIN_N)) / FACET), 0.0);
     float k = floor(level), f = level - k;
-    float a = sparkleCount(FACET * exp2(k), p, x, fa) - 1.0, b = sparkleCount(FACET * exp2(k + 1.0), p, x, fa) - 1.0;
+    float a = sparkleCount(FACET * exp2(k), p, x, fa, one) - 1.0, b = sparkleCount(FACET * exp2(k + 1.0), p, x, fa, one) - 1.0;
     c = max(1.0 + ((1.0 - f) * a + f * b) / sqrt((1.0 - f) * (1.0 - f) + f * f), 0.0);
   }
   return mix(s, c, count);
@@ -2084,8 +2051,6 @@ void main() {
   vec4 L[3], G[3];
   L[0] = vec4(0.0); L[1] = vec4(0.0); L[2] = vec4(0.0);
   G[0] = vec4(0.0); G[1] = vec4(0.0); G[2] = vec4(0.0);
-  vec3 starCol = vec3(0.0);                          // the stars at night, added after the exposure
-  vec2 zodiY = vec2(0.0);                            // the zodiacal light as drawn, to the cones and to the rods (not metered)
   vec4 Tv[3];
   float prev = 0.0, vis = 1.0;
   bool cloudsFirst = tHigh < 0.0 || (tBar > 0.0 && tBar <= tHigh);
@@ -2146,6 +2111,7 @@ void main() {
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
     }
     direct *= mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h));
+    direct = mix(1.0, direct, uLightShare);          // the clouds' shadows come and go with their light
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * vis, sunLight ? direct : 1.0, phaseSun, d, Tv, L);
     if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * vis, sunLight ? 1.0 : direct, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
@@ -2166,12 +2132,11 @@ void main() {
   } else if (ground) {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
-    float shadow = uLightI > 0.0 ? seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + cirrusShadow(pg) : 0.0;
+    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + cirrusShadow(pg)) : 0.0;
     addSea(pg, d, tmax, od, betaM, extM, vis, shadow, L, G);
   } else {
-    // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way and
-    // stars, all dimmed and reddened by the air. By day the exposure hides
-    // the faint ones.
+    // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way,
+    // the zodiacal light and stars, all dimmed and reddened by the air.
     float pix = 2.0 * uTan / uRes.y;
     // Sun disc (angular radius 0.267 degrees).
     float sun = mu > 0.0 ? 2000.0 * smoothstep(0.0050, 0.0043, length(cross(d, uSun))) : 0.0;
@@ -2183,85 +2148,38 @@ void main() {
     if (dot(d, uMoon) > 0.0 && rm < 1.0) {
       vec3 nm = em - uMoon * sqrt(1.0 - rm * rm);
       float seas = 0.65 + 0.6 * noise3(nm * 2.2 + 7.0);
-      moon = 0.05 * seas * pow(max(dot(nm, uSun), 0.0), 0.6) + uEarth;
+      moon = 0.05 * seas * pow(max(dot(nm, uSun), 0.0), 0.6) + EARTHSHINE;
       moonMask = smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm);
     }
     vec3 c = d * uSky;                               // equatorial direction (J2000)
+    // Every light here is drawn with its own brightness at every hour, and
+    // only the air hides it: it is dimmed on its way to the eye (tk, tg),
+    // and the light the air scatters towards the eye (L, so far) lies over
+    // it. The exposure and the tone curve then decide what shows. A star by
+    // day is lost under the bright sky, not switched off, and the stars and
+    // the Milky Way come out by themselves as the twilight fades.
     float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
-    float milky = milkyWay(c), raise = 1.0;
+    float free = 1.0 - moonMask;                     // the moon hides what lies behind it
     vec4 tk[3];
-    vec4 tg[3];                                      // ...and for the airglow at night (below)
+    vec4 tg[3];                                      // ...and for the airglow (below)
     for (int k = 0; k < 3; k++) {
       tk[k] = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
-      // The air dims the airglow and the Milky Way, but scatters much of
-      // that light back towards the eye: at night count half the loss.
-      tg[k] = mix(tk[k], vis * exp(-0.5 * (uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z)), uNightEye);
+      // The air dims the airglow, the Milky Way and the zodiacal light, but
+      // scatters much of that light back towards the eye: count half the loss.
+      tg[k] = vis * exp(-0.5 * (uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     }
-    // The stars as the eye sees them at night (see starsSeen): the faintest
-    // it can see against this sky, and the faintest whose colour it sees.
-    // The zodiacal light (zodiacal), of the sun's colour, only at night: its
-    // floor and the gegenschein as they are, its cone as the eye sees it
-    // (zodiacalSeen). By day and in twilight until the night eye comes in,
-    // the sky hides it.
-    vec2 seen = vec2(0.0);
-    float zodi = 0.0;
-    if (uNightEye > 0.0) {
-      float y = 0.0, ym = 0.0;
-      for (int k = 0; k < 3; k++) {
-        vec4 lw = 0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k];
-        vec4 g = tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0));
-        y += dot(lw, L[k] + g * vanRhijn);
-        ym += dot(lw, g * milky);
-      }
-      // The moon's glare in the eye veils the sky around it: 10 E / theta^2
-      // cd/m2 at theta degrees from a light of E lux (Stiles and Holladay;
-      // the moon is uMoonI of the sun's 133000 lux).
-      float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
-      float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
-      // The zodiacal cone's contrast to the rods, over the sky, the Milky Way
-      // and the rest of the zodiacal light behind it (the airglow, bluer
-      // than the zodiacal light, is brighter to them).
-      vec4 z = zodiacal(dot(d, uSun), dot(c, uEcliptic));
-      z.xyz *= 1.0 - moonMask;
-      float ys = 0.0, yz = 0.0, yzs = 0.0;
-      for (int k = 0; k < 3; k++) {
-        ys += dot(uWS[k], L[k] + tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0)) * (vanRhijn + milky));
-        yz += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], tg[k]);
-        yzs += dot(uWS[k], tg[k]);
-      }
-      // Drawn: zodiacalSeen of the contrast of the cone's brightness along
-      // the ecliptic (z.z) gives how far it raises that sky on its axis;
-      // across, it takes the band's shape (z.w), so that it is brightest on
-      // its axis and falls off smoothly to the sides, with no flat top. A
-      // moon up fades it (ZODI_MOON): the eye loses so faint a glow in
-      // moonlight sooner than its contrast says, and from cruise, where the
-      // moonlit air above is thin, the contrast alone left a first-quarter
-      // moon's cone plain. The moon's veil in the eye is left out of that
-      // contrast: nothing draws the veil, and counted in, it cut a dark
-      // hole into the cone around a crescent moon standing in it. Which
-      // stars the eye sees depends on the cone's
-      // light in its drawn shape. The floor and the fit's own wide profile
-      // are left out: the stars were set to look right against a sky
-      // without them, and they took 3 to 6 % of the stars all over the sky.
-      // The Milky Way is raised by its contrast with the sky and the moon's
-      // veil alone, as before the zodiacal light was drawn: counted in, it
-      // dimmed the Milky Way all over the sky.
-      float behind = ys + S10 * z.y * yzs;
-      float moonUp = uMoonI * smoothstep(-0.1, 0.2, uMoon.y) / ZODI_MOON;
-      float shape = z.w / (1.0 + moonUp * moonUp);
-      zodi = S10 * z.y + zodiacalSeen(S10 * z.z * yzs / max(behind, 1e-30)) * shape * behind / max(yzs, 1e-30);
-      zodiY = ISUN * zodi * vec2(yz, yzs);
-      float back = CD * ISUN * y + veil;
-      seen = starsSeen(back + CD * ISUN * (ym + S10 * z.z * z.w * yz));
-      // The dark-adapted eye sees the Milky Way plainly where it stands well
-      // over the sky and the moon's veil behind it, and not where its
-      // contrast with them is under its threshold: raised MILKY_EYE times
-      // over the range MILKY_SEEN of that contrast.
-      raise += MILKY_EYE * uNightEye * smoothstep(MILKY_SEEN.x, MILKY_SEEN.y, CD * ISUN * ym / max(back, 1e-9));
-    }
-    float glow = uNight * (vanRhijn + raise * milky) * (1.0 - moonMask);
-    vec4 st[3], sn[3];
-    for (int k = 0; k < 3; k++) { st[k] = vec4(0.0); sn[k] = vec4(0.0); }
+    // Airglow and the Milky Way, relative to the airglow. The zodiacal light
+    // (zodiacal), of the sun's colour: its floor and the gegenschein, and its
+    // cone as drawn, of the fit's brightness along the ecliptic and the
+    // band's shape across it. The Milky Way and the cone are drawn EYE_GAIN
+    // times their light, at every hour: large faint glows that the
+    // dark-adapted eye sees plainly, where a screen's dark end would hide
+    // them. One gain for both keeps their ratio.
+    float glow = uNight * (vanRhijn + EYE_GAIN * milkyWay(c)) * free;
+    vec4 z = zodiacal(dot(d, uSun), dot(c, uEcliptic));
+    float zodi = S10 * (z.y + EYE_GAIN * z.z * z.w) * free;
+    vec4 st[3];
+    for (int k = 0; k < 3; k++) st[k] = vec4(0.0);
     ivec2 cell = starCell(c);
     for (int s = 0; s < SLOTS; s++) {
       vec4 t = texelFetch(uStars, ivec2(cell.x * SLOTS + s, cell.y), 0);
@@ -2283,42 +2201,17 @@ void main() {
       }
       if (w > 1e-3) {
         float tilt = floor(t.w) / 63.0 * 8.0 - 4.0;  // blue to red
-        // The eye sees the colour of a star only well above what its
-        // cones can just see (seen.y): the brightest few.
-        float hue = smoothstep(STAR_HUE.x, STAR_HUE.y, seen.y - (6.5 - lf / STAR_LN_MAG));
-        for (int k = 0; k < 3; k++) {
-          vec4 tint = pow(uWL[k], vec4(tilt));
-          st[k] += w * tint;
-          sn[k] += w * mix(vec4(1.0), tint, hue);
-        }
+        for (int k = 0; k < 3; k++) st[k] += w * pow(uWL[k], vec4(tilt));
       }
     }
-    // By day the stars are drawn in proportion to the airglow; the exposure
-    // hides them.
-    float stars = uNight * STAR_GAIN * (1.0 - moonMask) * (1.0 - uNightEye);
+    // The stars: the core of a star of magnitude 6.5 is STAR_GAIN times the
+    // airglow's radiance, each magnitude brighter STAR_LN_MAG brighter.
+    float stars = uNight * STAR_GAIN * free;
     for (int k = 0; k < 3; k++) {
       G[k] = tk[k] * sun;
-      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0)) + tg[k] * zodi;
-      else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
-    }
-    // At night as the eye sees them: a star at the faintest magnitude the
-    // eye can see against this sky (seen.x) is drawn just visible, and each
-    // magnitude brighter STAR_LN_MAG brighter (in ln), dimmed by the air and
-    // the clouds before it. Added after the exposure (in main): the eye's
-    // threshold, not the exposure, says which stars show.
-    if (uNightEye > 0.0) {
-      float k0 = (1.0 - moonMask) * exp(STAR_LN_MAG * (seen.x - 6.5));
-      // The air and the clouds dim a star by some magnitudes; drawn on the
-      // same compressed scale, that is the power STAR_LN_MAG / 0.921 of
-      // their transmission.
-      for (int k = 0; k < 3; k++) sn[k] *= pow(tk[k], vec4(STAR_LN_MAG / 0.921));
-      starCol = k0 * vec3(
-        dot(uWR[0], sn[0]) + dot(uWR[1], sn[1]) + dot(uWR[2], sn[2]),
-        dot(uWG[0], sn[0]) + dot(uWG[1], sn[1]) + dot(uWG[2], sn[2]),
-        dot(uWB[0], sn[0]) + dot(uWB[1], sn[1]) + dot(uWB[2], sn[2]));
+      L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
   }
-
   // Glare: light of the sun strayed inside the eye or the lens, a glow of a
   // few degrees around it (a "look", like the spikes of the stars). Clouds
   // between the eye and the sun dim it.
@@ -2375,7 +2268,6 @@ void main() {
     float blue = uNightGrey * bluer * smoothstep(log(SKY_BLUE.x), log(SKY_BLUE.y), log(max(cd, 1e-12)));
     vec3 tint = mix(ROD_TINT, ROD_BLUE, blue);
     col = mix(col, max(rods, 0.0) * tint, rodShare);
-    zodiY.x = mix(zodiY.x, zodiY.y * dot(tint, vec3(0.2126, 0.7152, 0.0722)), rodShare);
   }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
@@ -2387,23 +2279,9 @@ void main() {
     dot(uWR[0], G[0]) + dot(uWR[1], G[1]) + dot(uWR[2], G[2]),
     dot(uWG[0], G[0]) + dot(uWG[1], G[1]) + dot(uWG[2], G[2]),
     dot(uWB[0], G[0]) + dot(uWB[1], G[1]) + dot(uWB[2], G[2])));
-  // Nor does it count the zodiacal light (zodiacal): a faint glow over a
-  // part of the night sky, drawn as the eye sees it, does not change how
-  // the rest is exposed.
-  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - zodiY.x - (1.0 - METER_GLINT) * max(glintY, 0.0);
+  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * max(glintY, 0.0);
   float level = (log2(max(metered, 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
-  // The stars at night (starCol), as the eye sees them: one at the eye's
-  // threshold against this sky stands STAR_SEEN over it on the screen,
-  // whatever the exposure. A dark sky does not hide stars that the eye sees.
-  if (uNightEye > 0.0 && max(starCol.r, max(starCol.g, starCol.b)) > 0.0) {
-    // The tone curve below, on the luminance: x^n p^(look - n), then 1 - exp.
-    float n = mix(uLook, NIGHT_LOOK, rodShare), p = pow(LOOK_PIVOT, uLook - n);
-    float back = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    float shown = pow(1.0 - exp(-p * pow(back, n)), 1.0 / 2.2) + STAR_SEEN;
-    float need = pow(-log(1.0 - pow(min(shown, 0.99), 2.2)) / p, 1.0 / n) - back;
-    col += uNightEye * need * starCol;
-  }
   // No shoulder that keeps the hue: each channel meets the curve below on
   // its own, as on a camera's sensor. A bright orange band of twilight
   // then runs into white at its strongest channel first, and comes out
@@ -2434,8 +2312,15 @@ void main() {
   vec3 looked = pow(col, vec3(uLook));
   if (rodShare > 0.0) {
     float yl = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30);
-    float n = mix(uLook, NIGHT_LOOK, rodShare);
-    looked = mix(looked, col * pow(yl, n - 1.0) * pow(LOOK_PIVOT, uLook - n), rodShare);
+    // As the eye adapts to a darker night it is steeper still, about a
+    // lower level (DARK_LOOK, DARK_PIVOT): on a moonless night the Milky
+    // Way, the zodiacal light and the stars stand out as the dark-adapted
+    // eye sees them; under a moon, with the gentler curve, the moonlit sky
+    // lies over them. One curve for everything, set by the adaptation.
+    float dark = smoothstep(DARK_EYE.x, DARK_EYE.y, log2(uExposure));
+    float n = mix(uLook, mix(NIGHT_LOOK, DARK_LOOK, dark), rodShare);
+    float pivot = LOOK_PIVOT * pow(DARK_PIVOT / LOOK_PIVOT, dark);
+    looked = mix(looked, col * pow(yl, n - 1.0) * pow(pivot, uLook - n), rodShare);
   }
   col = looked;
   col = 1.0 - exp(-col);                             // tone mapping
@@ -3143,6 +3028,8 @@ const SkySound = (() => {
   const RAD = Math.PI / 180;
   const LATITUDE = 35 * RAD;         // of the observer
   const OBLIQUITY = 23.44 * RAD;     // tilt of the earth's axis
+  const LIGHT_SWAP = [-3, -4.5, -6]; // sun's elevation: the clouds' light from the sun to the moon (see celestial)
+  const MOON_AIR = [-14, -11];       // stops of the moonlit air below the sunlit: the moon's light in the air fades in (moonAirFor)
   const FOV = 62 * RAD;
   const AIR_LOOK = 1.4;    // from the air: as deep as photographs taken there
   // The hero's limit, chosen in the panel.
@@ -3466,7 +3353,7 @@ const SkySound = (() => {
   const state = {
     time: 15, day: 80, moonAge: 13, haze: 1, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
-    alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1,
+    alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, lightShare: 1,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
     speed: 900, heading: 0, drift: [0, 0], cirrus: 0.4,
     // Days the sun has moved on beyond state.day while the time ran (see
@@ -3494,10 +3381,12 @@ const SkySound = (() => {
     const siderealTime = H + sunRA;
     state.sun = onSky(sunDec, H);
     state.elev = Math.asin(state.sun[1]) / RAD;
-    // The sun's light fades out between 18 and 21 degrees down, where it no
-    // longer matters, rather than stopping at once: no step shows.
-    const fade = Math.min(1, Math.max(0, (state.elev + 21) / 3));
-    state.sunOn = fade * fade * (3 - 2 * fade);
+    // A light below the horizon still lights the air above until it is
+    // some 18 degrees down. Its light fades out between 18 and 21 degrees
+    // down, where it no longer matters (no more than the airglow), rather
+    // than stopping at once: no step shows. The same for the sun and the moon.
+    const lit = e => { const f = Math.min(1, Math.max(0, (e + 21) / 3)); return f * f * (3 - 2 * f); };
+    state.sunOn = lit(state.elev);
     // The moon runs ahead of the sun along the ecliptic by its age.
     const elong = state.moonAge / 29.53 * 360;
     const [moonRA, moonDec] = fromEcliptic(lon + elong * RAD);
@@ -3506,11 +3395,24 @@ const SkySound = (() => {
     // (the phase law in Krisciunas and Schaefer, 1991).
     const alpha = Math.abs(180 - elong);
     const moonI = 2.5e-6 * 10 ** (-0.4 * (0.026 * alpha + 4e-9 * alpha ** 4));
-    const moonElev = Math.asin(state.moon[1]) / RAD;
-    state.moonI = state.elev < -3 && moonElev > -18 ? moonI : 0;
-    // One light for the clouds and the sea: the sun, then the moon.
-    state.light = state.elev > -3 ? state.sun : state.moon;
-    state.lightI = state.elev > -3 ? 1 : state.moonI;
+    // It is there at every hour, by day too: the day's sky hides it.
+    state.moonI = moonI * lit(Math.asin(state.moon[1]) / RAD);
+    // One light for the clouds and the sea (one shadow map, one march
+    // towards it): the sun, then the moon. Neither steps: the sun's share
+    // fades out as it goes from LIGHT_SWAP[0] to LIGHT_SWAP[1] degrees, the
+    // light turns to the moon there, and the moon's share comes in by
+    // LIGHT_SWAP[2], and so do the shadows the clouds cast (uLightShare).
+    // In between both are faint beside the light of the twilight's sky: the
+    // sun lights only the farthest clouds towards it, and the moon's light
+    // is weak beside the sky's (a full moon's 0.25 lux against some 10 to
+    // 30 lux at -4.5 degrees).
+    const swap = state.elev > LIGHT_SWAP[1];
+    const share = swap ? (state.elev - LIGHT_SWAP[1]) / (LIGHT_SWAP[0] - LIGHT_SWAP[1])
+                       : (LIGHT_SWAP[1] - state.elev) / (LIGHT_SWAP[1] - LIGHT_SWAP[2]);
+    const f = Math.min(1, Math.max(0, share));
+    state.light = swap ? state.sun : state.moon;
+    state.lightShare = f * f * (3 - 2 * f);
+    state.lightI = state.lightShare * (swap ? 1 : state.moonI);
     // Equatorial (J2000) to local axes, column-major: where the three
     // equatorial axes point now.
     state.sky.set(onSky(0, siderealTime), 0);
@@ -3629,19 +3531,21 @@ const SkySound = (() => {
   const DAY_SATURATION = 1.3;
   const saturationFor = () => 1 + (DAY_SATURATION - 1) * smooth01((state.elev - DUSK[1]) / (DUSK[0] - DUSK[1]));
 
-  // The eye at night (uNightEye): the rods' grey, the night's tone curve, the
-  // stars the eye sees, the Milky Way raised and the moon's glitter as
-  // sparkles (see main and addSea in fs) come in as the sun goes from NIGHT_EYE[0] to
-  // NIGHT_EYE[1] degrees. None by day; at -3 degrees the sky is still some 30
-  // cd/m2, too bright for the rods to matter.
-  const NIGHT_EYE = [-3, -6];
-  const nightEyeFor = () => smooth01((NIGHT_EYE[0] - state.elev) / (NIGHT_EYE[0] - NIGHT_EYE[1]));
-  // The eye's colours fade over a wider range of luminance (MESOPIC in fs) only
-  // in the night proper, as the sun goes from NIGHT_GREY[0] to NIGHT_GREY[1]
-  // degrees: through nautical twilight the sky, as dim as a full moon's
-  // clouds, still looks blue to the eye.
-  const NIGHT_GREY = [-10, -14];
-  const nightGreyFor = () => smooth01((NIGHT_GREY[0] - state.elev) / (NIGHT_GREY[0] - NIGHT_GREY[1]));
+  // The eye at night (uNightEye): the rods' grey, the night's tone curve and
+  // the moon's glitter as sparkles (see main and addSea in fs) come in as the
+  // eye adapts to the dark: as the exposure (log2, the eye's adaptation)
+  // goes from NIGHT_EYE[0] to NIGHT_EYE[1]. They follow the light, not the
+  // hour: in a view away from the sun that is with the sun from about 3 to
+  // 6 degrees down, where the sky is still some 30 to 3 cd/m2, too bright
+  // for the rods to matter much.
+  const NIGHT_EYE = [5.5, 9];
+  const nightEyeFor = e => smooth01((e - NIGHT_EYE[0]) / (NIGHT_EYE[1] - NIGHT_EYE[0]));
+  // The eye's colours fade over a wider range of luminance (MESOPIC in fs)
+  // once it is adapted further, as the exposure goes from NIGHT_GREY[0] to
+  // NIGHT_GREY[1]: away from the sun, as it goes from about 9 to 13
+  // degrees down.
+  const NIGHT_GREY = [12, 15];
+  const nightGreyFor = e => smooth01((e - NIGHT_GREY[0]) / (NIGHT_GREY[1] - NIGHT_GREY[0]));
 
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
@@ -3745,6 +3649,20 @@ const SkySound = (() => {
                     + (msData[msIndex(j0 + 1, i0, w)] * (1 - fx) + msData[msIndex(j0 + 1, i0 + 1, w)] * fx) * fy);
     }
     return Math.log2(Math.max(lum, 1e-30));
+  }
+  // How much of the moon's light in the air (uMoonI) is drawn. By day the
+  // air the moon lights is some 2e-6 of what the sun lights, far below one
+  // step of the screen, and working it out costs a second light in every
+  // march: it fades out as the moonlit air (the air's mean light, airLevel,
+  // for each light) goes from MOON_AIR[1] to MOON_AIR[0] stops below the
+  // sunlit air. That is 1/2000 to 1/16000 of the sky's light, a twentieth
+  // of a step of the screen or less, so no switch shows. The moon itself,
+  // its disc and its light on the clouds and the sea, is drawn at every hour.
+  function moonAirFor() {
+    if (state.moonI <= 0) return 0;
+    const q = Math.log2(state.moonI) + airLevel(state.alt, Math.asin(state.moon[1]) / RAD)
+            - Math.log2(Math.max(state.sunOn, 1e-30)) - airLevel(state.alt, state.elev);
+    return smooth01((q - MOON_AIR[0]) / (MOON_AIR[1] - MOON_AIR[0]));
   }
   function exposureFor(v) {
     const q = Float64Array.from(v).sort();
@@ -4046,9 +3964,9 @@ const SkySound = (() => {
     const uRes = U('uRes'), uCam = U('uCam'), uTan = U('uTan'), uSun = U('uSun');
     const uHaze = U('uHaze'), uExposure = U('uExposure'), uLook = U('uLook');
     const uSunI = U('uSunI'), uMoon = U('uMoon'), uMoonI = U('uMoonI'), uSky = U('uSky');
-    const uEarth = U('uEarth'), uAlt = U('uAlt'), uCloud = U('uCloud'), uWind = U('uWind');
+    const uAlt = U('uAlt'), uCloud = U('uCloud'), uWind = U('uWind');
     const uDrift = U('uDrift'), uCirrus = U('uCirrus');
-    const uLight = U('uLight'), uLightI = U('uLightI');
+    const uLight = U('uLight'), uLightI = U('uLightI'), uLightShare = U('uLightShare');
     const uJitter = U('uJitter'), uPass = U('uPass');
     gl.uniform2fv(U('uLogRange'), LOG_RANGE);
     const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye'), uNightGrey = U('uNightGrey');
@@ -4075,20 +3993,16 @@ const SkySound = (() => {
       gl.uniform3fv(uSun, state.sun);
       gl.uniform1f(uSunI, state.sunOn);
       gl.uniform3fv(uMoon, state.moon);
-      gl.uniform1f(uMoonI, state.moonI);
+      gl.uniform1f(uMoonI, state.moonI * moonAirFor());
       gl.uniformMatrix3fv(uSky, false, state.sky);
-      // Earthshine is 1e-6 in these units, but the night exposure would burn
-      // it out and hide the phase. The eye adapts to the moon locally; so
-      // hold the dark side at a dim grey (20 is the shader's ISUN).
       const exposure = 2 ** (logE ?? 0);
-      gl.uniform1f(uEarth, Math.min(1e-6, 0.06 / (20 * exposure)));
       gl.uniform1f(uHaze, state.haze);
       gl.uniform1f(uExposure, exposure);
       gl.uniform1f(uLook, v.look);
       gl.uniform3fv(uBalance, balanceFor());
       gl.uniform1f(uSaturation, saturationFor());
-      gl.uniform1f(uNightEye, nightEyeFor());
-      gl.uniform1f(uNightGrey, nightGreyFor());
+      gl.uniform1f(uNightEye, nightEyeFor(logE ?? 0));
+      gl.uniform1f(uNightGrey, nightGreyFor(logE ?? 0));
       gl.uniform1f(uAlt, v.alt);
       gl.uniform1f(uCloud, v.cloud);
       gl.uniform1f(uWind, state.wind);
@@ -4096,6 +4010,7 @@ const SkySound = (() => {
       gl.uniform1f(uCirrus, state.cirrus);
       gl.uniform3fv(uLight, state.light);
       gl.uniform1f(uLightI, state.lightI);
+      gl.uniform1f(uLightShare, state.lightShare);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
     // Fits the canvas to its place on the page. Returns 0 when it has no
@@ -4388,7 +4303,7 @@ const SkySound = (() => {
       // meter is read at once: the only frame that waits for the GPU.
       if (logE === null) {
         const from = [w, h, cam, v.fov, v.alt, v.cloud, v.look, state.sun, state.sunOn, state.moon, state.moonI,
-          state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, builtHaze, fine].join();
+          state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, state.lightShare, builtHaze, fine].join();
         meterPicture(cur, probe || from === primed ? null : 'now');
         if (probe) {
           primed = from;
