@@ -185,6 +185,12 @@ default limit (WQHD), a 4K window is drawn at 2560 x 1440.
 | 2545 x 1440 | 9.3 ms | | |
 | 3825 x 2160 | 19 ms | | |
 
+Measured again at 2560 x 1440 (`perf`, `res=1`, flying, three runs, the
+scene's median) in November 2026: the default view by day (`date=172&time=15`)
+12.5 ms, a full moon over clouds (`date=80&time=0&moon=14&cloud=0.5&pitch=-10&yaw=0`)
+13.8 ms. The night work had taken them to 17.0 and 19.0 ms (the sparkles'
+unrolled loops, see the GLSL rules); before it they were 12.4 and 13.5 ms.
+
 At 1905 x 1080, the scene without low clouds (`cloud=0`) took 2.8 ms,
 without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
@@ -318,8 +324,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `RG` and `RT`) in `fs`; `NM`, `NR` and `H` in `makeSky`.
   - Constants in both the JS and `fs`: `RG`, `RT`, `HR`, `HM`, `BETA_M`,
     `MIE_EXT`, `MIE_PHASE`, `MIE_G_UP`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
-    `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
-    earthshine). `RG` is also in the `mean` shader.
+    `LN_FLUX_MAX` and `WEATHER_KM`. `RG` is also in the `mean` shader.
   - The integer hash `ihash` (lowbias32): in the `noise`, `waves` and
     `fs` shaders.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
@@ -335,6 +340,12 @@ The shaders must run on any WebGL2. The code keeps these rules:
   same cloud field. A change to the field changes both. The program's
   uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
   field reads must be set there too.
+- **Loops in code that rarely runs get a bound the compiler cannot know.**
+  The compiler unrolls a loop of constant bounds, and the unrolled code
+  makes the whole shader heavier for the GPU even where a branch skips it:
+  the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
+  day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
+  cannot see (November 2026).
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
