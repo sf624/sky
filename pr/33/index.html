@@ -729,6 +729,7 @@ uniform float uSunI;    // 1, or 0 when the sun is too far down to matter
 uniform vec3 uMoon;     // unit vector towards the moon
 uniform float uMoonI;   // moonlight relative to sunlight (0 when it does not matter)
 uniform mat3 uSky;      // rotation of the stars since noon
+uniform vec3 uEcliptic; // the ecliptic's north pole, equatorial (J2000)
 uniform float uEarth;   // earthshine on the dark side of the moon
 // Star catalogue: a grid over the sphere (octahedral map), SLOTS stars per
 // cell. Texel: direction (J2000 equatorial), colour index + brightness.
@@ -741,12 +742,15 @@ uniform float uLook;    // power of the "look" curve
 uniform vec2 uLogRange;
 uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
+uniform float uNightEye;    // how far the eye's night vision has come in, 0 by day to 1 (nightEyeFor)
+uniform float uNightGrey;   // how far the night's wider grey has come in, 0 to 1 (nightGreyFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
 uniform vec4 uWR[3];    // spectrum -> linear sRGB (solar spectrum folded in)
 uniform vec4 uWG[3];
 uniform vec4 uWB[3];
+uniform vec4 uWS[3];    // spectrum -> what the rods see (WS in the JS)
 // Multiple scattering per unit of scattering coefficient: NMU x (12 * NH)
 // texels, the three wavelength groups stacked in y; then the same for the
 // light of the sky on the low clouds (cloudSky); then the light's mean
@@ -780,6 +784,14 @@ uniform float uSlopeMax;
 // The heaps' turrets (see cloudShape): R, G, B, A in cells of 2 km, 1 km,
 // 500 m and 250 m.
 uniform sampler3D uBody;
+// The tops (see clouds): for each texel of the weather map, how high the
+// march may meet cloud within 1, 2, 4 and 8 texels of it (R, G, B, A: 250
+// m to 2 km), as a share of CB to CT. Made with the clouds' amount.
+uniform sampler2D uTops;
+// The weather map where the cover breaks into heaps, read at a place moved
+// by up to WARP km (see cloudShape), 2048 texels square; and its slope
+// there (uSlopeW). Made with the clouds' amount.
+uniform sampler2D uWarped, uSlopeW;
 layout(location = 0) out vec4 outColor;
 // The aircraft's frames go on to the shader that joins them into a picture
 // (see there), with the distance of what each pixel shows (outAux). They are
@@ -832,6 +844,24 @@ const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
 const float STAR_GAIN = 3.0;
+const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
+const float STAR_SEEN = 0.12;   // how much a star the eye can just see stands over the sky, shown (0 to 1)
+const vec2 STAR_HUE = vec2(1.5, 4.0);   // its colour comes in from these magnitudes above the cones' threshold
+const float MILKY_EYE = 6.5;    // the Milky Way raised at night (see main)...
+const vec2 MILKY_SEEN = vec2(0.08, 0.8);   // ...over this range of its contrast with the sky behind it
+const float ZODI_SEEN = 0.25;   // the zodiacal cone's contrast over the sky, to the rods, where the eye starts to see it (zodiacalSeen)...
+const float ZODI_MOST = 6.0;    // ...and the most it raises the sky behind it, as drawn
+const vec2 ZODI_BAND = vec2(20.0, 2.0);   // the cone's half width as drawn, degrees, at 15 degrees from the sun and far from it (zodiacal)
+const float ZODI_MOON = 1.1e-7;  // moonlight (of sunlight, uMoonI) that halves the cone as drawn: a first-quarter moon, up, leaves a fifth
+const float S10 = 6.61e-12;     // radiance of one star of the 10th magnitude per square degree, of the sun's light (V = -26.74)
+const float CD = 6650.0;        // cd/m2 of a luminance of 1 here (white paper in the sun outside the air, 133000 lux, is 1 / pi)
+const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the cones in twilight (see main)
+const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
+const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
+const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
+const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)...
+const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
+const vec2 SKY_BLUE = vec2(0.001, 0.01);
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
 const int GRID = 128;
 const int SLOTS = 8;
@@ -930,6 +960,72 @@ float milkyWay(vec3 c) {
   float near = 0.5 + 0.5 * dot(c, CENTRE);
   float clouds = 0.5 * noise3(c * 5.0) + 0.3 * noise3(c * 11.0) + 0.2 * noise3(c * 23.0);
   return (0.8 + 3.0 * near * near) * exp(-b * b / (0.02 + 0.03 * near)) * (0.25 + 1.5 * clouds * clouds);
+}
+
+// The zodiacal light: sunlight scattered by the dust between the planets,
+// in S10 (stars of the 10th magnitude per square degree), from x, the cosine
+// of the angle from the sun, and y, the sine of the ecliptic latitude. A fit
+// to the table of Leinert et al. (1998, "The 1997 reference of diffuse night
+// sky brightness", A&AS 127, 1, Table 16: from the Earth, at 500 nm), within
+// 4.5 % rms and 13 % at most of its 182 values and the pole's 60: a cone that
+// falls off as the power -2.46 of the angle from the sun, flattened towards
+// the ecliptic as seen around the sun (x of the result), over a floor and
+// the gegenschein (some 13 degrees across) on a wider glow at the point
+// opposite the sun (y). And for the cone as it is drawn at night (see
+// zodiacalSeen), a look: z, its brightness along the ecliptic at this
+// angle from the sun, and w, its shape across: a band of half width
+// ZODI_BAND (to 1/e), 20 degrees at 15 degrees from the sun, narrowing
+// fastest near the sun towards 2 (15 at 24 degrees, 9 at 50, 4 at 80),
+// with a skirt twice as wide. The fit widens with the
+// angle from the sun (it is flattened by the same ratio at every angle):
+// drawn as it is, the cone spread into a fan and read as a soft glow on
+// the horizon, where the eye sees a cone, widest and brightest at its
+// base, whose sides close in all the way to its tip (Trouvelot's drawing
+// of 1876; reports from dark sites).
+vec4 zodiacal(float x, float y) {
+  float e = max(acos(clamp(x, -1.0, 1.0)), 0.035);  // from the sun, radians (at least 2 degrees)
+  float s = min(abs(y) * inversesqrt(max(1.0 - x * x * step(0.0, x), 1e-6)), 1.0);   // 0 on the ecliptic, 1 square to it
+  float across = 0.252 + 0.748 * exp(-pow(s / 0.419, 1.34));
+  float cone = 345.0 * pow(e, -2.46);
+  float b = degrees(asin(min(abs(y), 1.0))) / (ZODI_BAND.y + (ZODI_BAND.x - ZODI_BAND.y) * exp(-max(degrees(e) - 15.0, 0.0) / 30.0));
+  return vec4(cone * across,
+              78.6 * across + 19.3 * exp(-(1.0 + x) / 0.01) + 62.3 * exp(-(1.0 + x) / 0.511),
+              cone, 0.85 * exp(-b * b) + 0.15 * exp(-0.25 * b * b));
+}
+
+// How far the zodiacal cone raises the sky behind it on its axis, as drawn
+// at night (the drawn contrast), from c, the contrast of its brightness
+// along the ecliptic over that sky as the rods see it (the rest of the
+// zodiacal light included). A look for the eye's view, as the Milky Way is
+// raised: the eye sees so large and soft a glow from about ZODI_SEEN over
+// the sky, and then plainly, but its response to it is compressive. So the
+// drawn sum, sky and cone, grows as the cone's own contrast from ZODI_SEEN
+// on, with a soft knee (nothing is drawn well below it), and levels off
+// towards ZODI_MOST times the sky: a cone 3 times the sky and one 10 times
+// it look nearly alike. Its log never rises faster than the log of c, so
+// that where the sky behind brightens faster than the cone (the last
+// twilight at the horizon, the Milky Way) the sum still brightens: a
+// steeper rise left a dark rim along the horizon. Across the ecliptic the
+// raise takes the band's shape (zodiacal): applied after the levelling
+// off, it keeps a bright axis and soft sides, where levelling off the
+// shaped cone gave a column with a flat top.
+float zodiacalSeen(float c) {
+  float u = log(1.0 + pow(min(c, 1e4) / ZODI_SEEN, 6.0)) / 6.0;   // ln(c / ZODI_SEEN) above the knee
+  float top = log(ZODI_MOST);
+  return uNightEye * (exp(u * pow(1.0 + pow(u / top, 3.0), -1.0 / 3.0)) - 1.0);
+}
+
+// The faintest star the dark-adapted eye can see against a sky of b cd/m2
+// (x), and the faintest its cones alone can see (y), in magnitudes. After
+// Schaefer (1990): the threshold illuminance grows as (1 + sqrt(k b))^2,
+// with one pair of constants for the rods and one for the cones; the eye
+// takes the lower. A dark sky (2e-4 cd/m2) gives 6.6, a moonlit sky at
+// 0.005 about 4.2, twilight at 1 cd/m2 about 3, the day sky -4.
+vec2 starsSeen(float b) {
+  float nl = 3.1416e5 * b;                           // nanolamberts
+  float cones = 4.305 - 5.0 * log(1.0 + sqrt(1.259e-6 * nl)) / log(10.0);
+  float rods = 7.93 - 5.0 * log(1.0 + sqrt(0.01259 * nl)) / log(10.0);
+  return vec2(max(rods, cones), cones);
 }
 
 float cornetteShanks(float g, float mu) {
@@ -1048,10 +1144,10 @@ const float RELIEF = 0.85;          // the same for the fine noise
 const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
 const vec4 BODY_K = vec4(0.7, 0.4, 0.25, 0.14); // how far the body's bumps of 2 km, 1 km, 500 m, 250 m stand out, km
 const float BODY_C = 0.45;          // the value of the turrets that neither raises nor lowers the surface
-const float BODY_B = -0.2;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
+const float BODY_B = -0.15;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
 const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
 const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
-const float CLEFT = 0.6;            // how much a cleft of the body dims the light scattered into it
+const float CLEFT = 0.7;            // how much a cleft of the body dims the light scattered into it
 const float CLUMP = 2.0;            // how much the cover far off gathers heaps into clumps (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
 const int CLOUD_STEPS = 400;
@@ -1126,9 +1222,11 @@ vec4 bodyW = vec4(0.0);
 // (The slope of the map, uSlope, is read the same way: the 3D body's
 // envelope is divided by it, and read through the GPU's filter alone, its
 // bends drew upright bands on the sides of heaps' 3D body.)
-vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine) {
+// (mip: the level of the map's own texels, as a level of the noise: 2 for
+// 1024 texels, 1 for 2048.)
+vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine, float mip) {
   float ease = smoothReads ? clamp(-3.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) : 0.0;
-  if (ease == 0.0) return textureLod(map, x / WEATHER_KM, lod - 2.0);
+  if (ease == 0.0) return textureLod(map, x / WEATHER_KM, lod - mip);
   float N = float(textureSize(map, 0).x);
   vec2 u = x * (N / WEATHER_KM) - 0.5, i = floor(u), f = u - i;
   // Nearer still, the eased map still bent enough for lit and shaded
@@ -1141,7 +1239,7 @@ vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine) {
 }
 
 vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
-  return mapAt(uWeather, p, x, lod, fine);
+  return mapAt(uWarped, p, x, lod, fine, 1.0);
 }
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -1151,8 +1249,17 @@ vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
 // the cloud is there (q.w), how thick it is from base to top (body, 1 for a
 // deck), the billows there (lump: positive on one, negative between them)
 // and the field of the base alone (base: rising by 2 per km over it).
+#ifdef TOPS_MAP
+// The map of the tops reads the field at a place on the map and a height.
+vec2 topsX;
+float topsH;
+#endif
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
+#ifdef TOPS_MAP
+  float h = topsH;
+#else
   float h = heightAt(p);
+#endif
   q = vec4(0.0);
   body = 0.0;
   lump = 0.0;
@@ -1163,7 +1270,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   bodyW = vec4(0.0);
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
+#ifdef TOPS_MAP
+  vec2 x = topsX;
+#else
   vec2 x = p.xz + uDrift;
+#endif
   float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
   float sheet = smoothstep(0.6, 0.85, uCloud + 0.6 * (region - 0.5));
   // Where the cover breaks into heaps, the map is read at a place moved by
@@ -1178,9 +1289,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // (Photographs from above show clusters of many sizes and bare gaps; the
   // heaps of the map alone were spread evenly.)
   vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
-  vec2 xw = x;
-  if (sheet < 1.0) xw += WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
-  vec4 w = weather(p, xw, lod, fine);
+  // (Both are made with the clouds' amount, into uWarped: see there.)
+  vec4 w = weather(p, x, lod, fine);
   // The level of the bases, where rising air condenses: 150 to 300 m over
   // CB, higher or lower across tens of km (the gusts' map, w.b, serves as
   // a slow pattern). The clouds stand on it; a base is a little higher or
@@ -1253,13 +1363,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // pillar with upright walls.
   float riseB = (thick + swell) * smoothstep(0.0, 0.6, max(1.0 - sheet, smoothstep(0.1, 0.5, tower)));
   float env = riseB - y * y * y / cube - 4.0 * max(y - 0.85, 0.0) - 0.2 * rim * rim;
-  heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
   // The sizes of turrets that the heap's dome may hold (half its height and
   // more).
   vec4 bw = BODY_K * smoothstep(vec4(0.5), vec4(1.5), top * (CT - CB) / vec4(2.0, 1.0, 0.5, 0.25));
   bodyW = bw;
   // (shift: with more cloud, less inward, so that the slider's cover stays.)
-  float bumpMax = dot(bw, vec4(1.0 - BODY_C)), shift = BODY_B + 0.12 * smoothstep(0.4, 0.7, uCloud);
+  float bumpMax = dot(bw, vec4(1.0 - BODY_C)), shift = BODY_B + 0.09 * smoothstep(0.4, 0.7, uCloud);
   // Over a dome's top, env rises by gTop per km; before the slope is known,
   // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
   float gTop = 3.0 / (top * (CT - CB));
@@ -1289,7 +1398,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // wall anyway).
   float stB = 1.0;
   if (!coarse) {
-  vec4 sl = ((solid > 0.0 ? mapAt(uSlope, p, xw, lod, fine) : textureLod(uSlope, x / WEATHER_KM, lod - 2.0)) * 2.0 - 1.0) * uSlopeMax;
+  vec4 sl = ((solid > 0.0 ? mapAt(uSlopeW, p, x, lod, fine, 1.0) : textureLod(uSlope, x / WEATHER_KM, lod - 2.0)) * 2.0 - 1.0) * uSlopeMax;
   float dTower = towers * 2.0 * (1.0 - tg) / 0.3 * smoothstep(0.0, 0.15, tg);
   float rise = max(thick + swell, 0.01);
   // (Across: thick and the top's cube follow R and G, a tower G. The rise
@@ -1303,7 +1412,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float dEnv = env / (gTop * stB);
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
   bodyEnd = smoothReads ? 9.0 : bodyMax;
+#ifdef TOPS_MAP
+  // (The map of the tops wants the bound of this way out.)
+  return max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax);
+#endif
   if (mix(f + 0.6 * lumps * steep, bodyEnd, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
+  heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
   // Near the eye (a pixel finer than 16 m) the read moves by up to half a
   // texel each frame (shake), so that the mean over the frames smooths the
@@ -1461,6 +1575,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // near heaps in photographs have crisp edges. (On the 3D body, 30 m:
   // deeper, small heaps from 5 km were a grainy fog.)
   edge = mix(edge, mix(0.4, 0.06, solidAt), thin * smoothstep(4.0, 10.0, length(p)));
+  // From far off (15 to 45 km), every edge of the body is a veil 150 m
+  // deep: from 11 km, small cumulus were cut out of the sea, hard.
+  edge = max(edge, 0.15 * solidAt * smoothstep(15.0, 45.0, length(p)));
   // Shreds under a base are thin and ragged: a deep, faint fringe.
   edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
   bump = 0.0;
@@ -1698,7 +1815,7 @@ float hg(float mu, float g) {
 void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float sLean, out float tBar, out vec4 mapA, out vec4 mapB, out vec4 mapC) {
   const float DS_MIN = 0.02, DS_NEAR = 0.008, DS_REL = 0.0045, COARSE = 3.0, FINE = 0.35;
-  Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; sLean = 0.0; tBar = -1.0; mapA = vec4(-1.0); mapB = vec4(0.0); mapC = vec4(0.0);
+  Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; sLean = 0.0; tBar = -1.0;
   float pix = 2.0 * uTan / uRes.y;
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
@@ -1731,16 +1848,6 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   float s0 = max(ta, knee), E = exp(DS_REL * BUDGET);
   float L = plan > E * s0 ? s0 * plan * (E - 1.0) / (plan - E * s0) : 1e9;
   float rel = DS_REL * max(1.0, log(max(plan, knee) / max(ta, knee)) / DS_REL / BUDGET);
-  // Light scattered once keeps the forward peak of the droplets; light
-  // scattered many times goes deeper and forgets its direction. These five
-  // terms stand for the orders of scattering; a thick cloud top that faces
-  // the light comes out with an albedo near 0.7.
-  float mu = dot(d, uLight);
-  // With the sun on the horizon, the thin fringes towards it glowed like
-  // red-hot wire against clouds near black; in photographs at sunset the
-  // rims are pink or gold and faint. Their forward peak is halved then.
-  float p0 = mix(0.8, 0.4, 1.0 - smoothstep(-0.02, 0.12, uLight.y)) * hg(mu, 0.8) + 0.2 * hg(mu, -0.25);
-  float p1 = 0.6 * hg(mu, 0.4), p2 = 1.4 * hg(mu, 0.1), p3 = 1.6 / (4.0 * PI), p4 = 0.3 / (4.0 * PI);
   float ds = max(DS_NEAR, ta * min(DS_REL * (1.0 + ta / L), rel)), dsAir = max(DS_MIN, ds);
   // The march shakes the noise of the tile too, near the eye (see
   // cloudShape): read through the GPU's filter its surfaces are facets 62 m
@@ -1749,11 +1856,30 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   shake = vec3(hash(gl_FragCoord.xy + 1.37 * uPass + 13.1), hash(gl_FragCoord.yx + 2.11 * uPass + 15.3),
                hash(gl_FragCoord.xy + 3.07 * uPass + 19.7)) - 0.5;
   float t = ta + jitter * COARSE * dsAir, wsum = 0.0, tsum = 0.0;
+  // The first stage's rays round this pixel (3 by 3 of them, 6 pixels
+  // across) met no cloud before the nearest that one of them met: the
+  // clear air before it is not marched again, and the ray starts a little
+  // before it, a share of a stride further for each pixel and frame (as at
+  // ta). Where none of them met any, nor does this ray: a cloud that all
+  // of them miss is under 2 pixels wide.
+  if (uStage > 0.5) {
+    ivec2 c = ivec2(gl_FragCoord.xy * 0.5), last = textureSize(uLightA, 0) - 1;
+    float near = 1e9, hit = -1.0;
+    for (int k = 0; k < 9; k++) {
+      float a = texelFetch(uLightA, clamp(c + ivec2(k % 3, k / 3) - 1, ivec2(0), last), 0).x;
+      if (a >= 0.0) near = min(near, a);
+      hit = max(hit, a);
+    }
+    if (hit < 0.0) t = tb;
+    float s = 0.95 * near - 0.03;
+    if (s > t) t = s + jitter * COARSE * max(DS_MIN, s * min(DS_REL * (1.0 + s / L), rel));
+  }
   // The field tells how far the next surface is, roughly: stride through
   // clear air, and slow down to a pixel's worth near a cloud, so that its
   // edge comes out crisp. came: the step that led here.
   float fPrev = 1.0, came = COARSE * dsAir;
   int walk = 0;
+  float skipped = 0.0;
   // The light of the last sample; deeper in the same cloud the next ones
   // share it.
   float one = 0.0, many = 0.0, amb = 0.0, lean = 0.0;
@@ -1763,44 +1889,96 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   vec4 keptFine = vec4(0.0);
   vec3 keptNL = vec3(0.0, 1.0, 0.0);
   float TcLit = 1.0, column = -1.0, above = 0.0;
-  for (int i = 0; i < CLOUD_STEPS; i++) {
-    if (t >= tb || Tc < 0.01) break;
-    ds = max(DS_NEAR, t * min(DS_REL * (1.0 + t / L), rel));
-    dsAir = max(DS_MIN, ds);
-    float lod = log2(max(0.8 * pix * t, 0.2 * ds) / TEXEL_KM);
-    vec3 p = d * t;
-    float y, bump, body, edge, lump, fb;
+  // The march stops at each sample that needs the light worked out, and
+  // works it out after its loop: the pixels that the GPU runs together
+  // then work out their light together. Inside the loop, each pixel that
+  // met a cloud at another step made the others wait through its light
+  // in turn.
+  int i = 0;
+  for (int pass = 0; pass < CLOUD_STEPS; pass++) {
+    bool need = false;
+    float y, bump, body, edge, lump, fb, lod, f, stp, solidHere, next, a;
+    vec3 p;
     vec4 q;
-    float f = cloudField(p, lod, true, y, bump, body, edge, lump, q, fb);
-    float stp = steep, solidHere = solidAt * smoothstep(0.15, 0.4, overBase);
-    if (f > 0.0 && came > 1.5 * ds) {
-      // Strode into a cloud: go back and walk, though not to before the
-      // start (with the eye in a cloud, that would put the cloud behind
-      // it, and the sky would show through).
-      t = max(t - (came - ds), ta + jitter * ds);
-      came = ds;
-      walk = 3;
-      continue;
+    for (; i < CLOUD_STEPS; i++) {
+      if (t >= tb || Tc < 0.01) break;
+      ds = max(DS_NEAR, t * min(DS_REL * (1.0 + t / L), rel));
+      dsAir = max(DS_MIN, ds);
+      lod = log2(max(0.8 * pix * t, 0.2 * ds) / TEXEL_KM);
+      p = d * t;
+      f = cloudField(p, lod, true, y, bump, body, edge, lump, q, fb);
+      stp = steep;
+      solidHere = solidAt * smoothstep(0.15, 0.4, overBase);
+      if (f > 0.0 && came > 1.5 * ds) {
+        // Strode into a cloud: go back and walk, though not to before the
+        // start (with the eye in a cloud, that would put the cloud behind
+        // it, and the sky would show through).
+        skipped = t;
+        t = max(t - (came - ds), ta + jitter * ds);
+        came = ds;
+        walk = 3;
+        continue;
+      }
+      // Under a base, which has no fine noise, the fine steps are no finer
+      // than dsAir: rays that graze it crept along it.
+      float dsIn = mix(ds, dsAir, smoothstep(0.0, 0.1, fb));
+      if (f > 0.0) {
+        // Fine steps find the surface and what shows through its fringe;
+        // where little gets through, the old steps do.
+        float den = cloudExtinction(f, lod, y, body, edge);
+        // In a faint fringe (a shred) a step may be as long as takes a
+        // seventh of the light, up to dsAir.
+        next = clamp(0.5 * f, FINE * dsIn, max(mix(dsAir, dsIn, smoothstep(0.1, 0.6, Tc)), min(dsAir, 0.15 / max(den, 1e-3))));
+        a = 1.0 - exp(-den * next);
+        // Not at every fine step near the eye: once more when 30 % more of
+        // the light has gone (a fifth cost 3 ms more under a deck and
+        // looked the same).
+        // A cloud seen through others that already hide more than 85 % of
+        // what lies behind takes their light: it would show little of its
+        // own, and the light is most of the cost.
+        // (Not deeper in the heaps' 3D body: in a deck it shows, in a heap it
+        // did not, and cost 1.5 ms of the frame among them.)
+        if ((!lit && (Tc > 0.15 || TcLit > 0.99)) || (Tc > 0.4 && TcLit - Tc > 0.3 && solidHere < 0.5)) {
+          need = true;
+          break;
+        }
+        sOne += Tc * a * one;
+        sMany += Tc * a * many;
+        sAmb += Tc * a * amb;
+        sLean += Tc * a * lean;
+        wsum += Tc * a;
+        tsum += Tc * a * t;
+        Tc *= 1.0 - a;
+      } else {
+        lit = false;
+        fog = false;
+        next = clamp(-0.35 * f, FINE * dsIn, COARSE * dsAir);
+        // Over the tops round here (uTops), the ray meets no cloud before it
+        // has come down to them or gone as far sideways as they hold: it
+        // strides there, less a share of a stride new for each pixel and
+        // frame (landing in the same places, the steps after drew ripples).
+        // Only where the map is read at its own level (the tops hold for
+        // that), and not again over a stride that met cloud (skipped).
+        if (lod < 2.0 && t > skipped) {
+          vec3 up = normalize(p + eye());
+          float dy = dot(d, up);
+          ivec2 n = textureSize(uTops, 0);
+          vec4 top = CB + (CT - CB) * texelFetch(uTops, ivec2(fract((p.xz + uDrift) / WEATHER_KM) * vec2(n)) % n, 0);
+          vec4 room = min((heightAt(p) - top) / max(-dy, 1e-4), vec4(0.25, 0.5, 1.0, 2.0) / sqrt(max(1.0 - dy * dy, 1e-6)));
+          next = max(next, max(max(room.x, room.y), max(room.z, room.w)) - jitter * COARSE * dsAir);
+        }
+        if (walk > 0) {
+          next = min(next, ds);
+          walk--;
+        }
+      }
+      fPrev = f;
+      came = next;
+      t += next;
     }
-    // Under a base, which has no fine noise, the fine steps are no finer
-    // than dsAir: rays that graze it crept along it.
-    float dsIn = mix(ds, dsAir, smoothstep(0.0, 0.1, fb));
-    float next;
-    if (f > 0.0) {
-      // Fine steps find the surface and what shows through its fringe;
-      // where little gets through, the old steps do.
-      float den = cloudExtinction(f, lod, y, body, edge);
-      // In a faint fringe (a shred) a step may be as long as takes a
-      // seventh of the light, up to dsAir.
-      next = clamp(0.5 * f, FINE * dsIn, max(mix(dsAir, dsIn, smoothstep(0.1, 0.6, Tc)), min(dsAir, 0.15 / max(den, 1e-3))));
-      float a = 1.0 - exp(-den * next);
-      // Not at every fine step near the eye: once more when 30 % more of
-      // the light has gone (a fifth cost 3 ms more under a deck and
-      // looked the same).
-      // A cloud seen through others that already hide more than 85 % of
-      // what lies behind takes their light: it would show little of its
-      // own, and the light is most of the cost.
-      if ((!lit && (Tc > 0.15 || TcLit > 0.99)) || (Tc > 0.4 && TcLit - Tc > 0.3)) {
+    if (!need) break;
+    {
+      {
         bool again = lit;
         lit = true;
         TcLit = Tc;
@@ -1888,6 +2066,27 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             B += wk * texelFetch(uLightB, ij, 0);
             C += wk * texelFetch(uLightC, ij, 0);
             ws += wk;
+          }
+          if (ws <= 0.02) {
+            // None of those met this cloud (along an outline, where this ray
+            // passes the near cloud and meets one behind it): the one of the
+            // twelve texels round them that matches best. (Worked out in full,
+            // these few pixels made whole groups of the GPU wait.)
+            float best = 0.02;
+            ivec2 bij = ivec2(-1);
+            for (int k = 0; k < 16; k++) {
+              ivec2 o = ivec2(k & 3, k >> 2) - 1, ij = clamp(i0 + o, ivec2(0), top);
+              float a = texelFetch(uLightA, ij, 0).x;
+              vec2 dd = vec2(o) - fr;
+              float wk = max(1.0 - abs(a - tps) / tol, 0.0) * (a >= 0.0 ? 1.0 : 0.0) / (1.0 + dot(dd, dd));
+              if (wk > best) { best = wk; bij = ij; }
+            }
+            if (bij.x >= 0) {
+              ws = 1.0;
+              A = texelFetch(uLightA, bij, 0);
+              B = texelFetch(uLightB, bij, 0);
+              C = texelFetch(uLightC, bij, 0);
+            }
           }
           if (ws > 0.02) {
             mapped = true;
@@ -2091,8 +2290,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // smaller than a pixel, the tops of those of the tile catch more of
         // it than the creases between them.
         // (The small billows' crisp shadows at half their depth: at full
-        // depth they made the same carpet.)
-        crisp *= 0.5;
+        // depth they made the same carpet. On the heaps' 3D body at 70 %:
+        // the heads shade one another, grey between them, as in
+        // photographs; at half they were white and soft, at full depth
+        // sunlit tops went a smooth, dirty grey.)
+        crisp *= mix(0.5, 0.7, solidHere);
         float soft = tau + 0.4 * crisp;
         tau += crisp;
         float white = 1.12 * body / (body + 0.12);
@@ -2100,7 +2302,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // On the 3D body, a cleft between its bumps (cleftL low: the bumps
         // there are at their lowest) sees less of the sky and of the light
         // scattered in the cloud round it: grey, as in photographs.
-        billow *= 1.0 - CLEFT * solidHere * smoothstep(0.25, -0.3, cleftL);
+        billow *= 1.0 - CLEFT * solidHere * smoothstep(0.3, -0.3, cleftL);
         // A side turned from the light still sees the sunlit cloud around
         // it: white light, of the sun and of the sky, as that cloud sends.
         float bounce = (1.0 - facing) * clamp(dot(ps + eye(), uLight) / length(ps + eye()), 0.0, 1.0);
@@ -2108,6 +2310,18 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // or a base that the light grazes (a flat base, with the sun on the
         // horizon) gets little, though light runs in its fringe.
         float inc = mix(1.0, smoothstep(-0.05, 0.3, dot(nL, uLight)), clamp(white - 0.2, 0.0, 1.0));
+        // Light scattered once keeps the forward peak of the droplets; light
+        // scattered many times goes deeper and forgets its direction. These
+        // five terms stand for the orders of scattering; a thick cloud top
+        // that faces the light comes out with an albedo near 0.7. (Here, not
+        // before the march: held through it, they slowed it.)
+        float mu = dot(d, uLight);
+        // With the sun on the horizon, the thin fringes towards it glowed
+        // like red-hot wire against clouds near black; in photographs at
+        // sunset the rims are pink or gold and faint. Their forward peak is
+        // halved then.
+        float p0 = mix(0.8, 0.4, 1.0 - smoothstep(-0.02, 0.12, uLight.y)) * hg(mu, 0.8) + 0.2 * hg(mu, -0.25);
+        float p1 = 0.6 * hg(mu, 0.4), p2 = 1.4 * hg(mu, 0.1), p3 = 1.6 / (4.0 * PI), p4 = 0.3 / (4.0 * PI);
         one = p0 * exp(-tau) * inc;
         float crease = 1.0 - CREASE * occ;
         open = mix(open, 0.55 + 0.35 * fineL.y, 0.5);
@@ -2174,21 +2388,18 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       wsum += Tc * a;
       tsum += Tc * a * t;
       Tc *= 1.0 - a;
-    } else {
-      lit = false;
-      fog = false;
-      next = clamp(-0.35 * f, FINE * dsIn, COARSE * dsAir);
-      if (walk > 0) {
-        next = min(next, ds);
-        walk--;
-      }
     }
     fPrev = f;
     came = next;
     t += next;
+    i++;
   }
   if (Tc < 0.01) Tc = 0.0;
   if (wsum > 0.0) tBar = tsum / wsum;
+  // (Only the first stage, which returns above, keeps a light.)
+  mapA = vec4(-1.0);
+  mapB = vec4(0.0);
+  mapC = vec4(0.0);
 }
 
 // ---------- Sea ----------
@@ -2251,6 +2462,102 @@ const vec4 SWELL[SWELLS] = vec4[SWELLS](
   vec4(-827.0, 187.0, -0.0112, 0.0025), vec4(-794.0, 212.0, -0.0118, 0.0031),
   vec4(-775.0, -1975.0, -0.0036, -0.0091), vec4(-468.0, -1475.0, -0.0031, -0.0098));
 
+// The glitter at night as the eye sees it: separate sparkles, not their
+// mean. The sea is cut into facets of FACET km, each with its own slope
+// drawn from the slopes the glitter leaves to the ripples (variance s2r);
+// a facet sparkles where its slope is within FACET_TOL (of that variance)
+// of the one that mirrors the light to the eye (zh), as a spot of SPOT
+// facets at a place of its own in the facet. Divided by the mean of that
+// over all facets, so that the glitter keeps its light. The spot is read
+// over the pixel's footprint (fa, fc; as the foam's breakers), so that it
+// shows as a point however far. Where the footprint is wider than a facet,
+// the facets are taken four at a time, level by level, as one that
+// sparkles four times as often; where it holds more than a few sparkles,
+// they are counted (sparkleCount). The facets stay put on the sea: a still
+// holds still; in flight zh moves and they twinkle.
+const float FACET = 0.0005;
+const float FACET_TOL = 0.02;
+const float SPOT = 0.1;
+float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
+  float tau2 = tol * s2r;
+  float mean = tau2 / (s2r + tau2) * exp(-dot(zh, zh) / (s2r + tau2));
+  float n = round(WEATHER_KM / size);                // facets to the map's side (a power of 2 times 1000)
+  vec2 g = x / size, g0 = floor(g);
+  vec2 ha = 0.5 * fa / size, hc = 0.5 * fc / size;
+  vec3 cov = vec3(ha.x * ha.x + hc.x * hc.x, ha.x * ha.y + hc.x * hc.y, ha.y * ha.y + hc.y * hc.y) + vec3(SPOT * SPOT, 0.0, SPOT * SPOT);
+  float det = cov.x * cov.z - cov.y * cov.y;
+  float sum = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 c = mod(g0 + vec2(i, j), n);
+      vec2 lo = mod(c, 1000.0), hi = floor(c / 1000.0);
+      vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
+      float u1 = hash3(h + 0.37), u2 = hash3(h + 0.71);
+      vec2 sf = sqrt(-s2r * log(max(u1, 1e-7))) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2));
+      float w = exp(-dot(zh - sf, zh - sf) / tau2);
+      if (w > 1e-3) {
+        vec2 e = g0 + vec2(i, j) + vec2(hash3(h + 0.13), hash3(h + 0.53)) - g;
+        sum += w * exp(-0.5 * (cov.z * e.x * e.x - 2.0 * cov.y * e.x * e.y + cov.x * e.y * e.y) / det) / (2.0 * PI * sqrt(det));
+      }
+    }
+  }
+  return sum / max(mean, 1e-6);
+}
+// Many sparkles to a pixel: their count. A cell of the sea of the given
+// size holds lam of them on average (p of its facets); its light over the
+// mean is drawn as a lognormal of variance GRAIN / lam, from a hash of the
+// cell, and read as value noise (bilinear between cells) at GRAIN_N points
+// along the footprint. The mean stays 1 at every size; the grain gets finer
+// and fainter as the count grows with distance, and holds still on the sea.
+const float GRAIN = 4.0;
+const int GRAIN_N = 6;
+float sparkleCell(vec2 c, float n, float size) {
+  c = mod(c, n);
+  vec2 lo = mod(c, 1000.0), hi = floor(c / 1000.0);
+  vec3 h = vec3(lo, hi.x * 512.0 + hi.y + size * 7919.0);
+  return sqrt(-2.0 * log(max(hash3(h + 0.29), 1e-7))) * cos(2.0 * PI * hash3(h + 0.83));
+}
+float sparkleCount(float size, float p, vec2 x, vec2 fa) {
+  float lam = p * (size / FACET) * (size / FACET);
+  float v = min(log(1.0 + GRAIN / max(lam, 1e-6)), 2.5), s = sqrt(v);
+  float n = round(WEATHER_KM / size);
+  float sum = 0.0;
+  for (int i = 0; i < GRAIN_N; i++) {
+    vec2 g = (x + fa * ((float(i) + 0.5) / float(GRAIN_N) - 0.5)) / size - 0.5;
+    vec2 g0 = floor(g), f = g - g0;
+    vec4 e = exp(s * vec4(sparkleCell(g0, n, size), sparkleCell(g0 + vec2(1.0, 0.0), n, size),
+                          sparkleCell(g0 + vec2(0.0, 1.0), n, size), sparkleCell(g0 + 1.0, n, size)) - 0.5 * v);
+    sum += mix(mix(e.x, e.y, f.x), mix(e.z, e.w, f.x), f.y);
+  }
+  return sum / float(GRAIN_N);
+}
+float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
+  // p: the share of facets that sparkle here. Where the footprint holds
+  // few sparkles (counted at the middle of the path, zh = 0), they are
+  // drawn one by one; from 1 to 8 they hand over to their count.
+  float tau2 = FACET_TOL * s2r;
+  float p = tau2 / (s2r + tau2) * exp(-dot(zh, zh) / (s2r + tau2));
+  float across = length(fc), along = length(fa);
+  float count = smoothstep(0.0, 3.0, log2(along * across / (FACET * FACET) * FACET_TOL / (1.0 + FACET_TOL)));
+  float s = 0.0, c = 0.0;
+  if (count < 1.0) {
+    float level = max(log2(along / FACET), 0.0);
+    float k = floor(level), f = level - k;
+    float tol = FACET_TOL * exp2(2.0 * k);
+    float many = smoothstep(2.0, 32.0, FACET_TOL * exp2(2.0 * level));   // so many facets: their mean
+    s = many >= 1.0 ? 1.0 : mix(mix(sparkleAt(FACET * exp2(k), tol, x, zh, s2r, fa, fc),
+                                    sparkleAt(FACET * exp2(k + 1.0), 4.0 * tol, x, zh, s2r, fa, fc), f), 1.0, many);
+  }
+  if (count > 0.0) {
+    // Cells about as wide as the footprint, or a GRAIN_N-th of its length.
+    float level = max(log2(max(across, along / float(GRAIN_N)) / FACET), 0.0);
+    float k = floor(level), f = level - k;
+    float a = sparkleCount(FACET * exp2(k), p, x, fa) - 1.0, b = sparkleCount(FACET * exp2(k + 1.0), p, x, fa) - 1.0;
+    c = max(1.0 + ((1.0 - f) * a + f * b) / sqrt((1.0 - f) * (1.0 - f) + f * f), 0.0);
+  }
+  return mix(s, c, count);
+}
+
 // The sea at pg, at distance t along d, behind air of depth od and under
 // clouds of depth tau towards the light: the glitter of the sun on the
 // waves, the mirrored sky, and the blue light from below.
@@ -2291,9 +2598,15 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   float rep = max(round(WEATHER_KM / (0.0096 * uWind * uWind)), 1.0) / WEATHER_KM;
   vec2 slope = vec2(0.0);
   float hidden = 0.0, crest = 0.0;
+  // A footprint as wide as the waves averages them all (R, G 0.5, B 0.125).
+  // The read still has some of the longest in it at 0.12 of the map: it
+  // fades into that mean over the factor of three before, so that no edge
+  // shows where the read stops. The fade is of R, G and B, and h is taken
+  // after it: what slope loses, hidden gains.
   for (int i = 0; i < 3; i++) {
-    vec4 w = vec4(0.5, 0.5, 0.125, 0.0);             // a footprint as wide as the waves averages them all
-    if (along * rep < 0.12) w = textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep);
+    float far = smoothstep(-1.585, 0.0, log2(along * rep / 0.12));
+    vec4 w = vec4(0.5, 0.5, 0.125, 0.0);
+    if (far < 1.0) w = mix(textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep), w, far);
     vec2 s = 8.0 * w.rg - 4.0;
     float h = max(8.0 * w.b - dot(s, s), 0.0);
     slope += s;
@@ -2383,6 +2696,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     float glint = F * exp(-dot(zh, zh) / s2r)
                 / (4.0 * PI * s2r * max(cv, 1e-3) * ch * ch * ch * ch)
                 / (1.0 + waveShade(max(cv, 1e-3), s2) + waveShade(c, s2));
+    if (uNightEye > 0.0) glint *= mix(1.0, sparkle(x, zh, s2r, fa, fc), uNightEye);
     float direct = exp(-tau);
     for (int k = 0; k < 3; k++) {
       lit[k] = uLightI * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
@@ -2735,6 +3049,69 @@ void main() {
   shadowAxes();
   outColor = shadowTexel(gl_FragCoord.xy / uRes * 2.0 - 1.0);
 }
+#elif defined(TOPS_MAP)
+// The map of the tops (see uTops), uRes texels square, in two draws: first
+// the highest place over each texel where the march may meet cloud (R),
+// then the highest within 1, 2, 4 and 8 texels of it (RGBA, from uTopsIn).
+uniform sampler2D uTopsIn;
+uniform float uTopsPass;
+// Over x, at the height h: at or above nought where cloudShape takes
+// neither of its early ways out (where it takes one, it gives the march no
+// cloud: no fine noise either). The second, after the slope, is the
+// tighter: the first allows walls six times as steep everywhere, and its
+// tops stood so high that the march skipped next to nothing.
+float topsBound(vec2 x, float h) {
+  topsX = x;
+  topsH = h;
+  float y, body, lump, base;
+  vec4 q;
+  return cloudShape(vec3(0.0), -4.0, false, y, q, body, lump, base);
+}
+// The highest such place over x (km over the sea); CB where there is none.
+// The bound falls with the height over the lowest 180 m of the field (rim),
+// so a search between there and CT finds it.
+float topAt(vec2 x) {
+  if (topsBound(x, CT - 0.001) >= 0.0) return CT;
+  topsBound(x, CB + 0.3);
+  float level = CB + 0.3 - overBase, lo = level + 0.04 * (CT - CB), hi = CT;
+  if (topsBound(x, lo) < 0.0) return topsBound(x, level + 0.001) < 0.0 ? CB : lo;
+  for (int i = 0; i < 11; i++) {
+    float m = 0.5 * (lo + hi);
+    if (topsBound(x, m) >= 0.0) lo = m; else hi = m;
+  }
+  return hi;
+}
+void main() {
+  ivec2 n = ivec2(uRes), ij = ivec2(gl_FragCoord.xy);
+  if (uTopsPass < 0.0) {
+    // uWarped (outColor) and uSlopeW (outAux), uRes texels square.
+    vec2 x = gl_FragCoord.xy / uRes * WEATHER_KM;
+    float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
+    float sheet = smoothstep(0.6, 0.85, uCloud + 0.6 * (region - 0.5));
+    vec2 xw = x + WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
+    outColor = textureLod(uWeather, xw / WEATHER_KM, 0.0);
+    outAux = textureLod(uSlope, xw / WEATHER_KM, 0.0);
+    return;
+  }
+  if (uTopsPass == 0.0) {
+    // Four places in the texel, a quarter of it from its middle.
+    vec2 c = gl_FragCoord.xy / uRes * WEATHER_KM, e = 0.25 * WEATHER_KM / uRes;
+    float m = max(max(topAt(c + vec2(-e.x, -e.y)), topAt(c + vec2(e.x, -e.y))),
+                  max(topAt(c + vec2(-e.x, e.y)), topAt(c + vec2(e.x, e.y))));
+    // 50 m more, and rounded up to the 8 bits kept.
+    outColor = vec4(ceil(clamp((m + 0.05 - CB) / (CT - CB), 0.0, 1.0) * 255.0) / 255.0);
+    return;
+  }
+  vec4 m = vec4(0.0);
+  for (int j = -8; j <= 8; j++) {
+    for (int i = -8; i <= 8; i++) {
+      float v = texelFetch(uTopsIn, (ij + ivec2(i, j) + n) % n, 0).r;
+      int r = max(abs(i), abs(j));
+      m = max(m, v * vec4(r <= 1, r <= 2, r <= 4, true));
+    }
+  }
+  outColor = m;
+}
 #else
 void main() {
   shadowAxes();
@@ -2750,9 +3127,6 @@ void main() {
 
   float betaM = BETA_M * uHaze;
   float extM = betaM * MIE_EXT;
-  float mu = dot(d, uSun);
-  vec3 phaseSun = phases(mu);
-  vec3 phaseMoon = phases(dot(d, uMoon));
 
   // The clouds first. They enter the march through the air below as one
   // layer at distance tBar: it sends the light C and lets Tc through. The
@@ -2760,7 +3134,6 @@ void main() {
   float Tc = 1.0, tBar = -1.0, Th = 1.0, tHigh = -1.0;
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
-  if (uCirrus > 0.0 && uStage != 0.0) highCloud(o, d, tmax, extM, Th, tHigh, H);
   vec4 mapA = vec4(-1.0), mapB = vec4(0.0), mapC = vec4(0.0);
   if (uCloud > 0.0) {
     vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
@@ -2803,6 +3176,12 @@ void main() {
     outLight = mapC;
     return;
   }
+  // (These after the clouds: worked out before, they were held through the
+  // whole march, and the march ran slower for the registers they took.)
+  if (uCirrus > 0.0) highCloud(o, d, tmax, extM, Th, tHigh, H);
+  float mu = dot(d, uSun);
+  vec3 phaseSun = phases(mu);
+  vec3 phaseMoon = phases(dot(d, uMoon));
 
   // What the clouds leave of the light of the sky in the low air.
   float under = mix(1.0, UNDER, smoothstep(0.4, 1.0, uCloud));
@@ -2836,6 +3215,8 @@ void main() {
   vec4 L[3], G[3];
   L[0] = vec4(0.0); L[1] = vec4(0.0); L[2] = vec4(0.0);
   G[0] = vec4(0.0); G[1] = vec4(0.0); G[2] = vec4(0.0);
+  vec3 starCol = vec3(0.0);                          // the stars at night, added after the exposure
+  vec2 zodiY = vec2(0.0);                            // the zodiacal light as drawn, to the cones and to the rods (not metered)
   vec4 Tv[3];
   float prev = 0.0, vis = 1.0;
   bool cloudsFirst = tHigh < 0.0 || (tBar > 0.0 && tBar <= tHigh);
@@ -2941,8 +3322,81 @@ void main() {
       moonMask = smoothstep(1.0, 1.0 - 1.5 * pix / MOON_R, rm);
     }
     vec3 c = d * uSky;                               // equatorial direction (J2000)
-    vec4 st[3];
-    st[0] = vec4(0.0); st[1] = vec4(0.0); st[2] = vec4(0.0);
+    float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
+    float milky = milkyWay(c), raise = 1.0;
+    vec4 tk[3];
+    vec4 tg[3];                                      // ...and for the airglow at night (below)
+    for (int k = 0; k < 3; k++) {
+      tk[k] = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
+      // The air dims the airglow and the Milky Way, but scatters much of
+      // that light back towards the eye: at night count half the loss.
+      tg[k] = mix(tk[k], vis * exp(-0.5 * (uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z)), uNightEye);
+    }
+    // The stars as the eye sees them at night (see starsSeen): the faintest
+    // it can see against this sky, and the faintest whose colour it sees.
+    // The zodiacal light (zodiacal), of the sun's colour, only at night: its
+    // floor and the gegenschein as they are, its cone as the eye sees it
+    // (zodiacalSeen). By day and in twilight until the night eye comes in,
+    // the sky hides it.
+    vec2 seen = vec2(0.0);
+    float zodi = 0.0;
+    if (uNightEye > 0.0) {
+      float y = 0.0, ym = 0.0;
+      for (int k = 0; k < 3; k++) {
+        vec4 lw = 0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k];
+        vec4 g = tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0));
+        y += dot(lw, L[k] + g * vanRhijn);
+        ym += dot(lw, g * milky);
+      }
+      // The moon's glare in the eye veils the sky around it: 10 E / theta^2
+      // cd/m2 at theta degrees from a light of E lux (Stiles and Holladay;
+      // the moon is uMoonI of the sun's 133000 lux).
+      float off = degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0)));
+      float veil = uMoon.y > 0.0 ? 1.33e6 * uMoonI / max(off * off, 1.0) : 0.0;
+      // The zodiacal cone's contrast to the rods, over the sky, the Milky Way
+      // and the rest of the zodiacal light behind it (the airglow, bluer
+      // than the zodiacal light, is brighter to them).
+      vec4 z = zodiacal(dot(d, uSun), dot(c, uEcliptic));
+      z.xyz *= 1.0 - moonMask;
+      float ys = 0.0, yz = 0.0, yzs = 0.0;
+      for (int k = 0; k < 3; k++) {
+        ys += dot(uWS[k], L[k] + tg[k] * uNight * (1.0 - moonMask) * pow(uWL[k], vec4(-3.0)) * (vanRhijn + milky));
+        yz += dot(0.2126 * uWR[k] + 0.7152 * uWG[k] + 0.0722 * uWB[k], tg[k]);
+        yzs += dot(uWS[k], tg[k]);
+      }
+      // Drawn: zodiacalSeen of the contrast of the cone's brightness along
+      // the ecliptic (z.z) gives how far it raises that sky on its axis;
+      // across, it takes the band's shape (z.w), so that it is brightest on
+      // its axis and falls off smoothly to the sides, with no flat top. A
+      // moon up fades it (ZODI_MOON): the eye loses so faint a glow in
+      // moonlight sooner than its contrast says, and from cruise, where the
+      // moonlit air above is thin, the contrast alone left a first-quarter
+      // moon's cone plain. The moon's veil in the eye is left out of that
+      // contrast: nothing draws the veil, and counted in, it cut a dark
+      // hole into the cone around a crescent moon standing in it. Which
+      // stars the eye sees depends on the cone's
+      // light in its drawn shape. The floor and the fit's own wide profile
+      // are left out: the stars were set to look right against a sky
+      // without them, and they took 3 to 6 % of the stars all over the sky.
+      // The Milky Way is raised by its contrast with the sky and the moon's
+      // veil alone, as before the zodiacal light was drawn: counted in, it
+      // dimmed the Milky Way all over the sky.
+      float behind = ys + S10 * z.y * yzs;
+      float moonUp = uMoonI * smoothstep(-0.1, 0.2, uMoon.y) / ZODI_MOON;
+      float shape = z.w / (1.0 + moonUp * moonUp);
+      zodi = S10 * z.y + zodiacalSeen(S10 * z.z * yzs / max(behind, 1e-30)) * shape * behind / max(yzs, 1e-30);
+      zodiY = ISUN * zodi * vec2(yz, yzs);
+      float back = CD * ISUN * y + veil;
+      seen = starsSeen(back + CD * ISUN * (ym + S10 * z.z * z.w * yz));
+      // The dark-adapted eye sees the Milky Way plainly where it stands well
+      // over the sky and the moon's veil behind it, and not where its
+      // contrast with them is under its threshold: raised MILKY_EYE times
+      // over the range MILKY_SEEN of that contrast.
+      raise += MILKY_EYE * uNightEye * smoothstep(MILKY_SEEN.x, MILKY_SEEN.y, CD * ISUN * ym / max(back, 1e-9));
+    }
+    float glow = uNight * (vanRhijn + raise * milky) * (1.0 - moonMask);
+    vec4 st[3], sn[3];
+    for (int k = 0; k < 3; k++) { st[k] = vec4(0.0); sn[k] = vec4(0.0); }
     ivec2 cell = starCell(c);
     for (int s = 0; s < SLOTS; s++) {
       vec4 t = texelFetch(uStars, ivec2(cell.x * SLOTS + s, cell.y), 0);
@@ -2964,16 +3418,39 @@ void main() {
       }
       if (w > 1e-3) {
         float tilt = floor(t.w) / 63.0 * 8.0 - 4.0;  // blue to red
-        for (int k = 0; k < 3; k++) st[k] += w * pow(uWL[k], vec4(tilt));
+        // The eye sees the colour of a star only well above what its
+        // cones can just see (seen.y): the brightest few.
+        float hue = smoothstep(STAR_HUE.x, STAR_HUE.y, seen.y - (6.5 - lf / STAR_LN_MAG));
+        for (int k = 0; k < 3; k++) {
+          vec4 tint = pow(uWL[k], vec4(tilt));
+          st[k] += w * tint;
+          sn[k] += w * mix(vec4(1.0), tint, hue);
+        }
       }
     }
-    float vanRhijn = 1.0 / sqrt(1.0 - 0.90 * (1.0 - d.y * d.y));   // a thin layer seen aslant
-    float glow = uNight * (vanRhijn + milkyWay(c)) * (1.0 - moonMask);
-    float stars = uNight * STAR_GAIN * (1.0 - moonMask);
+    // By day the stars are drawn in proportion to the airglow; the exposure
+    // hides them.
+    float stars = uNight * STAR_GAIN * (1.0 - moonMask) * (1.0 - uNightEye);
     for (int k = 0; k < 3; k++) {
-      vec4 t = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
-      G[k] = t * sun;
-      L[k] += t * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
+      G[k] = tk[k] * sun;
+      if (uNightEye > 0.0) L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * glow * pow(uWL[k], vec4(-3.0)) + tg[k] * zodi;
+      else L[k] += tk[k] * (sun + moon * moonMask + glow * pow(uWL[k], vec4(-3.0)) + stars * st[k]);
+    }
+    // At night as the eye sees them: a star at the faintest magnitude the
+    // eye can see against this sky (seen.x) is drawn just visible, and each
+    // magnitude brighter STAR_LN_MAG brighter (in ln), dimmed by the air and
+    // the clouds before it. Added after the exposure (in main): the eye's
+    // threshold, not the exposure, says which stars show.
+    if (uNightEye > 0.0) {
+      float k0 = (1.0 - moonMask) * exp(STAR_LN_MAG * (seen.x - 6.5));
+      // The air and the clouds dim a star by some magnitudes; drawn on the
+      // same compressed scale, that is the power STAR_LN_MAG / 0.921 of
+      // their transmission.
+      for (int k = 0; k < 3; k++) sn[k] *= pow(tk[k], vec4(STAR_LN_MAG / 0.921));
+      starCol = k0 * vec3(
+        dot(uWR[0], sn[0]) + dot(uWR[1], sn[1]) + dot(uWR[2], sn[2]),
+        dot(uWG[0], sn[0]) + dot(uWG[1], sn[1]) + dot(uWG[2], sn[2]),
+        dot(uWB[0], sn[0]) + dot(uWB[1], sn[1]) + dot(uWB[2], sn[2]));
     }
   }
 
@@ -2993,8 +3470,11 @@ void main() {
     }
     vec3 ol = depthToTop(o, uSun);
     for (int k = 0; k < 3; k++) {
-      G[k] += uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
-      L[k] += G[k];
+      // Only the glare is new here: G already holds the sun's disc or its
+      // glitter, and L has it.
+      vec4 g = uSunI * glare * smoothstep(0.9, 0.93, mu) * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
+      G[k] += g;
+      L[k] += g;
     }
   }
 
@@ -3003,6 +3483,35 @@ void main() {
     dot(uWG[0], L[0]) + dot(uWG[1], L[1]) + dot(uWG[2], L[2]),
     dot(uWB[0], L[0]) + dot(uWB[1], L[1]) + dot(uWB[2], L[2]));
   col = max(col, 0.0);                               // colours outside sRGB
+  // The eye at night (after Krawczyk, Myszkowski and Seidel, 2005). Below
+  // a few cd/m2 the rods take over from the cones, and colours fade into
+  // the grey of what the rods see, which favours blue-green over red (the
+  // Purkinje shift): moonlit clouds and the moon's glitter are grey to the
+  // eye, and the moonlit sky a dark grey-blue, where a long exposure shows
+  // them in the colours of sunlight. The rods' share falls from 1 to 0 as
+  // the pixel's luminance goes from MESOPIC.x to MESOPIC.y cd/m2 (a
+  // smoothstep in its log: the eye's mesopic range), as the night eye
+  // comes in. So the full moon's clouds (about 0.07 cd/m2) are mostly
+  // grey, not tan. Their grey is a little blue, as the night looks (the
+  // "blue shift" of Jensen et al., 2001), but less: neutral grey read as a
+  // black and white photograph.
+  float rodShare = 0.0;
+  if (uNightEye > 0.0) {
+    float rods = ISUN * (dot(uWS[0], L[0]) + dot(uWS[1], L[1]) + dot(uWS[2], L[2]));
+    float cd = CD * dot(col, vec3(0.2126, 0.7152, 0.0722));
+    float wide = 1.0 - smoothstep(log(MESOPIC.x), log(MESOPIC.y), log(max(cd, 1e-12)));
+    rodShare = uNightEye * mix(ROD_HALF / (ROD_HALF + cd), wide, uNightGrey);
+    // A full moon's sky is dark but blue to the eye, where a quarter moon's
+    // is grey: at the top of the rods' range the grey of blue light turns
+    // blue (ROD_BLUE), as its luminance goes from SKY_BLUE.x to SKY_BLUE.y.
+    // Only light bluer than the rods' grey: the sky, and the sea that
+    // mirrors it; the moonlit clouds and the glitter stay grey.
+    float bluer = col.r > 0.0 ? smoothstep(0.0, 0.3, col.b / col.r * (ROD_TINT.r / ROD_TINT.b) - 1.0) : 0.0;
+    float blue = uNightGrey * bluer * smoothstep(log(SKY_BLUE.x), log(SKY_BLUE.y), log(max(cd, 1e-12)));
+    vec3 tint = mix(ROD_TINT, ROD_BLUE, blue);
+    col = mix(col, max(rods, 0.0) * tint, rodShare);
+    zodiY.x = mix(zodiY.x, zodiY.y * dot(tint, vec3(0.2126, 0.7152, 0.0722)), rodShare);
+  }
   // The meter counts the sun's disc and glare and its glitter on the sea
   // (G) at METER_GLINT of their light: a camera lets the sun and its mirror
   // image run into white and exposes for the rest. Photographs from the air
@@ -3013,9 +3522,23 @@ void main() {
     dot(uWR[0], G[0]) + dot(uWR[1], G[1]) + dot(uWR[2], G[2]),
     dot(uWG[0], G[0]) + dot(uWG[1], G[1]) + dot(uWG[2], G[2]),
     dot(uWB[0], G[0]) + dot(uWB[1], G[1]) + dot(uWB[2], G[2])));
-  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * max(glintY, 0.0);
+  // Nor does it count the zodiacal light (zodiacal): a faint glow over a
+  // part of the night sky, drawn as the eye sees it, does not change how
+  // the rest is exposed.
+  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - zodiY.x - (1.0 - METER_GLINT) * max(glintY, 0.0);
   float level = (log2(max(metered, 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
+  // The stars at night (starCol), as the eye sees them: one at the eye's
+  // threshold against this sky stands STAR_SEEN over it on the screen,
+  // whatever the exposure. A dark sky does not hide stars that the eye sees.
+  if (uNightEye > 0.0 && max(starCol.r, max(starCol.g, starCol.b)) > 0.0) {
+    // The tone curve below, on the luminance: x^n p^(look - n), then 1 - exp.
+    float n = mix(uLook, NIGHT_LOOK, rodShare), p = pow(LOOK_PIVOT, uLook - n);
+    float back = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    float shown = pow(1.0 - exp(-p * pow(back, n)), 1.0 / 2.2) + STAR_SEEN;
+    float need = pow(-log(1.0 - pow(min(shown, 0.99), 2.2)) / p, 1.0 / n) - back;
+    col += uNightEye * need * starCol;
+  }
   // No shoulder that keeps the hue: each channel meets the curve below on
   // its own, as on a camera's sensor. A bright orange band of twilight
   // then runs into white at its strongest channel first, and comes out
@@ -3038,7 +3561,18 @@ void main() {
   col = mix(col, vec3(lum), 0.85 * smoothstep(1.0, 6.0, lum));
 
   // A "look", not physics: a per-channel power deepens the colour, as film does.
-  col = pow(col, vec3(uLook));
+  // What the rods see takes the power on its luminance alone: the look
+  // deepens the tones but adds no colour that the eye does not see. And it
+  // is steeper (NIGHT_LOOK, the same at LOOK_PIVOT, about the moonlit
+  // clouds): the night eye's view has black in it, the dark sea and the
+  // sky away from the moon, where the gentler curve left a grey veil.
+  vec3 looked = pow(col, vec3(uLook));
+  if (rodShare > 0.0) {
+    float yl = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 1e-30);
+    float n = mix(uLook, NIGHT_LOOK, rodShare);
+    looked = mix(looked, col * pow(yl, n - 1.0) * pow(LOOK_PIVOT, uLook - n), rodShare);
+  }
+  col = looked;
   col = 1.0 - exp(-col);                             // tone mapping
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
@@ -3785,6 +4319,8 @@ const SkySound = (() => {
                                               // daylight's highlights, at most DROP lower...
   const GLOW_FREE = 3.5, GLOW_HOLD = 1;       // ...holding the sky down at most GLOW_HOLD stops for each stop the
                                               // band stands more than GLOW_FREE stops above the sky
+  const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
+                                       // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
   const MONO_DEEP = [-3, -6];                 // the first in civil twilight, the second from the sun MONO_DEEP[1] down
@@ -3842,6 +4378,12 @@ const SkySound = (() => {
   const yNorm = CMF.reduce((a, c, i) => a + c[1] * SOLAR[i], 0);
   const W = XYZ_TO_SRGB.map(m => CMF.map((c, i) => SOLAR[i] * (m[0] * c[0] + m[1] * c[1] + m[2] * c[2]) / yNorm));
   const WY = CMF.map((c, i) => SOLAR[i] * c[1] / yNorm);
+  // What the rods see, the same way, scaled so that sunlight gives them its
+  // luminance: the shape of the CIE's scotopic curve (peak at 507 nm), fitted
+  // here as a Gaussian in wavenumber, steeper on the red side.
+  const ROD = WL.map(l => Math.exp(-(l < 507 ? 12.6 : 36.7) * (1000 / l - 1000 / 507) ** 2));
+  const rodNorm = ROD.reduce((a, r, i) => a + r * SOLAR[i], 0);
+  const WS = ROD.map((r, i) => r * SOLAR[i] / rodNorm);
 
   // Optical depth from a point to the top of the atmosphere, towards the sun:
   // a table over altitude and the cosine of the sun's zenith angle.
@@ -4226,6 +4768,20 @@ const SkySound = (() => {
   const DAY_SATURATION = 1.3;
   const saturationFor = () => 1 + (DAY_SATURATION - 1) * smooth01((state.elev - DUSK[1]) / (DUSK[0] - DUSK[1]));
 
+  // The eye at night (uNightEye): the rods' grey, the night's tone curve, the
+  // stars the eye sees, the Milky Way raised and the moon's glitter as
+  // sparkles (see main and addSea in fs) come in as the sun goes from NIGHT_EYE[0] to
+  // NIGHT_EYE[1] degrees. None by day; at -3 degrees the sky is still some 30
+  // cd/m2, too bright for the rods to matter.
+  const NIGHT_EYE = [-3, -6];
+  const nightEyeFor = () => smooth01((NIGHT_EYE[0] - state.elev) / (NIGHT_EYE[0] - NIGHT_EYE[1]));
+  // The eye's colours fade over a wider range of luminance (MESOPIC in fs) only
+  // in the night proper, as the sun goes from NIGHT_GREY[0] to NIGHT_GREY[1]
+  // degrees: through nautical twilight the sky, as dim as a full moon's
+  // clouds, still looks blue to the eye.
+  const NIGHT_GREY = [-10, -14];
+  const nightGreyFor = () => smooth01((NIGHT_GREY[0] - state.elev) / (NIGHT_GREY[0] - NIGHT_GREY[1]));
+
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
   // - key: it opens up as the view darkens, but not all the way (EYE stops
@@ -4282,6 +4838,14 @@ const SkySound = (() => {
   //   (msData, at the eye's height) is darker now. Without it, the sky
   //   away from the sun rose by 70 levels of 255 from sunset to 2 degrees
   //   below, as the brighter twilight's exposure took over.
+  // - and at night the eye opens up no further than it can: the exposure
+  //   is at most NIGHT_OPEN when the sky's level (DUSK_SHARE) is at
+  //   NIGHT_SKY (a quarter moon's), and NIGHT_RATE stops more for each stop
+  //   that it is darker. So a half-moon night stays clearly dark, a full
+  //   moon is brighter, and a moonless night darker still. Without it the
+  //   floor held the median at the same shown level from dusk down to a
+  //   moonless night: a half moon's clouds came out nearly as light as by
+  //   day, as in a long exposure, yet with the stars of a short one.
   // Of the picture only its levels at five shares are needed: they are
   // sorted once, and the same view a stop brighter is the same shares a
   // stop higher.
@@ -4291,8 +4855,10 @@ const SkySound = (() => {
     const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const byDay = Math.max(Math.min(key, white), floor);
+    // The eye's limit (see NIGHT_OPEN), on the sky's level.
+    const eye = NIGHT_OPEN - NIGHT_RATE * (Math.max(st.sky + d, LOG_RANGE[0]) - NIGHT_SKY);
     const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
-    if (dusk === 0) return byDay;
+    if (dusk === 0) return Math.min(byDay, eye);
     // Twilight's: the sky's level shown, from the night's (nightMid
     // shown at nightShown) up to DUSK_SHOWN at DUSK_MID.
     const sky = Math.max(st.sky + d, NIGHT_LEVEL), peak = st.peak + d;
@@ -4303,7 +4869,7 @@ const SkySound = (() => {
     const byGlow = Math.max(WHITE + PEAK_ABOVE - peak - Math.min(DROP, DIM_BAND * Math.max(0, DAY_HIGH - peak)),
                             shown - sky - GLOW_HOLD * Math.max(0, peak - sky - GLOW_FREE));
     const byDusk = Math.min(shown - sky, WHITE - high + above, byGlow);
-    return byDay + (byDusk - byDay) * dusk;
+    return Math.min(byDay + (byDusk - byDay) * dusk, eye);
   }
   // log2 of the luminance of the air's mean light (msData) at height alt
   // with the sun at elevation e (degrees): how much darker the sky is.
@@ -4407,6 +4973,8 @@ const SkySound = (() => {
     const mean = link('mean'), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
     const shadowProg = link('fs', '#define SHADOW_MAP');
+    // And as the map of the tops (see uTops).
+    const topsProg = link('fs', '#define TOPS_MAP');
     gl.flush();
 
     // Waits, a frame at a time, until the GPU has done all that it was
@@ -4635,9 +5203,11 @@ const SkySound = (() => {
     gl.uniform4fv(U('uWL'), new Float32Array(WL.map(l => l / 550)));
     gl.uniform4fv(U('uMA'), new Float32Array(MA));
     gl.uniform1f(U('uNight'), NIGHT);
+    gl.uniform3f(U('uEcliptic'), 0, -Math.sin(OBLIQUITY), Math.cos(OBLIQUITY));
     gl.uniform4fv(U('uWR'), new Float32Array(W[0]));
     gl.uniform4fv(U('uWG'), new Float32Array(W[1]));
     gl.uniform4fv(U('uWB'), new Float32Array(W[2]));
+    gl.uniform4fv(U('uWS'), new Float32Array(WS));
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
     for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
@@ -4663,7 +5233,7 @@ const SkySound = (() => {
     gl.uniform1i(U('uLightB'), 11);
     gl.uniform1i(U('uLightC'), 12);
     gl.uniform2fv(U('uLogRange'), LOG_RANGE);
-    const uBalance = U('uBalance'), uSaturation = U('uSaturation');
+    const uBalance = U('uBalance'), uSaturation = U('uSaturation'), uNightEye = U('uNightEye'), uNightGrey = U('uNightGrey');
     let tableHaze = null;
     // The exposure, log2 (null until the first picture has been metered).
     let logE = null;
@@ -4700,6 +5270,8 @@ const SkySound = (() => {
       gl.uniform1f(uLook, v.look);
       gl.uniform3fv(uBalance, balanceFor());
       gl.uniform1f(uSaturation, saturationFor());
+      gl.uniform1f(uNightEye, nightEyeFor());
+      gl.uniform1f(uNightGrey, nightGreyFor());
       gl.uniform1f(uAlt, v.alt);
       gl.uniform1f(uCloud, v.cloud);
       gl.uniform1f(uWind, state.wind);
@@ -4827,6 +5399,85 @@ const SkySound = (() => {
     gl.activeTexture(gl.TEXTURE0);
     gl.useProgram(prog);
     gl.uniform1i(U('uShadow'), 14);
+    // The map of the tops (see uTops in fs), on unit 16, one texel for each
+    // of the weather map's: fs draws it (topsProg) in two draws, the tops
+    // over each texel into a first texture (on unit 17), then the highest of
+    // them round each, for each amount of cloud. 8 bits, rounded up.
+    const TOPS = 1024;
+    gl.useProgram(topsProg);
+    const uCloudTops = gl.getUniformLocation(topsProg, 'uCloud'), uTopsPass = gl.getUniformLocation(topsProg, 'uTopsPass');
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uWeather'), 3);
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uSlope'), 13);
+    gl.uniform1f(gl.getUniformLocation(topsProg, 'uSlopeMax'), SLOPE_MAX);
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uTopsIn'), 17);
+    const tops = [17, 16].map(unit => {
+      const t = { texture: gl.createTexture(), target: gl.createFramebuffer() };
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t.texture);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, TOPS, TOPS);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.target);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.texture, 0);
+      return t;
+    });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(prog);
+    gl.uniform1i(U('uTops'), 16);
+    let topsFor = null;
+    // The warped map and its slope (see uWarped in fs), on units 19 and 20,
+    // drawn by topsProg too (a first draw, uTopsPass -1), with mipmaps.
+    const WARPED = 2048, uResTops = gl.getUniformLocation(topsProg, 'uRes');
+    const warped = { target: gl.createFramebuffer(), textures: [19, 20].map(unit => {
+      const t = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(WARPED) + 1, gl.RGBA8, WARPED, WARPED);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      return t;
+    }) };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, warped.target);
+    warped.textures.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(topsProg);
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uWarped'), 19);
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uSlopeW'), 20);
+    gl.useProgram(prog);
+    gl.uniform1i(U('uWarped'), 19);
+    gl.uniform1i(U('uSlopeW'), 20);
+    const drawTops = cloud => {
+      gl.useProgram(topsProg);
+      gl.uniform1f(uCloudTops, cloud);
+      // (Units 19 and 20 are the targets of this draw: free while it runs.)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, warped.target);
+      gl.viewport(0, 0, WARPED, WARPED);
+      gl.uniform2f(uResTops, WARPED, WARPED);
+      gl.uniform1f(uTopsPass, -1);
+      for (const unit of [19, 20]) {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      warped.textures.forEach((t, i) => {
+        gl.activeTexture(gl.TEXTURE19 + i);
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.generateMipmap(gl.TEXTURE_2D);
+      });
+      gl.viewport(0, 0, TOPS, TOPS);
+      gl.uniform2f(uResTops, TOPS, TOPS);
+      // (The first texture is on its unit only while the second draw reads it.)
+      tops.forEach((t, pass) => {
+        gl.activeTexture(gl.TEXTURE17);
+        gl.bindTexture(gl.TEXTURE_2D, pass ? tops[0].texture : null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, t.target);
+        gl.uniform1f(uTopsPass, pass);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      });
+      gl.activeTexture(gl.TEXTURE0);
+      gl.useProgram(prog);
+      topsFor = cloud;
+    };
     const uShadowShift = U('uShadowShift');
     let shadowFor = '', shadowAt = [0, 0];
     // A picture of w by h pixels: `old` if it has that size, else a new one in its place.
@@ -4985,6 +5636,8 @@ const SkySound = (() => {
       gl.uniform2f(uJitter, halton(k, 2) - 0.5, halton(k, 3) - 0.5);
       gl.uniform1f(uPass, pass);
       gl.uniform1f(uSteps, steps);
+      // The map of the tops, for this frame's clouds.
+      if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
       // The shadow map, for this frame's light and clouds, and a place near enough.
       const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
       let shift = [wrapped(state.drift[0] - shadowAt[0]), wrapped(state.drift[1] - shadowAt[1])];

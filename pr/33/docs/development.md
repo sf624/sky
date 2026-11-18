@@ -228,39 +228,47 @@ The numbers to tune, all in `index.html`:
 
 Those numbers are older than the detail of the low clouds near the eye
 (#33, November 2026), which trades time for the picture. Flying, `res=1`,
-the scene in ms at 2560 x 1440 (both stages; main in brackets), minimum of
-two runs, 18 November 2026, with the 3D body of heaps (round 12):
+the scene in ms at 2560 x 1440 (both stages; main in brackets, one stage),
+median of two runs, 18 November 2026, round 13 of #33 on main 005ecb2:
 
 | View | 2560 x 1440 |
 |---|---|
-| Default (cruise) | 33.3 (13.2) |
-| `alt=2&cloud=0.7` | 60.3 (11.7) |
-| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 35.4 (9.7) |
-| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 56.2 (10.9) |
-| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 39.4 (12.8) |
-| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 43.5 (10.6) |
+| Default (cruise) | 22.0 (18.0) |
+| `alt=2&cloud=0.7` | 30.2 (16.4) |
+| Tops from 4.6 km (`alt=4.6&cloud=1&time=15&date=321&pitch=-15`) | 14.4 (12.9) |
+| Among clouds at 1.8 km (`alt=1.8&cloud=0.7&time=13&date=172&pitch=0&yaw=100`) | 28.0 (15.1) |
+| Under a deck at 0.6 km (`alt=0.6&cloud=0.78&time=17&date=319&yaw=130&pitch=25`) | 26.3 (17.8) |
+| 5 km, looking down 20 degrees (`alt=5&cloud=0.8&date=321&pitch=-20`) | 19.1 (14.2) |
 
-Round 11's body (turrets alone) took 21.4, 42.9, 28.7, 40.8, 33.7 and
-34.3 ms in the same views: the envelope with its bumps costs 6 to 17 ms
-more, most where heaps fill the view (rays meet more surface, and every
-read of the body near a heap reads the map's slope), and moving the map's
-heaps and gathering them (`WARP`, `CLUMP`) 3 to 8 ms of that.
+Round 12 (the 3D body of heaps) took 33.3, 60.2, 35.1, 56.3, 39.3 and 43.4
+ms in the same views on its own main (06d2cad), and a third more rebased
+on this one.
+Round 13 kept its picture and took half the time, where it went:
 
-Where clouds fill the view from near, the scene costs three to five times
-what it did. Of the scene's own draw, the light of the clouds was three
-quarters: its slow parts are now worked out at a quarter of the pixels (see
-[design.md](design.md#low-clouds)), any cloud along a ray takes them
-from there when its distance matches, and the normals smooth the reads of
-the maps over the frames instead of through splines. The fine normals and
-the light's first two steps come from the first stage too (they took
-6 and 3 ms of the frame among the tops at WQHD), and a pixel takes the
-first stage's light from any of its near texels whose ray met the cloud
-at its distance (along outlines, those worked out in full took 2.5 ms
-more). Closest to the tops (`alt=2`, among clouds at 1.8 km) the march
-(about 11 ms at WQHD), the first stage (8 ms) and the light worked out
-in full where no texel matched are most of what is left. The slope that
-scales the billows (`steep`) adds about 2 ms, and the deep fringe of thin
-cloud from 4 km on about 1.5 ms among the heaps (see design.md).
+- The clouds' light was worked out inside the march's loop, and each
+  pixel of a group the GPU runs together that met a cloud at another step
+  made the others wait through its light in turn. It is worked out after
+  the loop now: the first stage took a third of the time (17.5 to 5.8 ms
+  at `alt=2`), the same picture.
+- Along outlines, a few pixels whose first-stage texels had met another
+  cloud worked their light out in full and made their whole group wait
+  (12 ms at `alt=2`). They take the best of the twelve texels round
+  those now.
+- Rays marched clear air in steps of at most 60 m near the eye. Above the
+  tops of `uTops` they stride down to them; the second stage starts each
+  ray at the nearest cloud that the first stage's rays round it met, and
+  skips the march where none of them met any (see design.md).
+- What was worked out before the march (the cirrus, the phases) was held
+  in registers through it, and fewer pixels ran at once. Code that is
+  never run counts too: a search of sixteen texels in the second stage
+  made the first stage 5 ms slower. Round 12 rebased on main with the
+  night's work took a third longer for that alone.
+- The moved weather map (`WARP`) cost a read that the next two waited for
+  on every step; it is made once per amount of cloud (`uWarped`).
+
+The first picture comes 7.8 to 8.7 s after navigation at 2560 x 1440
+(main: 3.9 to 4.4 s; round 12: 7.0 to 7.3 s): `fs` is compiled a third
+time, as the map of the tops.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
