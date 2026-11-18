@@ -135,12 +135,26 @@ The JS then runs once, at load, and does little:
    - `prime`: the first frame is drawn as the first frame will draw it
      (`render` as a probe, which then puts its state back), and `show` once
      without a pixel (the scissor). Some drivers finish a program only at
-     its first draw, which can take a second: that happens now. Once a
+     its first draw, which can take a second: that happens now. ANGLE on
+     Direct3D 11 (Chrome and Edge on Windows) compiles a program at link
+     for one target, and again at its first draw into two or more (the
+     scene's frames, the ice's pieces): the scene's second compile is this
+     first frame, and the GPU process waits for it. Once a
      fence says the GPU is done, the meter of that frame is read: the read
      does not wait.
+   - A context lost meanwhile (`webglcontextlost`: the GPU process
+     restarted, or its driver gave up) ends the loading with an error at the
+     next wait, instead of waiting for a fence for ever.
+   - With `?timing` in the address, each part prints to the console as it
+     ends (seconds since the page was opened: the tables, each program
+     compiled, the noise, the cirrus, the waves, the first frame, the first
+     picture), and every 5 s the programs it still waits for.
 3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
-   without WebGL2 or if a program failed: the error goes to the console,
-   the loading state fades out, and the canvas keeps its CSS gradient).
+   without WebGL2 or if the loading failed). Without WebGL2 the loading
+   state fades out and the canvas keeps its CSS gradient. If the loading
+   failed (a program did not compile, or the context was lost), the error
+   goes to the console and the loading state stays, its line hidden and its
+   word changed to `TEXT.failed`.
    `kick()` asks for the first frame; a time-lapse asked for in the address
    starts now; the title's and the panel's timers start (see `.told` and
    `.still`). Before this, `kick()` and `schedule()` do nothing.
