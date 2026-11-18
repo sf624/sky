@@ -139,11 +139,19 @@ these rules, and new work at start should too:
 - GPU work at start goes in `batches`, with a fence after each.
 - No `readPixels`, `getError` or `finish` that waits for the GPU while the
   page loads.
-- On Windows (ANGLE on Direct3D 11) a program is compiled again at its
-  first draw into two or more targets, while the GPU process waits (see
-  [design.md](design.md#from-the-address-bar-to-the-first-frame)): the
-  scene's program is compiled twice there. `?timing` prints where the
-  time goes.
+- On Windows (ANGLE on Direct3D 11) a program is compiled at link for one
+  target, and again at its first draw into two or more, on the GPU
+  process's main thread: the whole browser waits, and a long compile
+  there loses the context (round 19's scene took some 150 s, then
+  `CONTEXT_LOST_WEBGL`). So the large programs draw into one target: the
+  scene writes its distance as the depth, the cirrus's pass its numbers
+  as the bits of one target and the depth (see
+  [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
+  ice program needs three targets: it is drawn once into a pixel of three
+  as soon as it links (`warm`), and its second compile runs while the
+  scene's programs still compile. `?timing` prints where the time goes;
+  `node tools/sky.mjs d3d` measures it on Windows from WSL (see
+  [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
 **Sound.** It cannot be judged by looking, and an agent cannot hear it:
 measure it, and give a person files to listen to. Render it offline in
@@ -282,8 +290,8 @@ the frame 9.53 ms at the default view (8.87 to 8.94; main 7.71 to
 15.82; main 13.72 to 13.75). Gradient noise of some 128 and 51 km for the
 turning wind took the frame under the shell to 17.3 ms and the first
 picture to 7.5 s: four shear waves (`CI_WAVES`) replaced it. The loops
-kept from Direct3D's unrolling (`LONG_N`, the cirrus's march, the GLSL
-rules) changed nothing here, measured on 2026-11-19 against round 19,
+with bounds the compiler cannot know (`LONG_N`, the cirrus's march)
+changed nothing here, measured on 2026-11-19 against round 19,
 two runs each: the same stills and GL trace, the frame 15.1 to 15.4 ms at
 the default view at 2560 x 1440, 20.3 to 20.4 ms under the shell and 16.7
 to 16.8 ms at the cruise view, and the first picture 5.6 to 5.7 s at 1920
@@ -386,32 +394,49 @@ The shaders must run on any WebGL2. The code keeps these rules:
   heads' cells in `iceSystems` and the strands' cells in `iceSheets`
   wrap by hand,
   `c - p * floor((c + 0.5) / p)`.
-- **`fs` is two programs.** `makeSky` compiles it a second time with
+- **`fs` is three programs.** `makeSky` compiles it again with
   `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
-  same cloud field. A change to the field changes both. The program's
+  same cloud field. A change to the field changes both. That program's
   uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
-  field reads must be set there too.
+  field reads must be set there too. And with `CIRRUS_PASS` defined: that
+  `main` draws the cirrus along each ray (`highCloud`) before the scene,
+  which reads it (`cirrusLight`). It gets the scene's uniforms by name:
+  the fixed ones (`C`, then `fixedFor`) and the view's (`view` in `draw`).
 - **Loops in code that rarely runs get a bound the compiler cannot know.**
   The compiler unrolls a loop of constant bounds, and the unrolled code
   makes the whole shader heavier for the GPU even where a branch skips it:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
   cannot see (November 2026).
-- **Long loops, and loops with large bodies, too.** ANGLE on Direct3D 11
-  (Chrome and Edge on Windows) gives the program to Microsoft's HLSL
-  compiler (FXC), which inlines every call and may unroll any loop of
-  constant bounds; ANGLE marks no loop to stop it. The scene's program
-  then takes far longer to compile (on the owner's Windows machine main
-  took 10 to 15 s to its first picture, against 3.5 s here, and the
-  cirrus of round 19 did not start within minutes). The marches
-  (`LONG_N`: the clouds, the air, the sky over the sea) and the cirrus's
-  loops (`CI_N`, `ICE_N`) run to bounds the compiler cannot know. No such
-  loop writes an array at its index: FXC may have to unroll a loop that
-  writes an array at an index it cannot know (its warning X3550), and it
-  cannot unroll one whose bound it cannot know (error X3511). Write a vector instead (ANGLE turns a
-  vector's index into a switch), or give the loop constant bounds and a
-  small body. This machine cannot run FXC: check new loops by these rules,
-  and ask for a run with `?timing` on Windows.
+- **Each program small enough for Microsoft's compiler.** ANGLE on
+  Direct3D 11 (Chrome and Edge on Windows) gives each program to
+  Microsoft's HLSL compiler (FXC), which inlines every call: each call of
+  a function is a copy. Its time grows far faster than the program.
+  Measured on the owner's machine (RTX 3090, 2026-11-19; `D3DCompile` of
+  ANGLE's HLSL, timed alone): main's scene 7.8 s; the scene with the
+  cirrus of round 19 162 s, of 7d1a635 165 s; that scene without the
+  cirrus 11.8 s, the cirrus alone (its pass, as below) 27.3 s. So the
+  cirrus is a program of its own (`CIRRUS_PASS`), compiled beside the
+  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciHair`,
+  `cirrusDepth`) in either program shows as seconds there: make it in a
+  loop that already makes it (as the scene reads the clouds' and the
+  sea's shadows and the glare's depth in one loop: 13.7 s with three
+  calls, 8.4 s with one), or in the other program. Measured on the scene
+  of 7d1a635 (165 s): its flat reads as a loop the compiler cannot unroll
+  133 s (one copy of their body, not two); the last place and warp kept
+  from call to call in globals (`ciPlace`, `ciWarp`), removed, 105 s;
+  both 57 s. Global state that many copies read and write costs much:
+  keep such functions pure. Unrolling small loops did not help (the
+  gather unrolled 180 s; every small loop of the cirrus's pass unrolled
+  26 s against 21). In the whole scene, the bounds the compiler cannot
+  know (`LONG_N`, `CI_N`) and vectors in place of arrays written at a
+  loop's index (round 19 to 7d1a635) changed nothing measurable (162
+  against 165 s). In the cirrus's pass alone, the march and the veil's
+  octaves with constant bounds (as in round 19) took 15.3 s against 10.1:
+  the cirrus's loops keep `CI_N`. `LONG_N` changed nothing (the scene 8.1
+  s with it and without). Measure
+  a change of `fs` there: `node tools/sky.mjs d3d programs --base
+  origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 
