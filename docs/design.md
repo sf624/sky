@@ -1068,7 +1068,9 @@ the ice was built with:
   them, as up to round 17, at a thin edge only the hairs' cores passed the
   floor, and stood as short bright dashes beyond the body); dense cores (`1 - exp(-7 ice)` from 0.25 to 0.75) keep only 0.15
   of them: a tuft has a soft, dense white core that dissolves into hairs
-  at its edges.
+  at its edges. Little cirrus keeps more of them in its cores (up to
+  0.75 at `c` = 0.15, by `1 - smoothstep(0.15, 0.45, c)`): photographs of
+  thin cirrus show fibrous sweeps, fibres across the whole form.
 - **Where it is read.** Far off, once per deck at the place read, with a
   pixel's footprint (not the blur through the deck); near the eye, at the
   sheets (above), each set shifted by its own share of a turn, so a ray
@@ -1100,15 +1102,38 @@ on the map.
   lower deck reads another place of the map and needs more of it (0.12),
   so that the decks come and go apart and two decks cross only in
   places. Over some 16 km (a coarse level of the map) it tells where
-  there is none, and most of the sky costs little. The kinds are mixed
-  by B and A: tails everywhere (fewer where sheets are many); sheets and
-  streets, which come in from `c` = 0.15 to 0.65 (`smoothstep`), so that
-  little cirrus is a few tails and more is streets and sheets; flocks or
-  large systems, these from 1 at little cirrus to twice at 0.85. Under
-  `c` = 0.45 (a `smoothstep` from 0.1) the tails weigh down to 0.45 and
-  the large systems up to 1.8: little cirrus is a few large sweeps (with
-  the tails' full weight, only their dense cores passed the floor and
-  stood as many small spindles with sharp ends). The
+  there is none, and most of the sky costs little.
+- **Where it gathers** (`ciEnv`, the envelope). Photographs of some cirrus
+  show a few broad bands or sheets and a few groups of tails, with wide
+  clear or thinly veiled sky between. The envelope says where in the sky
+  the cirrus gathers, 0 to 1: broad bands along the wind (noise of some
+  80 by 27 and 40 by 12 km, in the cirrus's frame) in groups of some 130
+  and 50 km, cut at a level that falls with the slider (`0.1 - 0.5 c -
+  0.1 smoothstep(0.5, 1, c)`), so that they cover some two fifths of the
+  sky at 0.15, three quarters at 0.6 and all of it by 0.95. The tails,
+  the sheets, the bands' body and the thin veil lie in it; the large
+  systems and the flocks keep 0.1 and 0.3 of their weight outside it. Within it the tails come in
+  groups of their own (`ciTailsAt`: noise of some 40 and 20 km,
+  a third of the sky up to `c` = 0.4, nearly all of it by 1): fall streaks hang from
+  generating cells, which come in groups. (Spread evenly over the sky, as
+  up to round 18, mid amounts stood as a crowd of similar streaks and
+  commas to one vanishing point.) Both are read once per deck and pixel,
+  with the bands, and passed to the march; the place where the page
+  starts lies in both, so that some cirrus is overhead there.
+- **The kinds** are mixed by B and A and by the envelope: tails in the
+  tails' groups (fewer where sheets are many, and from `c` = 0.3 to 0.6
+  only in the bands); sheets and streets, which come in from `c` = 0.15
+  to 0.65 (`smoothstep`), at 0.15 of their weight up to 0.6 and in full by
+  0.95 (their short streaks were most of the crowd), so that little
+  cirrus is a few tails, more is bands with a body and a few tails, and
+  much is streets, sheets and a veil; flocks or large systems, these
+  from 1 at little cirrus to twice at 0.85, 0.3 as much outside the
+  tails' groups. Under `c` = 0.45 (a `smoothstep` from 0.1) the tails
+  weigh down to 0.45 and the large systems 0.8: little cirrus is a few
+  translucent sweeps (with the tails' full weight, only their dense cores
+  passed the floor and stood as many small spindles with sharp ends;
+  with the large systems at 1.8, as up to round 18, the sweeps were
+  opaque white with no fibres). The
   faint trace under the sheets is taken off (0.035 of ice) up to `c` =
   0.6, and less up to 0.95, where the sheets become a streaky veil.
 - **The ice** is read in each deck's frame (`ciTile`): the upper deck
@@ -1119,7 +1144,20 @@ on the map.
   overhead: from near the shell a view sees only a few km of it, and the
   tile had a gap there. The places are chosen where the tile has
   structure (cover of 40 to 80 % over 5 km), not the densest: under a
-  large fan the owner's view was a fan of streaks from one point. It is read with `textureGrad` over the pixel's
+  large fan the owner's view was a fan of streaks from one point.
+  **The wind turns from region to region** (`ciWarp`): every place the
+  cirrus is read at (its ice, its map, its bands) is first moved by a
+  smooth displacement over the map, four shear waves (`CI_WAVES`, whole
+  waves to the map, some 62 to 114 km long), each moving the place across
+  its own way by `CI_SHEAR` = 0.3 of its wavelength over 2 pi, so that the
+  forms turn with the region by some 0.3 rad (a standard deviation; up to
+  some 0.7) over 30 to 60 km and stretch a little (some 0.75 to 1.5 along
+  the wind). Shear keeps areas and does not fold. With one way for the
+  whole sky (up to round 18), every streak ran to one vanishing point, a
+  radial fan seen from below. It is 0 at the place where the page starts,
+  and the footprints are carried through its derivative. (Gradient noise
+  of some 128 and 51 km did as well at four times the cost of the frame
+  under the shell.) It is read with `textureGrad` over the pixel's
   footprint (`f1`, `f2`: the footprint's axes on the map, drawn out along
   the ray's way and a little by the way through the deck), through the
   mipmaps and, where the GPU has it, its anisotropic filter.
@@ -1131,7 +1169,8 @@ on the map.
   as in round 16, large plumes stood as opaque white masses). Seen straight
   up most of a tail is at 0.05 to 0.5, its cores at 1 to 4, so the brightness varies with the
   thickness and blue shows through the thin parts. The slider takes a
-  floor off the ice first, `0.1 (1 - c)^6 + 0.02 (1 - m)`: little cirrus
+  floor off the ice first, `0.04 (1 - c)^6 + 0.02 (1 - m)` (0.1 up to
+  round 18, which the envelope now does much of): little cirrus
   shows only the densest tails, more shows weaker ones, and what is left
   fades in from nothing along its own strands and fibres, with no outline
   of its own. The floor is soft (`y^2 / (y + knee)` above it, the knee
@@ -1145,7 +1184,10 @@ on the map.
   which widen and join as the slider goes up (their threshold moves by
   0.7 of the slider up to 0.4, then by 0.4 of it up to 0.75: round 11's
   0.6 up to 0.65 put the cover at 0.6 eight points over round 9's);
-  in them the tails' share is 0.75 of the bands' strength, as the sheets
+  the bands are noise of some 80 by 20 km with weaker noise of some 40
+  by 7 and 27 by 3.5 km on it (up to round 18 the 40 by 7 km led: many
+  narrow bands evenly spaced, which stood as a crowd of streaks); in
+  them the tails' share is 0.75 of the bands' strength, as the sheets
   and the bands' body take over;
   they bend (`ciBend`, by some 0.4 rad either way over 27, 10 and 4 km),
   so that they do not run straight to the vanishing point; a band also has a body of ice (below, the veil), so
@@ -1153,8 +1195,10 @@ on the map.
   bands, as cirrus at dusk does. Spread evenly, the tufts stood far off
   in rows like the scales of a fish (round 10).
   Measured as the share of the view with a vertical depth over 0.03,
-  looking up at 35 degrees from 0.3 km: 5, 8, 36, 70, 83, 96, 100 and 100 % at 0.1, 0.25, 0.4,
-  0.6, 0.7, 0.8, 0.9 and 1 (round 16 by the same measure: 3, 6, 22, 51,
+  looking up at 35 degrees from 0.3 km: 2, 5, 30, 72, 88, 100, 100 and 100 % at 0.1, 0.25, 0.4,
+  0.6, 0.7, 0.8, 0.9 and 1 (round 18: 5, 8, 37, 71, 83, 95, 100, 100;
+  the few forms of little cirrus now gather in groups, so that one view
+  sees fewer of them; round 16 by the same measure: 3, 6, 22, 51,
   68, 91, 100, 100: blue between crisp strands, broken strands and
   eroded edges; round 15: 4, 8, 32, 68, 84, 96, 100, 100; round 14: 8, 21, 43,
   64, 77, 97, 100, 100; round 9: 6, 24, 45, 68, 82, 91, 100, 100). (The share of the
@@ -1193,14 +1237,29 @@ on the map.
   with them, much cirrus seen from the ground was a field of short
   blotches of one size (g3). An octave fades out before its bands get
   narrower than a few footprints. A floor, `6 (1 - c)^1.5`, less in the
-  bands, is taken off first, so that the veil comes in as patches that
-  join as the slider goes up. It takes 0.7 of the hairs.
-- **The body of a band.** From `c` = 0.2, `CI_BAND` = 0.5 of vertical
-  depth at its median, times `smoothstep(0.2, 0.6, c)`, `fields^2` and
-  the map, with the same noise as the veil for its exponent: a band is a
+  bands and in the envelope (by 0.6), is taken off first, so that the
+  veil comes in as patches that join as the slider goes up. It takes 0.7
+  of the hairs. It lies in the envelope (0.15 of it outside, up to `c` =
+  0.7, all over by 1), and is thicker and thinner over tens of km (noise
+  of where the tails are, some 43 and 20 km: thicker round the generating
+  cells; 0.55 to 1.45 of its depth): even all over, a deck
+  seen from just under it was a featureless grey (round 18's k4, s3).
+- **The thin veil.** From `c` = 0.15 to 0.45 (a `smoothstep`), and up to
+  the even veil, the envelope holds a thin veil, `CI_THIN` = 0.03 of
+  vertical depth at its median (the veil's noise as its exponent, times
+  1.6), 0.25 of it outside the bands: the thinly veiled, milky sky between
+  the bands of photographs.
+- **The body of a band.** From `c` = 0.2, `CI_BAND` = 0.8 of vertical
+  depth at its median, times `smoothstep(0.2, 0.6, c)`, `fields^2`, the
+  envelope and the map, with the same noise as the veil for its exponent:
+  a band is a
   long, continuous body of ice with streaks along it, its tufts in it,
-  not a row of separate dabs. It follows the ice's own texture (`0.25 +
-  tex`, `tex` = `smoothstep(0, 0.08, ice)`), and so does the veil below
+  not a row of separate dabs. Seen from below at dusk, these bodies are
+  the long lit bands of photographs (up to round 18, at 0.5 of depth and
+  under the sheets' streaks, the tails' commas led). It follows the ice's
+  own texture (`0.5 + 0.75 tex`, `tex` = `smoothstep(0, 0.08, ice)`;
+  `0.25 + tex` up to round 18, which drew the shapes of the tails and
+  streaks into it), and so does the veil below
   `c` = 1 (`0.5 + 0.7 tex`, even at the top): thinner in the lanes
   between strands, so that a deck seen from near it is streaky, not a
   fog of soft blobs (round 15's 11 km views). Far off, `tex` reads the
@@ -1270,7 +1329,11 @@ on the map.
   column (as up to round 17), the light scattered many times grew as the
   cube of the depth: only the dense cores were lit, and dusk stood as a
   field of bright dashes and hooked heads on a grey sky. The march near
-  the eye keeps its own light, step by step.
+  the eye keeps its own light, step by step, through the same depth at a
+  low sun (`ciLowSun`, read once before the march, at its middle; farther
+  on, where the flat reads put the ice): each step's column blends to it
+  by `duskK`, so that the cirrus near the eye at dusk is lit as the same
+  cirrus farther on.
 - **At night** (`nightK`, up to 0.9 as the light goes over from the sun to
   the moon: no switch, `0.9 (1 - smoothstep(0.02, 0.3, uLightI))`; the
   halo blends between its day and night strengths by the same) the light
@@ -1293,7 +1356,13 @@ on the map.
   keeps some of the blue of the upper sky behind it as well as the
   reddened sunlight on it. A fibre in a thick
   body of ice is lit through the body (`ciBody`), so dense patches are grey
-  inside and their thin edges bright. Sunlight reaches the shell through
+  inside and their thin edges bright. A dense core is lit through the
+  depth of its body, and its own depth there counts by only `CI_SHADE` =
+  0.3: sunlight enters the sheet aslant and spreads through it over some
+  0.5 km, so a dense core in front of the sun is darker than the bright
+  veil round it, but softly and broadly (lit through its own column, as
+  up to round 18, each dense head stood as a dark stroke on the grey veil
+  towards the sun from just under the shell). Sunlight reaches the shell through
   the air above it (`depthToTop`, the table of depths; an eight-step march
   before): at a low sun it is reddened.
 - **The glow of the night sky** (airglow and the Milky Way) is wide, so
