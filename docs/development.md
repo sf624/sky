@@ -264,7 +264,18 @@ in the same hour, two runs each: the first picture with `cirrus=0.5`
 under the shell (10.02 to 10.06; main 5.00 to 5.07), 15.78 to 15.82 ms
 at the cruise view at 2560 x 1440 (15.66 to 15.70; main 13.72 to
 13.77), and at dusk 7.50 to 7.52 ms from the ground and 9.31 to 9.34 ms
-from 11 km (7.34 to 7.37 and 9.17 to 9.21). The machine's times drift by several tenths
+from 11 km (7.34 to 7.37 and 9.17 to 9.21). Round 19 (the turning wind,
+`ciWarp`, read at every place the cirrus is read, and where the cirrus
+and its tails gather, `ciGather`, once per deck and pixel), measured the
+same day against round 18 and main in the same hour, two runs each: the
+first picture with `cirrus=0.5` 5.38 to 5.48 s (round 18: 4.95 to 5.03;
+main 3.48 to 3.50) and with `cirrus=0` 4.51 to 4.63 s (4.10 to 4.12);
+the frame 9.53 ms at the default view (8.87 to 8.94; main 7.71 to
+7.73), 11.67 to 11.80 ms under the shell (10.07 to 10.12; main 5.00 to
+5.07) and 16.78 to 16.82 ms at the cruise view at 2560 x 1440 (15.79 to
+15.82; main 13.72 to 13.75). Gradient noise of some 128 and 51 km for the
+turning wind took the frame under the shell to 17.3 ms and the first
+picture to 7.5 s: four shear waves (`CI_WAVES`) replaced it. The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
