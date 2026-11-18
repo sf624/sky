@@ -222,6 +222,13 @@ the rate to real time, and plays.
   mattering.
 - One light for the clouds and the sea (`uLight`, `uLightI`): the sun while
   it is above -3 degrees, else the moon.
+- The eye's night vision (`nightEyeFor`, `uNightEye`) comes in from 0 to 1
+  as the sun goes from -3 to -6 degrees (`NIGHT_EYE`, a smoothstep): the
+  rods' grey and the night's tone curve ([Exposure and the tone
+  curve](#exposure-and-the-tone-curve)), the stars that the eye sees and
+  the Milky Way ([Sun, moon, stars](#sun-moon-stars)), and the moon's
+  glitter as sparkles ([The sea](#the-sea)). At -3 degrees the sky is still some 30 cd/m2,
+  far too bright for the rods to matter; by day nothing changes.
 - `state.sky` (`uSky`) turns J2000 equatorial directions into local axes.
 
 The date slider covers the current year. The moon's age starts from the
@@ -636,6 +643,35 @@ cloud around each sample in finer detail than the map can hold.
 - **Glitter.** The share of slopes that mirror the light to the eye, with
   Fresnel and Smith's shadowing term (`waveShade`, in the rational form of
   Walter et al., 2007).
+- **Sparkles at night** (`sparkle`, as the night eye comes in). The eye
+  sees the moon's glitter as separate glints on black water, not as their
+  mean. The sea is cut into facets of `FACET` = 0.5 m, each with a slope
+  of its own drawn from the ripples' share of the variance (`s2r`); a facet
+  sparkles where its slope is within `FACET_TOL` = 0.02 of that variance
+  of the slope that mirrors the moon, as a spot at a place of its own,
+  read over the pixel's footprint (as the breakers of the foam). The sum
+  is divided by its mean over all facets, so the glitter keeps its light.
+  Where the footprint is wider than a facet, the facets are taken four at
+  a time, level by level, as one that sparkles four times as often.
+  Where the footprint holds more than a few sparkles (from 1 to 8 at the
+  middle of the path; `sparkleCount`), they are counted instead: cells of
+  the sea about as wide as the footprint (or a sixth of its length) each
+  hold a number of sparkles drawn as a lognormal of mean 1 and variance
+  `GRAIN` = 4 over the count expected in the cell, read as value noise at
+  `GRAIN_N` = 6 points along the footprint. The mean stays the glitter's
+  at every distance, and the grain gets finer and fainter as the count
+  grows, so that the separate sparkles near the sea merge into a grainy
+  band and, towards the horizon, a bright streak, with no line where one
+  way hands over to the other. The facets and the cells stay put on the
+  sea, so a still holds still; in flight the slope that mirrors the moon
+  moves on, and the sparkles twinkle, while the far grain moves with the
+  sea. By day the sun's glitter is drawn as before. Before (round 1), the
+  moon's path from near the sea was a smooth pale column with a grey halo;
+  photographs of short exposure (B4, 1/5 s) show separate sparkles on
+  black water. In round 2 the sparkles merged into their mean beyond a
+  footprint of some 20 m: from 0.3 km a horizontal line crossed the path
+  at about 2 km, beyond which it was a smooth white column striped by the
+  swell.
 - **Mirrored sky.** `skyAt` marches 8 steps of air in the mirrored
   direction of the tilted footprint. Rough water mirrors less at grazing
   angles (the mean Fresnel factor of Bruneton et al., 2010). Three samples
@@ -698,7 +734,20 @@ all dimmed and reddened by the air:
   (`uEarth`: earthshine, capped so the night exposure does not burn it out).
 - **Airglow** (`uNight`), brighter towards the horizon (van Rhijn's factor),
   and **the Milky Way** (`milkyWay`): a noise pattern on the real galactic
-  plane, brighter towards its centre.
+  plane, brighter towards its centre. As the night eye comes in, the Milky
+  Way is raised up to `MILKY_EYE` = 6.5 times more: the dark-adapted eye
+  sees it plainly as a grey band, which the steeper night curve below
+  would hide. How much depends on its contrast with what lies behind it,
+  the sky and the moon's veil in the eye (see the stars below): fully
+  above a contrast of 0.8, not at all below 0.08 (`MILKY_SEEN`). So it
+  is plain on a moonless night (40 to 50 of 255 against a sky of 8 to 10
+  in a view of Cygnus), weaker under a quarter moon (from cruise its
+  brightest parts at about 40, near the sea about 24 against 15), and
+  gone under a full moon. Before (round 2) it was raised 2 times at all
+  phases and stood 15 to 27 against 8 to 9 on a moonless night. The air
+  takes only half of their light away: it scatters much of what it takes
+  back towards the eye, and the sky from cruise brightens towards the
+  horizon (by about 1.5 times at 5 degrees up) instead of staying flat.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
@@ -709,8 +758,36 @@ all dimmed and reddened by the air:
   every cell its disc can reach, so the shader reads one cell per pixel
   (`starCell`). A star is a spot about a pixel wide, with a colour from its
   B-V index (Ballesteros's temperature, then a tilt of the spectrum) and a
-  compressed brightness (a "look"). The brightest get diffraction spikes
+  compressed brightness (a "look": `STAR_LN_MAG` = 0.645 in ln per
+  magnitude, 0.7 of the real ratio). The brightest get diffraction spikes
   fixed to the screen.
+  By day and in twilight until the night eye comes in, the core of a star
+  of magnitude 6.5 is `STAR_GAIN` = 3 times the radiance of the airglow,
+  and the exposure hides them.
+  At night the stars are drawn as the eye sees them, not as the exposure
+  would show them. `starsSeen` gives the faintest magnitude the
+  dark-adapted eye sees against the luminance behind the star, after
+  Schaefer (1990): the threshold illuminance grows as `(1 + sqrt(k B))^2`,
+  with one pair of constants for the rods and one for the cones, and the
+  eye takes the lower. The luminance is the sky's (or the cloud's) at that
+  pixel plus the moon's glare in the eye, `10 E / theta^2` cd/m2 at theta
+  degrees from the moon (Stiles and Holladay). A dark sky (about 2e-4
+  cd/m2) gives 6.5; a quarter moon's sky from cruise about 6; a full
+  moon's about 4.9 from cruise and 4.2 from near the sea, less towards
+  the moon. A star at that threshold is drawn `STAR_SEEN` = 0.12 of the
+  screen's range over the sky behind it, after the exposure and through
+  the inverse of the tone curve, and each magnitude brighter by
+  `STAR_LN_MAG`; the air and the clouds before it dim it on the same
+  scale. So the exposure does not decide which stars show: a darker
+  picture of a darker night shows more stars, not fewer. Their colour
+  comes in only for stars `STAR_HUE` = 1.5 to 4 magnitudes brighter than
+  what the cones alone can see: on a moonless night the brightest few
+  (Betelgeuse, Aldebaran orange; Vega, Rigel white-blue), the rest white.
+  Before (round 1) the stars were raised by the square root of the sky's
+  brightness over the airglow and scaled with the exposure: under the
+  night's capped exposure a moonless sky showed mag 6 stars at a third of
+  the contrast they have now, and the picture read as an empty black
+  frame.
 
 **Glare**: a glow of a few degrees around the sun, as strayed
 light in a lens, dimmed by the clouds (the shadow map at the eye) and the
@@ -836,7 +913,21 @@ itself, the one read that waits.
   degrees and lifted the picture by up to `DUSK_LIFT` = 1.2 stops (gone
   now): in a time-lapse the sky away from the sun went from 75 to 148
   (of 255) between sunset and 2 degrees below it, and the view towards
-  the sun from near the sea rose by 23 levels as the sun's disc set.
+  the sun from near the sea rose by 23 levels as the sun's disc set;
+- and at night the eye opens up no further than it can: the exposure is
+  at most `NIGHT_OPEN` = 16.75 when the sky's level (the level that the
+  brighter third passes, as in twilight) is `NIGHT_SKY` = -22.5, about a
+  quarter moon's, and `NIGHT_RATE` = 0.5 stops more for each stop that it
+  is darker (less for each stop brighter). By day and in twilight it is
+  far above the exposure and does nothing; it takes over in the last of
+  the twilight, with the sun 11 to 18 degrees down (sooner near the
+  sea). Before it, the floor held the median at about the same shown
+  level from dusk down to a moonless night, as a long exposure does:
+  under a quarter moon the clouds came out nearly as light as by day (150
+  of 255 from cruise), yet the sky showed only the brightest few stars.
+  Now they are at about 40 to 70 under a quarter moon and 110 under a
+  full moon, and a moonless night is darker still: black sky, stars, the
+  clouds below barely seen.
 
 `exposureFor` returns the exposure.
 
@@ -864,7 +955,43 @@ base has neither, and is compared as it comes.
 
 At the end of `main`:
 
-1. Spectrum to linear sRGB, times `ISUN`; the level for the meter is
+1. Spectrum to linear sRGB, times `ISUN`. At night the rods take over from
+   the cones (after Krawczyk, Myszkowski and Seidel, 2005): the colour is
+   mixed with the grey that the rods see (`uWS`: the shape of the CIE's
+   scotopic curve, peak at 507 nm, fitted as a Gaussian in wavenumber;
+   sunlight gives the rods the same luminance as the cones), a little
+   blue (`ROD_TINT`, the "blue shift" of the night in Jensen et al.,
+   2001, but less). The rods' share depends on Y, the pixel's luminance in
+   cd/m2 (`CD` = 6650 per unit: white paper in the sun outside the air,
+   133,000 lux, is 1 / pi here), times `uNightEye`. In twilight it is
+   `ROD_HALF / (ROD_HALF + Y)`, `ROD_HALF` = 0.01 cd/m2 (the paper's 0.04
+   greyed the sky of nautical twilight, which photographs and the eye see
+   blue). In the night proper (`uNightGrey`, `nightGreyFor`: the sun from
+   10 to 14 degrees down) it widens to the eye's mesopic range: from 1 to
+   0 as Y goes from `MESOPIC` = 0.003 to 3 cd/m2, along a smoothstep in log
+   Y. The sky of nautical twilight is as dim as a full moon's clouds (both
+   about 0.07 cd/m2), so a range in luminance alone would grey both; the
+   eye still sees that sky blue. So the moonlit clouds under a quarter moon
+   (about 0.003 cd/m2) are grey, those under a full moon (about 0.07)
+   mostly grey, and the moon's glitter keeps a little colour only where it
+   is bright. At the top of the rods' range, from `SKY_BLUE` = 0.001 to
+   0.01 cd/m2, the rods' grey of light bluer than that grey turns bluer
+   (`ROD_BLUE`): a full moon's sky (about 0.002 to 0.02 cd/m2, darkest
+   overhead from cruise) and the sea that mirrors it are a dark blue,
+   lighter towards the horizon, while a quarter moon's sky (under 0.001)
+   stays grey, and so do the moonlit clouds and the glitter, which are
+   not bluer than the grey. Before (round 2) the full moon's sky was a
+   flat grey (R, G and B within a fifth of each other). A long exposure
+   shows all of them in the colours of sunlight. Round 1 took the share
+   as `0.01 / (0.01 + Y)`: it left the full moon's clouds tan and a brown
+   rim along the far cloud tops. That rim is the far clouds' light
+   reddened on its way to the eye through some 300 km of air, not the
+   moonlight's colour (the full moon stands high): the same view by day
+   shows it too, but there the tone curve runs it into white. Before,
+   the light of a low moon, reddened on its long way through the air and
+   on the way back from the far clouds, made tan clouds, a golden glitter
+   and an orange-brown rim
+   along the far cloud tops at the horizon. The level for the meter is
    taken here; then times `uExposure`.
    No shoulder keeps the hue: each channel meets the curve of steps 4 to
    6 on its own, as on a camera's sensor.
@@ -896,7 +1023,17 @@ At the end of `main`:
    night were set without it, and keep their colours.
 4. Light far too strong for the screen (1 to 6 times white) turns towards
    white, as on film.
-5. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4.
+5. A "look": `pow(col, uLook)`, with `AIR_LOOK` = 1.4. For what the rods
+   see (the rods' share of step 1) it takes the power on the luminance
+   alone, so it adds no colour the eye does not see, and a steeper one,
+   `NIGHT_LOOK` = 1.7, the same as by day at `LOOK_PIVOT` = 0.12 (about
+   the moonlit clouds): the night has black in it, the dark sea and the
+   sky away from the moon, where the gentler curve left a grey veil over
+   the whole picture (sky 17 and sea 5 to 6 of 255 under clouds at 60;
+   now about 9 and 4). The stars at night are added before this step,
+   after the exposure (see [Sun, moon, stars](#sun-moon-stars)): one at
+   the eye's threshold stands `STAR_SEEN` over the sky behind it once
+   through this curve.
 6. Tone mapping `1 - exp(-col)`, channel by channel, then the display
    power `1 / 2.2`. Steps 2, 4, 5 and 6 are those of `main`.
 7. Rounding at random to the storage steps (next section).
