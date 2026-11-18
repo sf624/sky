@@ -334,7 +334,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
   of a whole number `x` equal to `p` gave `p` in places, not 0, and the
   cirrus's noise had a seam along that lattice line. `iceNoise` and the
-  heads' cells in `icePlumes`, `iceRows` and `iceFlock` wrap by hand,
+  heads' cells in `iceSystems` wrap by hand,
   `c - p * floor((c + 0.5) / p)`.
 - **`fs` is two programs.** `makeSky` compiles it a second time with
   `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the

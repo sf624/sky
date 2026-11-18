@@ -790,144 +790,105 @@ footprint lost them). The detail finer than that comes from the hairs
 
 ![Cirrus seen from 11 km: ?date=319&pitch=28&cirrus=0.6&cloud=0.3](images/cirrus.jpg)
 
-**The ice** (`uIce`, below) holds the forms. It is not noise drawn out
-along the wind but the result of a process, followed at start for every
-texel: ice is made in generating heads, falls out of them, and the wind
-shear draws what falls into a trail behind each head; eddies stir the
-trails. Four kinds of head make four fields, one to a channel, which the
-scene mixes by the cirrus's map (below), so that one region of the sky has
-plumes, another bands or flocks:
+**The ice** (`uIce`, below) holds the forms. Photographs of cirrus show a
+few large, connected systems with much blue between them: a dense head
+with a long tail that curves away (mares' tails, the hook of cirrus
+uncinus), heads in a row whose tails join into a feather or a broad band
+of fibres, long streets of fibres across a third of the sky, broad
+fibrous sheets; sizes from 1 km to over 100 km. The ice draws those forms
+directly, each texel by itself in closed form, from four kinds, one to a
+channel, which the scene mixes by the cirrus's map (below):
 
-- **Plumes** (R, `icePlumes`): tufts, 9 cells to a side of the tile
-  (4.5 km), 30 % of them empty, each head anywhere in the middle 90 % of
-  its cell (round 9: 4 cells of 10 km, a quarter empty, heads in the
-  middle half: evenly spread, far off they stood in rows like the scales
-  of a fish). A head is 0.4 to 1.6 km (a few large, many small), and its
-  trail widens as it ages: a wedge, from a narrow streak to a fan. Half
-  the plumes have a dense head, half the head size (a tuft, cirrus
-  uncinus), lumpy while the ice is young (knots of a third and a tenth of
-  the head); the others have none, their ice fading in from a narrow
-  root: a fan of 6 to 12 strands to a half width that spreads by 10 to 20
-  degrees (a spray of fibres, cirrus fibratus; 20 to 40 drew peacock
-  tails from below). Their strengths vary by seven times; groups of
-  plumes (noise of some 20 km) are strong, others weak, so that tufts
-  come in clusters with blue between. The trails are 0.6 times the drift
-  (some 10 km; 24 before: long combed hairs across half the sky from
-  below), and each lives 0.25 to 1 of a life, so that neighbours differ
-  in length. Each plume reads its own way at its head (`icePlumes`,
-  `iceHooked`): groups of plumes are turned by up to 0.3 rad from the
-  common way, and each head by up to 0.1 rad more, with a drift up to
-  10 % longer or shorter; the ice leaves a head turned by up to 115
-  degrees either way (up to 23 for a fan) and comes round to the shear
-  over 0.1 to 0.25 of its life (a comma, the hook of cirrus uncinus,
-  larger for a large head); after that each trail turns by its own amount
-  (`ICE_VEER` = 0.35 rad over a life, give or take 1.8), so that it curves
-  along its whole length, not only at the head. Most heads (85 %) also
-  move against the air around them while they make ice, by 0.15 to 0.5
-  of the reach over a life, at 35 to 80 degrees from the shear: the
-  head's track is a spine and the trails leave it aslant (a feather, a
-  hooked plume) instead of a wedge of parallel strands from one point.
-  A head's ice fades out over 0.75 to 1 cell from where the common way
-  puts it (1 to 1.2 before), so that a head never leaves the nine cells
-  searched while it still has ice: moving heads, cut there, drew straight
-  seams.
-  With one way and one turn for the whole tile (round 8), every trail of a
-  deck was parallel and the streaks converged on one vanishing point like
-  ruled rays.
-- **Large plumes** (A): the same with 4 cells to a side (10 km), heads
-  1.4 times as large, trails 1.1 times the drift (some 18 km), 2.5 times
-  as strong, all in their cells (no clusters): the broad fans and sheets.
-  The scene gives them more weight as the slider goes up (from 0.6 at
-  0.15 to twice at 0.85), so that much cirrus is made of larger forms.
-- **Rows** (G, `iceRows`): small heads (50 to 130 m) along lines with the
-  wind, 5 to the tile (8 km apart), a head every 1 km, scattered over
-  the row's width (0.3 to 1.5 km). A row comes and goes along its length
-  (runs of 5 to 20 km) and wanders across by up to 1 km. Each row's
-  trails have a way and a turn of their own: along the row in most rows,
-  where they join into a band of fibres (a street); turned some 60
-  degrees in a fifth of them, where they stand off a spine as ribs that
-  curl (a feather, cirrus vertebratus). The bands wrap round the tile, so
-  they run on as far as the map lets them.
-- **Flocks** (B, `iceFlock`): small heads (0.1 to 0.3 km), one to a cell
-  of 3.4 km, gathered in flocks with wide gaps by two octaves of noise
-  (20 and 8 km), each with a short trail of threads (cirrus floccus).
-  Half have died out and left their trail. A flock's head grows with age
-  and wobbles in time. It is lumpy, not a round puff: knots of a third
-  and a tenth of its size (value noise, cubed), so that the floor the
-  scene takes off leaves a ragged little cloud. Heads are 70 to 220 m.
-  The scene cuts the thin edge of a flock off and makes its core denser
-  (`q.b`), so that a tuft stands as a small, bright cell.
-- **Strands** (`iceStrands`). A plume's ice falls in strands along its
-  trail: value noise across it (squared, so that there are gaps between
-  the strands), at 3 to 12 strands to the trail's half width, and thin
-  bright threads within. The place across is measured in
-  units of the trail's width at that age, so the strands fan out with
-  the trail. Each strand has a life of its own (0.75 to 1.05 of the
-  trail's; 0.4 to 1.15 drew short fans as tufts of grass), the outer ones
-  shorter: the strands end one by one, so that a trail tapers and frays out
-  instead of ending round. The strands wander from side to side (by about
-  a strand's width, each group of two or three its own way), so that they
-  cross and braid, and near the end of its life a strand curls off to
-  one side or the other. Along the trail they change over some 5 km (4.5
-  to a life; 2 before, which drew straight hairs 12 km long). The ice
-  also falls in bursts: several strands at once thicken and thin along
-  the trail (value noise slow across, 1.1 to a life along, squared), so
-  that a trail has patches and bands across its streaks, with gaps.
-- **The trail.** The shear draws the ice away from its head, slowly at
-  first (a dense head), then at full speed, along a way that turns with
-  age: `iceDrift`, in closed form (an arc, `iceArc`). The common shear
-  runs one way over the tile (`ICE_TH`, turning by `ICE_VEER` = 0.35 rad
-  over a life, `ICE_REACH` = 16 km of drift); each plume and each row has
-  its own way and turn, as above. It used to change over the tile (slow noise), read at
-  each texel: a trail then took the way of every place it crossed, and
-  every trail bent into regular waves as long as the noise (S-shaped
-  ribbons). Only the strength of the eddies changes over the tile. Each
-  kind falls at its own speed: its trails are as many times as long as
-  the drift (plumes 0.6, large plumes 1.1, rows 0.45, flocks 0.35).
-- **Eddies**: the curl of a noise potential at 13, 5 and 2 km (divergence
-  free), which changes in time (its gradients turn), the smaller the
-  faster; the largest is kept gentle (0.35 against 0.45 for the middle
-  one), or every trail waved alike; and a gentle divergent part, the
-  gradient of the middle size, as the ice spreads and gathers where the
-  air rises and sinks.
-- **How.** For each texel, the eddies are followed back in time
-  (`ICE_STEPS` = 20 steps over a life of the ice, 28 before: the same
-  picture; the method of
-  characteristics). At each age, the ice of that age at the texel came from
-  where the eddies bring it from, less each kind's drift; a head there made
-  it then. Each step is a segment, and each head's puff is integrated along
-  it (with `erf`, `icePuff`), so that no step shows. The strands, threads
-  and bursts a step draws are taken where the step's way, or its line
-  beyond, passes nearest the head (`iceAt`): the age, the trail's width
-  and way and the place along it there, and the place across from it.
-  Several steps overlap at a texel (a step's way is shorter than a head is
-  wide), and so they all draw the same strands. Taken at each step's own
-  end (round 13), the strands of the steps differed a little, and summed
-  they stood as fine ripples across the trails from the ground (g3); a
-  flock's head, which wobbles, is taken where it was at both ends of the
-  step. Strands and threads finer than the texels can hold (a period under
-  some three texels for the strands, six for the threads, `iceFine`) are
-  drawn as their mean: sampled once a texel, they aliased into moire that
-  no filter of the scene could take out. The hairs draw them instead.
-  A plume reaches no
-  further than 1 cell from where the common way puts its head, so the
-  nine cells nearest are enough (four to a side, for the heads whose own
-  way takes them farther, drew the same picture at nearly twice the cost
-  on SwiftShader); a row's
-  head no further than 0.8 of a cell, a flock's 0.3: four cells and one.
-  Nothing is resampled step after step, so nothing blurs, and each texel
-  is computed by itself: the field does not depend on the order of the
-  draws, and repeats with the tile. Each field is stored as
-  `sqrt(x / ICE_STORE)`, `ICE_STORE` = 1, and read back squared: the
-  scene's depth is linear in the ice. The old `1 - exp(-7 x)` saturated:
-  most of a plume read near 1, a flat white.
+- **The flow** (`iceFlowFrame`). Everything is drawn in one warped frame:
+  the tile's place plus a displacement of noise at 20, 8 and 3.4 km (more
+  across the wind than along; whole numbers to the tile, so that it
+  repeats). Its lines of constant y are the ways the wind draws the ice;
+  they turn by up to some 0.4 rad over 10 to 20 km, so that neighbouring
+  forms run together and their way changes from region to region. The
+  displacement's slope stays well under 1, so the frame never folds.
+- **Tails** (R, `iceSystems`): one system to a cell of 13.5 by 10 km (3 by
+  4 to the tile), 45 % of the cells empty, and groups of systems (noise of
+  some 20 and 8 km at the head) strong, weak or missing, so that the forms
+  come in clusters with blue between. A system has one to three heads
+  along a spine, across the flow (their tails join into a band of fibres)
+  or, in 30 % of them, along it (ribs off a spine, cirrus vertebratus).
+  Each tail is 4 to 24 km long, even in the logarithm (many short, a few
+  long), and is two arcs (`iceTailNear`, `iceArcNear`): the ice leaves the
+  head turned by up to 0.5 to 1.4 rad (more for a larger system) and comes
+  round to the flow over some 0.1 of the tail (a comma, the hook of cirrus
+  uncinus), then turns by its own amount over the rest, as it falls into
+  wind of another way: the turn comes from noise over the tile (a group's
+  tails run and curve alike, as in photographs of mares' tails), less for
+  a long tail. The tail widens from 0.4 of the head's radius to 0.035 to 0.09
+  of its length (a fan, which has lost its head, to twice that) and thins
+  as it widens. Its ice falls in strands (`iceStrands`, below). The head
+  is the start of the tail, dense along its hook and lumpy (knots of a
+  third and a tenth of its size): a comma, not a ball (round 15's first
+  try drew a round head and stood as comets).
+- **Sheets and streets** (G, `iceSheets`): old ice, spread by the shear.
+  A body of noise drawn out along the flow: sheets of some 20 by 7 km and
+  streets some 15 to 40 km long and 1 to 2.5 km wide, a few km apart;
+  regions of 40 by 20 km have the one or the other. Strands run along it
+  (noise of 20 km by 0.22 km, 5 km by 90 m and 2 km by 34 m, the finest as
+  their mean where the texels cannot hold them), and wander from side to
+  side by some 0.25 km, so that they braid; the body's edge breaks up a
+  little along them. A faint trace of strands (a streaky veil) lies under
+  it all: the scene takes it off except near the top of the slider. Its
+  strands' phase is half cancelled (below), so its hairs are faint:
+  drawn in full, from under the shell, the long straight strands of two
+  decks crossed as a net of scratches.
+- **Flocks** (B): the tails' code with small heads (some 0.1 km) and short
+  tails (0.3 to 3 km), at most one to a cell of 3.4 km, gathered in a few
+  flocks with wide gaps (cirrus floccus): spread more widely, their heads
+  stood all over the sky as small white dabs. The scene cuts the thin edge of a flock off
+  and makes its core denser (`q.b`), so that a tuft stands as a small,
+  bright cell.
+- **Large systems** (A): the tails' code with cells of 20 by 13.5 km (2 by
+  3 to the tile), up to four heads of some 1.2 km, tails 10 to 36 km
+  long and 0.05 to 0.15 of that wide: the broad fans and feathered sheets.
+- **Strands** (`iceStrands`). A tail's ice falls in strands along it:
+  value noise across it (squared, so that there are gaps between the
+  strands), at 3 to 8 strands to the tail's half width (6 to 12 for a
+  fan), and thin bright threads within. The place across is measured in
+  units of the tail's width there, so the strands fan out with it. Each
+  strand has a life of its own (0.75 to 1.05 of the tail's), the outer
+  ones shorter: the strands end one by one, so that a tail tapers and
+  frays out instead of ending round. The strands wander from side to side
+  (by about a strand's width, each group of two or three its own way), so
+  that they cross and braid, and near the end of its life a strand curls
+  off to one side or the other. The ice also falls in bursts: several
+  strands at once thicken and thin along the tail (value noise slow
+  across, squared), so that a tail has patches and bands across its
+  streaks, with gaps. Strands and threads finer than the texels can hold
+  (a period under some three texels for the strands, six for the threads,
+  `iceFine`) are drawn as their mean: sampled once a texel, they aliased
+  into moire. The hairs draw them instead.
+- **The age.** The ice's age is 0 at a head and 1 at the end of its tail;
+  a sheet's is 0.35 to 0.7. The ice falls as it ages, so heads are high
+  and tails hang below them (`ciHeight`).
+- **The search.** A tail reaches no further than 1.8 cells down the flow
+  from its system's head, 0.8 up it and 0.85 across (it fades out there,
+  measured from the system's first head, which lies in its cell), so the
+  twelve cells searched (two up, one down, one to each side) hold every
+  system whose ice can be at a texel: a cut at the edge of the cells
+  searched draws straight seams.
+- Each field is stored as `sqrt(x / ICE_STORE)`, `ICE_STORE` = 1, and read
+  back squared: the scene's depth is linear in the ice.
+
+Rounds 1 to 14 built the ice by following it back in time through eddies
+(the method of characteristics, 20 steps over a life), from plumes of 4.5
+km cells, rows of small heads and flocks. Each head made one short trail
+of similar size: seen from below, the sky was sprinkled with short, alike,
+lens-shaped smears, like brush dabs, and much cirrus was a radial smear of
+overlapping lobes, where photographs show few, large, connected forms.
 
 **The cirrus's map** (`uCiMap`, `ciMap`), 256 x 256 over the map (1 km a
 texel), says where the cirrus is and of what kind, at the scale of 50 to
 300 km: R and G, how much for the upper and the lower deck (patches of
 some 85 and 35 km, and bands along the wind of 40 by 8 km and 27 by 5 km,
-in the frame of the wind with whole numbers); B, the share of rows; A,
-the share of flocks against large plumes (both over some 100 km).
+in the frame of the wind with whole numbers); B, the share of sheets and
+streets; A, the share of flocks against large systems (both over some 100
+km).
 
 **The hairs** (`ciHair`). Photographed cirrus is made of fine filaments:
 streaks of falling ice that run along the trails and curve with them, so
@@ -939,10 +900,11 @@ ice (and 0.7 of it on the veil and the body of a band), along the strands
 the ice was built with:
 
 - **The strands' phase** (`uIcePhase`). While the ice is built, every
-  piece of ice that `icePlumes`, `iceRows` and `iceFlock` add also adds
+  piece of ice that `iceSystems` and `iceSheets` add also adds
   a phasor of the place across its strands (`icePhase`: one turn to a
-  strand, `v` of `iceStrands` for the plumes without the curl of their
-  tails, the place across a row's or a tuft's streaks for the others),
+  strand, `v` of `iceStrands` for the tails without the curl of their
+  ends, the place across the flow for the sheets, with a second phasor
+  of 0.55 of the ice half a turn off, so that a sheet's hairs are faint),
   weighed by the square of the ice, its kinds weighed as `iceAge` weighs
   them; the texture holds the phasor over the weight (RG8, as wide as the
   ice, mipmapped). The square lets the densest piece lead where trails of
@@ -1036,8 +998,12 @@ on the map.
   so that the decks come and go apart and two decks cross only in
   places. Over some 16 km (a coarse level of the map) it tells where
   there is none, and most of the sky costs little. The kinds are mixed
-  by B and A: plumes everywhere (fewer where rows are many), rows, flocks
-  or large plumes.
+  by B and A: tails everywhere (fewer where sheets are many); sheets and
+  streets, which come in from `c` = 0.2 to 0.75 (`smoothstep`), so that
+  little cirrus is a few tails and more is streets and sheets; flocks or
+  large systems, these from 1 at little cirrus to twice at 0.85. The
+  faint trace under the sheets is taken off (0.035 of ice) up to `c` =
+  0.6, and less up to 0.95, where the sheets become a streaky veil.
 - **The ice** is read in each deck's frame (`ciTile`): the upper deck
   along (3, 1), two tiles to a unit of 81 km; the lower along (1, 1),
   four tiles to a unit of 181 km, so that its forms are a little larger
@@ -1055,10 +1021,10 @@ on the map.
   `0.3 + 0.7 m` for the map, and dense cores up to twice that (from 0.04
   to 0.3 of ice above the floor; the edges, and so the cover, as before):
   a tuft has a dense white body under its feathered edges. Seen straight
-  up most of a plume is at 0.05 to 0.5, its cores at 1 to 4, so the brightness varies with the
+  up most of a tail is at 0.05 to 0.5, its cores at 1 to 4, so the brightness varies with the
   thickness and blue shows through the thin parts. The slider takes a
   floor off the ice first, `0.1 (1 - c)^6 + 0.02 (1 - m)`: little cirrus
-  shows only the densest plumes, more shows weaker ones, and what is left
+  shows only the densest tails, more shows weaker ones, and what is left
   fades in from nothing along its own strands and fibres, with no outline
   of its own. The floor is soft (`y^2 / (y + knee)` above it, the knee
   half the floor), so the depth grows smoothly from 0. (Round 7 cut a
@@ -1077,21 +1043,26 @@ on the map.
   bands, as cirrus at dusk does. Spread evenly, the tufts stood far off
   in rows like the scales of a fish (round 10).
   Measured as the share of the view with a vertical depth over 0.03,
-  looking up at 35 degrees from 0.3 km: 7, 20, 44, 67, 78, 90, 99 and
-  100 % at 0.1, 0.25, 0.4, 0.6, 0.7, 0.8, 0.9 and 1 (round 9: 6, 24, 45,
-  68, 82, 91, 100, 100; round 11: 7, 20, 45, 76, 86, 92, 99, 100). (The share of the
+  looking up at 35 degrees from 0.3 km: 4, 8, 32, 68, 84, 96, 100 and
+  100 % at 0.1, 0.25, 0.4, 0.6, 0.7, 0.8, 0.9 and 1 (round 14 by the same
+  measure: 8, 21, 43, 64, 77, 97, 100, 100: little cirrus is now a few
+  tails with more blue; round 9: 6, 24, 45, 68, 82, 91, 100, 100). (The share of the
   picture that differs from `cirrus=0` no longer measures it: the metered
   exposure changes the whole picture when the cirrus brightens it.)
 - **The veil.** From `c` = 0.35 a veil (cirrostratus) grows, `CI_VEIL` =
   0.4 of vertical depth at its median, times `smoothstep(0.35, 1, c)^1.6`
   and the map, mostly in the bands (`0.1 + 1.5 fields^2`); from `c` =
-  0.55 to 0.9 it closes up into an even veil (`even`): it fills the lanes
+  0.7 to 1 it closes up into an even veil (`even`): it fills the lanes
   between the bands (`0.1 + 1.2 even + 1.5 fields^2`), its noise is
-  weaker (`2.2 - even` for 2.2) and it takes fewer hairs (0.3 for 0.7), so
+  a little weaker (`2.2 - 0.6 even` for 2.2) and it takes a few fewer hairs
+  (0.5 for 0.7), so that it keeps faint streaks, so
   that the moon shines through one milky sheet with its ring and a deck
   seen from under it is grey all over, as in photographs of
   cirrostratus. (With lanes, much cirrus at night stood as dark lanes
-  across the moonlit veil, and the ring had no even sheet to show on.)
+  across the moonlit veil, and the ring had no even sheet to show on.
+  From 0.55, with its noise and hairs weaker by more, the even veil
+  wiped out the texture of the decks seen from near the shell: round
+  14's k5 and c2 were featureless grey.)
   Its depth is
   the exponent of noise (`ciVeilNoise`, times 2.2), so that it spreads as
   cloud depths do (log-normal: thick patches and clear lanes): bands along
@@ -1137,9 +1108,12 @@ on the map.
   bright lens; a
   broad refraction lobe; and a flat part to the side and back, some 0.3 of
   the mean, as ray tracing of ice crystals gives it), the 22-degree halo
-  with the dispersion of ice (soft, some 1.4 degrees inside; 0.05 in
-  thin cirrus from a depth of 0.02, as photographs show halos in cirrus
-  fibratus, up to 0.17 where there is a veil, from a depth of 0.03; it
+  with the dispersion of ice (soft, some 1.4 degrees inside; by day only
+  0.03 and only where there is a veil, from a depth of 0.1, since
+  photographs of much cirrus towards the sun mostly show none: 0.05 to
+  0.17 drew a clear coloured ring in every veil; at night, by the moon,
+  0.05 in thin cirrus from a depth of 0.02, as photographs show halos in
+  cirrus fibratus, up to 0.17 where there is a veil, from a depth of 0.03; it
   fades as the ice scatters the light again, as the rest of the light
   scattered once does: taken by that twice, and at 0.03 to 0.07, the
   ring did not show at night through a veil, where photographs show it),
