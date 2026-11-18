@@ -183,6 +183,12 @@ default limit (WQHD), a 4K window is drawn at 2560 x 1440.
 | 2545 x 1440 | 9.3 ms | | |
 | 3825 x 2160 | 19 ms | | |
 
+Measured again at 2560 x 1440 (`perf`, `res=1`, flying, three runs, the
+scene's median) in November 2026: the default view by day (`date=172&time=15`)
+12.5 ms, a full moon over clouds (`date=80&time=0&moon=14&cloud=0.5&pitch=-10&yaw=0`)
+13.8 ms. The night work had taken them to 17.0 and 19.0 ms (the sparkles'
+unrolled loops, see the GLSL rules); before it they were 12.4 and 13.5 ms.
+
 At 1905 x 1080, the scene without low clouds (`cloud=0`) took 2.8 ms,
 without cirrus (`cirrus=0`) 5.6 ms, and without either 2.5 ms. So in the
 default view the low clouds take about half of the scene; the air, the
@@ -232,7 +238,14 @@ picture came 5.25 to 5.33 s after navigation with `cirrus=0.5`, as round
 12 (5.25 to 5.32 s), against 3.69 to 3.84 s for `main`; with `cirrus=0`,
 4.33 to 4.39 s against round 12's 4.47 to 4.53 s and `main`'s 3.59 to
 3.77 s (the ice program is then not compiled, but the scene's program
-holds the cirrus's code). The machine's times drift by several tenths
+holds the cirrus's code). Round 16 (the stirred frame, the erosion,
+the sheets' turned cells, frayed heads and broken strands) made the ice
+dearer to build: the first picture with `cirrus=0.5` came 5.97 to 6.03 s
+after navigation against round 15's 5.19 to 5.26 s (same day, both on
+main f2b0707, whose own first picture came at 3.47 to 3.51 s), the frame
+unchanged at the default view (8.78 to 8.85 ms against 8.80 to 8.85 ms)
+and 0.4 ms more just under the shell (10.36 to 10.42 against 9.98 to
+9.99 ms). The machine's times drift by several tenths
 from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
@@ -328,13 +341,20 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **No `mod()` for a lattice that wraps.** On the same driver, `mod(x, p)`
   of a whole number `x` equal to `p` gave `p` in places, not 0, and the
   cirrus's noise had a seam along that lattice line. `iceNoise` and the
-  heads' cells in `iceSystems` wrap by hand,
+  heads' cells in `iceSystems` and the strands' cells in `iceSheets`
+  wrap by hand,
   `c - p * floor((c + 0.5) / p)`.
 - **`fs` is two programs.** `makeSky` compiles it a second time with
   `SHADOW_MAP` defined: that `main` draws the clouds' shadow map with the
   same cloud field. A change to the field changes both. The program's
   uniforms are set apart (`S` in `makeSky`): a new uniform that the cloud
   field reads must be set there too.
+- **Loops in code that rarely runs get a bound the compiler cannot know.**
+  The compiler unrolls a loop of constant bounds, and the unrolled code
+  makes the whole shader heavier for the GPU even where a branch skips it:
+  the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
+  day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
+  cannot see (November 2026).
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

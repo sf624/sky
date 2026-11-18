@@ -222,20 +222,37 @@ the rate to real time, and plays.
 - The moon runs ahead of the sun along the ecliptic by its age
   (`state.moonAge / 29.53` of a turn). Its orbit's tilt is left out.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
-  angle. It counts (`state.moonI`) only when the sun is below -3 degrees and
-  the moon above -18.
-- `state.sunOn` (`uSunI`) fades from 1 to 0 as the sun goes from 18 to 21
-  degrees down (a smoothstep), so that no step shows when it stops
-  mattering.
-- One light for the clouds and the sea (`uLight`, `uLightI`): the sun while
-  it is above -3 degrees, else the moon.
-- The eye's night vision (`nightEyeFor`, `uNightEye`) comes in from 0 to 1
-  as the sun goes from -3 to -6 degrees (`NIGHT_EYE`, a smoothstep): the
-  rods' grey and the night's tone curve ([Exposure and the tone
-  curve](#exposure-and-the-tone-curve)), the stars that the eye sees and
-  the Milky Way ([Sun, moon, stars](#sun-moon-stars)), and the moon's
-  glitter as sparkles ([The sea](#the-sea)). At -3 degrees the sky is still some 30 cd/m2,
-  far too bright for the rods to matter; by day nothing changes.
+  angle (`state.moonI`). It is there at every hour, by day too. Only its
+  light in the air (`uMoonI`, `moonAirFor`) is left out where it cannot
+  show: it fades out as the moonlit air (the air's mean light, `airLevel`,
+  for each light) goes from 11 to 14 stops below the sunlit air
+  (`MOON_AIR`), a twentieth of a step of the screen or less. By day that
+  saves a second light in every march (4.8 ms of 22 at 2560 x 1440); with
+  a full moon it comes in fully with the sun 5 degrees down.
+- A light below the horizon still lights the air above until it is some
+  18 degrees down. `state.sunOn` (`uSunI`) fades from 1 to 0 as the sun goes
+  from 18 to 21 degrees down (a smoothstep, `lit`), so that no step shows
+  when it stops mattering; the moon's light fades the same way.
+- One light for the clouds and the sea (`uLight`, `uLightI`): the sun,
+  then the moon. It never steps: the sun's share (`state.lightShare`,
+  `uLightShare`) fades from 1 to 0 as the sun goes from 3 to 4.5 degrees
+  down, the light turns to the moon there, and the moon's share comes in
+  by 6 degrees down (`LIGHT_SWAP`). The clouds' shadows (on the sea, in
+  the air, and the light of the lit clouds around a shaded side) come and
+  go with the share. In between, both lights are faint beside the light of
+  the twilight's sky. Before, the light turned from the sun to the moon at
+  once at -3 degrees, and with it the shadows on the sea.
+- The eye's night vision (`nightEyeFor`, `uNightEye`) follows the eye's
+  adaptation, not the hour: it comes in from 0 to 1 as the exposure (log2)
+  goes from 5.5 to 9 (`NIGHT_EYE`, a smoothstep). In a view away from the
+  sun that is with the sun from about 3 to 6 degrees down; towards the
+  glow of the sunset, which holds the exposure down, a degree or two later.
+  It sets the rods' grey and the night's tone curve ([Exposure and the
+  tone curve](#exposure-and-the-tone-curve)) and the moon's glitter as
+  sparkles ([The sea](#the-sea)). At the start the sky is still some 30
+  cd/m2, far too bright for the rods to matter. Before, it came in with the
+  sun from -3 to -6 degrees, and also raised the Milky Way and set which
+  stars were drawn.
 - `state.sky` (`uSky`) turns J2000 equatorial directions into local axes.
 
 The date slider covers the current year. The moon's age starts from the
@@ -646,11 +663,15 @@ cloud around each sample in finer detail than the map can hold.
   Reads use `textureGrad` with the pixel's footprint on the sea (long when
   seen aslant). What the footprint averages away stays in the variance
   (`hidden`, from B of the wave map), so the glitter has the same light
-  from near and from far.
+  from near and from far. A band is no longer read where the footprint is
+  0.12 of its tile or wider: it is the map's mean there. The read still
+  holds some of the longest waves at that size, so it fades into the mean
+  over the factor of three before (R, G and B together, and `hidden` after
+  the fade): no edge shows where the read stops.
 - **Glitter.** The share of slopes that mirror the light to the eye, with
   Fresnel and Smith's shadowing term (`waveShade`, in the rational form of
   Walter et al., 2007).
-- **Sparkles at night** (`sparkle`, as the night eye comes in). The eye
+- **Sparkles at night** (`sparkle`, as the night eye comes in, `uNightEye`). The eye
   sees the moon's glitter as separate glints on black water, not as their
   mean. The sea is cut into facets of `FACET` = 0.5 m, each with a slope
   of its own drawn from the ripples' share of the variance (`s2r`); a facet
@@ -712,7 +733,11 @@ top and ice of 0.6 of a life and older at 0.85 (`ciAge` blends the age
 towards 0.3 where there is little ice: cut off where the weight of the
 age passed a threshold, the age jumped, and with it the ice's height,
 which drew hard stepped edges across the decks from just under the
-shell; round 13's k5), and `ciSpread` spreads it
+shell; round 13's k5; and it reads the age over `CI_AGEF` = 0.15 km at
+least: the age changes sharply at the edge of each strand of a tail over
+a sheet, and read finer, the place read jumped with it and drew hard
+lines with strings of beads across a deck seen from just under it), and
+`ciSpread` spreads it
 round that height by a Gaussian of 0.08 to 0.22 of the thickness (wider
 when older). The vertical depth of a column is what a flat read gives
 (`ciDensity`); the spread only says where in the deck it lies, so the
@@ -779,12 +804,23 @@ directly, each texel by itself in closed form, from four kinds, one to a
 channel, which the scene mixes by the cirrus's map (below):
 
 - **The flow** (`iceFlowFrame`). Everything is drawn in one warped frame:
-  the tile's place plus a displacement of noise at 20, 8 and 3.4 km (more
-  across the wind than along; whole numbers to the tile, so that it
-  repeats). Its lines of constant y are the ways the wind draws the ice;
-  they turn by up to some 0.4 rad over 10 to 20 km, so that neighbouring
-  forms run together and their way changes from region to region. The
-  displacement's slope stays well under 1, so the frame never folds.
+  the tile's place plus a displacement of noise at 20 (by 40 km across),
+  8 and 3.4 km (more across the wind than along; whole numbers to the
+  tile, so that it repeats). Its lines of constant y are the ways the wind
+  draws the ice; they turn by up to some 0.6 rad over 10 to 30 km, so that
+  neighbouring forms run together and their way changes from region to
+  region. The displacement across changes faster along the wind than
+  across it, so the frame turns without folding.
+- **Turbulence** (`iceTurb`). The flow's frame is then stirred: moved by
+  the curl of noise at some 5.8, 2.5 and 1 km (by 0.45, 0.1 and 0.025
+  km), each size read where the larger ones have moved it, so that
+  the eddies stir the stirred ice again. The curl moves the ice without
+  bunching it, and its strength changes from region to region (noise of
+  some 13 and 6 km: calm patches with smooth streaks, stirred ones where
+  they kink, hook and fold). Everything below is drawn in the stirred
+  frame, so heads are ragged, tails kink and edges are irregular at every
+  scale; drawn in the smooth flow alone (round 15), tails stood as
+  airbrushed ribbons with a rounded bright tip, like comets.
 - **Tails** (R, `iceSystems`): one system to a cell of 13.5 by 10 km (3 by
   4 to the tile), 45 % of the cells empty, and groups of systems (noise of
   some 20 and 8 km at the head) strong, weak or missing, so that the forms
@@ -798,24 +834,46 @@ channel, which the scene mixes by the cirrus's map (below):
   uncinus), then turns by its own amount over the rest, as it falls into
   wind of another way: the turn comes from noise over the tile (a group's
   tails run and curve alike, as in photographs of mares' tails), less for
-  a long tail. The tail widens from 0.4 of the head's radius to 0.035 to 0.09
-  of its length (a fan, which has lost its head, to twice that) and thins
-  as it widens. Its ice falls in strands (`iceStrands`, below). The head
-  is the start of the tail, dense along its hook and lumpy (knots of a
-  third and a tenth of its size): a comma, not a ball (round 15's first
-  try drew a round head and stood as comets).
+  a long tail. Where the two arcs are nearly as near, the tail's
+  coordinates blend from the one to the other, and near the centre of a
+  tight turn there is none (`iceIn`): there the nearest point of the tail
+  jumped, and with it its strands. The tail widens from 0.4 of the head's
+  radius to 0.035 to 0.09 of its length (a fan, which has lost its head,
+  to twice that), swells and pinches along it (0.6 to 1.4 of that, over a
+  quarter of its length), and thins as it widens. It is fine strands all
+  along (`iceStrands`, below), from the head on. The head is the start of
+  the tail, dense along its hook, made of ragged tufts (noise at a third,
+  an eighth and a twentieth of its size, cut: knots with blue between),
+  and ahead of it each strand sticks out by its own way, so that its front
+  is frayed, not round. The tail fades to nothing before 3.5 of its widths
+  (cut there, a strong tail drew a hard edge seen from near the deck).
+- **Feathers** (in 10 % of the tails' systems and 40 % of the large
+  ones): wide plumes (up to 1.6 times a tail's width) whose fine barbs
+  leave the spine aslant and sweep back by some 40 to 60 degrees, curving
+  with the distance out, on one side or both, each barb ending at a place
+  of its own and wandering, so that barbs merge and part (drawn evenly,
+  they stood as a fish bone); the spine is a thin dense line. Photographs looking up show
+  such plumes and tangled skeins filling the frame where round 15 drew
+  only separate thin tails.
 - **Sheets and streets** (G, `iceSheets`): old ice, spread by the shear.
   A body of noise drawn out along the flow: sheets of some 20 by 7 km and
   streets some 15 to 40 km long and 1 to 2.5 km wide, a few km apart;
-  regions of 40 by 20 km have the one or the other. Strands run along it
-  (noise of 20 km by 0.22 km, 5 km by 90 m and 2 km by 34 m, the finest as
-  their mean where the texels cannot hold them), and wander from side to
-  side by some 0.25 km, so that they braid; the body's edge breaks up a
-  little along them. A faint trace of strands (a streaky veil) lies under
-  it all: the scene takes it off except near the top of the slider. Its
-  strands' phase is half cancelled (below), so its hairs are faint:
-  drawn in full, from under the shell, the long straight strands of two
-  decks crossed as a net of scratches.
+  regions of 40 by 20 km have the one or the other. Its strands (noise of
+  some 3 km by 0.2 km, squared, with gaps between them, and threads of 1.2
+  km by 75 m) run their own way in each cell of 8.1 by 5.8 km: the
+  region's way (noise over some 15 to 30 km, up to some 0.5 rad off the
+  flow) and up to 0.55 rad of the cell's own (less in a street), and they
+  curve. Between cells the two ways blend (over narrow zones: the weights
+  cubed; blended evenly, two sets of strands crossed as a grid of beads
+  seen from near the deck), so that strands of different headings overlap
+  and tangle and no single vanishing point leads. Drawn
+  along the flow alone (round 15), long straight strands stood as a radial
+  fan, like a zoom blur, seen from below, and as straight spokes from near
+  the deck. The body's edge breaks up along the strands. A faint trace of
+  strands (a streaky veil) lies under it all: the scene takes it off
+  except near the top of the slider. Its strands' phase is half cancelled
+  (below), so its hairs are faint: drawn in full, from under the shell,
+  two decks' long strands crossed as a net of scratches.
 - **Flocks** (B): the tails' code with small heads (some 0.1 km) and short
   tails (0.3 to 3 km), at most one to a cell of 3.4 km, gathered in a few
   flocks with wide gaps (cirrus floccus): spread more widely, their heads
@@ -824,7 +882,10 @@ channel, which the scene mixes by the cirrus's map (below):
   bright cell.
 - **Large systems** (A): the tails' code with cells of 20 by 13.5 km (2 by
   3 to the tile), up to four heads of some 1.2 km, tails 10 to 36 km
-  long and 0.05 to 0.15 of that wide: the broad fans and feathered sheets.
+  long and 0.05 to 0.15 of that wide: the broad fans, plumes and
+  feathered sheets. They are stirred at 0.45 of the turbulence: from just
+  under the deck, their wide plumes stirred in full stood as folded,
+  marbled curtains.
 - **Strands** (`iceStrands`). A tail's ice falls in strands along it:
   value noise across it (squared, so that there are gaps between the
   strands), at 3 to 8 strands to the tail's half width (6 to 12 for a
@@ -835,13 +896,24 @@ channel, which the scene mixes by the cirrus's map (below):
   frays out instead of ending round. The strands wander from side to side
   (by about a strand's width, each group of two or three its own way), so
   that they cross and braid, and near the end of its life a strand curls
-  off to one side or the other. The ice also falls in bursts: several
+  off to one side or the other. Each strand breaks into pieces of its own
+  (some 1 to 3 times the noise's step along, each group's starting at a
+  place of its own: on one lattice, neighbouring strands broke at the
+  same places and stood as a grid of beads from near the deck) with blue
+  between, and
+  downstream the strands part in groups of some four that drift apart,
+  with lanes of blue opening between them: a tail splits and fans out
+  instead of widening as one ribbon. The ice also falls in bursts: several
   strands at once thicken and thin along the tail (value noise slow
   across, squared), so that a tail has patches and bands across its
   streaks, with gaps. Strands and threads finer than the texels can hold
   (a period under some three texels for the strands, six for the threads,
   `iceFine`) are drawn as their mean: sampled once a texel, they aliased
   into moire. The hairs draw them instead.
+- **Erosion** (`iceErode`). Last, thin ice is eaten by noise of some 1.35
+  by 0.27 km and 0.58 by 0.12 km, drawn out along the flow
+  (`smoothstep(-0.45, 0.25, e + 5 ice)`: the denser, the less), so that
+  edges are ragged and blue shows through them at every scale.
 - **The age.** The ice's age is 0 at a head and 1 at the end of its tail;
   a sheet's is 0.35 to 0.7. The ice falls as it ages, so heads are high
   and tails hang below them (`ciHeight`).
@@ -850,7 +922,10 @@ channel, which the scene mixes by the cirrus's map (below):
   measured from the system's first head, which lies in its cell), so the
   twelve cells searched (two up, one down, one to each side) hold every
   system whose ice can be at a texel: a cut at the edge of the cells
-  searched draws straight seams.
+  searched draws straight seams. A tail is no longer than 1.6 cells less
+  its hook (cut at the edge, a long tail ended blunt). Within that, a
+  tail is left out only beyond 5 of its widths (7 for a feather) and its
+  length.
 - Each field is stored as `sqrt(x / ICE_STORE)`, `ICE_STORE` = 1, and read
   back squared: the scene's depth is linear in the ice.
 
@@ -882,7 +957,8 @@ the ice was built with:
   piece of ice that `iceSystems` and `iceSheets` add also adds
   a phasor of the place across its strands (`icePhase`: one turn to a
   strand, `v` of `iceStrands` for the tails without the curl of their
-  ends, the place across the flow for the sheets, with a second phasor
+  ends, the place across the strands of each of the four cells blended
+  for the sheets, with a second phasor
   of 0.55 of the ice half a turn off, so that a sheet's hairs are faint),
   weighed by the square of the ice, its kinds weighed as `iceAge` weighs
   them; the texture holds the phasor over the weight (RG8, as wide as the
@@ -1022,10 +1098,11 @@ on the map.
   bands, as cirrus at dusk does. Spread evenly, the tufts stood far off
   in rows like the scales of a fish (round 10).
   Measured as the share of the view with a vertical depth over 0.03,
-  looking up at 35 degrees from 0.3 km: 4, 8, 32, 68, 84, 96, 100 and
-  100 % at 0.1, 0.25, 0.4, 0.6, 0.7, 0.8, 0.9 and 1 (round 14 by the same
-  measure: 8, 21, 43, 64, 77, 97, 100, 100: little cirrus is now a few
-  tails with more blue; round 9: 6, 24, 45, 68, 82, 91, 100, 100). (The share of the
+  looking up at 35 degrees from 0.3 km: 3, 6, 22, 51, 68, 91, 100 and
+  100 % at 0.1, 0.25, 0.4, 0.6, 0.7, 0.8, 0.9 and 1 (round 15 by the same
+  measure: 4, 8, 32, 68, 84, 96, 100, 100: the strands now have blue
+  between them, broken strands and eroded edges; round 14: 8, 21, 43,
+  64, 77, 97, 100, 100; round 9: 6, 24, 45, 68, 82, 91, 100, 100). (The share of the
   picture that differs from `cirrus=0` no longer measures it: the metered
   exposure changes the whole picture when the cirrus brightens it.)
 - **The veil.** From `c` = 0.35 a veil (cirrostratus) grows, `CI_VEIL` =
@@ -1062,7 +1139,11 @@ on the map.
   depth at its median, times `smoothstep(0.2, 0.6, c)`, `fields^2` and
   the map, with the same noise as the veil for its exponent: a band is a
   long, continuous body of ice with streaks along it, its tufts in it,
-  not a row of separate dabs.
+  not a row of separate dabs. It follows the ice's own texture (`0.25 +
+  tex`, `tex` = `smoothstep(0, 0.08, ice)`), and so does the veil below
+  `c` = 1 (`0.5 + 0.7 tex`, even at the top): thinner in the lanes
+  between strands, so that a deck seen from near it is streaky, not a
+  fog of soft blobs (round 15's 11 km views).
   Round 9's veil grew in proportion to the ice around and saturated: one
   even, pale sheet from edge to edge (depth 0.5 to 1 over 70 % of the
   view at `cirrus` 0.85 from 11 km).
@@ -1091,11 +1172,12 @@ on the map.
   0.03 and only where there is a veil, from a depth of 0.1, since
   photographs of much cirrus towards the sun mostly show none: 0.05 to
   0.17 drew a clear coloured ring in every veil; at night, by the moon,
-  0.05 in thin cirrus from a depth of 0.02, as photographs show halos in
-  cirrus fibratus, up to 0.17 where there is a veil, from a depth of 0.03; it
-  fades as the ice scatters the light again, as the rest of the light
-  scattered once does: taken by that twice, and at 0.03 to 0.07, the
-  ring did not show at night through a veil, where photographs show it),
+  0.12 in thin cirrus, as photographs show halos in cirrus fibratus, up
+  to 0.22 where there is a veil, from a depth of 0.02 to 0.15 over some
+  10 km and here; it fades as the ice scatters the light again, as the
+  rest of the light scattered once does: taken by that twice, and at 0.03
+  to 0.07, the ring did not show at night through a veil, where
+  photographs show it),
   light
   scattered once with the sheet's own shadow (a low sun enters the sheet
   within some seven times its thickness, between the clouds, so cirrus at
@@ -1108,6 +1190,14 @@ on the map.
   skylight from the multiple-scattering table (less the share `CI_FWD`,
   below), and light from the low clouds below, at the mean distance of
   the decks seen.
+- **At night** (`nightK`, up to 0.65 as the light goes over from the sun to
+  the moon: no switch, `1 - smoothstep(0.02, 0.3, uLightI)`; the halo
+  blends between its day and night strengths by the same) the light that the
+  sheet scatters, and its share of the sky's light, follow its depth over
+  some 10 km by that much, and a broader aureole (some 5 degrees) is
+  added: photographs of a lunar halo show a smooth sheet, a bright
+  aureole and a clear ring, where the moonlit decks stood as dark lanes
+  across a grey veil with only a faint ring.
 - **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
   extinction is diffraction by its crystals: light turned by less than a
   degree, which goes on as if not scattered. The march through the air
@@ -1185,30 +1275,48 @@ which repeats ten or four times over the map.
 
 ## Sun, moon, stars
 
+**The rule.** Every light beyond the air, the sun, the moon, the stars, the
+airglow, the Milky Way and the zodiacal light, is drawn with its own
+brightness at every hour. Besides the exposure and the tone curve, only
+the air decides what shows: each light is dimmed on its way to the eye,
+and the light the air scatters towards the eye (of the sun, and of the
+moon) lies over it. A star by day is lost because the bright sky sets the
+exposure and lies over it, not because anything switches it off; as the
+twilight fades, the stars and the Milky Way come out by themselves, the
+brightest first. No switch on the hour, the sun's height or the moon's,
+and no threshold on one light's contrast, raises or hides a light. Where a
+light needs help to look as the eye sees it, the help is a constant gain
+(below) or the night's tone curve, which applies to everything alike.
+
 Rays that reach the top of the air (no sea, not behind a thick cloud) get,
 all dimmed and reddened by the air:
 
 - **The sun**: a disc of 0.267 degrees radius, of a fixed brightness (2000
   in these units).
 - **The moon**: a sphere lit by the sun (`uSun`), so its phase comes out by
-  itself, with darker seas from noise. The dark side holds a dim grey
-  (`uEarth`: earthshine, capped so the night exposure does not burn it out).
+  itself, with darker seas from noise, by day as well (a pale day moon).
+  The dark side holds the earthshine, `EARTHSHINE` = 1e-6 of sunlight per
+  steradian. Before, the earthshine was capped by the exposure, so that
+  the night exposure did not burn it out: the moon's dark side was a dim
+  grey at night. At its own brightness the night exposure takes it near
+  white, and a crescent shows as a whole pale disc with a brighter rim.
 - **Airglow** (`uNight`), brighter towards the horizon (van Rhijn's factor),
   and **the Milky Way** (`milkyWay`): a noise pattern on the real galactic
-  plane, brighter towards its centre. As the night eye comes in, the Milky
-  Way is raised up to `MILKY_EYE` = 6.5 times more: the dark-adapted eye
-  sees it plainly as a grey band, which the steeper night curve below
-  would hide. How much depends on its contrast with what lies behind it,
-  the sky and the moon's veil in the eye (see the stars below): fully
-  above a contrast of 0.8, not at all below 0.08 (`MILKY_SEEN`). So it
-  is plain on a moonless night (40 to 50 of 255 against a sky of 8 to 10
-  in a view of Cygnus), weaker under a quarter moon (from cruise its
-  brightest parts at about 40, near the sea about 24 against 15), and
-  gone under a full moon. Before (round 2) it was raised 2 times at all
-  phases and stood 15 to 27 against 8 to 9 on a moonless night. The air
+  plane, brighter towards its centre, relative to the airglow. The air
   takes only half of their light away: it scatters much of what it takes
   back towards the eye, and the sky from cruise brightens towards the
   horizon (by about 1.5 times at 5 degrees up) instead of staying flat.
+  The Milky Way is drawn `EYE_GAIN` = 6 times its light, at every hour,
+  and so is the zodiacal cone: large faint glows that the dark-adapted
+  eye sees plainly, where a screen's dark end would hide them. One gain
+  for both keeps their ratio. On a moonless night, towards Sagittarius
+  from cruise (`date=200&time=1.5&moon=0&yaw=20&pitch=8`), its brightest
+  parts stand at about 47 of 255 over a sky of 10; under a
+  quarter moon it is faint, and under a full moon it is lost in the
+  moonlit sky. Before, it was raised up to 6.5 times more as the night eye
+  came in, by its contrast with the sky and the moon's glare in the eye
+  (`MILKY_EYE`, `MILKY_SEEN`): as a moon set, that contrast crossed its
+  threshold within a few minutes and the Milky Way came in at once.
 - **The zodiacal light** (`zodiacal`): sunlight scattered by the dust
   between the planets, of the sun's colour, a cone along the ecliptic
   that is brightest near the sun, a faint band along the rest of it, and
@@ -1234,75 +1342,32 @@ all dimmed and reddened by the air:
   time and the place. Nearer the sun than the table goes (15 degrees on
   the ecliptic), the power goes on, to 2 degrees. `zodiacal` returns the
   cone (the power term) and the rest (the floor and the bumps) apart, and
-  for the cone as it is drawn (below) its brightness along the ecliptic
-  and its shape across it.
+  for the cone as it is drawn its brightness along the ecliptic and its
+  shape across it.
 
-  It is drawn only at night, once the night eye comes in (`uNightEye`):
-  by day and in civil twilight the sky is thousands of times brighter,
-  and leaving it out keeps every picture with the sun above -3 degrees as
-  it was. The air dims it as the Milky Way. Its floor and the gegenschein
-  are drawn as they are. Its cone is drawn as the eye sees it, a look like
-  the Milky Way's:
-  - **Shape.** Along the ecliptic it keeps the fit's brightness. Across
-    it, the fit widens with the angle from the sun (it is flattened by
-    the same ratio at every angle), and drawn so the cone spread into a
-    fan and read as a soft glow on the horizon. The eye sees a cone
-    instead, widest and brightest at its base, whose sides close in all
-    the way to its tip (Trouvelot's drawing of 1876, reports from dark
-    sites). So it is drawn as a band of half width (to 1/e) 20 degrees
-    at 15 degrees from the sun, narrowing fastest near the sun, towards 2
-    far from it (`ZODI_BAND`; 15 at 24 degrees, 9 at 50, 4 at 80), with
-    a skirt twice as wide (0.15 of it).
-  - **Brightness** (`zodiacalSeen`). It starts from the contrast c of
-    the cone's brightness along the ecliptic over what lies behind it
-    (the sky, the Milky Way and the rest of the zodiacal light), as the
-    rods see them: the airglow, bluer than sunlight, is brighter to them.
-    From `ZODI_SEEN` = 0.25 on, with a soft knee, the drawn sum of sky
-    and cone on its axis grows as c (so the cone is drawn some four
-    times its own light), and then levels off towards `ZODI_MOST` = 6
-    times the sky: the eye's response to so faint a glow is compressive,
-    and a cone 3 and one 10 times the sky look nearly alike. Without
-    that, the base near the sun burned out while the cone faded within 30
-    degrees of it. Across, that raise takes the band's shape, so the cone
-    is brightest on its axis and falls off smoothly to its sides. Made
-    the other way round (the contrast of the cone in its shape, then
-    levelled off), its lower half was a column with a flat top across
-    (round 3). The log of the sum never rises faster than the log of c,
-    so where the sky behind brightens faster than the cone (the last of
-    the twilight at the horizon) the sum does not darken: a steeper rise
-    (tried first: a smoothstep over the contrast) left a dark rim between
-    the cone and the glow at the horizon.
-  - **The moon.** A moon above the horizon fades the cone by 1 / (1 +
-    (m / `ZODI_MOON`)^2), m the moonlight (`uMoonI`); `ZODI_MOON` =
-    1.1e-7 of sunlight is about half a first quarter's. The eye loses so
-    faint a glow in moonlight sooner than its contrast says: from cruise,
-    where the moonlit air above is thin, the contrast alone left a
-    first-quarter moon's cone plain (42 levels over 29). Now a crescent
-    (age 4) leaves nine tenths of it, a first quarter a fifth, a full
-    moon nothing. The moon's veil in the eye is not in c: nothing draws
-    the veil, and counted in, it cut a dark hole into the cone around a
-    crescent standing in it.
-  - **What it leaves alone.** The exposure meter does not count the
-    zodiacal light (a faint glow over part of the sky does not change
-    how the rest is exposed): the exposure is the same as without it.
-    The Milky Way is raised by its contrast with the sky and the moon's
-    veil alone, as before. The faintest star seen counts the cone's own
-    light in its drawn shape, but not the floor nor the fit's wide
-    profile: counted in, they took 3 to 6 % of the stars all over the
-    sky, which were set to look right without them.
+  It is drawn at every hour; by day and in civil twilight the sky is
+  thousands of times brighter and lies over it. The air dims it as the
+  Milky Way. Its floor and the gegenschein are drawn as they are. Its cone
+  is drawn `EYE_GAIN` times the fit's brightness along the ecliptic, and
+  across it as the eye sees it: along the ecliptic the fit widens with the
+  angle from the sun (it is flattened by the same ratio at every angle),
+  and drawn so the cone spread into a fan and read as a soft glow on the
+  horizon. The eye sees a cone instead, widest and brightest at its base,
+  whose sides close in all the way to its tip (Trouvelot's drawing of
+  1876, reports from dark sites). So it is drawn as a band of half width
+  (to 1/e) 20 degrees at 15 degrees from the sun, narrowing fastest near
+  the sun, towards 2 far from it (`ZODI_BAND`; 15 at 24 degrees, 9 at 50,
+  4 at 80), with a skirt twice as wide (0.15 of it). A moon fades it only
+  as the moonlit sky lies over it. Before (round 4) the cone was raised
+  by its contrast with the sky behind it, from `ZODI_SEEN` = 0.25 up to
+  `ZODI_MOST` = 6 times the sky, faded by a moon above the horizon
+  (`ZODI_MOON`), and drawn only once the night eye came in.
 
-  On a moonless spring evening (sun 18 degrees down, 35 degrees north)
-  the cone stands, over a sky of 7 to 22 levels of 255, about 25 (from
-  0.3 km) to 48 (from 11 km) levels at its base, 17 at 30 degrees up,
-  12 at 40, 9 at 50 and 5 at 60, and fades out by about 75 degrees up.
-  At half its height on the axis it is some 22 degrees wide near the
-  base, 14 at 30 degrees up and 9 at 60; where it stands 3 levels over
-  the sky, 37 to 41 near the base and 8 at 60. The Milky Way's brightest
-  clouds stand 17 to 26. On an autumn evening, with the ecliptic low, it
-  is a slanting band along the western horizon, 11 to 17 levels near its
-  base. Under a first-quarter moon it is a trace, under 10 levels from
-  cruise and 2 near the sea; under a full moon it is not drawn. It costs
-  a few operations per pixel of sky.
+  On a moonless spring evening (sun 18 degrees down, 35 degrees north;
+  `date=80&time=19.45&yaw=90&pitch=15`) the cone stands from the glow at
+  the horizon to some 60 degrees up, as on main before. Under a gibbous
+  moon in the last of the twilight it is a trace. It costs a few
+  operations per pixel of sky, now at every hour.
 - **Stars** from Wikidata (CC0), to magnitude 6.5 (the `stars` block: six
   bytes per star, brightest first, about 8,800 stars; built by
   `tools/make-stars.py`, the source is named in `THIRD_PARTY_NOTICES.md`). About a hundred
@@ -1315,38 +1380,27 @@ all dimmed and reddened by the air:
   B-V index (Ballesteros's temperature, then a tilt of the spectrum) and a
   compressed brightness (a "look": `STAR_LN_MAG` = 0.645 in ln per
   magnitude, 0.7 of the real ratio). The brightest get diffraction spikes
-  fixed to the screen.
-  By day and in twilight until the night eye comes in, the core of a star
-  of magnitude 6.5 is `STAR_GAIN` = 3 times the radiance of the airglow,
-  and the exposure hides them.
-  At night the stars are drawn as the eye sees them, not as the exposure
-  would show them. `starsSeen` gives the faintest magnitude the
-  dark-adapted eye sees against the luminance behind the star, after
-  Schaefer (1990): the threshold illuminance grows as `(1 + sqrt(k B))^2`,
-  with one pair of constants for the rods and one for the cones, and the
-  eye takes the lower. The luminance is the sky's (or the cloud's) at that
-  pixel plus the moon's glare in the eye, `10 E / theta^2` cd/m2 at theta
-  degrees from the moon (Stiles and Holladay). A dark sky (about 2e-4
-  cd/m2) gives 6.5; a quarter moon's sky from cruise about 6; a full
-  moon's about 4.9 from cruise and 4.2 from near the sea, less towards
-  the moon. A star at that threshold is drawn `STAR_SEEN` = 0.12 of the
-  screen's range over the sky behind it, after the exposure and through
-  the inverse of the tone curve, and each magnitude brighter by
-  `STAR_LN_MAG`; the air and the clouds before it dim it on the same
-  scale. So the exposure does not decide which stars show: a darker
-  picture of a darker night shows more stars, not fewer. Their colour
-  comes in only for stars `STAR_HUE` = 1.5 to 4 magnitudes brighter than
-  what the cones alone can see: on a moonless night the brightest few
-  (Betelgeuse, Aldebaran orange; Vega, Rigel white-blue), the rest white.
-  Before (round 1) the stars were raised by the square root of the sky's
-  brightness over the airglow and scaled with the exposure: under the
-  night's capped exposure a moonless sky showed mag 6 stars at a third of
-  the contrast they have now, and the picture read as an empty black
-  frame.
+  fixed to the screen. At every hour the core of a star of magnitude 6.5
+  is `STAR_GAIN` = 20 times the radiance of the airglow. That is about its
+  true brightness spread over the spot at a drawing size of some 1600 x
+  900 (the spot keeps its size in pixels, so the gain is a constant, not
+  the true radiance at every size). The air dims a star by its own
+  transmission, the light of the sky lies over it, and the exposure and
+  the night's tone curve decide which show: on a moonless night from
+  cruise the faintest of the catalogue just show, under a moon and in
+  twilight fewer, the brightest first. Their colour is their own; at night
+  the rods' grey takes it from all but the brightest, by their luminance
+  ([Exposure and the tone curve](#exposure-and-the-tone-curve)). Before,
+  the stars at night were drawn after the exposure as the eye's threshold
+  says (`starsSeen`, after Schaefer, 1990, with the moon's glare in the
+  eye; `STAR_SEEN`, `STAR_HUE`), and in proportion to the airglow only by
+  day and in twilight.
 
 **Glare**: a glow of a few degrees around the sun, as strayed
 light in a lens, dimmed by the clouds (the shadow map at the eye) and the
-cirrus towards the sun.
+cirrus towards the sun. It is drawn within 26 degrees of the sun
+(`mu > 0.9`), and added to `L` and to `G` alone: `G` already holds the
+sun's disc or its glitter, which `L` has.
 
 ## Exposure and the tone curve
 
@@ -1364,10 +1418,11 @@ in it at only `METER_GLINT` = 0.15 of their light (`G` in `main` and
 exposes for the rest. Photographs from cruise keep the sky as light
 facing the sun as away from it (h11-vueling01 and 03); counted in full,
 the glitter held the view towards the sun 1.5 to 2.4 stops below the
-view away, and the sky there was navy (round 10). The zodiacal light, as
-drawn, does not count at all (`zodiY`): with it counted, a spring
-evening's view of its cone was exposed 0.25 to 0.56 stops darker than
-without.
+view away, and the sky there was navy (round 10). Every other light
+counts in full, the moon, the stars, the Milky Way and the zodiacal
+light among them. Before, the zodiacal light was left out (`zodiY`): it
+was drawn then some four times its own light, and counted in, it darkened
+a spring evening's view of its cone by 0.25 to 0.56 stops.
 
 **The meter.** After `mean`, the shader `meter` draws a target of 64 by 36
 texels (`METER`): each is a block of the picture and holds the mean level
@@ -1524,10 +1579,11 @@ At the end of `main`:
    133,000 lux, is 1 / pi here), times `uNightEye`. In twilight it is
    `ROD_HALF / (ROD_HALF + Y)`, `ROD_HALF` = 0.01 cd/m2 (the paper's 0.04
    greyed the sky of nautical twilight, which photographs and the eye see
-   blue). In the night proper (`uNightGrey`, `nightGreyFor`: the sun from
-   10 to 14 degrees down) it widens to the eye's mesopic range: from 1 to
-   0 as Y goes from `MESOPIC` = 0.003 to 3 cd/m2, along a smoothstep in log
-   Y. The sky of nautical twilight is as dim as a full moon's clouds (both
+   blue). As the eye adapts further (`uNightGrey`, `nightGreyFor`: the
+   exposure from 12 to 15, in a view away from the sun the sun from about
+   9 to 13 degrees down; before, the sun from 10 to 14 degrees down) it
+   widens to the eye's mesopic range: from 1 to 0 as Y goes from `MESOPIC`
+   = 0.003 to 3 cd/m2, along a smoothstep in log Y. The sky of nautical twilight is as dim as a full moon's clouds (both
    about 0.07 cd/m2), so a range in luminance alone would grey both; the
    eye still sees that sky blue. So the moonlit clouds under a quarter moon
    (about 0.003 cd/m2) are grey, those under a full moon (about 0.07)
@@ -1588,10 +1644,14 @@ At the end of `main`:
    the moonlit clouds): the night has black in it, the dark sea and the
    sky away from the moon, where the gentler curve left a grey veil over
    the whole picture (sky 17 and sea 5 to 6 of 255 under clouds at 60;
-   now about 9 and 4). The stars at night are added before this step,
-   after the exposure (see [Sun, moon, stars](#sun-moon-stars)): one at
-   the eye's threshold stands `STAR_SEEN` over the sky behind it once
-   through this curve.
+   now about 9 and 4). As the eye adapts to a darker night it grows
+   steeper still: from `NIGHT_LOOK` to `DARK_LOOK` = 2.0, and its pivot
+   from `LOOK_PIVOT` down to `DARK_PIVOT` = 0.07, as the exposure (log2)
+   goes from 15.5 (about a full moon's) to 17.5 (a moonless night from
+   cruise; `DARK_EYE`). That is the eye's contrast on a dark night, for
+   everything alike: the Milky Way, the zodiacal light and the stars stand
+   out of a moonless sky, and fade under a moon because the moonlit sky
+   lies over them and the curve is gentler there.
 6. Tone mapping `1 - exp(-col)`, channel by channel, then the display
    power `1 / 2.2`. Steps 2, 4, 5 and 6 are those of `main`.
 7. Rounding at random to the storage steps (next section).
