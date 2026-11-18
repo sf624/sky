@@ -29,6 +29,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
+| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the frame rate, and the GPU time per kind of draw (median and p90). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
@@ -164,6 +165,41 @@ SKY_GPU=1 node tools/sky.mjs check --base origin/main
 - No Japanese font is installed, so `ui-ja` is skipped.
 - This GPU stack ignores the alpha of `blendColor` (see the [GLSL rules](../docs/development.md#glsl-rules)); SwiftShader does not.
 
+## Direct3D 11 on Windows
+
+Chrome and Edge on Windows draw WebGL through ANGLE on Direct3D 11, which
+compiles shaders with Microsoft's HLSL compiler: far slower than this
+machine's stack for large programs (see the GLSL rules in
+[development.md](../docs/development.md#glsl-rules)). On WSL, `d3d` runs
+Windows Chrome itself, headless (`--headless=new --use-angle=d3d11`, no
+window, no focus), with a profile of its own in the Windows temporary
+directory and the program cache off, one Chrome at a time. The page is
+served from WSL (Windows reaches its localhost) and posts what it measures
+back over HTTP. Each run ends after `done` or `--limit` s (default 300);
+then exactly its own processes are killed (found by the profile's path,
+never by name) and its profile is deleted. `SKY_WIN_CHROME` names another
+Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
+
+- `d3d page`: the page with `?timing&res=1` (and `--q`): its console lines
+  (each program compiled, the textures, the first picture, in seconds since
+  the page was opened), then the GPU time of `--frames` frames (default 60,
+  `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080).
+- `d3d programs`: each program `makeSky` links (its `link(...)` calls,
+  with their defines), alone: the time to compile and link it, and of its
+  first draw into one target and into all its outputs (ANGLE compiles a
+  program again for a draw into more than one target).
+
+With `--base`, the base and the page take turns, `--runs` times each. Every
+line names the renderer: it must say `Direct3D11`. Headless Chrome did
+not lose the context even where a draw held the GPU process for 143 s
+(also with `--gpu-watchdog-timeout-seconds=2`), where a browser with a
+window does: watch the times of the second compiles, not for a loss.
+
+Measured on the owner's machine on 2026-11-19 (`d3d programs`, a program
+alone): main's `fs` links in 7.7 to 9.8 s and takes as long again at its
+first draw into its two targets; 7d1a635's `fs` 138 to 152 s, and 143 s
+more at that draw.
+
 ## Timings and limits
 
 Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.
@@ -207,3 +243,4 @@ Other copies broken on purpose, each caught: the loop stopping one frame early (
 | `lib/png.mjs` | PNG reading and writing (Node's zlib), picture differences, the shift between two pictures. |
 | `lib/run.mjs` | Running a view; the commands `trace`, `stills`, `drive`, `perf`; base revisions. |
 | `lib/checks.mjs` | The checks and their limits. |
+| `lib/d3d.mjs` | The command `d3d`: Windows Chrome on Direct3D 11, its harness pages, its cleanup. |

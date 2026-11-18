@@ -52,6 +52,7 @@ export function renderer() {
 
 // A static server for page directories: one port, each directory under its own prefix (/0/, /1/, ...), so that a
 // page and its base can be served together. Caching is off, so every load reads the files on disk.
+// `handle(req, res, url)`, if given, answers a request first when it returns true (see d3d.mjs).
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.glsl': 'text/plain; charset=utf-8',
@@ -59,10 +60,11 @@ const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.wasm': 'application/wasm',
   '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon',
 };
-export async function startServer() {
+export async function startServer({ handle } = {}) {
   const roots = [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    if (handle && handle(req, res, url)) return;
     const m = /^\/(\d+)(\/.*)$/.exec(decodeURIComponent(url.pathname));
     const root = m && roots[+m[1]];
     let file = root && path.join(root, m[2]);

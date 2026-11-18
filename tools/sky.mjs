@@ -23,8 +23,10 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
+  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]
+              on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
 common:       --page DIR (the page to test; default: this repository)
-environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT`;
+environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
 
 // Commands that start Chrome, and their time limits (s).
 const LIMITS = { trace: 900, stills: 2400, check: 5400, drive: 900, perf: 300 };
@@ -73,7 +75,7 @@ async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (!cmd || cmd === 'help' || cmd === '--help') { console.log(USAGE); return 0; }
   const opt = parseArgs(rest);
-  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'check', 'drive', 'perf'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
+  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'check', 'drive', 'perf', 'd3d'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
   const queued = wrapped(cmd);
   if (queued) return await queued;
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(130));
@@ -104,6 +106,18 @@ async function main() {
     return d.max === 0 ? 0 : 1;
   }
 
+  if (cmd === 'd3d') {
+    // Windows Chrome, not this machine's: not queued, each run under its own limit.
+    const { d3d } = await import('./lib/d3d.mjs');
+    const { parseSize, resolveBase } = await import('./lib/run.mjs');
+    const pages = [{ name: 'page', dir: page }];
+    if (opt.base) pages.unshift({ name: `base ${opt.base}`, dir: resolveBase(opt.base, REPO) });
+    const mode = opt._[0] || 'page';
+    if (!['page', 'programs'].includes(mode)) throw new Error(`d3d: no mode ${mode} (page, programs)`);
+    await d3d(pages, { mode, q: opt.q || '', runs: +(opt.runs || 1), limit: +(opt.limit || 300), frames: +(opt.frames || 60),
+      size: parseSize(opt.size || '1920x1080') });
+    return 0;
+  }
   const { Session } = await import('./lib/page.mjs');
   const run = await import('./lib/run.mjs');
   const session = await Session.start();
