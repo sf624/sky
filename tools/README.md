@@ -29,7 +29,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
@@ -134,6 +134,8 @@ canvas sky, frame 1, call 113 of 133 in A, 113 of 133 in B:
             ["size", 800, 600], ["frames", 2], ["sleep", 100], ["shot", "b.png", {"x": 0, "y": 0, "width": 200, "height": 100}]] }
 ```
 
+A file may also hold a list of such scripts: they run one after another in the same Chrome (one wait in the queue), each printed after its `name`, each on its own `page` directory if it gives one (else `--page`).
+
 `step` takes frames and ms; `shot` a file and an optional clip; `eval` prints the value of a JavaScript expression in the page; `draws` prints the draw calls so far per canvas (to the screen, offscreen, and the size of the largest offscreen draw since the last draw to the screen: the size the picture is drawn at); `mouse` sends a DevTools `Input.dispatchMouseEvent`; `size` changes the viewport; `frames` waits for real browser frames; `sleep` waits real ms. Optional: `dpr`, `mobile` (true: the mobile viewport and touch, as `perf --mobile`), `seed`, `realDate` (true: the real `Date`).
 
 ## Environment
@@ -176,6 +178,10 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   (each program compiled, the textures, the first picture, in seconds since
   the page was opened), then the GPU time of `--frames` frames (default 60,
   `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080).
+  With `--shot S`, instead of the GPU time: the canvas as a PNG, S s (real
+  time) after the first picture, at the page's own drawing size (no
+  `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
+  picture of S s flown on Direct3D 11.
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
   with their defines), alone: the time to compile and link it, and of its
   first draw into one target and into all its outputs (ANGLE compiles a
