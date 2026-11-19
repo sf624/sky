@@ -2973,7 +2973,12 @@ asks which level it is.
   is 1) and `Q_SPARKLE` (the sea's glitter at night is its mean, not
   separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
   the low clouds and the sea and does not dim the glare: the scene then
-  holds no copy of the cirrus's code). The programs of `low` are smaller
+  holds no copy of the cirrus's code). Four more, for cuts not taken yet
+  (`?stats=bench3` measures them on a device): `Q_LEAN` (0: the air's
+  light leans no way, `msLean` not read), `Q_SWELLS` (of the eight swells),
+  `Q_MIRROR_H` (of the four heights the sea's mirror reads the clouds at;
+  the depth scaled up for those left out) and `Q_LIGHT_FINE` (0: the
+  clouds' light steps read no fine noise). The programs of `low` are smaller
   for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
   at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
 - `cost` is the GPU time of a frame for a canvas of as many pixels,
@@ -3088,24 +3093,28 @@ name. With `?stats=bench`, from 3 s after the first picture the drawing
 scale is held at 1, 0.71, 0.5 and 0.35 for 4 s each (`BENCH_SCALES`,
 `render.pin`), and the frames a second and the script's time of the last
 2 s of each are shown: what falls with the scale's square is the cost of
-the pixels, what stays is the frame's fixed cost. With `?stats=bench2`,
-from 2 s after the first picture, at full scale (held), each draw is timed
-on its own for `BENCH2_FRAMES` (6) frames: a read of a pixel of a target of
-its own (RGBA8, 1 x 1) before and after it, which waits until the GPU has
-done all it was given, less such a read alone (`countDraws`; a read of the
-draw's own target, of whatever format, lost the context on this GPU). The
-table gives the GPU's ms a frame of each kind of draw (light, cirrus,
-clouds, scene, mean, show, meter, shadow), then the frame's ms with one
-thing taken away each time: the low clouds, the cirrus, the sea (looking up
-35 degrees), most of the sky (looking down 50), and two variants of the
-scene compiled for it, without the air's march (`Q_BENCH_NOAIR`) and
-without the sea's light (`Q_BENCH_NOSEA`, `render.variants`,
-`render.use`). Its steps wait for frames, not timers: with every draw
-waiting for the GPU, a frame took all of the main thread and the timers
-waited. It also says whether the GPU tells its time
-(`EXT_disjoint_timer_query_webgl2`). (A variant of the low clouds' pass
-with steps twice as long stopped the page at its first draws on this
-machine: none.) Without `?stats`, none of this runs (the GPU's times are then asked
+the pixels, what stays is the frame's fixed cost. With `?stats=bench3`, what each part of the frame costs and what each
+candidate cut saves, measured as the first bench does, by the time between
+pictures: a phone's GPU gives no timer queries, and it draws a target only
+when something needs it, so reads of a pixel round a draw time nothing (a
+first try, `bench2`, read 0.9 ms for a frame that took some 56). After the
+variants of the programs that it needs are compiled (`render.variants`), the
+scale is held at 1 and each configuration of `BENCH3` is drawn in turn:
+`BENCH3_SKIP` (0.5 s) let go, then the mean time between pictures over
+`BENCH3_MS` (2.5 s). The screen's 60 Hz caps that at 16.7 ms: where the
+first configuration ("as is") reads under twice `BENCH3_CAP` (20 ms), the
+passes and the scene are drawn K times a frame (2, 4 or 8: `render.bench`,
+`benchRepeat`), and every configuration at that K. The configurations: as
+is; without the low clouds, the cirrus, both; without the first stage of
+the clouds' light (the last one kept: `benchSkip.light`) or the depth maps'
+layers (`benchSkip.maps`); variants of the scene without the air's march
+(`Q_BENCH_NOAIR`), without the sea's light (`Q_BENCH_NOSEA`), with
+`Q_LEAN` 0, `Q_SWELLS` 4, `Q_MIRROR_H` 2, at half precision
+(`Q_BENCH_MEDIUMP`); of the low clouds' pass with `Q_LIGHT_FINE` 0 and with
+steps 1.5 times as long (`Q_BENCH_MARCH`); and all the cuts together. It
+prints its progress ("7/15") and at the end the ms of each, three to a line.
+The steps wait for pictures, not timers (while frames are slow the timers
+wait behind them). Without `?stats`, none of this runs (the GPU's times are then asked
 only for the automatic choice, not for a level named in the address or
 the panel).
 
