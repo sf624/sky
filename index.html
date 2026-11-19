@@ -1603,6 +1603,9 @@ precision highp int;
 #ifndef Q_HAIRS
 #define Q_HAIRS 1         // 0: no hairs on the cirrus (ciHair)
 #endif
+#ifndef Q_CI_SHADE
+#define Q_CI_SHADE 1      // 0: the cirrus casts no shadow on the low clouds and the sea, nor dims the glare (main)
+#endif
 #ifndef Q_SPARKLE
 #define Q_SPARKLE 1       // 0: the glitter at night is its mean, not separate sparkles (sparkle)
 #endif
@@ -4731,7 +4734,11 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // thin lit bands). The blend goes by the ray's slope, which flight does
   // not change, so it draws no edge that moves.
   vec3 pe = o + d * t0;
+#if Q_CI_STEPS > 0
   float wn = (1.0 - smoothstep(CI_NEAR.x, CI_NEAR.y, t0)) * smoothstep(0.12, 0.3, abs(dot(d, normalize(pe))));
+#else
+  float wn = 0.0;                                    // (no march: every ray is read flat)
+#endif
   float tE = wn > 0.0 ? min(t1, t0 + CI_NEAR.z) : t0;
   float tauR = 0.0, wttR = 0.0;
   // Per deck (x: the lower, y: the upper; the fields, one vector a deck).
@@ -4832,6 +4839,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // the same cirrus lit gold farther off.
   float tPre = tau > 0.0 ? wtt / tau : tSum / max(nSum, 1.0);
   vec2 lowSun = ciLowSun(o + d * mix(tPre, 0.5 * (t0 + tE), wn));
+#if Q_CI_STEPS > 0
   if (tE > t0) {
     float dt = (tE - t0) / float(CI_STEPS), jit = ign(gl_FragCoord.xy + 2.718 * uPass + 5.0);
     // The hairs of each sheet, read once where the ray crosses it (before
@@ -4914,6 +4922,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       tauN += tauS;
     }
   }
+#endif
   float tauF = tau;
   tau = mix(tauF, tauN + tauR, wn);
   wtt = mix(wtt, wttN + wttR, wn);
@@ -5343,6 +5352,7 @@ void main() {
   float ciCloud = 0.0, ciSea = 0.0, ciGlare = 0.0;
   bool glareCi = uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0 && uCirrus > 0.0 && uAlt < CI_HI;
   vec3 glarePc = o + uSun * raySphere(o, uSun, RG + max(0.5 * (CI_LO + CI_HI), uAlt)).y;
+#if Q_CI_SHADE
   for (int i = 0; i < CI_N(3); i++) {
     bool want = i == 0 ? cloudLit && uCirrus > 0.0 : i == 1 ? uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0 : glareCi;
     if (!want) continue;
@@ -5354,6 +5364,7 @@ void main() {
     else if (i == 1) ciSea = shade;
     else ciGlare = depth;
   }
+#endif
   if (cloudLit) {
     float dim = exp(-ciCloud);   // the thin cloud above shades them
     for (int k = 0; k < 3; k++) C[k] += uLightI * cloudSun * dim * exp(-(uBR[k] * cloudOl.x + extM * uMA[k] * cloudOl.y + uBO[k] * cloudOl.z));
@@ -6445,7 +6456,7 @@ const SkySound = (() => {
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
-      fs: { Q_NV: 4, Q_NSHADE: 2, Q_NFAR: 4, Q_MARCH: '6.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 2, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0 } },
+      fs: { Q_NV: 4, Q_NSHADE: 2, Q_NFAR: 4, Q_MARCH: '6.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.3,
       fs: { Q_NV: 8, Q_NSHADE: 4, Q_NFAR: 8, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 3.0,
