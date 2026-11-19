@@ -2896,13 +2896,13 @@ asks which level it is.
 | `Q_MARCH` | 6 | 3 | 1.2 | 1 |
 | `Q_SHAFTS` | 1 | 6 | 12 | 16 |
 | `Q_SHADOW_TAPS` | 2 | 4 | 6 | 8 |
-| `Q_CI_STEPS` | 2 | 6 | 10 | 12 |
+| `Q_CI_STEPS` | 0 | 6 | 10 | 12 |
 | `Q_SKY_NS` | 3 | 5 | 8 | 8 |
 | `Q_MIRROR` | 1 | 1 | 4 | 4 |
 | `Q_LITE` | 1 | 0 | 0 | 0 |
-| `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE` | 0 | 1 | 1 | 1 |
-| `cost` | COST_LOW | COST_MID | COST_HIGH | COST_MAX |
-| GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 | MEM_LOW | MEM_MID | MEM_HIGH | MEM_MAX |
+| `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE`, `Q_CI_SHADE` | 0 | 1 | 1 | 1 |
+| `cost` | 1 | 1.4 | 7 | 7.3 |
+| GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
 
 - `pixels` and `dpr` cap the canvas (`fit`, see [The drawing size](#the-drawing-size)):
   at most that many pixels, and at most that many per CSS pixel. The
@@ -2934,7 +2934,8 @@ asks which level it is.
   (the low clouds' steps, times their length: `DS_MIN`, `DS_NEAR`,
   `DS_REL`, and `CLOUD_STEPS` divided by it), `Q_SHAFTS` (the clouds'
   shadow in the air), `Q_SHADOW_TAPS` (the soft edge of the shadow on the
-  sea), `Q_CI_STEPS` (the cirrus's march near the eye), `Q_WARP_MIP`
+  sea), `Q_CI_STEPS` (the cirrus's march near the eye; 0: no march, every
+  ray reads each deck flat, as rays farther off do), `Q_WARP_MIP`
   (the level of the moved map's texels, 2 for 1024), `Q_SKY_NS` (the
   air's samples of the sky that the sea mirrors, `skyAt`), `Q_MIRROR`
   (the clouds the sea mirrors: all four directions of a pixel, or one,
@@ -2944,7 +2945,11 @@ asks which level it is.
   what a small picture does not show: `Q_MICRO` (the billows finer than
   the fine noise, near the eye), `Q_HAIRS` (the cirrus's hairs: `ciHair`
   is 1) and `Q_SPARKLE` (the sea's glitter at night is its mean, not
-  separate sparkles). The programs of `low` are smaller for them.
+  separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
+  the low clouds and the sea and does not dim the glare: the scene then
+  holds no copy of the cirrus's code). The programs of `low` are smaller
+  for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
+  at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
 - `cost` is the GPU time of a frame for a canvas of as many pixels,
   relative to `low`'s, from measures on one GPU (see [development.md](development.md#gpu-time)):
   the automatic choice takes the ratio of two levels from it.
