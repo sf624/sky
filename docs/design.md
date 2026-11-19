@@ -2912,7 +2912,11 @@ asks which level it is.
   height, and `mean` joins it into the picture where its rays fell (see
   [the mean over frames](#the-heros-mean-over-frames)): a quarter of the
   pixels a frame, and still as sharp at rest. In flight the picture is
-  softer, about as sharp as the frame.
+  softer, about as sharp as the frame. The shaders read the detail of the
+  clouds, the sea and the cirrus for the picture's pixels, not the
+  frame's (`Q_FRAME` in `fs`, the size of a pixel times it): read for the
+  frame's larger pixels, through coarser levels of the textures, the
+  clouds stayed as soft at rest as a picture of the frame's size.
 - `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
   heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the

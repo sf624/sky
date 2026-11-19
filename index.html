@@ -1585,6 +1585,9 @@ precision highp int;
 #ifndef Q_PASS
 #define Q_PASS 1.0        // the passes before the scene (the low clouds', the cirrus's) draw a pixel for Q_PASS by Q_PASS of the frame's
 #endif
+#ifndef Q_FRAME
+#define Q_FRAME 1.0       // the frame's width over the picture's (a level's `frame`): the detail is read for the picture's pixels
+#endif
 #ifndef Q_CI_PASS
 #define Q_CI_PASS Q_PASS  // the cirrus's pass alone: a pixel for Q_CI_PASS by Q_CI_PASS of the frame's
 #endif
@@ -2669,7 +2672,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float c = min(f, base);
   fb = f - base;
   billowy = smoothstep(0.15, 0.45, heapUp) * mix(0.5, 1.0, upshear);
-  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * length(p));
+  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME * length(p));
   // Hard, growing turrets have a crisp edge (10 m); older cloud a deeper
   // fringe. Billows smaller than the edge melt into it: a deeper one made
   // every top look like cotton wool.
@@ -2968,7 +2971,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float sLean, out float tBar, out vec4 mapA, out vec4 mapB) {
   const float DS_MIN = 0.02 * Q_MARCH, DS_NEAR = 0.008 * Q_MARCH, DS_REL = 0.0045 * Q_MARCH, COARSE = 3.0, FINE = 0.35;
   Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; sLean = 0.0; tBar = -1.0;
-  float pix = 2.0 * uTan / uRes.y * PASS_PIX;
+  float pix = 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME;
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
   const float BUDGET = COARSE * 80.0;
@@ -3748,7 +3751,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   vec3 n = normalize(pg);
   vec3 ps = pg + n * 0.001;
   float cv = max(dot(n, -d), 0.0);
-  float pix = 2.0 * uTan / uRes.y;
+  float pix = 2.0 * uTan / uRes.y * Q_FRAME;
   // Axes on the sea along the map's x and z, and the footprint of the pixel
   // on them: fa along the view (long when seen aslant), fc across.
   vec3 ex = normalize(vec3(1.0, 0.0, 0.0) - n * n.x), ez = cross(ex, n);
@@ -4713,7 +4716,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   }
   t1 = min(t1, tmax);
   if (t0 < 0.0 || t1 <= t0) return;
-  float pix = 2.0 * uTan / uRes.y * PASS_PIX;
+  float pix = 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME;
   // Each deck is a volume (CI_DECK) that the ice fills by its age (ciAge,
   // ciHeight): heads near its top, older ice lower down, as it has fallen;
   // its vertical depth (ciDensity) is spread over the height round there
@@ -7310,7 +7313,7 @@ const SkySound = (() => {
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1), Q_CI_JITTER: 1 } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1), Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
