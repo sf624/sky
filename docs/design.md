@@ -746,9 +746,31 @@ smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cov
   still at the place reached by more than the `flight` check allows.
 - The extinction in the body grows with the height over its base
   (`cloudExtinction`), as the water does in air that rises and cools
-  without mixing (adiabatic), with its 2/3 power: `clamp((h - base /
+  without mixing (adiabatic), with its 2/3 power: `clamp(wet (h - base /
   1 km)^(2/3), 0.3, 1.2)` of `SIGMA`; elsewhere `0.45` at the base to 1 at
-  1.1 km. So a small heap is thin, and a tower's top dense.
+  1.1 km. Deeper than `MIXED` = 100 m under the body's surface `wet` is
+  `WET` = 3 (about 260 (h / 1 km)^(2/3) per km: 2 g of water per m³ and
+  km of height, 300 drops per cm³), so the core is at 1.2 `SIGMA` from
+  some 230 m over its base; towards the surface it falls smoothly to 1, a
+  third of that, as air mixed in from outside dries a cloud's edge. So an
+  ordinary heap seen towards the sun from 0.3 km is 12 to 22 deep through
+  its body (the median of its visible points within 30° of the sun, `g1`,
+  `g4` and `m15`, a 20 m march towards the sun; 30 to 40 at the deepest
+  tenth), and grey with bright rims, as in photographs. In linear light
+  against the sky 8° to 40° from the sun, those clouds' darkest twentieth
+  is 0.3 to 0.6, their median 0.9 to 1.6, their brightest twentieth 1.6
+  to 2.5 (a photograph of cumulus before the sun: bodies 0.6 to 0.9, rims
+  1.8 to 2.7); the darker parts slate blue-grey (sRGB about (107, 119,
+  143), saturation 0.26, where that photograph has (111, 129, 153), 0.27).
+  Until 9f326f9 `wet` was 1 throughout (air with four fifths of it mixed
+  in), and the same heaps were 7 to 11 deep: grey-white masses lit
+  through (0.6 to 1.1, 1.2 to 2.0 and 1.9 to 2.9; the darker parts (157,
+  160, 170), saturation 0.08). Dense to 40 m under the surface, the tops
+  seen from above had darker pits between their heads, and the `flight`
+  check failed (cruise 1.15 against main's 0.97). The lower parts of
+  towers (up to 1.3 km over their base) are denser too; their faces were
+  already deep, and their lit faces came out a little brighter (the
+  exposure 0.1 to 0.2 stops lower).
 - `body` (how dense the cloud is) is at least 0.7 of the heap's top over
   the whole body: from the column under them, the heads that overhang a
   heap's thin foot were translucent, and the cloud behind showed through
@@ -873,7 +895,8 @@ line of them, seen from their own height.
 
 `cloudExtinction` turns the field into extinction: `SIGMA` = 90 per km
 once the field is past the edge, with more water higher up and in thicker
-clouds. The edge (`edge`, from `cloudField`) is 10 m deep on hard,
+clouds (in a heap's 3D body 1.2 `SIGMA` from some 230 m over its base:
+see above). The edge (`edge`, from `cloudField`) is 10 m deep on hard,
 growing turrets and `EDGE` = 30 m on older, softer cloud; the extinction
 rises with the square of the depth there, so the outer part is a thin,
 translucent fringe. Billows smaller than the edge melt into it: with

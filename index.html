@@ -1962,6 +1962,8 @@ const float BASE_KM = 8.0;          // size of one tile of the noise
 const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
+const float WET = 3.0;              // in a heap's 3D body, WET (h / 1 km)^(2/3) of SIGMA, h over its base (0.3 to 1.2 of it)
+const float MIXED = 0.1;            // how deep under the body's surface it reaches that, km (a third of it at the surface)
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
 const float GEO_S = 0.25;          // the fine noise on the body: the seams of the billows of 71, 36, 18 m (cloudDetail)
 const float RELIEF = 0.85;          // the same for the fine noise
@@ -2563,9 +2565,20 @@ float cloudExtinction(float f, float lod, float y, float body, float edge) {
   float s = 1.5 * TEXEL_KM * exp2(lod), x = clamp(f / max(edge, s), 0.0, 1.0);
   // In a heap's 3D body the water grows with the height over its base, as
   // in air that rises and cools without mixing (adiabatic), and the
-  // extinction with its 2/3 power: a small heap is thin and grey, a tower's
-  // top dense.
-  float up = mix(mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)), clamp(pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2), solidAt);
+  // extinction with its 2/3 power: about 260 (h / 1 km)^(2/3) per km with
+  // 2 g of water per m3 and km and 300 drops per cm3 (WET of SIGMA), up to
+  // 1.2 SIGMA from some 230 m over the base. Its outer MIXED km are thinner,
+  // down to a third of that at the surface, as air mixed in from outside
+  // dries a cloud's edge. So an ordinary heap seen towards the sun from
+  // under it is 12 to 22 deep through its body (30 to 40 through its
+  // deepest tenth), grey with bright rims, as in photographs. (At a third
+  // of that throughout, until 9f326f9, such heaps were 7 to 11 deep:
+  // grey-white masses lit through, nearly as white as their rims. Dense up
+  // to 40 m under the surface, the tops seen from above had darker pits
+  // between their heads, and a flight drew them farther from a still than
+  // the check allows.)
+  float wet = mix(1.0, WET, smoothstep(0.0, MIXED, f / BODY_G));
+  float up = mix(mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)), clamp(wet * pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2), solidAt);
   return SIGMA * x * mix(x, 1.0, min(s / edge, 1.0)) * up * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
 }
 
