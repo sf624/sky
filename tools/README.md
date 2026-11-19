@@ -30,9 +30,11 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
 | `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
-| `perf [--q QUERY] [--size WxH] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the frame rate, and the GPU time per kind of draw (median and p90). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
+| `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
+
+Every page the tools load gets `quality=max` in its query, unless the query names a level (`quality=low`, or `quality=auto` for the automatic choice): the pictures are those of before there were levels, and the same on every machine.
 
 ## The views
 

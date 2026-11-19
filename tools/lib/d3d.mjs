@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { startServer, sleep } from './browser.mjs';
+import { startServer, sleep, withQuality } from './browser.mjs';
 
 const CHROME = process.env.SKY_WIN_CHROME || '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe';
 // Windows programs want a Windows working directory.
@@ -242,7 +242,7 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
           url = `http://localhost:${port}/d3d/programs/${id}.html?d3d=${id}`;
         } else {
           files.set(`/d3d/page/${id}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
-          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing&res=1${q ? '&' + q : ''}&d3d=${id}&d3dFrames=${frames}`;
+          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing&res=1&${withQuality(q)}&d3d=${id}&d3dFrames=${frames}`;
         }
         reports.set(id, []);
         const timedOut = await runChrome(url, reports.get(id), id, { limit, size });

@@ -160,11 +160,13 @@ The JS then runs once, at load, and does little:
      compiled, the noise, the cirrus, the waves, the first frame, the first
      picture), and every 5 s the programs it still waits for.
 3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
-   without WebGL2 or if the loading failed). Without WebGL2 the loading
-   state fades out and the canvas keeps its CSS gradient. If the loading
-   failed (a program did not compile, or the context was lost), the error
-   goes to the console and the loading state stays, its line hidden and its
-   word changed to `TEXT.failed`.
+   without WebGL2 or if the loading failed). A loading that fails (a
+   program did not compile, or the context was lost) is tried again a
+   quality level lower (see [Quality levels](#quality-levels)). If it
+   fails at every level, or there is no WebGL2, the error goes to the
+   console and the loading state stays, its line hidden and its word
+   changed to `TEXT.failed` (`TEXT.noWebGL`), with what failed at each
+   level and the GPU's name under it (`.why`).
    `kick()` asks for the first frame; a time-lapse asked for in the address
    starts now; the title's and the panel's timers start (see `.told` and
    `.still`). Before this, `kick()` and `schedule()` do nothing.
@@ -2820,8 +2822,9 @@ start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
-`fit()` sizes the canvas: its CSS size times the device pixel ratio (at
-most 2), but no more pixels than the resolution choice (`#pixels`,
+`fit()` sizes the canvas (`canvasSize`): its CSS size times the device
+pixel ratio (at most the quality level's `dpr`, 2 at `max`), but no more
+pixels than the quality level's `pixels` and the resolution choice (`#pixels`,
 `HERO_PIXELS`): Full HD (1920 x 1080 pixels' worth), WQHD (2560 x 1440,
 the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 `localStorage` (`sky.pixels`, written when the choice changes), else WQHD.
@@ -2834,6 +2837,135 @@ row slower than 40 ms shrink `scale` (by `sqrt(30 / ms)`, down to
 `MIN_SCALE` = 0.35); faster than 24 ms grows it by 1.12, up to 1. At rest
 the picture is drawn at full size; the smaller past then counts as one
 frame. `?res=` fixes `scale` for tests.
+
+## Quality levels
+
+The page draws at one of four levels: `low`, `mid`, `high` and `max`.
+`max` is the picture as it was before there were levels; each lower one
+draws fewer pixels, bakes smaller textures and takes fewer samples. One
+table in the JS, `QUALITY`, sets everything a level changes; nothing else
+asks which level it is.
+
+| | `low` | `mid` | `high` | `max` |
+|---|---|---|---|---|
+| `pixels` | 300,000 | 800,000 | 1920 x 1080 | no limit |
+| `dpr` | 1 | 1.5 | 2 | 2 |
+| `pass` | 2 | 2 | 1 | 1 |
+| `body` | 128 | 128 | 256 | 256 |
+| `ice` | 1024 | 2048 | 4096 | 4096 |
+| `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
+| `warped` | 1024 | 1024 | 2048 | 2048 |
+| `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 6, 3, 6 | 10, 5, 10 | 20, 8, 16 | 20, 8, 16 |
+| `Q_MARCH` | 4 | 2 | 1.2 | 1 |
+| `Q_SHAFTS` | 4 | 8 | 12 | 16 |
+| `Q_SHADOW_TAPS` | 2 | 4 | 6 | 8 |
+| `Q_CI_STEPS` | 4 | 6 | 10 | 12 |
+| `cost` | 1 | 1.3 | 3 | 3.1 |
+| GPU memory, a phone of 412 x 915 CSS pixels | 84 MB | 148 MB | 476 MB | 476 MB |
+
+- `pixels` and `dpr` cap the canvas (`fit`, see [The drawing size](#the-drawing-size)):
+  at most that many pixels, and at most that many per CSS pixel. The
+  panel's resolution (`#pixels`) is a second cap; the smaller wins. The
+  browser stretches a smaller canvas to the screen.
+- `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
+  heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
+  and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
+  moved weather map (`uWarped`, `uSlopeW`) (see [Textures made at start](#textures-made-at-start)).
+  A renderer without a GPU still takes the smaller body and ice whatever
+  the level, and no texture is larger than `MAX_TEXTURE_SIZE`.
+- `pass`: the passes before the scene (the low clouds' and the cirrus's)
+  draw one pixel for `pass` by `pass` of the frame's, and the scene reads
+  the nearest (`Q_PASS` in `fs`, set from it): the clouds are a quarter of
+  the work, and their edges are softened by the mean over frames, as each
+  frame's jitter spans the larger pixel. The first stage of the clouds'
+  light is a quarter of the passes' pixels, as always.
+- `fs` holds defines put before `fs` (all six of its programs). At the top
+  of `fs`, each `Q_` define has `max`'s value unless it is given: `Q_NV`,
+  `Q_NSHADE`, `Q_NFAR` (the air's samples along a view ray), `Q_MARCH`
+  (the low clouds' steps, times their length: `DS_MIN`, `DS_NEAR`,
+  `DS_REL`, and `CLOUD_STEPS` divided by it), `Q_SHAFTS` (the clouds'
+  shadow in the air), `Q_SHADOW_TAPS` (the soft edge of the shadow on the
+  sea), `Q_CI_STEPS` (the cirrus's march near the eye) and `Q_WARP_MIP`
+  (the level of the moved map's texels, 2 for 1024).
+- `cost` is the GPU time of a frame of as many pixels, relative to
+  `low`'s, from measures on one GPU (see [development.md](development.md#gpu-time)):
+  the automatic choice takes the ratio of two levels from it.
+
+A level is made by `makeSky` as a whole: its programs, its textures, its
+targets. Another level is made afresh: the page loses its WebGL context
+on purpose (`WEBGL_lose_context`), so that the old level's textures and
+programs are freed at once (a phone has little memory to hold two),
+waits until the browser gives the context back, empty, and runs
+`makeSky` again. Meanwhile the loading state shows, as at the start (the
+`.shown` class goes, `data-sky` is `loading`). A context lost for real
+(`webglcontextlost`) is kept for the browser to give back
+(`preventDefault`).
+
+**Which level.** The address (`?quality=`) wins, then the panel's last
+choice (`sky.quality` in `localStorage`), else the level is chosen for
+the device (`auto`). The panel's select then reads "Auto (Low)" and so
+on. Once a context exists, `makeSky` asks for the level (its option
+`level`), so that the first guess can read the GPU's name:
+
+- The level this device reached on its last visit (`sky.qualityAuto`),
+  if there is one.
+- Else a guess (`guess`): `low` on a renderer without a GPU (SwiftShader,
+  llvmpipe, Microsoft's Basic Render Driver), on a phone or tablet (the
+  user agent says mobile, or the pointer is coarse and the screen under
+  900 CSS pixels on its short side), without half floats to draw into
+  (`EXT_color_buffer_float` or `EXT_color_buffer_half_float`), or with
+  `MAX_TEXTURE_SIZE` under 8192. Else by the GPU's name
+  (`WEBGL_debug_renderer_info`): `max` for the strongest desktop GPUs
+  (GeForce RTX x080 and x090 of the 30, 40 and 50 series, x070 of the
+  40 and 50, Radeon RX 6800 and up, Apple M Max and Ultra), `high` for other
+  dedicated GPUs, `mid` for the rest (integrated GPUs, and browsers that
+  do not give the name). With `deviceMemory` or `hardwareConcurrency` at
+  4 or less, at most `mid`.
+- Never above the ceiling (`sky.qualityAuto`): a level it once stepped
+  down from.
+
+Then it measures. `render` passes the wall-clock time of each frame that
+follows another and its drawing scale to `timed`. After the first
+picture, `AUTO_WAIT` (2 s) is let go by; then windows of at least
+`AUTO_SPAN` (3 s) and 20 frames:
+
+- A window drawn at under `AUTO_SMALL` (0.6) of the size per side, on the
+  mean, steps down: the dynamic resolution had to draw under a third of
+  the pixels to keep 25 frames a second. The level stepped down from
+  becomes the ceiling, and no step up follows in this visit.
+- A window drawn at full size throughout, whose frames would still take
+  under `AUTO_FAST` (30 ms) at the level above (its time times the ratio
+  of the two `cost`s), steps up. On a 60 Hz screen a frame is never
+  shorter than 16.7 ms, so with a ratio of two or more this needs a
+  faster screen: on a desktop the guess decides the level, and the
+  measure can only step down.
+- At most `AUTO_STEPS` (3) steps a visit. The level reached and the
+  ceiling are kept (`sky.qualityAuto`) for the next visit. Choosing Auto
+  in the panel forgets both.
+
+**When a level fails.** A program that does not compile or link (the
+message names it: `fs (CLOUD_PASS) did not link: …`), a context lost
+during the loading (the message says what the loading was doing), a
+target the GPU cannot draw into (`complete`: the framebuffer's status),
+or an error while drawing: the page makes the level below, and the
+automatic choice takes it as its ceiling. When `low` fails too, or the
+browser has no WebGL2, the loading state stays with the failure's text
+(`TEXT.failed`, or `TEXT.noWebGL`) and under it, in small type, what
+failed at each level tried and the GPU's name (`.why`): a phone has no
+console to read.
+
+A context lost once the page draws (the GPU process gave up, or reset
+the GPU: on a phone, as the targets are made again for full screen) is
+not left as a white canvas: the loading state comes back, its text
+saying so (`TEXT.lost`), and the level below is made once the browser
+gives the context back (after 10 s without it, the failure's text).
+A level that fails steps the choice down for good: the automatic one
+takes the level below as its ceiling; a level chosen in the panel (not
+in the address) becomes the level below. And a level that started but
+did not last: as a level starts, `sky.qualityTrying` holds it, and
+`QUALITY_OK_MS` (10 s) after its first picture it is removed. Found at
+the next visit (the tab died, or the browser gave up on the page), the
+page starts a level lower.
 
 ## Textures made at start
 
@@ -2849,9 +2981,9 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uBody` | 22 | 256^3 (128^3 on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
+| `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
-| `uIce` | 10 | 4096 x 4096 (1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
+| `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
@@ -2861,7 +2993,7 @@ changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
 
 | Texture | Unit | Size and format | Holds |
 |---|---|---|---|
-| `uWarped` | 25 | 2048^2 over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds) |
+| `uWarped` | 25 | the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds) |
 | `uSlopeW` | 26 | as `uWarped` | `uSlope` read at the same moved place |
 | `uTops` | 23 | 1024^2, RGBA8, nearest | How high the march may meet cloud within 1, 2, 4 and 8 texels (250 m to 2 km), rounded up (see the march) |
 

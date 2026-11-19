@@ -2,7 +2,7 @@
 // (see inpage.mjs), loaded with a query string, stepped frame by frame.
 import fs from 'node:fs';
 import path from 'node:path';
-import { sleep, launchChrome, startServer } from './browser.mjs';
+import { sleep, launchChrome, startServer, withQuality } from './browser.mjs';
 import { pageScript } from './inpage.mjs';
 
 // Hides the text and the controls over the hero (.fs: the full-screen button), and the scroll bar, from the first frame on.
@@ -40,7 +40,7 @@ export class Session {
   // Opens ROOT/index.html + query in a new tab and waits until it is ready.
   // opt: { w, h, dpr, hide (default true), seed, epoch (null: the real Date), trace: frames or 0 }
   async open(root, query = '', opt = {}) {
-    if (query && !query.startsWith('?')) query = '?' + query;
+    query = '?' + withQuality(query);
     const { targetId } = await this.chrome.send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await this.chrome.send('Target.attachToTarget', { targetId, flatten: true });
     const page = new Page(this, targetId, sessionId, opt);
