@@ -2950,6 +2950,7 @@ asks which level it is.
 | `Q_MIRROR` | 1 | 1 | 4 | 4 |
 | `Q_LITE` | 1 | 0 | 0 | 0 |
 | `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE`, `Q_CI_SHADE` | 0 | 1 | 1 | 1 |
+| `Q_DETAIL_KM`, `Q_TC_END` | 6, 0.05 | none, 0.01 | none, 0.01 | none, 0.01 |
 | `cost` | 1 | 1.4 | 7 | 7.3 |
 | GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
 
@@ -3159,11 +3160,11 @@ over the run, and its frames grew 28 % slower between the first row and
 the last. The rows: without the low clouds, without the cirrus, without
 the first stage of the clouds' light (the last one kept: `benchSkip.light`)
 or with it drawn every second frame (`lightOdd`); variants of the low
-clouds' pass with the fine noise only nearer than 6 or 3 km
-(`Q_DETAIL_KM`), ending at 5 % let through (`Q_TC_END`) and reading their
-detail for the frame's pixels, not the picture's (`Q_BENCH_CLOUD_LOD`); of
-the cirrus's pass reading each deck once (`Q_BENCH_CI_ONCE`); and of the
-scene without the air (`Q_BENCH_NOAIR`). Afterwards the drawing scale is
+clouds' pass with the fine noise at every distance or only nearer than 3
+km (`Q_DETAIL_KM`; `low` has 6), ending at 1 % let through (`Q_TC_END`;
+`low` 5 %), and reading their detail for the frame's pixels, not the
+picture's (`Q_BENCH_CLOUD_LOD`); and of the cirrus's pass reading each deck
+once (`Q_BENCH_CI_ONCE`). Afterwards the drawing scale is
 put back as it was and the overlay's frame rate starts afresh. It prints
 its progress ("bench3 7/10: …") and at the end the ms of each row, two to
 a line. The steps wait for pictures, not timers (while frames are slow the
