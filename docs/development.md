@@ -598,7 +598,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   (`MAX_TEXTURE_IMAGE_UNITS`; the scene of round 20 rebased on the
   cirrus's pass read 20 and did not link): pass a map to a function as an
   argument (`mapDepth`) so that a program counts only the maps it reads,
-  and keep what passes hand on in layers of one texture (`uPasses`).
+  and keep what passes hand on in layers of one texture (`uPasses`). A
+  read in a branch the program never takes still counts: the scene's own
+  program reads the clouds only coarsely, for the sea, and there `coarse`
+  is a constant (`SET_COARSE`), so that its reads of the slope maps are
+  not in it (with the map of the heaps it read 17 at `max`; now 14, and
+  13 at `low`). Count with the active uniforms of each program, not the
+  units.
   Round 21 of #33 (2026-11-19, `d3d programs`, link in s): the scene 7.4
   to 8.2, the low clouds' pass 3.9 to 4.7, the cirrus's pass 8.5 to 8.6,
   `SKY_LIGHT` 2.6 to 2.7 (5.7 more in the scene's program, timed alone
