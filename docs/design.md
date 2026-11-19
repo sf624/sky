@@ -360,7 +360,13 @@ Cornette-Shanks form (`cornetteShanks`), by height:
 **The march.** `NV` = 20 samples at
 `t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
 through the planet's shadow: in parallel light, a cylinder of radius `RG`
-behind the planet (`shadowSpan`). Then the march has three runs, each
+behind the planet (`shadowSpan`: the part of the ray inside the cylinder
+and behind the plane through the planet's centre facing the light). By
+day the eye is inside the cylinder on the light's side; until issue #54
+the span was cut by the chord's middle alone, so that every ray above a
+curve through the sun was marched as if it crossed the shadow, with 8
+samples instead of 20: a step of about 1 % across the sky. Then the
+march has three runs, each
 denser at its start: `NV` samples from the eye to the shadow, `NSHADE` = 8
 in it, and `NFAR` = 16 in the lit air beyond (a run of no length is
 skipped). The light scattered once rises steeply from the shadow's edge;
@@ -1407,6 +1413,13 @@ however near: through the march such a ray crossed several km of ice,
 which averaged its bands into one smooth sheet (at dusk, from just under
 the shell, a soft glow where photographs show thin lit bands; round 11's
 s5). The blend goes by the ray's slope, which flight does not change.
+A ray that crosses a deck over a long way (two to four times its
+thickness) gets a second read of the depth, a quarter of the way on, in
+the part the march leaves; where the march fades out, that part grows
+with the fade to the whole deck, as a ray read flat reads it. (Taken from
+the part left up to the end of the march, the second read jumped to the
+whole deck there: a line across the sky some 20 degrees up from 11 km,
+through the sun on a November afternoon, issue #54.)
 
 Seen from near, the fibres then have depth: the trails hang lower than
 their heads, nearer streaks pass farther ones in flight (parallax), and
@@ -1906,11 +1919,20 @@ on the map.
   view at `cirrus` 0.85 from 11 km).
 - `ciBody` is the depth of the ice over some 0.4 km (or four footprints if
   that is wider): the light inside the sheet feels it. `ciVeil` is the
-  share of the veil: it draws the halo. `ciMean` is the depth over some
-  2.5 km, and `ciWide` over some 10 km, from which the glow round the sun
-  and the moon is drawn; it weighs the kinds by the bands and fields
-  evened out by 0.8 (by the local ones, the moonlit veil, which follows
-  it at night, stood in lanes).
+  share of the veil: it draws the halo. `ciWide` is the depth over some
+  10 km, from which the glow round the sun and the moon is drawn; it
+  weighs the kinds by the bands and fields evened out by 0.8 (by the
+  local ones, the moonlit veil, which follows it at night, stood in
+  lanes). It reads the ice over a footprint of some 10 km along the ray's
+  way (`ciIceWide`): the mean of eight reads, four along the footprint
+  and two across, each at the level of half their spacing. Read by the
+  anisotropic filter, the mean jumped where the number of the filter's
+  reads changed with the footprint's shape: the glow round the sun had
+  arcs and straight edges across it, as if a sheet ended there (issue
+  #54). Eight reads along the way alone drew the glow out into streaks
+  towards the horizon; read finer, the ice's forms stood in the glow
+  several times over. The glow is some 15 % fainter than with the
+  filter, which read finer than the footprint.
 - **The depth of a deck far off.** A ray crosses a deck aslant over
   hundreds of metres or more, and the ice it meets at different heights
   does not line up: the footprint grows by 0.08 of the way through the
@@ -2535,8 +2557,15 @@ sky is infinitely far (code 1, nearness 0). The pixel's distance is that
 of the clouds if they hide a tenth of what is behind or give a twentieth
 of its light (`C` against `L`, in one band of wavelengths: a wisp in
 front of the dark sea), else of the sea, else
-infinity; a cirrus sheet counts when nothing else is there, or when it
-hides the rest.
+infinity; a cirrus sheet counts when it hides the rest, and against the
+sky by degrees: by its share of the light (or of what it hides, if more),
+from 0.05 to 0.3 (`smoothstep`), the pixel's nearness is that share of the
+sheet's, so that it moves with the sheet by that share. Next to the sun,
+where the glare is most of the light, it stays nearly put. (Up to issue
+#54 it moved with the sheet from a share of 0.1 on: there, the pixels took
+their past from where the sheet had been, with the glare of another angle
+from the sun, and in flight a dark or bright band with an edge hugged the
+glow round the sun.)
 
 **Reprojection** (`whence` in `mean`): each pixel finds where what it shows
 now was a frame ago. Clouds and sea have come nearer by the eye's way since
