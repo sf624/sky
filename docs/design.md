@@ -859,6 +859,32 @@ than before among fields of cumulus. The early way out of `cloudShape`
 allows for the sheet's cells and billows (`fsMax`): with a fixed margin
 they were cut flat, as mesas with a hatch on them.
 
+**One top.** Where the sheet is whole (`whole`), the sheet and the heaps
+on it are one top: what is said above holds only at its first edges
+(`whole` under 1). Each is taken as a height in units of the shell's
+depth: the sheet's level, and the heaps' field over the rate at which it
+rises over their top (`gF`, by `steep`), mixed with the body's (over
+`BODY_G`) by `solid`. A smooth max joins them (`TOP_K` = 0.04, some 180
+m). A heap with no body keeps half its rise over the sheet (`TOP_S`), and
+on the whole top stand the noise's Worley domes of 2 km, 1 km and 500 m
+(`TOP_W` = 0.3, 0.2 and 0.12 km), up to twice as high on a heap that
+rises 300 m or more over the sheet, and 60 m higher on the whole
+(`TOP_O`: one top stood lower than the higher of two fields, and from
+under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve them
+`TOP_E` = 1.5 times as deep as on the sheet's first edges, and the fine
+noise carves them as on the sheet. A heap with a body keeps its form
+(`free`: none from `solid` 0.8 on); the sheet round it has the cells.
+The rows of rolls keep the sheet above. Until #64 B2 the sheet and the
+heaps were two fields that crossed: from 4 to 5 km the turrets of the
+sheet stood out of the heaps' smooth domes as plateaus with cliffs, the
+domes lay between them as flat grey floors, like frozen lakes, their
+shadows drew long winding valleys, and the tops read as snowy mountains.
+The turrets of `uBody` stand apart, and between them the sheet was flat;
+the Worley domes fill the plane and meet in creases. With the whole rise
+kept, the heaps were smooth hills with long shadows. The early ways out
+and the map of the tops allow for what the cells, heads and rolls add
+over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
 up to 120 m lower under the thick middle of a cloud and under the swells
