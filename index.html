@@ -3147,13 +3147,20 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // the map: there three more steps, by degrees.
       // The light's: the optical depth of the clouds towards the light over
       // the next 26 first steps' worth of distance (the first: step); the
-      // steps grow. The first three see the fine noise, smoothed over some
-      // tens of metres (light spreads that far in a cloud), and the depth of
-      // the first two comes apart (crisp, for tauF, where it is wanted: see
-      // below): bumps shade the creases beside them softly. The others make
-      // tauCM, where the first stage did not serve. The levels of the reads
-      // shrink with the step below 50 m (kl < 0), so that a nearer cloud is
-      // shaded as a far one is, at a smaller size. The later steps are moved
+      // steps grow. All read the field at the level of the first; the
+      // first three see the fine noise, smoothed over some tens of metres
+      // (light spreads that far in a cloud), and the depth of the first two
+      // comes apart (crisp, for tauF, where it is wanted: see below): bumps
+      // shade the creases beside them softly. The others make tauCM, where
+      // the first stage did not serve. (Read half a level coarser at each
+      // step, a small heap had too little depth towards the light: the
+      // smoothed field falls under the edge of the cloud where the field
+      // itself does not, and a heap of 6 seen towards the sun was lit as
+      // one of 3, through and through. With the fine noise in every step
+      // too, the depth came out right, 6 to 7, but the shaded sides of
+      // towers were mottled.) The levels of the reads shrink with the step
+      // below 50 m (kl < 0), so that a nearer cloud is shaded as a far one
+      // is, at a smaller size. The later steps are moved
       // aside by off, each a third of a turn from the one before: light
       // strays inside a cloud, and over the frames the shadows of other
       // clouds soften. The stray grows with the depth the light has come
@@ -3196,7 +3203,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         } else {
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
-          l = j < 2 ? max(lod, kl - 1.0) : max(lod, kl) + 0.5 * float(j);
+          l = max(lod, kl - 1.0);
           x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
@@ -6198,7 +6205,7 @@ const SkySound = (() => {
   const BAND = 0.1;              // each share is read as a mean over shares this far on either side (HIGH_BAND for HIGH_SHARE)
   const HIGH_BAND = 0.025;
   const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
-  const SUN_SHARE = 0.35;        // ...down to this share of their light
+  const SUN_SHARE = 0.5;         // ...down to this share of their light
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
   const DUSK = [8, 1];           // twilight's exposure takes over as the sun goes from 8 to 1 degrees:
   const DUSK_SHARE = 0.65;       // ...set by the level that the brighter third of the picture passes (the sky):
