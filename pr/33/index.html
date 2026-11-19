@@ -7898,18 +7898,24 @@ const SkySound = (() => {
     // meter read once the GPU has drawn it: so the first frame need not
     // wait for the GPU. On drivers that finish a program at its first draw,
     // this also gets that out of the way before the first frame.
-    // With cirrus it is drawn twice: at an exposure of 1, then at the
-    // exposure that metered, and metered again. The light the cirrus
-    // scatters forward rolls off on the screen (see cirrusLight): metered at
-    // 1 alone, a bright sheet near the sun read darker than it is shown, and
-    // the page started a tenth of a stop too bright and faded down over its
-    // first second, drawing for 76 frames at rest where 40 do.
+    // With cirrus it is drawn again, at the exposure the last reading gave,
+    // and metered again, until a reading lies within ADAPT_START of the
+    // exposure it was drawn at: the exposure the picture asks for is then
+    // found, a fixed point (the next reading moves by less still), and the
+    // page does not fade at its start. The light the cirrus scatters forward
+    // rolls off on the screen (see cirrusLight), so a bright sheet near the
+    // sun meters darker at a higher exposure: in the default view a picture
+    // drawn at 0 (log2) reads -0.91, at -0.91 -1.19, at -1.19 -1.24, at
+    // -1.24 -1.25. Each draw leaves 0.2 to 0.3 of the gap. Drawn twice only,
+    // the page started 0.06 stops too bright and faded down over its first
+    // half second, drawing for 68 frames at rest where 40 do.
     const probe = () => {
       const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn];
       const drew = render(true, performance.now(), true);
       [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
       return drew;
     };
+    const PRIME_DRAWS = 6;                   // at most (the default view needs 4)
     const prime = async () => {
       if (!probe()) return;                  // the canvas has no place on the page yet
       // Its meter, once the GPU has drawn it: metered at once after its
@@ -7931,13 +7937,15 @@ const SkySound = (() => {
       gl.useProgram(prog);
       await settle();
       readMeter();
-      if (pin !== null || target === null || !(state.cirrus > 0)) return;
-      firstE = target;
-      probe();
-      await settle();
-      meterPicture(pictures[turn], null);
-      await settle();
-      readMeter();
+      if (pin !== null || !(state.cirrus > 0)) return;
+      for (let n = 1; n < PRIME_DRAWS && target !== null && Math.abs(target - firstE) > ADAPT_START; n++) {
+        firstE = target;
+        probe();
+        await settle();
+        meterPicture(pictures[turn], null);
+        await settle();
+        readMeter();
+      }
     };
     // (On Direct3D 11 the first draw of a program into two or more targets
     // compiles it again, while the GPU process waits: the scene's first
