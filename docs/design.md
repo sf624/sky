@@ -529,6 +529,43 @@ So the light of the sky is the page's atmosphere's; what still differs
 from photographs is mostly how much aerosol there is, and the exposure
 and tone curve (see [Exposure](#exposure-and-the-tone-curve)).
 
+**The air as a table** (`low`: the level's `airLut`, `Q_AIR_LUT` in `fs`).
+A phone spent most of the scene's time on the march above (`?stats=bench3`
+on an Adreno 660: 107 ms of a frame without clouds at full scale, 24 ms
+without the air's march). At `low` the scene reads the air from a table
+made ahead instead, as Hillaire (2020) makes his sky-view and
+aerial-perspective tables (written here from the paper's ideas): `fs`
+compiled with `AIR_LUT` marches the air (as above, with 14, 6 and 10
+samples, more than the level's own, and without the clouds' shadows) for
+`LUT_AZ` x `LUT_EL` (64 x 48) directions round the eye and `LUT_S` (16)
+distances along each, from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
+evenly in their log; a ray that ends sooner (at the sea) keeps its end's
+values beyond. The directions are the azimuth from the sun's, squeezed
+towards it (a square root: its glow), and the elevation from the horizon,
+squeezed towards the horizon, which lies at the middle of the table
+(`lutUV`, `lutDir`). One more slice holds the sky as the sea sees it, from
+its surface through the whole air (for `skyAt`). The table is one 3D
+texture of half floats on unit 29, four times as wide: the light's three
+`vec4` and the optical depth in its four quarters. Each slice is drawn into
+four targets and copied into it (`copyTexSubImage3D`), all 17 when the
+sun, the moon, the haze, the height or the amount of cloud has changed
+(`lut.for`); in flight, none of these changes. The light is kept divided by
+the stronger of the sun and the moon (`uLutScale`), so that half floats
+hold the night's.
+
+The scene then takes, for each segment of its ray (the eye to the first
+layer, to the second, to the end), the table's light at its end less at
+its start, through the layers before it, and the layers' light through the
+table's depth at them (`airAt`), as the march adds them. Within 8 degrees
+of the sun or the moon (`LUT_NEAR`), whose glow is finer than the table's
+texels, the pixel marches as before. What the table leaves out: the clouds'
+shadows in the air (`low` took one sample of them, `Q_SHAFTS` 1; the table
+takes their mean instead, the direct light below the tops times 1 to 0.15
+as the amount of cloud goes from 0.4 to 1: without it, the air under a deck
+shone orange at its far edge at dusk) and the
+thin cloud's shade on the low air (`low` has none, `Q_CI_SHADE` 0). The
+sky's light on the clouds (`SKY_LIGHT`) keeps its own march.
+
 ## Low clouds
 
 Low clouds live in a shell from `CB` = 0.6 km to `CT` = 5 km. `CB` is
@@ -2893,6 +2930,7 @@ asks which level it is.
 | `dpr` | 1 | 1.5 | 2 | 2 |
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `meterAsync` | yes | yes | no | no |
+| `airLut` | yes | no | no | no |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
@@ -2973,12 +3011,15 @@ asks which level it is.
   is 1) and `Q_SPARKLE` (the sea's glitter at night is its mean, not
   separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
   the low clouds and the sea and does not dim the glare: the scene then
-  holds no copy of the cirrus's code). Four more, for cuts not taken yet
-  (`?stats=bench3` measures them on a device): `Q_LEAN` (0: the air's
-  light leans no way, `msLean` not read), `Q_SWELLS` (of the eight swells),
-  `Q_MIRROR_H` (of the four heights the sea's mirror reads the clouds at;
-  the depth scaled up for those left out) and `Q_LIGHT_FINE` (0: the
-  clouds' light steps read no fine noise). The programs of `low` are smaller
+  holds no copy of the cirrus's code), and `Q_AIR_LUT` (1: the scene
+  reads the air from a table, see [The air](#the-air)). Four more, for cuts
+  not taken (a phone's `?stats=bench3` saved little or nothing with them,
+  within its noise, but `Q_LEAN`, which the table makes moot):
+  `Q_LEAN` (0: the air's light leans no way, `msLean` not read),
+  `Q_SWELLS` (of the eight swells), `Q_MIRROR_H` (of the four heights the
+  sea's mirror reads the clouds at; the depth scaled up for those left
+  out) and `Q_LIGHT_FINE` (0: the clouds' light steps read no fine
+  noise). The programs of `low` are smaller
   for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
   at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
 - `cost` is the GPU time of a frame for a canvas of as many pixels,
@@ -3107,11 +3148,11 @@ passes and the scene are drawn K times a frame (2, 4 or 8: `render.bench`,
 `benchRepeat`), and every configuration at that K. The configurations: as
 is; without the low clouds, the cirrus, both; without the first stage of
 the clouds' light (the last one kept: `benchSkip.light`) or the depth maps'
-layers (`benchSkip.maps`); variants of the scene without the air's march
-(`Q_BENCH_NOAIR`), without the sea's light (`Q_BENCH_NOSEA`), with
-`Q_LEAN` 0, `Q_SWELLS` 4, `Q_MIRROR_H` 2, at half precision
-(`Q_BENCH_MEDIUMP`); of the low clouds' pass with `Q_LIGHT_FINE` 0 and with
-steps 1.5 times as long (`Q_BENCH_MARCH`); and all the cuts together. It
+layers (`benchSkip.maps`); variants of the scene without the air
+(`Q_BENCH_NOAIR`: no march, no table), without the sea's light
+(`Q_BENCH_NOSEA`), with the air marched instead of read from the table
+(`Q_AIR_LUT` 0), and with `Q_LEAN` 0; and as is again, last, to show how
+far the phone's own speed has moved over the run (it grows warm). It
 prints its progress ("7/15") and at the end the ms of each, three to a line.
 The steps wait for pictures, not timers (while frames are slow the timers
 wait behind them). Without `?stats`, none of this runs (the GPU's times are then asked
