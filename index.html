@@ -1851,7 +1851,14 @@ bool shadowSpan(vec3 o, vec3 d, float tmax, vec3 s, inout float sa, inout float 
   if (A < 1e-12 || D <= 0.0) return false;
   D = sqrt(D);
   float t0 = (-B - D) / A, t1 = (-B + D) / A;
-  if (os + ds * 0.5 * (t0 + t1) >= 0.0) return false;   // the half towards the light: not a shadow
+  // Only the half away from the light is in the shadow (os + ds t < 0).
+  // (Cut by the chord's middle, the whole chord counted where its middle
+  // lay behind the planet: by day the eye is inside the cylinder, and every
+  // ray above a curve through the sun was marched as if it crossed the
+  // shadow, in 8 samples instead of 20, a step of 1 % across the sky.)
+  if (ds > 0.0) t1 = min(t1, -os / ds);
+  else if (ds < 0.0) t0 = max(t0, -os / ds);
+  else if (os >= 0.0) return false;
   t0 = max(t0, 0.0);
   t1 = min(t1, tmax);
   if (t1 <= t0) return false;
