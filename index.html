@@ -6697,7 +6697,7 @@ const SkySound = (() => {
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
-      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0 } },
+      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_DETAIL_KM: '6.0', Q_TC_END: 0.05 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 8, Q_NSHADE: 4, Q_NFAR: 8, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7,
@@ -9554,10 +9554,9 @@ const SkySound = (() => {
   const BENCH3_SKIP = 500, BENCH3_MS = 2500, BENCH3_CAP = 20;
   const BENCH3 = [
     ['no clouds', { cloud: 0 }], ['no cirrus', { cirrus: 0 }], ['no light pass', { skip: { light: true } }],
-    ['light every 2nd', { skip: { lightOdd: true } }], ['detail < 6 km', { clouds: '#define Q_DETAIL_KM 6.0' }],
-    ['detail < 3 km', { clouds: '#define Q_DETAIL_KM 3.0' }], ['stop at 5 %', { clouds: '#define Q_TC_END 0.05' }],
+    ['light every 2nd', { skip: { lightOdd: true } }], ['detail all', { clouds: '#undef Q_DETAIL_KM\n#define Q_DETAIL_KM 1e9' }],
+    ['detail < 3 km', { clouds: '#undef Q_DETAIL_KM\n#define Q_DETAIL_KM 3.0' }], ['stop at 1 %', { clouds: '#undef Q_TC_END\n#define Q_TC_END 0.01' }],
     ['LOD for frame', { clouds: '#define Q_BENCH_CLOUD_LOD' }], ['cirrus once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
-    ['no air', { scene: '#define Q_BENCH_NOAIR' }],
   ];
   if (stats && stats.bench3) {
     const B = stats.bench3;
