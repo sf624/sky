@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { shortTmp, sleep } from './browser.mjs';
+import { shortTmp, sleep, withQuality } from './browser.mjs';
 import { formatTrace } from './trace.mjs';
 import { diffPng, fmtDiff } from './png.mjs';
 
@@ -193,14 +193,15 @@ const PERF = `(() => {
     }
   }, 20);
 })()`;
-export async function perf(session, root, { q, size, seconds }) {
-  if (q && !q.startsWith('?')) q = '?' + q;
+export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = false }) {
+  q = '?' + withQuality(q);
   const { targetId } = await session.chrome.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await session.chrome.send('Target.attachToTarget', { targetId, flatten: true });
   const s = (m, p) => session.chrome.send(m, p, sessionId);
   const ev = async (expression) => (await s('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value;
   await s('Page.enable');
-  await s('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: false });
+  await s('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: dpr, mobile });
+  if (mobile) await s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await s('Page.addScriptToEvaluateOnNewDocument', { source: PERF });
   await s('Page.navigate', { url: session.server.url(root) + (q || '') });
   // Until the load event, the end of the page's loading (data-sky, see page.mjs) and a first picture.
@@ -209,6 +210,7 @@ export async function perf(session, root, { q, size, seconds }) {
   for (let i = 0; i < 1200 && !(await ev(READY)); i++) await sleep(50);
   await sleep(1500);
   await ev('window.__perf.on = true, 0');
+  const level = await ev(`[document.querySelector('#quality') && document.querySelector('#quality').value, (document.querySelector('canvas') || {}).width, (document.querySelector('canvas') || {}).height].join(' ')`);
   const fps = await ev(`new Promise((res) => { let n = 0, t0 = performance.now(), last = t0, worst = 0;
     const f = (t) => { n++; worst = Math.max(worst, t - last); last = t;
       if (t - t0 < ${seconds * 1000}) requestAnimationFrame(f); else res({ fps: +(n / ((t - t0) / 1000)).toFixed(1), worstMs: +worst.toFixed(1) }); };
@@ -221,7 +223,10 @@ export async function perf(session, root, { q, size, seconds }) {
   const until = Math.max(0, ...Object.values(g.picture)), long = g.long.filter(([t]) => t <= until);
   console.log(`main thread until then: ${long.length} tasks over 50 ms` + (long.length ? `, the longest ${Math.max(...long.map(([, d]) => d)).toFixed(0)} ms,`
     + ` blocked ${long.reduce((a, [, d]) => a + d - 50, 0).toFixed(0)} ms (the time over 50 ms)` : ''));
+  console.log(`quality and canvas: ${level}`);
   console.log(`frame rate: ${fps.fps} per second, longest gap ${fps.worstMs} ms`);
+  const frames = Object.entries(g.kinds).filter(([k]) => k.includes(' canvas ')).reduce((a, [, v]) => a + v.length, 0), all = Object.values(g.kinds).flat().reduce((a, b) => a + b, 0);
+  if (frames) console.log(`GPU ms per frame (all draws, over ${frames} frames shown): ${(all / frames).toFixed(2)}`);
   for (const [k, a] of Object.entries(g.kinds).sort()) {
     a.sort((x, y) => x - y);
     console.log(`${k}: ${a.length} draws, GPU ms median ${a[a.length >> 1].toFixed(2)}, p90 ${a[Math.floor(a.length * 0.9)].toFixed(2)}`);

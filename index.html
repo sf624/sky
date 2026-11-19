@@ -322,6 +322,16 @@
       </select>
     </label>
     <label>
+      <span class="row"><span data-t="quality">画質</span></span>
+      <select id="quality">
+        <option value="auto" data-t="qualityAuto">自動</option>
+        <option value="low" data-t="qualityLow">低</option>
+        <option value="mid" data-t="qualityMid">中</option>
+        <option value="high" data-t="qualityHigh">高</option>
+        <option value="max" data-t="qualityMax">最高</option>
+      </select>
+    </label>
+    <label>
       <span class="row"><span data-t="lang">言語 / Language</span></span>
       <select id="lang">
         <option value="ja" lang="ja">日本語</option>
@@ -342,12 +352,16 @@ const TEXT = {
     hint: 'ドラッグで見回す',
     loading: '読み込み中…',
     failed: '空を描けませんでした',
+    lost: 'GPU が描くのをやめました。画質を下げてやり直します…',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
     play: '時間を進める', now: 'いまの日時',
     rate: '時間の進む速さ', rate1: '実時間', rate60: '1分/秒', rate600: '10分/秒', rate960: '16分/秒', rate3600: '1時間/秒',
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
     alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
+    quality: '画質', qualityAuto: '自動', qualityLow: '低', qualityMid: '中', qualityHigh: '高', qualityMax: '最高',
+    qualityAutoAt: level => '自動（' + level + '）',
+    noWebGL: 'このブラウザでは WebGL2 が使えません',
     lang: '言語 / Language',
     sound: '音', soundOff: 'なし', soundAirliner: '旅客機', soundWhine: 'エンジン近く', soundWind: '風',
     volume: '音量', soundWait: 'クリックで再生',
@@ -368,12 +382,16 @@ const TEXT = {
     hint: 'Drag to look around',
     loading: 'Loading…',
     failed: 'The sky could not be drawn',
+    lost: 'The GPU stopped drawing. Starting again at a lower quality…',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
     play: 'Play time-lapse', now: 'Now',
     rate: 'Speed of time', rate1: 'real time', rate60: '1 min/s', rate600: '10 min/s', rate960: '16 min/s', rate3600: '1 h/s',
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
     alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
+    quality: 'Quality', qualityAuto: 'Auto', qualityLow: 'Low', qualityMid: 'Medium', qualityHigh: 'High', qualityMax: 'Max',
+    qualityAutoAt: level => 'Auto (' + level + ')',
+    noWebGL: 'This browser has no WebGL2',
     lang: 'Language / 言語',
     sound: 'Sound', soundOff: 'Off', soundAirliner: 'Airliner', soundWhine: 'Near engines', soundWind: 'Wind',
     volume: 'Volume', soundWait: 'click to play',
@@ -428,6 +446,8 @@ applyLanguage(LANG);
 <script id="noise" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // Draws the textures of the clouds once, at start: slice uZ (0 to 1) of the
 // 3D noise, slice uZ - 2 of the heaps' body (uZ from 2 to 3), the
@@ -755,6 +775,8 @@ void main() {
 <script id="ice" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // Draws the cirrus's textures once: its map (uZ = -2), its ice (-3, and
 // the ice's age into a second target), and the way of the ice's fibres and
@@ -1440,6 +1462,8 @@ void main() {
 <script id="waves" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // Draws the map of the waves on the sea once, at start: many plane waves,
 // each a whole number of times across the map, so that it repeats.
@@ -1501,6 +1525,8 @@ void main() {
 <script id="slope" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // Draws the slope of the weather map once, at start, for cloudShape: how
 // fast its R and G change along x and along z, per km, as 0.5 plus half
@@ -1525,6 +1551,41 @@ precision highp float;
 precision highp sampler2D;
 precision highp sampler3D;
 precision highp sampler2DArray;
+precision highp int;
+// The quality level's knobs (QUALITY in the JS defines them for the lower
+// levels; these defaults are max's, the picture as it was before levels).
+#ifndef Q_NV
+#define Q_NV 20           // view samples of the air (NV)
+#endif
+#ifndef Q_NSHADE
+#define Q_NSHADE 8        // and in the planet's shadow (NSHADE)...
+#endif
+#ifndef Q_NFAR
+#define Q_NFAR 16         // ...and in the lit air beyond it (NFAR)
+#endif
+#ifndef Q_MARCH
+#define Q_MARCH 1.0       // the low clouds' steps, times their length at max
+#endif
+#ifndef Q_SHAFTS
+#define Q_SHAFTS 16       // samples of the clouds' shadow along a view ray (SHAFTS)
+#endif
+#ifndef Q_SHADOW_TAPS
+#define Q_SHADOW_TAPS 8   // reads of the shadow map per pixel of sea (SHADOW_TAPS)
+#endif
+#ifndef Q_CI_STEPS
+#define Q_CI_STEPS 12     // steps of the cirrus's march near the eye (CI_STEPS)
+#endif
+#ifndef Q_PASS
+#define Q_PASS 1.0        // the passes before the scene (the low clouds', the cirrus's) draw a pixel for Q_PASS by Q_PASS of the frame's
+#endif
+#if defined(CLOUD_PASS) || defined(CIRRUS_PASS)
+#define PASS_PIX Q_PASS   // (a pixel's width, in the frame's pixels, where the passes draw)
+#else
+#define PASS_PIX 1.0
+#endif
+#ifndef Q_WARP_MIP
+#define Q_WARP_MIP 1.0    // the warped map's texels as a level of the noise: 1 for 2048, 2 for 1024 (see mapAt)
+#endif
 
 uniform vec2 uRes;
 uniform mat3 uCam;      // columns: right, up, forward
@@ -1689,9 +1750,9 @@ const float MIE_LEAN = 4.0;
 const vec3 AERO_FREE = vec3(0.048, 6.0, 5.0);    // density (as at sea level), height, half-width in km
 const vec3 AERO_STRAT = vec3(0.004, 20.0, 8.0);
 const float ISUN = 20.0;
-const int NV = 20;              // view samples: the picture is within two steps of 8 bits of 40's
-const int NSHADE = 8;           // more samples in twilight: in the planet's shadow...
-const int NFAR = 16;            // ...and in the lit air beyond it (see shadowSpan)
+const int NV = Q_NV;            // view samples: the picture is within two steps of 8 bits of 40's
+const int NSHADE = Q_NSHADE;        // more samples in twilight: in the planet's shadow...
+const int NFAR = Q_NFAR;          // ...and in the lit air beyond it (see shadowSpan)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
 const float MS_MU_MIN = -0.35;
@@ -1990,7 +2051,7 @@ const vec2 LEAN = vec2(0.06, 0.03);   // how far heaps lean with the wind's shea
 const float PILE = 0.2;             // how far a tower's stacked thermals swell, of its envelope
 const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
-const int CLOUD_STEPS = 400;
+const int CLOUD_STEPS = int(400.0 / Q_MARCH);
 // The long marches (the clouds, the air, the sky over the sea) run to
 // bounds the compiler cannot know (uRes is never negative), so that it
 // keeps them as loops: Direct3D's compiler (ANGLE on Windows) may unroll a
@@ -2091,7 +2152,7 @@ vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine, float mip) {
 }
 
 vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
-  return mapAt(uWarped, p, x, lod, fine, 1.0);
+  return mapAt(uWarped, p, x, lod, fine, Q_WARP_MIP);
 }
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -2563,7 +2624,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float c = min(f, base);
   fb = f - base;
   billowy = smoothstep(0.15, 0.45, heapUp) * mix(0.5, 1.0, upshear);
-  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * length(p));
+  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * length(p));
   // Hard, growing turrets have a crisp edge (10 m); older cloud a deeper
   // fringe. Billows smaller than the edge melt into it: a deeper one made
   // every top look like cotton wool.
@@ -2758,7 +2819,7 @@ float columnDepth(vec3 p) {
 // places each frame (jitter), spaced evenly out from the middle (denser
 // there: a uniform disc left round blots), and only then made a depth.
 const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
-const int SHADOW_TAPS = 8;
+const int SHADOW_TAPS = Q_SHADOW_TAPS;
 float seaShadow(vec3 p, float jitter) {
   if (uCloud <= 0.0) return 0.0;
   float r = min(SHADOW_PEN * SHADOW_OCC / max(uLight.y, 0.05), 0.75);
@@ -2860,9 +2921,9 @@ float hg(float mu, float g) {
 // (tBar; negative without clouds).
 void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float sLean, out float tBar, out vec4 mapA, out vec4 mapB) {
-  const float DS_MIN = 0.02, DS_NEAR = 0.008, DS_REL = 0.0045, COARSE = 3.0, FINE = 0.35;
+  const float DS_MIN = 0.02 * Q_MARCH, DS_NEAR = 0.008 * Q_MARCH, DS_REL = 0.0045 * Q_MARCH, COARSE = 3.0, FINE = 0.35;
   Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; sLean = 0.0; tBar = -1.0;
-  float pix = 2.0 * uTan / uRes.y;
+  float pix = 2.0 * uTan / uRes.y * PASS_PIX;
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
   const float BUDGET = COARSE * 80.0;
@@ -3874,7 +3935,7 @@ const vec2 CI_DECK[2] = vec2[2](vec2(12.2, 12.6), vec2(12.35, 12.8));
 // it within CI_NEAR.x km fully, fading out by CI_NEAR.y, over CI_NEAR.z km
 // of the ray, in CI_STEPS steps.
 const vec3 CI_NEAR = vec3(2.0, 3.5, 3.0);
-const int CI_STEPS = 12;
+const int CI_STEPS = Q_CI_STEPS;
 // The sets of hairs in a deck near the eye, at fixed heights (see highCloud).
 const int CI_SHEETS = 4;
 // The ice is never read over less than this (km): its streaks are soft at
@@ -4586,7 +4647,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   }
   t1 = min(t1, tmax);
   if (t0 < 0.0 || t1 <= t0) return;
-  float pix = 2.0 * uTan / uRes.y;
+  float pix = 2.0 * uTan / uRes.y * PASS_PIX;
   // Each deck is a volume (CI_DECK) that the ice fills by its age (ciAge,
   // ciHeight): heads near its top, older ice lower down, as it has fallen;
   // its vertical depth (ciDensity) is spread over the height round there
@@ -4973,7 +5034,7 @@ float distanceCode(float t) {
 // two at once, where the whole took minutes (Microsoft's compiler takes
 // far longer than twice as long for a program twice the size).
 void main() {
-  vec2 uv = ((gl_FragCoord.xy + uJitter) * 2.0 - uRes) / uRes.y;
+  vec2 uv = ((gl_FragCoord.xy + uJitter) * Q_PASS * 2.0 - uRes) / uRes.y;
   vec3 d = normalize(uCam * vec3(uv * uTan, 1.0));
   vec3 o = vec3(0.0, RG + uAlt, 0.0);
   float tmax = raySphere(o, d, RT).y;
@@ -5082,8 +5143,8 @@ void main() {
 // The ray of this pixel, of the picture's uRes (scale 2: every second
 // pixel's, for the first stage of the clouds' light): from the eye o along
 // d to tmax, where it leaves the air or meets the sea (ground).
-void viewRay(float scale, out vec3 o, out vec3 d, out float tmax, out bool ground) {
-  vec2 uv = ((gl_FragCoord.xy * scale + uJitter) * 2.0 - uRes) / uRes.y;
+void viewRay(float scale, float spread, out vec3 o, out vec3 d, out float tmax, out bool ground) {
+  vec2 uv = ((gl_FragCoord.xy * scale + uJitter * spread) * 2.0 - uRes) / uRes.y;
   d = normalize(uCam * vec3(uv * uTan, 1.0));
   o = vec3(0.0, RG + uAlt, 0.0);
   tmax = raySphere(o, d, RT).y;
@@ -5101,7 +5162,7 @@ void main() {
   vec3 o, d;
   float tmax;
   bool ground;
-  viewRay(uStage == 0.0 ? 2.0 : 1.0, o, d, tmax, ground);
+  viewRay((uStage == 0.0 ? 2.0 : 1.0) * Q_PASS, Q_PASS, o, d, tmax, ground);
   float Tc = 1.0, tBar = -1.0, sOne = 0.0, sMany = 0.0, sAmb = 0.0, sLean = 0.0;
   vec4 mapA = vec4(-1.0), mapB = vec4(0.0);
   vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
@@ -5123,7 +5184,7 @@ void main() {
   vec3 o, d;
   float tmax;
   bool ground;
-  viewRay(1.0, o, d, tmax, ground);
+  viewRay(1.0, 1.0, o, d, tmax, ground);
 
   float betaM = BETA_M * uHaze;
   float extM = betaM * MIE_EXT;
@@ -5141,7 +5202,7 @@ void main() {
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), HM[3] = H;
   if (uCloud > 0.0) {
-    ivec3 here = ivec3(gl_FragCoord.xy, 1);
+    ivec3 here = ivec3(gl_FragCoord.xy / Q_PASS, 1);
     uvec4 cl = texelFetch(uPasses, here, 0);
     Tc = texelFetch(uPassDepth, here, 0).r;
     tBar = uintBitsToFloat(cl.x);
@@ -5174,7 +5235,7 @@ void main() {
     }
   }
   if (uCirrus > 0.0) {
-    ivec3 here = ivec3(gl_FragCoord.xy, 0);
+    ivec3 here = ivec3(gl_FragCoord.xy / Q_PASS, 0);
     uvec4 ci = texelFetch(uPasses, here, 0);
     Th = texelFetch(uPassDepth, here, 0).r;
     tHigh = uintBitsToFloat(ci.x);
@@ -5192,7 +5253,7 @@ void main() {
   // cb, denser near the eye, at new places each frame. Each step of the
   // march takes the mean light of those that fall in it (weighed by the
   // air's scattering there), or reads the map once if none does.
-  const int SHAFTS = 16;
+  const int SHAFTS = Q_SHAFTS;
   float ca = 0.0, cb = -1.0;
   if (uCloud > 0.0 && uLightI > 0.0) {
     vec2 ct = eyeSphere(o, d, CT);
@@ -5573,6 +5634,7 @@ void main() {
 <script id="mean" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
 precision highp sampler2D;
 
 // The picture of the aircraft's view is a mean over frames: one frame is
@@ -5737,6 +5799,8 @@ void main() {
 <script id="show" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // Copies the picture of the aircraft's view to the canvas, which may be larger.
 uniform sampler2D uPicture;
@@ -5762,6 +5826,8 @@ void main() {
 <script id="meter" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
 // The exposure meter: each pixel of this small target is a block of the
 // picture, and holds the mean of its level (log2 of the luminance before
@@ -6251,6 +6317,33 @@ const SkySound = (() => {
   // The hero's limit, chosen in the panel.
   const HERO_PIXELS = { fhd: 1920 * 1080, wqhd: 2560 * 1440, '4k': 3840 * 2160 };
   let heroPixels = HERO_PIXELS.wqhd;
+  // The quality levels: this table sets everything a level changes (see
+  // "Quality levels" in docs/design.md). max draws the picture as it was
+  // before there were levels; the lower ones draw fewer pixels (pixels: at
+  // most this many; dpr: at most this many per CSS pixel), bake smaller
+  // textures (body: the heaps' body, texels a side; ice: the cirrus's ice;
+  // shadow, column: the clouds' depth maps; warped: the moved weather map)
+  // and take fewer samples in fs (fs: its defines, Q_ at its top). cost:
+  // the GPU time of a frame of as many pixels, relative to low's (measured,
+  // see docs/development.md), for the automatic choice.
+  const QUALITY = {
+    low: { pixels: 0.3e6, dpr: 1, pass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
+      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 4, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 4, Q_WARP_MIP: '2.0' } },
+    mid: { pixels: 0.8e6, dpr: 1.5, pass: 2, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.3,
+      fs: { Q_NV: 10, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '2.0', Q_SHAFTS: 8, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0' } },
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 3.0,
+      fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
+    max: { pixels: Infinity, dpr: 2, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 3.1, fs: {} },
+  };
+  const LEVELS = Object.keys(QUALITY);
+  // The canvas's size in pixels for a place of cw by ch CSS pixels at the
+  // level Q: its device pixels, but at most Q.dpr per CSS pixel, and no more
+  // than the drawing limit (heroPixels) or the level's (Q.pixels) allow.
+  const canvasSize = (cw, ch, Q) => {
+    let scale = Math.min(window.devicePixelRatio || 1, Q.dpr);
+    scale = Math.min(scale, Math.sqrt(Math.min(heroPixels, Q.pixels) / (cw * ch)));
+    return [Math.max(1, Math.round(cw * scale)), Math.max(1, Math.round(ch * scale))];
+  };
   const CRUISE = 11;       // km: 36,000 ft
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
   const SLOPE_MAX = 2;                 // the steepest slope of the weather map kept, per km (see cloudShape)
@@ -6950,19 +7043,22 @@ const SkySound = (() => {
   // fresh: something has changed; now: the time of the frame, ms.
   // done(share) tells the loading state how far it has come (0 to 1);
   // shown() is called once, when the first picture has gone to the canvas.
-  async function makeSky(canvas, view, { done, shown }) {
+  // level(gl): the quality level to draw at (a name of QUALITY), asked once
+  // there is a context. timed(ms, scale): each frame that followed another,
+  // its wall-clock time and its drawing scale (see the automatic choice).
+  async function makeSky(canvas, view, { done, shown, level, timed }) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
+    const Q = QUALITY[level(gl)];
     // A context lost while the page loads (the GPU process restarted, or a
     // driver gave up on a program) ends the loading with an error: a fence
     // or a program would otherwise be waited for for ever.
     let lost = false;
-    canvas.addEventListener('webglcontextlost', () => {
-      lost = true;
-      console.error('Sky: the WebGL context was lost.');
-    });
+    canvas.addEventListener('webglcontextlost', () => { lost = true; });
+    // (What the loading was doing, for the message.)
+    let doing = 'starting';
     const alive = () => {
-      if (lost) throw new Error('The WebGL context was lost.');
+      if (lost) throw new Error(`The WebGL context was lost (while ${doing}).`);
     };
     // ?timing in the address prints the parts of the loading to the
     // console as each ends (seconds since the page was opened), and every
@@ -6987,7 +7083,7 @@ const SkySound = (() => {
     // that one renderer always draws the same.
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
-    const iceSize = software ? ICE_SOFT : ICE;
+    const iceSize = Math.min(Q.ice, software ? ICE_SOFT : ICE, gl.getParameter(gl.MAX_TEXTURE_SIZE));
     // The aircraft's view reads its tables through the GPU's filter: full
     // floats where it can filter them, else half floats (rounded to within 5e-4).
     const fullFloat = !!gl.getExtension('OES_texture_float_linear');
@@ -6995,7 +7091,7 @@ const SkySound = (() => {
     // 125 m need 31 m texels. A renderer on the CPU (SwiftShader, llvmpipe)
     // takes 128 (software, as for the ice), which bakes in an eighth of the
     // time (seconds there).
-    const BODY = software ? NOISE : 2 * NOISE;
+    const BODY = Math.min(Q.body, software ? NOISE : 2 * NOISE);
     // The frames and the pictures: half floats where the GPU can draw to those (see picture).
     let fine = !!(gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float'));
 
@@ -7014,10 +7110,11 @@ const SkySound = (() => {
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
-      let fsrc = document.getElementById(id).textContent.trim();
+      // (A last newline: the last line, an #endif, is a directive.)
+      let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + (defs || '');
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
@@ -7034,9 +7131,12 @@ const SkySound = (() => {
       const linked = gl.getProgramParameter(prog, gl.LINK_STATUS);
       if (linked) return;
       // (null: the context was lost before its event came.)
-      if (linked === null) throw new Error('The WebGL context was lost.');
-      for (const s of shaders) if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-      throw new Error(gl.getProgramInfoLog(prog));
+      if (linked === null) throw new Error(`The WebGL context was lost (while compiling ${names.get(prog)}).`);
+      // (The message names the program, and says what the driver said, or that it said nothing.)
+      const said = what => new Error(`${names.get(prog)} did not ${what}: ${(what === 'link' ? gl.getProgramInfoLog(prog) : gl.getShaderInfoLog(shaders[1])) || '(no log)'}`);
+      if (!gl.getShaderParameter(shaders[0], gl.COMPILE_STATUS)) throw new Error(`${names.get(prog)}: the vertex shader did not compile: ${gl.getShaderInfoLog(shaders[0])}`);
+      if (!gl.getShaderParameter(shaders[1], gl.COMPILE_STATUS)) throw said('compile');
+      throw said('link');
     };
     // The programs that take longest to compile first (on Direct3D 11, in
     // s: the cirrus's pass 8.6, the scene 8.2, the low clouds' pass 4.7, ice
@@ -7160,6 +7260,7 @@ const SkySound = (() => {
 
     // The programs. Without the extension, asking waits until a program is
     // done: one a frame.
+    doing = 'compiling the programs';
     for (let left = programs, told = performance.now(); left.length;) {
       alive();
       left = left.filter(([p]) => {
@@ -7402,6 +7503,7 @@ const SkySound = (() => {
           gl.activeTexture(gl.TEXTURE3);
           gl.deleteTexture(pop);
         }]);
+        doing = 'building the noise and the weather map';
         await batches(parts, share => done(0.6 + 0.15 * share));
         mark('noise and weather built');
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -7437,6 +7539,7 @@ const SkySound = (() => {
     }
 
     if (iceParts) {
+      doing = 'building the cirrus';
       await batches(iceParts, share => done(0.75 + 0.1 * share));
       mark('cirrus built');
     }
@@ -7601,9 +7704,12 @@ const SkySound = (() => {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       };
       if (stage === 1 && ((state.cirrus > 0 && ciProg) || v.cloud > 0)) {
-        passes = passTarget(passes, w, h);
+        // (A pixel of the passes for Q.pass by Q.pass of the frame's: see Q_PASS in fs.)
+        passes = passTarget(passes, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
+        if (Q.pass > 1) gl.viewport(0, 0, passes.w, passes.h);
         if (state.cirrus > 0 && ciProg) pass(ciProg, 0);
         if (v.cloud > 0) pass(cloudProg, 1);
+        if (Q.pass > 1) gl.viewport(0, 0, vw, vh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       }
       // The first stage of the clouds' light is the clouds' pass's, the
@@ -7620,6 +7726,12 @@ const SkySound = (() => {
     // place. Two layers, the cirrus's and the low clouds': their numbers
     // on unit 16, their depths (Th, Tc) on unit 17, where the scene reads
     // them; a framebuffer for each layer.
+    // Throws if the bound framebuffer cannot be drawn into: else every draw
+    // into it would fail, and the page would show nothing, or black.
+    const complete = what => {
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE && !gl.isContextLost()) throw new Error(`The GPU cannot draw into ${what}: framebuffer status 0x${status.toString(16)}.`);
+    };
     let passes = null;
     const passTarget = (old, w, h) => {
       if (old && old.w === w && old.h === h) return old;
@@ -7641,6 +7753,7 @@ const SkySound = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, t);
         gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.bits, 0, layer);
         gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, c.depth, 0, layer);
+        complete('the passes before the scene (RGBA32UI and DEPTH_COMPONENT32F layers)');
       });
       return c;
     };
@@ -7649,9 +7762,7 @@ const SkySound = (() => {
     const fit = () => {
       const cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (!cw || !ch) return 0;
-      let scale = Math.min(window.devicePixelRatio || 1, 2);
-      scale = Math.min(scale, Math.sqrt(heroPixels / (cw * ch)));
-      const w = Math.max(1, Math.round(cw * scale)), h = Math.max(1, Math.round(ch * scale));
+      const [w, h] = canvasSize(cw, ch, Q);
       if (canvas.width === w && canvas.height === h) return 1;
       canvas.width = w;
       canvas.height = h;
@@ -7757,7 +7868,7 @@ const SkySound = (() => {
     // SHADOW_STALE km since it was drawn; until then the frames read each
     // layer where things were (uShadowShift, uColumnShift). Half floats
     // where the GPU can draw to them, else 8 bits.
-    const SHADOW = 1024, COLUMN = 512, SHADOW_STALE = 0.5;
+    const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = 0.5;
     const S = {};
     gl.useProgram(shadowProg);
     for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
@@ -7847,7 +7958,7 @@ const SkySound = (() => {
     // The warped map and its slope (see uWarped in fs), on units 25 and 26,
     // drawn by topsProg too (first two draws, uTopsPass -2 and -1, one
     // target each: see warm), with mipmaps.
-    const WARPED = 2048, uResTops = gl.getUniformLocation(topsProg, 'uRes');
+    const WARPED = Q.warped, uResTops = gl.getUniformLocation(topsProg, 'uRes');
     const warped = [25, 26].map(unit => {
       const t = { texture: gl.createTexture(), target: gl.createFramebuffer() };
       gl.activeTexture(gl.TEXTURE0 + unit);
@@ -7936,13 +8047,14 @@ const SkySound = (() => {
         p.w = 0;
         return picture(p, w, h, depth);
       }
+      complete(depth ? 'the frame (and its depth, DEPTH_COMPONENT32F)' : 'a picture');
       return p;
     };
     // The first stage of the clouds' light, for a frame of w by h pixels: a
     // texture half as wide and high, of four 32-bit integers a texel, each
     // two half floats (see uLightMap in fs), on unit 18.
     const lightMap = (old, w, h) => {
-      const hw = Math.ceil(w / 2), hh = Math.ceil(h / 2);
+      const hw = Math.ceil(w / (2 * Q.pass)), hh = Math.ceil(h / (2 * Q.pass));
       if (old && old.w === hw && old.h === hh) return old;
       if (old) {
         gl.deleteFramebuffer(old.target);
@@ -7958,6 +8070,7 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, m.texture, 0);
+      complete('the first stage of the clouds\' light (RGBA32UI)');
       return m;
     };
     let light = null;
@@ -8190,6 +8303,7 @@ const SkySound = (() => {
       if (chained && small === scale && wall - clock < 250) {
         span += wall - clock;
         count++;
+        timed(wall - clock, small);
       }
       clock = wall;
       if (!fixedScale && count >= 4 && span >= 400) {
@@ -8261,6 +8375,7 @@ const SkySound = (() => {
     // (On Direct3D 11 the first draw of a program into two or more targets
     // compiles it again, while the GPU process waits: the scene's first
     // frame here.)
+    doing = 'drawing the first frame';
     await prime();
     mark('first frame drawn');
     done(1);
@@ -8316,7 +8431,13 @@ const SkySound = (() => {
     const step = state.speed / 3600 * dt;
     state.drift[0] = wrap(state.drift[0] + step * Math.sin(state.heading));
     state.drift[1] = wrap(state.drift[1] + step * Math.cos(state.heading));
-    const more = !!render && render(fresh, now);
+    let more = false;
+    try {
+      more = !!render && render(fresh, now);
+    } catch (err) {
+      // (A level that fails while it draws: see fall.)
+      fall(err);
+    }
     running = more;
     if (more) kick();
   }
@@ -8595,6 +8716,7 @@ const SkySound = (() => {
     showLabels();
     showFullScreen();
     sound.show();
+    showQuality();
     showIntro();
   });
 
@@ -8680,6 +8802,295 @@ const SkySound = (() => {
   const done = s => {
     if (s > share) loadingLine.style.setProperty('--done', share = s);
   };
+
+  // ---------- Quality ----------
+  // The level drawn (see QUALITY): the address (?quality=), else the
+  // panel's last choice, else the automatic one: the level this device
+  // reached on its last visit, or a first guess from what it says of
+  // itself; then a step down while frames are too slow, or up while they
+  // are fast (see "Quality levels" in docs/design.md). A level that fails
+  // to start falls back to the one below.
+  const quality = document.getElementById('quality');
+  const named = q => LEVELS.includes(q);
+  // (The panel's name of a level: TEXT.qualityLow and so on.)
+  const levelText = l => TEXT[LANG]['quality' + l[0].toUpperCase() + l.slice(1)];
+  // crashed: a level that started on the last visit and did not draw for
+  // QUALITY_OK_MS (sky.qualityTrying: set as a level starts, removed once it
+  // has drawn that long): the tab died, or the context was lost for good.
+  const QUALITY_OK_MS = 10000;
+  let storedQuality = null, memo = null, crashed = null;
+  try {
+    storedQuality = localStorage.getItem('sky.quality');
+    memo = JSON.parse(localStorage.getItem('sky.qualityAuto'));
+    crashed = localStorage.getItem('sky.qualityTrying');
+  } catch (err) {}
+  const askedQuality = params.get('quality');
+  // choice: 'auto' or a level; level: the level drawn (null until the context says what it can do).
+  let choice = named(askedQuality) || askedQuality === 'auto' ? askedQuality : named(storedQuality) ? storedQuality : 'auto';
+  let level = named(choice) ? choice : null;
+  // The automatic choice goes no higher than a level it once stepped down from.
+  let ceiling = memo && named(memo.ceiling) ? memo.ceiling : 'max';
+  const below = l => LEVELS[Math.max(0, LEVELS.indexOf(l) - 1)];
+  const lower = (a, b) => LEVELS[Math.min(LEVELS.indexOf(a), LEVELS.indexOf(b))];
+  const remember = () => {
+    try { localStorage.setItem('sky.qualityAuto', JSON.stringify({ level, ceiling })); } catch (err) {}
+  };
+  // A level failed, and `to` is drawn instead: the automatic choice goes no
+  // higher for good, and a level chosen in the panel (not in the address)
+  // becomes `to` (the panel shows it), so that the next visit does not fail
+  // again.
+  let wentDown = false;
+  const steppedDown = to => {
+    if (choice === 'auto') {
+      ceiling = lower(ceiling, to);
+      wentDown = true;
+      remember();
+    } else if (!named(askedQuality)) {
+      choice = to;
+      try { localStorage.setItem('sky.quality', to); } catch (err) {}
+    }
+  };
+  if (named(crashed) && !named(askedQuality)) {
+    console.info(`Sky: quality ${crashed} did not last on the last visit`);
+    if (choice === 'auto') ceiling = lower(ceiling, below(crashed));
+    else if (choice === crashed) level = choice = below(crashed);
+  }
+  // The first guess, from cheap signals: low on a renderer without a GPU, on
+  // a phone or a tablet, and where the GPU lacks what the frames need (half
+  // floats to draw into, large textures); max for the strongest desktop
+  // GPUs, high for other dedicated ones, mid for the rest (integrated GPUs,
+  // and GPUs that do not give their name), and at most mid with little
+  // memory or few cores.
+  function guess(gl) {
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    const ua = navigator.userAgentData;
+    const phone = (ua ? ua.mobile : /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
+      || (matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 900);
+    const floats = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
+    if (/swiftshader|llvmpipe|softpipe|software|basic render/i.test(name) || phone || !floats
+      || gl.getParameter(gl.MAX_TEXTURE_SIZE) < 8192) return 'low';
+    let l = /RTX\s*(30[89]0|40[789]0|50[789]0)|RX\s*(6[89]|7[89]|9[07])\d0|Apple M\d+ (Max|Ultra)/i.test(name) ? 'max'
+      : /GeForce|Quadro|RTX|Radeon (RX|Pro)|Arc|Apple M\d+ Pro/i.test(name) ? 'high' : 'mid';
+    if ((navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4) l = lower(l, 'mid');
+    return l;
+  }
+  function showQuality() {
+    const T = TEXT[LANG];
+    // (An explicit level that could not start shows the one drawn.)
+    quality.value = choice === 'auto' ? 'auto' : level || choice;
+    quality.options[0].textContent = choice === 'auto' && level ? T.qualityAutoAt(levelText(level)) : T.qualityAuto;
+  }
+  showQuality();
+  quality.addEventListener('change', () => {
+    choice = quality.value;
+    // (Auto chosen in the panel starts afresh: no ceiling, and the next
+    // visit starts from the first guess.)
+    if (choice === 'auto') {
+      ceiling = 'max';
+      wentDown = false;
+    }
+    try {
+      if (choice === 'auto') {
+        localStorage.removeItem('sky.quality');
+        localStorage.removeItem('sky.qualityAuto');
+      } else localStorage.setItem('sky.quality', choice);
+    } catch (err) {}
+    showQuality();
+    if (named(choice) && choice !== level && loaded) restart(choice);
+  });
+
+  // The automatic steps. After the first picture, AUTO_WAIT ms are let go
+  // by (the first frames are slow on any GPU); then windows of at least
+  // AUTO_SPAN ms and 20 frames that follow one another. A window whose
+  // pictures were drawn at under AUTO_SMALL of the size per side (on the
+  // mean: the drawing size had to shrink to keep 25 frames a second; see
+  // The drawing size) steps down, and the level above becomes the ceiling
+  // for good (no step back up: no back and forth). One drawn at full size
+  // throughout, fast enough that the level above would still draw at
+  // AUTO_FAST ms a frame by the costs in QUALITY, steps up. At most
+  // AUTO_STEPS steps a visit. The level reached is the next visit's start.
+  const AUTO_WAIT = 2000, AUTO_SPAN = 3000, AUTO_SMALL = 0.6, AUTO_FAST = 30, AUTO_STEPS = 3;
+  let shownAt = 0, measure = null, autoSteps = 0, restarting = false;
+  // The GPU's work for a frame at level l on this canvas: its cost per pixel times its pixels.
+  const work = l => {
+    const [w, h] = canvasSize(heroCanvas.clientWidth || 1, heroCanvas.clientHeight || 1, QUALITY[l]);
+    return QUALITY[l].cost * w * h;
+  };
+  const timed = (ms, small) => {
+    if (choice !== 'auto' || restarting || !shownAt || !render) return;
+    const now = performance.now();
+    if (now - shownAt < AUTO_WAIT) return;
+    if (!measure) measure = { from: now, n: 0, ms: 0, small: 0, full: true };
+    measure.n++;
+    measure.ms += ms;
+    measure.small += small;
+    measure.full = measure.full && small === 1;
+    if (now - measure.from < AUTO_SPAN || measure.n < 20) return;
+    const m = measure, i = LEVELS.indexOf(level), up = LEVELS[i + 1];
+    measure = null;
+    let to = null;
+    if (autoSteps >= AUTO_STEPS) return;
+    if (m.small / m.n < AUTO_SMALL && i > 0) {
+      to = LEVELS[i - 1];
+      steppedDown(to);
+    } else if (up && !wentDown && i < LEVELS.indexOf(ceiling) && m.full
+      && m.ms / m.n * work(up) / work(level) < AUTO_FAST) {
+      to = up;
+    }
+    if (to) {
+      autoSteps++;
+      console.info(`Sky: quality ${level} to ${to} (${(m.ms / m.n).toFixed(1)} ms a frame at ${(m.small / m.n).toFixed(2)} of the size)`);
+      restart(to);
+    }
+    remember();
+  };
+
+  // A context for a new level: the last level's textures and programs are
+  // freed by losing the context on purpose (WEBGL_lose_context), and the
+  // browser gives it back empty. A context lost for real is waited for.
+  let used = false, retiring = null, back = null;
+  const once = type => new Promise(resolve => heroCanvas.addEventListener(type, resolve, { once: true }));
+  heroCanvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault();                      // so that the browser may give it back
+    back = once('webglcontextrestored');
+    if (retiring) {
+      const ext = retiring;
+      retiring = null;
+      setTimeout(() => ext.restoreContext(), 0);
+      return;
+    }
+    console.error('Sky: the WebGL context was lost.');
+    // Lost while drawing (a driver gave up, or the GPU was reset): start
+    // again a level lower. (Lost while loading, the loading throws.)
+    if (render && !restarting) fall(new Error('The WebGL context was lost while drawing.'));
+  });
+  async function freshContext() {
+    if (!used) {
+      used = true;
+      return;
+    }
+    const gl = heroCanvas.getContext('webgl2');
+    if (!gl) return;
+    if (!gl.isContextLost()) {
+      const ext = gl.getExtension('WEBGL_lose_context');
+      if (!ext) return;                      // (the old level's work stays until it is collected)
+      retiring = ext;
+      const gone = once('webglcontextlost');
+      ext.loseContext();
+      await gone;
+    }
+    let late;
+    await Promise.race([back, new Promise((resolve, reject) => {
+      late = setTimeout(() => reject(new Error('The WebGL context was lost, and the browser did not give it back.')), 10000);
+    })]).finally(() => clearTimeout(late));
+  }
+
+  // What failed at each level tried, for the message.
+  const tried = [];
+  const view = () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV, alt: state.alt, cloud: state.cloud, look: AIR_LOOK });
+  // Makes the renderer at `level`, or the first level below it that starts.
+  async function load() {
+    for (;;) {
+      try {
+        await freshContext();
+        const made = await makeSky(heroCanvas, view, {
+          done, timed,
+          shown: () => {
+            hero.classList.add('shown');
+            shownAt = performance.now();
+            const at = level;
+            setTimeout(() => {
+              try { if (level === at && render) localStorage.removeItem('sky.qualityTrying'); } catch (err) {}
+            }, QUALITY_OK_MS);
+          },
+          level: gl => {
+            if (!level) level = lower(memo && named(memo.level) ? memo.level : guess(gl), ceiling);
+            try { localStorage.setItem('sky.qualityTrying', level); } catch (err) {}
+            showQuality();
+            return level;
+          },
+        });
+        if (!made) throw Object.assign(new Error('This browser gives no WebGL2.'), { none: true });
+        return made;
+      } catch (err) {
+        console.error(err);
+        tried.push(`${level || '?'}: ${String(err && err.message || err).trim()}`);
+        if (err.none || !level || level === LEVELS[0]) throw Object.assign(new Error(tried.join('\n')), { none: err.none });
+        level = below(level);
+        steppedDown(level);
+        showQuality();
+        share = 0;
+        loadingLine.style.setProperty('--done', 0);
+      }
+    }
+  }
+  // The loading failed at every level: its text says so, and stays, with
+  // the reasons (a phone has no console to read) and the GPU's name.
+  function fail(err) {
+    const said = hero.querySelector('.loading p');
+    said.dataset.t = err.none ? 'noWebGL' : 'failed';
+    said.textContent = TEXT[LANG][said.dataset.t];
+    hero.classList.remove('shown');
+    hero.classList.add('failed');
+    let why = hero.querySelector('.loading .why');
+    if (!why) {
+      why = document.createElement('pre');
+      why.className = 'why';
+      said.after(why);
+    }
+    let gpu = '';
+    try {
+      const g = heroCanvas.getContext('webgl2');
+      const info = g && g.getExtension('WEBGL_debug_renderer_info');
+      gpu = g ? String(g.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no WebGL2';
+    } catch (e) {}
+    why.textContent = (String(err && err.message || err).trim().slice(0, 1600) + '\n' + gpu).trim();
+    render = null;
+    hero.dataset.sky = 'failed';
+  }
+  // A failure once the page draws: a level lower, or the message.
+  function fall(err) {
+    console.error(err);
+    tried.push(`${level}: ${String(err && err.message || err).trim()}`);
+    if (level === LEVELS[0]) fail(new Error(tried.join('\n')));
+    else {
+      steppedDown(below(level));
+      restart(below(level), 'lost');
+    }
+  }
+  // Another level, once the page draws: the loading state again, over the
+  // dark, while it compiles and bakes.
+  // (note: the loading's text meanwhile, a key of TEXT.)
+  async function restart(to, note = 'loading') {
+    if (restarting) return;
+    restarting = true;
+    const asked = choice;
+    measure = null;
+    render = null;
+    level = to;
+    if (choice === 'auto') remember();
+    showQuality();
+    hero.classList.remove('shown');
+    hero.dataset.sky = 'loading';
+    const said = hero.querySelector('.loading p');
+    said.dataset.t = note;
+    said.textContent = TEXT[LANG][note];
+    share = 0;
+    loadingLine.style.setProperty('--done', 0);
+    try {
+      render = await load();
+      hero.dataset.sky = 'ready';
+      said.dataset.t = 'loading';
+      said.textContent = TEXT[LANG].loading;
+    } catch (err) {
+      fail(err);
+    }
+    restarting = false;
+    update();
+    // (A level chosen in the panel meanwhile.)
+    if (render && choice !== asked && named(choice) && choice !== level) restart(choice);
+  }
   // After the first paint: an animation frame runs before it, a message after.
   nextFrame()
     .then(nextFrame)
@@ -8688,34 +9099,16 @@ const SkySound = (() => {
       channel.port1.onmessage = resolve;
       channel.port2.postMessage(0);
     }))
-    .then(() => makeSky(heroCanvas, () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV,
-      alt: state.alt, cloud: state.cloud, look: AIR_LOOK }),
-      { done, shown: () => hero.classList.add('shown') }))
+    .then(load)
     .catch(err => {
-      console.error(err);
-      // The loading's text says that it failed, and stays.
-      const said = hero.querySelector('.loading p');
-      said.dataset.t = 'failed';
-      said.textContent = TEXT[LANG].failed;
-      hero.classList.add('failed');
-      // The reason goes on the page too: a phone has no console to read.
-      const why = document.createElement('pre');
-      why.className = 'why';
-      let gpu = '';
-      try {
-        const g = heroCanvas.getContext('webgl2');
-        const info = g && g.getExtension('WEBGL_debug_renderer_info');
-        gpu = g ? String(g.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no WebGL2';
-      } catch (e) {}
-      why.textContent = (String(err && err.message || err).trim().slice(0, 1200) + '\n' + gpu).trim();
-      said.after(why);
+      fail(err);
       return null;
     })
     .then(made => {
       render = made;
       loaded = true;
       hero.dataset.sky = made ? 'ready' : 'failed';
-      if (!made && !hero.classList.contains('failed')) hero.classList.add('shown');
+      if (choice === 'auto' && made) remember();
       kick();
       // A time-lapse asked for in the address starts now, not during the loading.
       if (playing) {

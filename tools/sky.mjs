@@ -21,7 +21,7 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   check       [NAME...] [--base DIR|REV] [--size WxH] [--out DIR] [--ignore CLASSES]
               runs the checks (all of: trace stills wrap loop res flight); one line each
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
-  perf        [--q QUERY] [--size WxH] [--seconds S]
+  perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
   d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]
               on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
@@ -137,7 +137,7 @@ async function main() {
       return r.ok ? 0 : 1;
     }
     if (cmd === 'drive') return await run.drive(session, page, JSON.parse(fs.readFileSync(opt._[0], 'utf8')), size);
-    if (cmd === 'perf') return await run.perf(session, page, { q: opt.q || '', size, seconds: +(opt.seconds || 5) });
+    if (cmd === 'perf') return await run.perf(session, page, { q: opt.q || '', size, seconds: +(opt.seconds || 5), dpr: +(opt.dpr || 1), mobile: 'mobile' in opt });
     if (cmd === 'check') {
       const { runChecks } = await import('./lib/checks.mjs');
       const ok = await runChecks(session, {

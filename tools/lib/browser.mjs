@@ -189,3 +189,10 @@ export async function launchChrome() {
     close() { try { ws.close(); } catch {} close(); },
   };
 }
+
+// The page's quality level (?quality=) for a query: max unless the query names one, so that the tools draw what
+// they drew before there were levels, and never the automatic choice (which depends on the machine and the clock).
+export function withQuality(query = '') {
+  const q = query.startsWith('?') ? query.slice(1) : query;
+  return /(^|&)quality=/.test(q) ? q : q + (q ? '&' : '') + 'quality=max';
+}
