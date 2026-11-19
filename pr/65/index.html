@@ -360,6 +360,7 @@ const TEXT = {
     loading: '読み込み中…',
     failed: '空を描けませんでした',
     lost: 'GPU が描くのをやめました。画質を下げてやり直します…',
+    lostAgain: 'GPU が描くのをやめました。やり直します…',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
     play: '時間を進める', now: 'いまの日時',
@@ -390,6 +391,7 @@ const TEXT = {
     loading: 'Loading…',
     failed: 'The sky could not be drawn',
     lost: 'The GPU stopped drawing. Starting again at a lower quality…',
+    lostAgain: 'The GPU stopped drawing. Starting again…',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
     play: 'Play time-lapse', now: 'Now',
@@ -1612,28 +1614,13 @@ precision highp int;
 #ifndef Q_AIR_LUT
 #define Q_AIR_LUT 0       // 1: the scene reads the air's light from a table made ahead (AIR_LUT), not by a march
 #endif
-#ifndef Q_DETAIL_KM
-#define Q_DETAIL_KM 1e9   // the low clouds' fine noise only nearer than this (km)
-#endif
-#ifndef Q_TC_END
-#define Q_TC_END 0.01     // the march through the low clouds ends when less than this gets through
+#ifndef Q_GOLD
+#define Q_GOLD 0          // 1: the jitters of the low clouds' march and of the shafts step by the golden ratio each frame (see CLOUD_PASS's main)
 #endif
 #ifdef Q_BENCH_CLOUD_LOD  // (?stats=bench3: the clouds' detail for the frame's pixels)
 #define CLOUD_FRAME 1.0
 #else
 #define CLOUD_FRAME Q_FRAME
-#endif
-#ifndef Q_LEAN
-#define Q_LEAN 1          // 0: the air's light leans no way (no MIE_LEAN: addLight reads msLean not)
-#endif
-#ifndef Q_SWELLS
-#define Q_SWELLS 8        // the swells drawn on the sea (of SWELLS)
-#endif
-#ifndef Q_MIRROR_H
-#define Q_MIRROR_H 4      // the heights the sea's mirror reads the clouds at (of 4)
-#endif
-#ifndef Q_LIGHT_FINE
-#define Q_LIGHT_FINE 1    // 0: the steps of the clouds' light read no fine noise
 #endif
 #ifndef Q_SPARKLE
 #define Q_SPARKLE 1       // 0: the glitter at night is its mean, not separate sparkles (sparkle)
@@ -2005,11 +1992,7 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
   vec4 ms[3], lh[3], lv[3];
   float mus = dot(p, dir) / r;
   multiScatter(h, mus, ms);
-#if Q_LEAN
   msLean(h, mus, lh, lv);
-#else
-  for (int k = 0; k < 3; k++) { lh[k] = vec4(0.0); lv[k] = vec4(0.0); }
-#endif
   // The aerosol scatters that light forwards: more of it towards a view
   // that looks where it comes from (MIE_LEAN). Only the forward part: the
   // first moment taken from the view away from it as well left that sky
@@ -2183,6 +2166,12 @@ const float BODY_C = 0.45;          // the value of the turrets that neither rai
 const float BODY_B = -0.06;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
 const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
+const float TOP_K = 0.04;           // how far the sheet's top and the heaps on it melt into one, in units of the shell's depth
+const vec3 TOP_W = vec3(0.3, 0.2, 0.12); // the cells of one top: how far the noise's 2 km, 1 km and 500 m cells raise it, km
+const float TOP_E = 1.5;            // and how deep its heads carve it, against a sheet's own
+const float TOP_S = 0.5;            // how much of a heap's rise over the sheet one top keeps
+const float TOP_O = 0.06;           // how far its cells raise it on the whole, km
+const float TOP_R = 0.66;           // the most that its cells and heads raise it over the heaps, km (for the ways out)
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
 const float ERO_F = 0.55 * GEO_S;  // how far out the body's surface stands for the billows, of their weight (their mean is 0.43), see cloudField
@@ -2449,7 +2438,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // No noise could make a cloud here, even on the steepest wall (below).
   steep = 1.0;
   thin = 1.0 - smoothstep(0.05, 0.4, thick + swell);
-  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
+  // (On a sheet, the heaps without a body are part of its top, and its
+  // cells stand on them: see below.)
+  // (topR: what the cells, heads and rolls may add over the heaps, in
+  // units of y; the heaps' bound as a height, with their field rising 0.7
+  // to 6 times as fast as over a dome's top, mixed with the body's.)
+  float topR = (TOP_R + 0.2) / (CT - CB) + 1.2 * sheetTop * smoothstep(0.3, 0.6, far.a) * sheet, fUp = f + 3.6 * lumps;
+  bool clear = sheet <= 0.0 || mix(fUp > 0.0 ? fUp * top / 3.36 : fUp * top / 28.8, bodyMax / (BODY_G * (CT - CB)), solid) + topR < 0.0;
+  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) return max(mix(f, bodyMax, solid), fs);
   // How steep this field is where its surface over this place stands (yt),
   // against the top of a whole dome (where it rises by 4.8 / top per unit
   // of y): over the top of a heap about 1, on its walls up to 6. The
@@ -2482,12 +2478,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   upshear = gs > 1e-3 ? smoothstep(-0.6, 0.6, dot(sl.xy / gs, normalize(LEAN))) : 0.5;
   }
   float dEnv = env / (gTop * stB);
+  // How fast the heaps' field rises over their top, per unit of y.
+  float gF = 4.8 * max(steep, 0.7) / top;
+  float hUp = mix((f + 0.9 * lumps * steep) / gF, bodyMax / (BODY_G * (CT - CB)), solid) + topR;
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
 #ifdef TOPS_MAP
   // (The map of the tops wants the bound of this way out.)
-  return max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax);
+  return max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0);
 #endif
-  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
+  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax && (sheet <= 0.0 || hUp < 0.0)) return max(mix(f, bodyMax, solid), fs);
   heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
   // Near the eye (a pixel finer than 16 m) the read moves by up to half a
@@ -2539,6 +2538,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   f += billows;
   float lumpOld = lump;
   vec4 t = vec4(BODY_C);
+  // (The heaps' field before their body takes over, and the body's.)
+  float fField = f, fBody = -9.0;
   if (solid > 0.0) {
     // The turrets as bumps on the envelope (km): each size moves the
     // surface by up to about a third of its width, so that a bump rises
@@ -2562,6 +2563,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * hw;
     float disp = u - dEnv - shift - hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
     float fb = BODY_G * (dEnv + disp + shift);
+    fBody = fb;
     f = mix(f, fb, solid);
     float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
     body = mix(body, max(pow(max(thick + swell, 0.0), 1.0 / 3.0), 0.7) * top / 0.28, solid);
@@ -2582,7 +2584,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     carved = max(carved, deck * (1.0 - solid));
     q.w = mix(q.w, max(q.w, 0.9), deck * (1.0 - solid));
   }
-  if (fs > -fsMax) {
+  if (fs > -fsMax || (sheet > 0.0 && hUp > 0.0)) {
     // The cells: domes of the noise's 1 and 2 km Worley cells, which meet
     // in creases; rows of rolls 1.2 km apart across the wind (whole
     // numbers of them across the map), bent over tens of km, where the
@@ -2628,6 +2630,51 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     carved = max(carved, kc);
     q.w = mix(q.w, max(q.w, 0.9), kc);
     f = mix(f, fs, k) + 0.2 * k * (1.0 - k);
+    // Where the sheet is whole, the heaps on it that have no 3D body and
+    // the sheet are one top: each as a height (units of y), joined by a
+    // smooth max (TOP_K), with the cells and heads on the whole of it.
+    // As two fields that crossed (above), the sheet's heads stood out of
+    // the heaps' smooth domes as plateaus with cliffs, and the domes lay
+    // between them as flat floors, like frozen lakes: from 4 to 5 km the
+    // tops were a snowy mountain range. Each heap keeps half its rise over
+    // the sheet (TOP_S), and its cells are as much larger as it rises
+    // higher, up to twice (a heap 300 m over the sheet): with the whole
+    // rise, heaps were smooth hills with long shadows. The cells are the
+    // noise's Worley domes (2 km, 1 km, 500 m), which fill the plane and
+    // meet in creases; the turrets of uBody stand apart, and between them
+    // the sheet was flat. The heads of uBody carve them, TOP_E as deep as
+    // on the sheet above, so that the top is heads on cells, as
+    // photographs of stratocumulus and of cumulus from above show it.
+    // They raise it by TOP_O on the whole: the two fields' higher surface
+    // stood higher than one top, and without it a deck let more light
+    // through (0.1 stops brighter from under it at 0.3 km).
+    // (Not in the rows of rolls, which keep the sheet above.)
+    if (whole > 0.0) {
+      // The heaps as heights: their field over its rise at their top, and
+      // the body's over its own (BODY_G per km), mixed as main mixes the
+      // fields (solid).
+      float hN = (fField + 0.8 * rank - 0.5 * rows * billows) / gF;
+      float hH = mix(hN, fBody / (BODY_G * (CT - CB)), solid);
+      float hs = (13.0 * (sheetTop - y) - 3.0 * (1.0 - sheet)) / 13.0;
+      float sN = clamp(0.5 + (hH - hs) / (2.0 * TOP_K), 0.0, 1.0);
+      float hTop = mix(hs, hH, sN) + TOP_K * sN * (1.0 - sN);
+      // (free: how much of the heap there has no body. Bodies keep their
+      // own form; the sheet round them has cells.)
+      float free = 1.0 - smoothstep(0.3, 0.8, solid);
+      float up = free * clamp((hTop - hs) * (CT - CB) / 0.3, 0.0, 1.0);
+      hTop = hs + (1.0 - TOP_S * free) * (hTop - hs);
+      float wc = whole * (1.0 - rows) * (1.0 - (1.0 - free) * sN);
+      float rk = (1.0 + up) * (TOP_W.x * (n.g - 0.712) + TOP_W.y * (n.b - 0.715) + TOP_W.z * (n.a - 0.715));
+      float raiseN = rows * 0.12 * cells + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
+      hTop += sheetTop * raiseN + wc * (rk + TOP_O) / (CT - CB);
+      hTop += TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
+      f = mix(f, hTop * mix(13.0, BODY_G * (CT - CB), solid * sN), whole);
+      relief = mix(relief, clamp(raiseN + wc * rk / (sheetTop * (CT - CB)), -0.6, 0.9) * sheet, whole);
+      steep = mix(steep, 1.9, wc);
+      carved = max(carved, wc);
+      q.w = mix(q.w, max(q.w, 0.9), wc);
+      thin *= 1.0 - whole * (1.0 - solid * sN);
+    }
   }
   return f;
 }
@@ -2749,7 +2796,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // under it.)
   float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = carved * geoNear;
   float fat = steep * RELIEF * rough * sg * ERO_F;
-  if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && length(p) < Q_DETAIL_KM && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
+  if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
     float d = cloudDetail(q.xyz, lod, rough), fo = f + fat;
     // The sides and tops have billows; a base is flat, and only its broad
     // mottling shows. Here and there a shred hangs below it.
@@ -3100,7 +3147,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
-      if (t >= tb || Tc < Q_TC_END) {
+      if (t >= tb || Tc < 0.01) {
         // (A cloud still waiting for its point takes the light of the last
         // sample.)
         need = waiting;
@@ -3148,7 +3195,13 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             waiting = true;
             TcIn = Tc;
             tIn = t0;
+#if Q_GOLD
+            // (By the plastic number's step, so that it runs apart from the
+            // start's jitter.)
+            tauStar = -log(1.0 - fract(ign(gl_FragCoord.xy + 31.0) + 0.7548777 * mod(uPass, 4096.0)) * (1.0 - exp(-LIGHT_TAU)));
+#else
             tauStar = -log(1.0 - ign(gl_FragCoord.xy + 5.588238 * uPass + 31.0) * (1.0 - exp(-LIGHT_TAU)));
+#endif
             // (The first stage keeps only the slow parts, which change
             // little over those metres: it takes them at the entry, and
             // marches no deeper. Deeper, it cost 0.4 ms under a deck.)
@@ -3436,7 +3489,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           fine = !moved;
           wt = dl;
         }
-        float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine && Q_LIGHT_FINE == 1) * wt : 0.0;
+        float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
         if (n < 10) {
           tw += dt;
           sw += dw;
@@ -3611,7 +3664,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     t += next;
     i++;
   }
-  if (Tc < Q_TC_END) Tc = 0.0;
+  if (Tc < 0.01) Tc = 0.0;
   if (wsum > 0.0) tBar = tsum / wsum;
   // (Only the first stage, which returns above, keeps a light.)
   mapA = vec4(-1.0);
@@ -3632,10 +3685,15 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
   S[0] = vec4(0.0); S[1] = vec4(0.0); S[2] = vec4(0.0);
 #if Q_AIR_LUT && !defined(SKY_LIGHT)
   // (From the table's last slice: the sky as the sea sees it. Not for the
-  // sky's light on the clouds, drawn now and then from their heights.)
-  vec3 odS;
-  airAt(lutUV(dir, normalize(p0), 0.0), 0.0, true, S, odS);
-  return;
+  // sky's light on the clouds, drawn now and then from their heights; nor
+  // within 8 degrees of the sun or the moon, whose glow the table's texels
+  // spread wide: mirrored in the glitter, it filled the clouds' shadows on
+  // the sea.)
+  if (!((uSunI > 0.0 && dot(dir, uSun) > 0.99) || (uMoonI > 0.0 && skyMoon && dot(dir, uMoon) > 0.99))) {
+    vec3 odS;
+    airAt(lutUV(dir, normalize(p0), 0.0), 0.0, true, S, odS);
+    return;
+  }
 #endif
   float tmax = raySphere(p0, dir, RT).y;
   vec3 phaseSun = phases(dot(dir, uSun));
@@ -3847,7 +3905,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   // Swell, smoothed over the footprint. Currents bend its crests: the map
   // of the streaks, read wide, shifts it by up to some 200 m.
   vec2 xs = (x + (textureLod(uWaves, x * (5.0 / WEATHER_KM), 2.0).a - 0.5) * vec2(0.24, 0.32)) / WEATHER_KM;
-  for (int i = 0; i < Q_SWELLS; i++) {
+  for (int i = 0; i < SWELLS; i++) {
     vec2 k = SWELL[i].xy * (2.0 * PI / WEATHER_KM);
     float keep = exp(-0.125 * (dot(k, fa) * dot(k, fa) + dot(k, fc) * dot(k, fc)));
     float var = 0.5 * dot(SWELL[i].zw, SWELL[i].zw);
@@ -3997,7 +4055,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       float lodk = log2(max(2.0 * sigma * dist / ck, 0.06) / TEXEL_KM);
       vec3 xk = ps - eye() + uk * dist;
       float tv = 0.0;
-      for (int i = 4 - Q_MIRROR_H; i < 4; i++) {
+      for (int i = 0; i < 4; i++) {
         vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
         float y, bump, body, edge;
         coarse = true;
@@ -4005,9 +4063,6 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
         coarse = false;
         if (f > 0.0) tv += cloudExtinction(f, min(lodk, 2.0), y, body, edge) * h.y;
       }
-#if Q_MIRROR_H < 4
-      tv *= 2.4 / (Q_MIRROR_H == 1 ? 1.4 : Q_MIRROR_H == 2 ? 1.85 : 2.15);   // (the heights left out, as the ones read)
-#endif
       vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
       float sk = exp(-tv / ck);
       for (int k = 0; k < 3; k++) {
@@ -5368,7 +5423,17 @@ void main() {
   float ta = max(uAlt > CT ? top.x : uAlt < CB ? base.y : 0.0, 0.0);
   float tb = min(ground ? (uAlt < CB ? -1.0 : base.x) : top.y, 600.0);
   if (uCloud > 0.0 && tb > ta) {
-    clouds(o, d, ta, tb, ign(gl_FragCoord.xy + 5.588238 * uPass), Tc, sOne, sMany, sAmb, sLean, tBar, mapA, mapB);
+    // (Q_GOLD: the march's jitters over the frames, here and for the
+    // light's point (tauStar), step by the golden ratio and the plastic
+    // number. IGN shifted along the diagonal each frame runs through its
+    // values unevenly at each pixel; with low's long steps the light's point
+    // stayed in the mean at rest as a fine diagonal hatch over the bases.)
+#if Q_GOLD
+    float jitter = fract(ign(gl_FragCoord.xy) + 0.618034 * mod(uPass, 4096.0));
+#else
+    float jitter = ign(gl_FragCoord.xy + 5.588238 * uPass);
+#endif
+    clouds(o, d, ta, tb, jitter, Tc, sOne, sMany, sAmb, sLean, tBar, mapA, mapB);
   }
   if (uStage == 0.0) {
     outClouds = uvec4(halfPair(mapA.xy), halfPair(mapA.zw), halfPair(mapB.xy), halfPair(mapB.zw));
@@ -5462,7 +5527,11 @@ void main() {
     else if (ct.x >= 0.0 && ct.x < 1e8) { ca = ct.x; cb = ct.y; }
     cb = min(cb, tmax);
   }
+#if Q_GOLD
+  float shaftJitter = fract(ign(gl_FragCoord.xy + 11.0) + 0.618034 * mod(uPass, 4096.0));
+#else
   float shaftJitter = ign(gl_FragCoord.xy + 3.137 * uPass + 11.0);
+#endif
   int shaft = 0;
   // The thin cloud is not in the map: its shadow on the clouds (dim), and
   // where the ray meets the sea, which dims the air near the sea and shades
@@ -5523,11 +5592,8 @@ void main() {
     n = sb < tmax ? NV + NSHADE + NFAR : NV + NSHADE;
     if (sa <= 0.0) j = NV;
   }
-#ifdef Q_BENCH_NOAIR
-  n = 0;                                             // (?stats=bench3: no march of the air)
-#endif
   int layer = 0;
-#if Q_AIR_LUT && !defined(Q_BENCH_NOAIR)
+#if Q_AIR_LUT
   // The air from the table (see airAt), except within LUT_NEAR of the sun
   // or the moon, whose glow the table's texels are too coarse for: the
   // march below. The segments between the eye, the layers and the end:
@@ -5536,15 +5602,53 @@ void main() {
   const float LUT_NEAR = 0.99;                       // cos 8 degrees
   if (!((uSunI > 0.0 && mu > LUT_NEAR) || (uMoonI > 0.0 && dot(d, uMoon) > LUT_NEAR))) {
     vec2 uv = lutUV(d, vec3(0.0, 1.0, 0.0), uAlt);
-    vec4 La[3], Lb[3];
-    vec3 odb;
+    vec4 La[3], Lb[3], Lc[3], Ld[3];
+    vec3 odb, odc;
     La[0] = vec4(0.0); La[1] = vec4(0.0); La[2] = vec4(0.0);
+    // The table has the clouds' shadows only by their mean: the air between
+    // the eye and a cloud towards the sun, which lies in that cloud's shadow,
+    // shone there with the sun's glow, and the cloud looked thin enough to see
+    // the sun through; and the shafts of shadow on the air over the sea were
+    // gone. So the part of each segment below the tops, [ca, cb], takes the
+    // shadow at LUT_SHADE places in it (denser near the eye, new each frame,
+    // as the march's SHAFTS) over the mean the table took there. (With one,
+    // the mean at rest kept the jitter's pattern over the far air. Not where
+    // the moon lights the clouds while the sun lights the air: the map is
+    // the moon's.)
+    const int LUT_SHADE = 4;
+    const float LUT_SKY = 0.35;
+    bool shade = cb > ca && (sunLight || uSunI <= 0.0);
+    float tA = 0.0;
     for (int s = 0; s < 3; s++) {
       float tEnd = s == 2 ? tmax : tLayer;
       bool atLayer = s < 2 && tEnd < tmax;
       if (!atLayer) tEnd = tmax;
       airAt(uv, tEnd, false, Lb, odb);
       for (int k = 0; k < 3; k++) L[k] += visX * max(Lb[k] - La[k], 0.0);
+      float a = max(tA, ca), b = min(tEnd, cb);
+      if (shade && b > a) {
+        float lit = 0.0, mean = 0.0;
+        for (int m = 0; m < LUT_SHADE; m++) {
+          float f = (float(m) + shaftJitter) / float(LUT_SHADE), ts = a + (b - a) * f * f;
+          float h = length(o + d * ts) - RG;
+          lit += exp(-cloudShadow(o + d * ts));
+          mean += mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h)));
+        }
+        // (The table's light is the light's, which the shadows take, and the
+        // sky's, scattered many times, which they leave: LUT_SKY of it, about;
+        // taken all, the air under a deck went black towards the horizon.
+        // Towards the light, its glow is nearly all its own: none there, so
+        // that the air meets the march within LUT_NEAR without a seam.)
+        float sky0 = LUT_SKY * (1.0 - smoothstep(0.9, LUT_NEAR, dot(d, uLight)));
+        lit = sky0 + (1.0 - sky0) * mix(1.0, lit / float(LUT_SHADE), uLightShare);
+        mean = sky0 + (1.0 - sky0) * mix(1.0, mean / float(LUT_SHADE), uLightShare);
+        // (The light of [a, b]: the table's at b less at a, read where they
+        // are not the segment's ends.)
+        if (a > tA) airAt(uv, a, false, Lc, odc); else Lc = La;
+        if (b < tEnd) airAt(uv, b, false, Ld, odc); else Ld = Lb;
+        for (int k = 0; k < 3; k++) L[k] += visX * (lit / mean - 1.0) * max(Ld[k] - Lc[k], 0.0);
+      }
+      tA = tEnd;
       od = odb;
       if (!atLayer) break;
       bool isClouds = (layer == 0) == cloudsFirst;
@@ -5604,18 +5708,19 @@ void main() {
         lit += wt * exp(-cloudShadow(ps));
         sum += wt;
       }
+#if Q_AIR_LUT
+      // (Low: read at a place in the step new each frame. Its few steps
+      // read at their middles left dark blots near the sun, where one fell
+      // in the shadow of a far cloud.)
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(o + d * (prev - dt * fract(shaftJitter + 0.618034 * float(j)))));
+#else
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
+#endif
     }
     // Under a deck the light of the sky reaches the low air only through
     // the deck: else the air under it, a hundred km of it towards the
     // horizon, glowed as a thin pale blue band.
     float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
-#if Q_AIR_LUT
-    // (As the table takes them, the clouds' shadows by their mean: the
-    // pixels near the sun or the moon that march stood out as a dark disc
-    // where the shadows came out in full.)
-    direct = mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h)));
-#endif
     direct *= mix(1.0, ciShade, low);
     direct = mix(1.0, direct, uLightShare);          // the clouds' shadows come and go with their light
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
@@ -5642,9 +5747,7 @@ void main() {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
     float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea) : 0.0;
-#ifndef Q_BENCH_NOSEA
     addSea(pg, d, tmax, od, betaM, extM, visX, shadow, L, G);
-#endif
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way,
     // the zodiacal light and stars, all dimmed and reddened by the air.
@@ -6633,9 +6736,9 @@ const SkySound = (() => {
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
-      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_DETAIL_KM: '6.0', Q_TC_END: 0.05 } },
+      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
-      fs: { Q_NV: 8, Q_NSHADE: 4, Q_NFAR: 8, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1 } },
+      fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
     max: { pixels: Infinity, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7.3, fs: {} },
@@ -9490,9 +9593,7 @@ const SkySound = (() => {
   const BENCH3_SKIP = 500, BENCH3_MS = 2500, BENCH3_CAP = 20;
   const BENCH3 = [
     ['no clouds', { cloud: 0 }], ['no cirrus', { cirrus: 0 }], ['no light pass', { skip: { light: true } }],
-    ['light every 2nd', { skip: { lightOdd: true } }], ['detail all', { clouds: '#undef Q_DETAIL_KM\n#define Q_DETAIL_KM 1e9' }],
-    ['detail < 3 km', { clouds: '#undef Q_DETAIL_KM\n#define Q_DETAIL_KM 3.0' }], ['stop at 1 %', { clouds: '#undef Q_TC_END\n#define Q_TC_END 0.01' }],
-    ['LOD for frame', { clouds: '#define Q_BENCH_CLOUD_LOD' }], ['cirrus once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
+    ['light every 2nd', { skip: { lightOdd: true } }], ['LOD for frame', { clouds: '#define Q_BENCH_CLOUD_LOD' }], ['cirrus once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
   ];
   if (stats && stats.bench3) {
     const B = stats.bench3;
@@ -9635,6 +9736,13 @@ const SkySound = (() => {
     if (choice === 'auto') ceiling = lower(ceiling, below(crashed));
     else if (choice === crashed) level = choice = below(crashed);
   }
+  // A visit that ends in the usual way (a reload, another page, the tab
+  // closed, also while it loads) did not crash: only a tab that died
+  // leaves sky.qualityTrying behind. (Reloaded within QUALITY_OK_MS, the
+  // page stepped down a level for good each time.)
+  addEventListener('pagehide', () => {
+    try { localStorage.removeItem('sky.qualityTrying'); } catch (err) {}
+  });
   // The first guess, from cheap signals: low on a renderer without a GPU, on
   // a phone or a tablet, and where the GPU lacks what the frames need (half
   // floats to draw into, large textures); max for the strongest desktop
@@ -9699,7 +9807,8 @@ const SkySound = (() => {
   // Where the GPU tells the time of its frames (gpuTimed), that decides the
   // step up instead: the level above would take under AUTO_GPU ms of the
   // GPU's a frame. The wall clock cannot tell how much time is left on a
-  // frame that waits for the screen (at 60 Hz, never under 16.7 ms).
+  // frame that waits for the screen (at 60 Hz, never under 16.7 ms). And
+  // the GPU's times keep the step down for a GPU that is busy.
   const AUTO_WAIT = 2000, AUTO_SPAN = 3000, AUTO_SMALL = 0.6, AUTO_FAST = 30, AUTO_GPU = 12, AUTO_STEPS = 3;
   let shownAt = 0, measure = null, autoSteps = 0, restarting = false;
   // The GPU's work for a frame at level l on this canvas: its cost per pixel times its pixels.
@@ -9729,7 +9838,12 @@ const SkySound = (() => {
     measure = null;
     let to = null;
     if (autoSteps >= AUTO_STEPS) return;
-    if (m.small / m.n < AUTO_SMALL && i > 0) {
+    // (Where the GPU tells its time, a step down needs it busy: its time
+    // a frame, scaled to the full size, at least AUTO_FAST. Frames slowed by
+    // something else, a busy CPU or a throttled window, are no reason to
+    // draw less; a level stepped down from is never tried again.)
+    const scale = m.small / m.n, busy = m.gn < 20 || m.gpu / m.gn / (scale * scale) >= AUTO_FAST;
+    if (scale < AUTO_SMALL && i > 0 && busy) {
       to = LEVELS[i - 1];
       steppedDown(to);
     } else if (up && !wentDown && i < LEVELS.indexOf(ceiling) && m.full
@@ -9862,11 +9976,17 @@ const SkySound = (() => {
     render = null;
     hero.dataset.sky = 'failed';
   }
-  // A failure once the page draws: a level lower, or the message.
+  // A failure once the page draws: a level lower, or the message. (At the
+  // lowest level, once a visit, the same level again: a phone's GPU process
+  // may be reset by something else, and low drew before.)
+  let again = false;
   function fall(err) {
     console.error(err);
     tried.push(`${level}: ${String(err && err.message || err).trim()}`);
-    if (level === LEVELS[0]) fail(new Error(tried.join('\n')));
+    if (level === LEVELS[0] && !again) {
+      again = true;
+      restart(level, 'lostAgain');
+    } else if (level === LEVELS[0]) fail(new Error(tried.join('\n')));
     else {
       steppedDown(below(level));
       restart(below(level), 'lost');
