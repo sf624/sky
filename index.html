@@ -5208,6 +5208,8 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3]
 
 // A distance (km; negative: infinitely far) as a number from 0 to 1, in 16
 // bits: the depth of the frame, c / 65536 (exact in its 32-bit floats).
+// The scene adds a share (`astray`, 0 to 1) times 0.75 / 65536: below the
+// next code, and kept to 1/256 of a step.
 float distanceCode(float t) {
   float c = floor((t > 0.0 ? clamp(0.5 + log2(t) / 20.0, 0.0, 0.99) : 1.0) * 65535.0 + 0.5);
   return c / 65536.0;
@@ -5969,11 +5971,21 @@ void main() {
   // the pixels past that share took their past from where the sheet was,
   // with the glare of another angle from the sun: in flight, a dark or
   // bright band hugged the glow there, with an edge, issue #54.)
+  // The rest of such a pixel's light, the sky, the glare and the sun
+  // behind the sheet, stays put, yet moves with the pixel: `astray`, its
+  // share, goes with the distance (in the fraction of the depth below the
+  // code's step), and the mean holds the past of that light to this frame
+  // around the pixel as far as it slips (see `mean`).
+  float astray = 0.0;
   if (tSeen < 0.0 && tHigh > 0.0) {
-    float share = smoothstep(0.05, 0.3, max(wHigh, dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30)));
-    if (share > 0.0) tSeen = tHigh / share;
+    float lit = dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30);
+    float share = smoothstep(0.05, 0.3, max(wHigh, lit));
+    if (share > 0.0) {
+      tSeen = tHigh / share;
+      astray = clamp(1.0 - lit, 0.0, 1.0);
+    }
   } else if (wHigh > 0.5) tSeen = tHigh;
-  gl_FragDepth = distanceCode(tSeen);
+  gl_FragDepth = distanceCode(tSeen) + 0.75 / 65536.0 * astray;
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
   // would be too dark. So round up or down at random, anew each frame:
@@ -6077,7 +6089,10 @@ void main() {
     weight = 0.5;
   }
 #endif
-  float code = texelFetch(uFrameAux, here, 0).r * 65536.0 / 65535.0;
+  // The code, and the share of the pixel's light that is not as far as it
+  // says (astray: the sky behind a thin sheet, see the other shader).
+  float raw = texelFetch(uFrameAux, here, 0).r * 65536.0;
+  float code = floor(raw) / 65535.0, astray = fract(raw) / 0.75;
   float inv = nearness(code);
   // Things at different distances pass each other as the eye moves: by
   // `parallax` pixels a frame for a difference of 1 in one over the distance.
@@ -6139,9 +6154,13 @@ void main() {
     // by enough to slip a fraction of a pixel since. Then the past only
     // counts as far as it looks like this frame around the pixel. At the
     // ragged edge of a cloud both cloud and sea are around, and the mean
-    // goes on.
+    // goes on. Nor is it, for the light that stays put (astray) in a pixel
+    // that moves: that light slips by the pixel's own way. Next to the sun,
+    // under a thin sheet near the eye, the glare and the sun's disc slipped
+    // so by pixels a frame, and in flight the disc drew a streak and the
+    // glow banded copies of its edge.
     float invWas = nearness(codeWas);
-    float doubt = smoothstep(0.1, 0.3, parallax * max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0));
+    float doubt = smoothstep(0.1, 0.3, parallax * max(max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0), astray * inv));
     if (doubt > 0.0) {
 #ifdef UPSCALE
       ivec2 edge = ivec2(uFrameRes) - 1;

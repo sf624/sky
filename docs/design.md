@@ -2818,7 +2818,11 @@ where the glare is most of the light, it stays nearly put. (Up to issue
 #54 it moved with the sheet from a share of 0.1 on: there, the pixels took
 their past from where the sheet had been, with the glare of another angle
 from the sun, and in flight a dark or bright band with an edge hugged the
-glow round the sun.)
+glow round the sun.) The rest of such a pixel's light (the sky, the
+glare and the sun behind the sheet) stays put but moves with the pixel;
+its share, `astray` (1 minus the sheet's share of the light), goes with
+the distance, in the fraction of the frame's depth below the next code
+(`0.75 / 65536` times the share, kept to 1/256 of a step).
 
 **Reprojection** (`whence` in `mean`): each pixel finds where what it shows
 now was a frame ago. Clouds and sea have come nearer by the eye's way since
@@ -2837,7 +2841,14 @@ number of frames in the mean (B of `aux`, over 64) and the past distance.
 slip a fraction of a pixel (`doubt`, from the parallax), it counts only as
 far as it fits the 3 by 3 neighbourhood of the new frame (clamped to its
 minimum and maximum). A past that had to change much was something else:
-its count drops to 1.
+its count drops to 1. The same check holds the light that stays put in a
+pixel that moves: the past is in doubt as far as `astray` times the
+pixel's own parallax slips. Under a thin sheet near the eye (just below
+its base at 12.2 km), the pixels round the sun move with the sheet by
+their share, pixels a frame, while the glare and the sun's disc stay.
+Without the check they took their past from where the sheet had been: in
+flight the disc drew a streak and the glow banded copies of its edge,
+longer as frames grew slower.
 
 **The picture's distance** (R, G of the picture's `aux`): the nearer of
 the new frame's distance and a mean of the past one and the new one, with
