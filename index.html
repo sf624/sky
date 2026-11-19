@@ -1973,6 +1973,12 @@ const float BODY_C = 0.45;          // the value of the turrets that neither rai
 const float BODY_B = -0.06;          // the body's surface, km out of its envelope's (with few clouds; less inward with more)
 const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
+const float TOP_K = 0.04;           // how far the sheet's top and the heaps on it melt into one, in units of the shell's depth
+const vec3 TOP_W = vec3(0.3, 0.2, 0.12); // the cells of one top: how far the noise's 2 km, 1 km and 500 m cells raise it, km
+const float TOP_E = 1.5;            // and how deep its heads carve it, against a sheet's own
+const float TOP_S = 0.5;            // how much of a heap's rise over the sheet one top keeps
+const float TOP_O = 0.06;           // how far its cells raise it on the whole, km
+const float TOP_R = 0.66;           // the most that its cells and heads raise it over the heaps, km (for the ways out)
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
 const float ERO_F = 0.55 * GEO_S;  // how far out the body's surface stands for the billows, of their weight (their mean is 0.43), see cloudField
@@ -2239,7 +2245,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // No noise could make a cloud here, even on the steepest wall (below).
   steep = 1.0;
   thin = 1.0 - smoothstep(0.05, 0.4, thick + swell);
-  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
+  // (On a sheet, the heaps without a body are part of its top, and its
+  // cells stand on them: see below.)
+  // (topR: what the cells, heads and rolls may add over the heaps, in
+  // units of y; the heaps' bound as a height, with their field rising 0.7
+  // to 6 times as fast as over a dome's top, mixed with the body's.)
+  float topR = (TOP_R + 0.2) / (CT - CB) + 1.2 * sheetTop * smoothstep(0.3, 0.6, far.a) * sheet, fUp = f + 3.6 * lumps;
+  bool clear = sheet <= 0.0 || mix(fUp > 0.0 ? fUp * top / 3.36 : fUp * top / 28.8, bodyMax / (BODY_G * (CT - CB)), solid) + topR < 0.0;
+  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) return max(mix(f, bodyMax, solid), fs);
   // How steep this field is where its surface over this place stands (yt),
   // against the top of a whole dome (where it rises by 4.8 / top per unit
   // of y): over the top of a heap about 1, on its walls up to 6. The
@@ -2272,12 +2285,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   upshear = gs > 1e-3 ? smoothstep(-0.6, 0.6, dot(sl.xy / gs, normalize(LEAN))) : 0.5;
   }
   float dEnv = env / (gTop * stB);
+  // How fast the heaps' field rises over their top, per unit of y.
+  float gF = 4.8 * max(steep, 0.7) / top;
+  float hUp = mix((f + 0.9 * lumps * steep) / gF, bodyMax / (BODY_G * (CT - CB)), solid) + topR;
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
 #ifdef TOPS_MAP
   // (The map of the tops wants the bound of this way out.)
-  return max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax);
+  return max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0);
 #endif
-  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax) return max(mix(f, bodyMax, solid), fs);
+  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax && (sheet <= 0.0 || hUp < 0.0)) return max(mix(f, bodyMax, solid), fs);
   heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
   // Near the eye (a pixel finer than 16 m) the read moves by up to half a
@@ -2329,6 +2345,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   f += billows;
   float lumpOld = lump;
   vec4 t = vec4(BODY_C);
+  // (The heaps' field before their body takes over, and the body's.)
+  float fField = f, fBody = -9.0;
   if (solid > 0.0) {
     // The turrets as bumps on the envelope (km): each size moves the
     // surface by up to about a third of its width, so that a bump rises
@@ -2352,6 +2370,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * hw;
     float disp = u - dEnv - shift - hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
     float fb = BODY_G * (dEnv + disp + shift);
+    fBody = fb;
     f = mix(f, fb, solid);
     float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
     body = mix(body, max(pow(max(thick + swell, 0.0), 1.0 / 3.0), 0.7) * top / 0.28, solid);
@@ -2372,7 +2391,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     carved = max(carved, deck * (1.0 - solid));
     q.w = mix(q.w, max(q.w, 0.9), deck * (1.0 - solid));
   }
-  if (fs > -fsMax) {
+  if (fs > -fsMax || (sheet > 0.0 && hUp > 0.0)) {
     // The cells: domes of the noise's 1 and 2 km Worley cells, which meet
     // in creases; rows of rolls 1.2 km apart across the wind (whole
     // numbers of them across the map), bent over tens of km, where the
@@ -2418,6 +2437,51 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     carved = max(carved, kc);
     q.w = mix(q.w, max(q.w, 0.9), kc);
     f = mix(f, fs, k) + 0.2 * k * (1.0 - k);
+    // Where the sheet is whole, the heaps on it that have no 3D body and
+    // the sheet are one top: each as a height (units of y), joined by a
+    // smooth max (TOP_K), with the cells and heads on the whole of it.
+    // As two fields that crossed (above), the sheet's heads stood out of
+    // the heaps' smooth domes as plateaus with cliffs, and the domes lay
+    // between them as flat floors, like frozen lakes: from 4 to 5 km the
+    // tops were a snowy mountain range. Each heap keeps half its rise over
+    // the sheet (TOP_S), and its cells are as much larger as it rises
+    // higher, up to twice (a heap 300 m over the sheet): with the whole
+    // rise, heaps were smooth hills with long shadows. The cells are the
+    // noise's Worley domes (2 km, 1 km, 500 m), which fill the plane and
+    // meet in creases; the turrets of uBody stand apart, and between them
+    // the sheet was flat. The heads of uBody carve them, TOP_E as deep as
+    // on the sheet above, so that the top is heads on cells, as
+    // photographs of stratocumulus and of cumulus from above show it.
+    // They raise it by TOP_O on the whole: the two fields' higher surface
+    // stood higher than one top, and without it a deck let more light
+    // through (0.1 stops brighter from under it at 0.3 km).
+    // (Not in the rows of rolls, which keep the sheet above.)
+    if (whole > 0.0) {
+      // The heaps as heights: their field over its rise at their top, and
+      // the body's over its own (BODY_G per km), mixed as main mixes the
+      // fields (solid).
+      float hN = (fField + 0.8 * rank - 0.5 * rows * billows) / gF;
+      float hH = mix(hN, fBody / (BODY_G * (CT - CB)), solid);
+      float hs = (13.0 * (sheetTop - y) - 3.0 * (1.0 - sheet)) / 13.0;
+      float sN = clamp(0.5 + (hH - hs) / (2.0 * TOP_K), 0.0, 1.0);
+      float hTop = mix(hs, hH, sN) + TOP_K * sN * (1.0 - sN);
+      // (free: how much of the heap there has no body. Bodies keep their
+      // own form; the sheet round them has cells.)
+      float free = 1.0 - smoothstep(0.3, 0.8, solid);
+      float up = free * clamp((hTop - hs) * (CT - CB) / 0.3, 0.0, 1.0);
+      hTop = hs + (1.0 - TOP_S * free) * (hTop - hs);
+      float wc = whole * (1.0 - rows) * (1.0 - (1.0 - free) * sN);
+      float rk = (1.0 + up) * (TOP_W.x * (n.g - 0.712) + TOP_W.y * (n.b - 0.715) + TOP_W.z * (n.a - 0.715));
+      float raiseN = rows * 0.12 * cells + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
+      hTop += sheetTop * raiseN + wc * (rk + TOP_O) / (CT - CB);
+      hTop += TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
+      f = mix(f, hTop * mix(13.0, BODY_G * (CT - CB), solid * sN), whole);
+      relief = mix(relief, clamp(raiseN + wc * rk / (sheetTop * (CT - CB)), -0.6, 0.9) * sheet, whole);
+      steep = mix(steep, 1.9, wc);
+      carved = max(carved, wc);
+      q.w = mix(q.w, max(q.w, 0.9), wc);
+      thin *= 1.0 - whole * (1.0 - solid * sN);
+    }
   }
   return f;
 }
