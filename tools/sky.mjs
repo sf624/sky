@@ -31,12 +31,15 @@ environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_L
 // Commands that start Chrome, and their time limits (s).
 const LIMITS = { trace: 900, stills: 2400, check: 5400, drive: 900, perf: 300 };
 
+// The options that take no value: `--mobile --dpr 2.6` took '--dpr' as the value of --mobile, and the DPR stayed 1.
+const FLAGS = new Set(['mobile', 'no-gpu']);
 function parseArgs(argv) {
   const opt = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
-      const [k, v] = a.includes('=') ? [a.slice(2, a.indexOf('=')), a.slice(a.indexOf('=') + 1)] : [a.slice(2), argv[++i]];
+      const [k, v] = a.includes('=') ? [a.slice(2, a.indexOf('=')), a.slice(a.indexOf('=') + 1)]
+        : FLAGS.has(a.slice(2)) ? [a.slice(2), ''] : [a.slice(2), argv[++i]];
       if (v === undefined) throw new Error(`${a} needs a value`);
       opt[k] = v;
     } else opt._.push(a);
