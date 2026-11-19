@@ -2035,9 +2035,14 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 // and the moon) to keep half floats' range by night.
 const float LUT_AZ = 64.0, LUT_EL = 48.0, LUT_S = 16.0, LUT_T0 = 0.05, LUT_T1 = 1200.0;
 uniform float uLutScale;
-// The sun's way along the ground at a place whose up is `up`, and the way across it.
+// The stronger light (the sun's or the moon's direction), which the
+// azimuth is measured from: the table's seam, behind it, then lies where its
+// light is the same on either side (from the sun's, the moonlit sky stepped
+// there).
+uniform vec3 uLutLight;
+// The light's way along the ground at a place whose up is `up`, and the way across it.
 void lutAxes(vec3 up, out vec3 sh, out vec3 side) {
-  sh = uSun - up * dot(uSun, up);
+  sh = uLutLight - up * dot(uLutLight, up);
   sh = dot(sh, sh) > 1e-8 ? normalize(sh) : normalize(cross(up, vec3(0.0, 0.0, 1.0)));
   side = cross(up, sh);
 }
@@ -8443,6 +8448,7 @@ const SkySound = (() => {
     }
     // The light the table is kept in units of (see uLutScale).
     const lutScale = () => Math.max(state.sunOn, state.moonI * moonAirFor(), 1e-30);
+    const lutLight = () => state.moonI * moonAirFor() > state.sunOn ? state.moon : state.sun;
     // The map of the tops (see uTops in fs), on unit 23, one texel for each
     // of the weather map's: fs draws it (topsProg) in two draws, the tops
     // over each texel into a first texture (on unit 24), then the highest of
@@ -8721,7 +8727,7 @@ const SkySound = (() => {
       if (lut && lutKey !== lut.for) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, lut.target);
         for (let sl = 0; sl <= LUT_S; sl++) {
-          draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutScale', lutScale()]], 3);
+          draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]], 3);
           gl.activeTexture(gl.TEXTURE29);
           gl.bindTexture(gl.TEXTURE_3D, lut.texture);
           for (let q = 0; q < 4; q++) {
@@ -8785,7 +8791,7 @@ const SkySound = (() => {
       if (stale && !benchSkip.maps) drawLayer(...stale);
       // (Where things were when each layer was drawn, for every program
       // that reads the maps.)
-      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale()]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
+      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
       lap('maps');
       // The first stage of the clouds' light, then the frame, which reads it.
       // (benchRepeat, benchSkip: ?stats=bench3 only.)
