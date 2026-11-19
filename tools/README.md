@@ -151,19 +151,9 @@ With a queue, the command runs again inside it: `heavy timeout --foreground -k 1
 
 Chrome always dies with the command: it is started in a process group of its own, under `setpriv --pdeathsig KILL`, and the group is killed on exit, on a signal and on an error. If Chrome or the page's renderer dies, every call waiting on it fails at once, and the run ends with the reason. Its profile goes in a short temporary directory (`/tmp/sky-…`): Chrome puts sockets there, and a long path makes it fail at start. Do not set `TMPDIR` to a long path. A run killed outright leaves its profile behind; each run removes this user's `sky-…` and `sky-base-…` folders older than a day.
 
-### The owner's machine (WSL2, RTX 3090)
+### WSL2
 
-```sh
-export SKY_CHROME_LIBS=/usr/lib/x86_64-linux-gnu:$HOME/.cache/explain-bash-tools/libs/usr/lib/x86_64-linux-gnu
-SKY_GPU=1 node tools/sky.mjs check --base origin/main
-```
-
-- Playwright's Chromium lacks the NSS libraries there; they are unpacked under `~/.cache/explain-bash-tools/libs`. `/usr/lib/x86_64-linux-gnu` comes first, so that Mesa is the system's.
-- With `SKY_GPU=1` and `/dev/dxg` present, the tools start Chrome with `--use-angle=gl-egl --ignore-gpu-blocklist` and set `GALLIUM_DRIVER=d3d12` and `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`. Mesa then renders through D3D12 on the GPU; without `GALLIUM_DRIVER` it falls back to llvmpipe, on the CPU. `DISPLAY` is removed: with it, headless Chrome got no WebGL2. These flags live in `renderer()` in `lib/browser.mjs`.
-- `~/.claude/bin/heavy` exists, so every run queues there (two heavy runs at a time) under a 3 GB cap.
-- Every command prints the renderer: on the GPU it says `D3D12 (NVIDIA GeForce RTX 3090)`.
-- No Japanese font is installed, so `ui-ja` is skipped.
-- This GPU stack ignores the alpha of `blendColor` (see the [GLSL rules](../docs/development.md#glsl-rules)); SwiftShader does not.
+With `SKY_GPU=1` and `/dev/dxg` present, the tools start Chrome with `--use-angle=gl-egl --ignore-gpu-blocklist` and set `GALLIUM_DRIVER=d3d12` and `MESA_D3D12_DEFAULT_ADAPTER_NAME` (from `SKY_GPU_ADAPTER`). Mesa then renders through D3D12 on the GPU; without `GALLIUM_DRIVER` it falls back to llvmpipe, on the CPU. `DISPLAY` is removed: with it, headless Chrome got no WebGL2. These flags live in `renderer()` in `lib/browser.mjs`. Every command prints the renderer: on the GPU it names the adapter (`D3D12 (…)`). Without a Japanese font, `ui-ja` is skipped. This GPU stack ignores the alpha of `blendColor` (see the [GLSL rules](../docs/development.md#glsl-rules)); SwiftShader does not.
 
 ## Direct3D 11 on Windows
 
