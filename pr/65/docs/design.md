@@ -2753,8 +2753,13 @@ the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 **Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
 are drawn at `scale` times the canvas size, and `show` stretches them.
-(The picture is drawn at that size; the frame at the level's `frame` times
-it.)
+(At the levels whose `frame` is under 1 the picture stays at the canvas's
+size and only the frame shrinks: `frame` times `scale` times the canvas.
+Its targets, and those of the passes and the light, are made at full
+scale and drawn in their lower left, so that a change of the scale makes
+no new ones: made anew at each step, their framebuffer checks waited for
+the GPU, up to some 100 ms on a phone. The mean reads the part drawn,
+`uFrameRes`.)
 The wall clock measures frames that follow one another: two measures in a
 row slower than 40 ms shrink `scale` (by `sqrt(30 / ms)`, down to
 `MIN_SCALE` = 0.35); faster than 24 ms grows it by 1.12, up to 1. At rest
@@ -2775,6 +2780,7 @@ asks which level it is.
 | `dpr` | 1 | 1.5 | 2 | 2 |
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `meterAsync` | yes | yes | no | no |
+| `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
 | `ice` | 1024 | 2048 | 4096 | 4096 |
@@ -2812,6 +2818,11 @@ asks which level it is.
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
   idle while the next frame is made, every 100 ms. (`max` and `high` keep
   the plain read: their frames stay as they were.)
+- `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
+  and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
+  the aircraft flies before a layer of a depth map is drawn again (see
+  [The clouds' shadow](#the-clouds-shadow)): work a frame does now and
+  then, which a slow GPU feels as a long frame.
 - `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
   heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
@@ -2946,7 +2957,12 @@ over the last `STATS_SPAN` (3 s) and the longest gap between two of them
 (or "not drawing" at rest), the GPU's time a frame where the GPU tells it
 (the same queries as the automatic choice), the time the page's own
 script takes in the renderer a frame, its mean and its longest (a long one
-there is the CPU waiting for the GPU, as the meter's read does), the level
+there is the CPU waiting for the GPU, as the meter's read does) and by
+part of the frame (`lap` in the renderer: `start` up to the textures,
+`maps` the tops, the sky's light and the depth maps, `frame` the passes
+and the scene, `mean`, `meter`, `show`; a mean over the last few dozen
+frames), the draws of the last frame and the pixels they shaded
+(`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
 canvas's size, the CSS size it fills and the device pixel ratio, the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
@@ -2955,7 +2971,11 @@ page to the first picture, the GPU memory of the level (its textures,
 counted as `makeSky` makes them, by wrapping the calls that allocate and
 free them on its context, `countMemory`; and the canvas's own buffers as 12
 bytes a pixel), the contexts lost and the levels that failed, and the GPU's
-name. Without `?stats`, none of this runs (the GPU's times are then asked
+name. With `?stats=bench`, from 3 s after the first picture the drawing
+scale is held at 1, 0.71, 0.5 and 0.35 for 4 s each (`BENCH_SCALES`,
+`render.pin`), and the frames a second and the script's time of the last
+2 s of each are shown: what falls with the scale's square is the cost of
+the pixels, what stays is the frame's fixed cost. Without `?stats`, none of this runs (the GPU's times are then asked
 only for the automatic choice, not for a level named in the address or
 the panel).
 

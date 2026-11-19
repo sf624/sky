@@ -2943,7 +2943,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // ta). Where none of them met any, nor does this ray: a cloud that all
   // of them miss is under 2 pixels wide.
   if (uStage > 0.5) {
-    ivec2 c = ivec2(gl_FragCoord.xy * 0.5), last = textureSize(uLightMap, 0) - 1;
+    // (The light map drawn: its texture may be larger, see `full` in the JS.)
+    ivec2 c = ivec2(gl_FragCoord.xy * 0.5), last = ivec2(ceil(uRes / (2.0 * Q_PASS))) - 1;
     float near = 1e9, hit = -1.0;
     for (int k = 0; k < 9; k++) {
       float a = unpackHalf2x16(texelFetch(uLightMap, clamp(c + ivec2(k % 3, k / 3) - 1, ivec2(0), last), 0).x).x;
@@ -3142,7 +3143,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       bool mapped = false, behind = uStage == 1.0 || Q_LITE == 1;
       if (uStage > 0.5) {
         vec2 hp = gl_FragCoord.xy * 0.5 - 0.5, fr = fract(hp);
-        ivec2 i0 = ivec2(floor(hp)), top = textureSize(uLightMap, 0) - 1;
+        ivec2 i0 = ivec2(floor(hp)), top = ivec2(ceil(uRes / (2.0 * Q_PASS))) - 1;
         vec4 A = vec4(0.0), B = vec4(0.0);
         float ws = 0.0, tol = 0.04 * tIn + 0.03;
         for (int k = 0; k < 4; k++) {
@@ -5642,6 +5643,7 @@ uniform float uPass;    // the number of the frame
 // the picture's pixel. Over the frames the rays fall all over the pixels,
 // and a still picture comes out as sharp as the picture's own size.
 uniform vec2 uJitter;
+uniform vec2 uFrameRes;   // the part of uFrame drawn (its texture is as large as at full scale)
 #endif
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outAux;
@@ -5683,7 +5685,7 @@ void main() {
 #ifdef UPSCALE
   // The ray of the frame that fell nearest this pixel's middle, and its
   // weight: 1 on the middle, 0.13 a pixel of the picture off.
-  vec2 fsize = vec2(textureSize(uFrame, 0)), ratio = fsize / uRes, fp = gl_FragCoord.xy * ratio;
+  vec2 fsize = uFrameRes, tsize = vec2(textureSize(uFrame, 0)), ratio = fsize / uRes, fp = gl_FragCoord.xy * ratio;
   ivec2 here = clamp(ivec2(floor(fp - uJitter)), ivec2(0), ivec2(fsize) - 1);
   vec2 off = (vec2(here) + 0.5 + uJitter - fp) / ratio;
   float weight = exp(-2.0 * dot(off, off)), count = -1.0;
@@ -5696,7 +5698,7 @@ void main() {
   // rays fell, all pixels alike: all of a frame's rays fall at the same place
   // in their pixels, and weighed by it, the picture's pixels took turns
   // following the noisy frames, in a fine grid that showed in flight.
-  vec4 filtered = textureLod(uFrame, (fp - uJitter) / fsize, 0.0);
+  vec4 filtered = textureLod(uFrame, clamp(fp - uJitter, vec2(0.5), fsize - 0.5) / tsize, 0.0);
   if (uTrust < 62.5) {
     col = filtered;
     weight = 0.5;
@@ -5768,7 +5770,11 @@ void main() {
     float invWas = nearness(codeWas);
     float doubt = smoothstep(0.1, 0.3, parallax * max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0));
     if (doubt > 0.0) {
+#ifdef UPSCALE
+      ivec2 edge = ivec2(uFrameRes) - 1;
+#else
       ivec2 edge = textureSize(uFrame, 0) - 1;
+#endif
       lo = col;
       hi = col;
       for (int k = 0; k < 9; k++) {
@@ -6356,7 +6362,7 @@ const SkySound = (() => {
   // the GPU time of a frame of as many pixels, relative to low's (measured,
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
-    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, meterAsync: true, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
+    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 8, Q_NSHADE: 4, Q_NFAR: 8, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1 } },
@@ -7104,6 +7110,25 @@ const SkySound = (() => {
     memory.update = sum;
   }
 
+  // Counts the draws a frame and the pixels they shade (the viewport's,
+  // or the scissor's where it is on), into parts.draws and parts.pixels,
+  // for ?stats: it wraps drawArrays, viewport and scissor on this context.
+  function countDraws(gl, parts) {
+    const { drawArrays, viewport, scissor, enable, disable } = gl;
+    let vw = 0, vh = 0, sw = 0, sh = 0, cut = false;
+    parts.draws = 0;
+    parts.pixels = 0;
+    gl.viewport = function (x, y, w, h) { vw = w; vh = h; return viewport.apply(gl, arguments); };
+    gl.scissor = function (x, y, w, h) { sw = w; sh = h; return scissor.apply(gl, arguments); };
+    gl.enable = function (cap) { if (cap === gl.SCISSOR_TEST) cut = true; return enable.apply(gl, arguments); };
+    gl.disable = function (cap) { if (cap === gl.SCISSOR_TEST) cut = false; return disable.apply(gl, arguments); };
+    gl.drawArrays = function () {
+      parts.draws++;
+      parts.pixels += cut ? Math.min(sw, vw) * Math.min(sh, vh) : vw * vh;
+      return drawArrays.apply(gl, arguments);
+    };
+  }
+
   // Makes the renderer, a step at a time (see Loading below). Resolves to a
   // function that draws, render(fresh, now), or to null without WebGL2.
   // fresh: something has changed; now: the time of the frame, ms.
@@ -7113,14 +7138,18 @@ const SkySound = (() => {
   // there is a context. timed(ms, scale): each frame that followed another,
   // its wall-clock time and its drawing scale (see the automatic choice).
   // pictured(now): each picture that has gone to the canvas.
+  // parts: for ?stats, an object this renderer fills each frame: the
+  // script's time in each part of a frame (lap), and the draws and the
+  // pixels they shade (see countDraws).
   // gpuTimed(ms): the GPU's time for each frame drawn, where the GPU can
   // tell it (EXT_disjoint_timer_query_webgl2); asked only if given.
   // memory: an object whose `bytes` this renderer keeps up to date (its
   // textures, and the canvas's own buffers as 12 bytes a pixel), for ?stats.
-  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured }) {
+  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts }) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
     if (memory) countMemory(gl, memory);
+    if (parts) countDraws(gl, parts);
     const levelName = level(gl), Q = QUALITY[levelName];
     // A context lost while the page loads (the GPU process restarted, or a
     // driver gave up on a program) ends the loading with an error: a fence
@@ -7777,12 +7806,12 @@ const SkySound = (() => {
       };
       if (stage === 1 && ((state.cirrus > 0 && ciProg) || v.cloud > 0)) {
         // (A pixel of the passes for Q.pass by Q.pass of the frame's: see Q_PASS in fs.)
-        passes = passTarget(passes, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
+        passes = passTarget(passes, Math.ceil(full[0] / Q.pass), Math.ceil(full[1] / Q.pass));
         // (The cirrus's may be coarser still: ciPass, Q_CI_PASS in fs.)
         const ciPass = Q.ciPass || Q.pass;
         if (ciPass > 1) gl.viewport(0, 0, Math.ceil(w / ciPass), Math.ceil(h / ciPass));
         if (state.cirrus > 0 && ciProg) pass(ciProg, 0);
-        if (ciPass !== Q.pass) gl.viewport(0, 0, passes.w, passes.h);
+        if (ciPass !== Q.pass) gl.viewport(0, 0, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
         if (v.cloud > 0) pass(cloudProg, 1);
         if (ciPass > 1) gl.viewport(0, 0, vw, vh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
@@ -7853,7 +7882,7 @@ const SkySound = (() => {
     const uSteps = U('uSteps');
     const M = {};
     gl.useProgram(mean);
-    for (const n of ['uRes', 'uCam', 'uTan', 'uAlt', 'uCamPast', 'uResPast', 'uWay', 'uTrust', 'uSteps', 'uPass', ...(Q.frame < 1 ? ['uJitter'] : [])]) {
+    for (const n of ['uRes', 'uCam', 'uTan', 'uAlt', 'uCamPast', 'uResPast', 'uWay', 'uTrust', 'uSteps', 'uPass', ...(Q.frame < 1 ? ['uJitter', 'uFrameRes'] : [])]) {
       M[n] = gl.getUniformLocation(mean, n);
     }
     // Texture units 6 to 9: the new frame and the picture so far.
@@ -7960,7 +7989,7 @@ const SkySound = (() => {
     // SHADOW_STALE km since it was drawn; until then the frames read each
     // layer where things were (uShadowShift, uColumnShift). Half floats
     // where the GPU can draw to them, else 8 bits.
-    const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = 0.5;
+    const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = Q.stale || 0.5;
     const S = {};
     gl.useProgram(shadowProg);
     for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
@@ -8186,7 +8215,7 @@ const SkySound = (() => {
     // While the view moves or changes, the picture is drawn smaller than
     // the canvas if frames take long (scale); at rest it is drawn in full.
     // The wall clock tells how long frames take, while one follows another.
-    let scale = fixedScale || 1, clock = 0, span = 0, count = 0, slow = 0, chained = false;
+    let scale = fixedScale || 1, clock = 0, span = 0, count = 0, slow = 0, chained = false, pinnedScale = 0;
     // A frame smaller than the picture gives each of its pixels less (see
     // UPSCALE in "mean"): a still takes more frames to settle, by the ratio
     // of their pixels, and in motion the past counts for as many frames'
@@ -8199,8 +8228,17 @@ const SkySound = (() => {
     // Draws a frame, if the picture can still gain from one. Returns true
     // while more frames are needed. probe: see prime.
     // (What the last frame drew, for ?stats; drew: a frame was drawn.)
-    let sizes = null, drew = false;
+    let sizes = null, drew = false, full = [1, 1];
+    // (For ?stats: the script's time since the last lap, by part.)
+    let lapAt = 0;
+    const lap = name => {
+      if (!parts) return;
+      const t = performance.now();
+      if (name) parts.lap(name, t - lapAt);
+      lapAt = t;
+    };
     const drawFrame = (fresh, now, probe) => {
+      lap('');
       const fitted = fit();
       if (!fitted) return false;
       const v = view(), cam = camera(v.yaw, v.pitch);
@@ -8235,9 +8273,18 @@ const SkySound = (() => {
       const small = now - lastStir < 150 ? scale : 1;
       // The picture (pw by ph), and the frame (w by h): smaller by the
       // level's `frame` (see UPSCALE in the shader "mean").
-      const pw = Math.max(1, Math.round(canvas.width * small)), ph = Math.max(1, Math.round(canvas.height * small));
-      const w = Q.frame < 1 ? Math.max(1, Math.round(pw * Q.frame)) : pw, h = Q.frame < 1 ? Math.max(1, Math.round(ph * Q.frame)) : ph;
-      shot = picture(shot, w, h, true);
+      // (A frame smaller than the picture: the picture stays at the
+      // canvas's size, and only the frame shrinks with the scale; drawn
+      // smaller, the picture was stretched to the screen, and blurred.)
+      const pw = Q.frame < 1 ? canvas.width : Math.max(1, Math.round(canvas.width * small)), ph = Q.frame < 1 ? canvas.height : Math.max(1, Math.round(canvas.height * small));
+      const w = Q.frame < 1 ? Math.max(1, Math.round(canvas.width * small * Q.frame)) : pw, h = Q.frame < 1 ? Math.max(1, Math.round(canvas.height * small * Q.frame)) : ph;
+      // (A frame smaller than the picture is drawn into the lower left of
+      // targets as large as at full scale, `full`: a change of the scale
+      // then makes no new targets. Made anew at each step, as before, their
+      // checks of the framebuffers waited for the GPU, some 100 ms on a
+      // phone.)
+      full = Q.frame < 1 ? [Math.max(1, Math.round(canvas.width * Q.frame)), Math.max(1, Math.round(canvas.height * Q.frame))] : [w, h];
+      shot = picture(shot, full[0], full[1], true);
       drew = true;
       const cur = pictures[turn] = picture(pictures[turn], pw, ph);
       const past = pictures[1 - turn] || (pictures[1 - turn] = picture(null, pw, ph));
@@ -8262,6 +8309,7 @@ const SkySound = (() => {
       const steps = fine ? 2048 : 255;                 // every half float up to 1 is a multiple of 1/2048
       const pass = drawn % 64;
 
+      lap('start');
       if (state.cirrus > 0) buildIce();
       // The frame. New noise for each: where the ray crosses the pixel, and
       // where its samples lie.
@@ -8324,19 +8372,21 @@ const SkySound = (() => {
       // (Where things were when each layer was drawn, for every program
       // that reads the maps.)
       const frame = [...each, ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
+      lap('maps');
       // The first stage of the clouds' light, then the frame, which reads it.
       if (v.cloud > 0) {
-        light = lightMap(light, w, h);
+        light = lightMap(light, full[0], full[1]);
         gl.bindFramebuffer(gl.FRAMEBUFFER, light.target);
         bind(18, null);
         gl.activeTexture(gl.TEXTURE0);
-        draw(v, cam, w, h, frame, 0, light.w, light.h);
+        draw(v, cam, w, h, frame, 0, Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass)));
         bind(18, light.texture);
         gl.activeTexture(gl.TEXTURE0);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       draw(v, cam, w, h, frame, 1);
 
+      lap('frame');
       // The picture: the mean so far, and this frame.
       gl.bindFramebuffer(gl.FRAMEBUFFER, cur.target);
       if (pw !== w || ph !== h) gl.viewport(0, 0, pw, ph);
@@ -8346,7 +8396,10 @@ const SkySound = (() => {
       bind(8, past.colour);
       bind(9, past.aux);
       gl.uniform2f(M.uRes, pw, ph);
-      if (M.uJitter) gl.uniform2f(M.uJitter, ...jitter);
+      if (M.uJitter) {
+        gl.uniform2f(M.uJitter, ...jitter);
+        gl.uniform2f(M.uFrameRes, w, h);
+      }
       gl.uniformMatrix3fv(M.uCam, false, cam);
       gl.uniform1f(M.uTan, Math.tan(v.fov / 2));
       gl.uniform1f(M.uAlt, v.alt);
@@ -8380,11 +8433,13 @@ const SkySound = (() => {
         turn = 1 - turn;
         return true;
       }
-      if (waiting === null && now - meteredAt >= METER_MS) {
+      lap('mean');
+      if (waiting === null && now - meteredAt >= (Q.meterMs || METER_MS)) {
         meterPicture(cur, 'later');
         meteredAt = now;
       }
 
+      lap('meter');
       // To the canvas.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -8403,6 +8458,7 @@ const SkySound = (() => {
         shown = null;
       }
 
+      lap('show');
       // Too slow for 25 frames a second, twice in a row (the first frames
       // of a page are slow on any GPU): draw fewer pixels. Fast again: try
       // more. Gaps longer than a quarter of a second are not frames (the
@@ -8414,7 +8470,7 @@ const SkySound = (() => {
         timed(wall - clock, small);
       }
       clock = wall;
-      if (!fixedScale && count >= 4 && span >= 400) {
+      if (!fixedScale && !pinnedScale && count >= 4 && span >= 400) {
         const ms = span / count;
         slow = ms > 40 ? slow + 1 : 0;
         if (slow >= 2) scale = Math.max(MIN_SCALE, scale * Math.sqrt(30 / ms));
@@ -8422,7 +8478,7 @@ const SkySound = (() => {
         span = count = 0;
       }
       chained = flying || adapting || calm < settleFrames + RELIGHT;
-      sizes = { picture: [pw, ph], frame: [w, h], passes: passes && [passes.w, passes.h], light: light && [light.w, light.h],
+      sizes = { picture: [pw, ph], frame: [w, h], passes: [Math.ceil(w / Q.pass), Math.ceil(h / Q.pass)], light: [Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass))],
         scale: small, level: levelName };
       return chained;
     };
@@ -8449,6 +8505,11 @@ const SkySound = (() => {
       return more;
     };
     render.sizes = () => sizes;
+    // (?stats=bench: the drawing scale held at s, or let go with 0.)
+    render.pin = s => {
+      pinnedScale = s;
+      if (s) scale = s;
+    };
 
     // The first frame, drawn before it is asked for, as it will be drawn
     // (render as a probe, which then leaves its state as it was), and its
@@ -8565,9 +8626,13 @@ const SkySound = (() => {
     state.drift[1] = wrap(state.drift[1] + step * Math.cos(state.heading));
     let more = false;
     const began = stats ? performance.now() : 0;
+    if (stats) stats.parts.draws = stats.parts.pixels = 0;
     try {
       more = !!render && render(fresh, now);
-      if (stats && render) stats.js.push([began, performance.now() - began]);
+      if (stats && render && stats.parts.draws) {
+        stats.js.push([began, performance.now() - began]);
+        stats.drawn = [stats.parts.draws, stats.parts.pixels];
+      }
     } catch (err) {
       // (A level that fails while it draws: see fall.)
       fall(err);
@@ -8950,7 +9015,10 @@ const SkySound = (() => {
   // nothing of this runs.
   const STATS_SPAN = 3000;
   const stats = params.has('stats') && params.get('stats') !== '0'
-    ? { frames: [], gpu: [], js: [], memory: { bytes: 0 }, first: null, lost: 0, element: null } : null;
+    ? { frames: [], gpu: [], js: [], memory: { bytes: 0 }, first: null, lost: 0, element: null, bench: params.get('stats') === 'bench' ? [] : null,
+        // The parts of a frame: the script's time in each (a mean over the
+        // last few dozen frames), and the draws and pixels of the last frame.
+        parts: { mean: new Map(), lap(name, ms) { this.mean.set(name, (this.mean.get(name) ?? ms) * 0.95 + ms * 0.05); }, draws: 0, pixels: 0 } } : null;
   function showStats() {
     if (!stats.element) {
       stats.element = document.createElement('pre');
@@ -8980,10 +9048,13 @@ const SkySound = (() => {
     stats.element.textContent = [
       `${fps ? fps.toFixed(1) + ' fps, worst ' + worst.toFixed(0) + ' ms' : 'not drawing'}${gpu !== null ? `, GPU ${gpu.toFixed(1)} ms` : ''}`,
       js !== null ? `JS ${js.toFixed(1)} ms a frame, worst ${jsWorst.toFixed(0)} ms` : '',
+      stats.parts.mean.size ? 'JS by part ' + [...stats.parts.mean].map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', ') : '',
+      stats.drawn ? `${stats.drawn[0]} draws a frame, ${(stats.drawn[1] / 1e6).toFixed(2)} Mpx` : '',
+      stats.bench && stats.bench.length ? 'bench ' + stats.bench.map(([sc, f, j]) => `${sc}: ${f.toFixed(1)} fps JS ${j.toFixed(1)}`).join(', ') : '',
       `quality ${level || '-'}${choice === 'auto' ? ' (auto)' : ''}`,
       `canvas ${heroCanvas.width}x${heroCanvas.height}, CSS ${heroCanvas.clientWidth}x${heroCanvas.clientHeight}, DPR ${(window.devicePixelRatio || 1).toFixed(2)}`,
       z ? `picture ${wh(z.picture)}, frame ${wh(z.frame)}, scale ${z.scale.toFixed(2)}` : 'picture -',
-      z ? `clouds ${wh(z.passes)}, light ${wh(z.light)}, cirrus ${wh(z.frame.map(x => Math.ceil(x / (Q.ciPass || Q.pass))))}` : '',
+      z ? `clouds ${state.cloud > 0 ? wh(z.passes) : '-'}, light ${state.cloud > 0 ? wh(z.light) : '-'}, cirrus ${state.cirrus > 0 ? wh(z.frame.map(x => Math.ceil(x / (Q.ciPass || Q.pass)))) : '-'}` : '',
       `first picture ${stats.first === null ? '-' : (stats.first / 1000).toFixed(1) + ' s'}`,
       `GPU memory ${(stats.memory.bytes / 1e6).toFixed(0)} MB`,
       `context lost ${stats.lost}, failed ${tried.length}`,
@@ -8991,6 +9062,28 @@ const SkySound = (() => {
     ].filter(Boolean).join('\n');
   }
   if (stats) setInterval(showStats, 500);
+  // ?stats=bench: from 3 s after the first picture, the drawing scale is
+  // held at each of BENCH_SCALES for BENCH_MS in turn, and the frames a
+  // second and the script's time are noted for each (the last 2 s of it):
+  // a time that falls with the scale's square is the pixels', one that
+  // stays is the frame's fixed cost. Then the scale is let go.
+  const BENCH_SCALES = [1, 0.71, 0.5, 0.35], BENCH_MS = 4000;
+  if (stats && stats.bench) {
+    const run = async () => {
+      while (!stats.first || !render || !render.pin) await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 3000));
+      for (const sc of BENCH_SCALES) {
+        render.pin(sc);
+        await new Promise(r => setTimeout(r, BENCH_MS - 2000));
+        const from = performance.now();
+        await new Promise(r => setTimeout(r, 2000));
+        const f = stats.frames.filter(t => t >= from), j = stats.js.filter(([t]) => t >= from);
+        stats.bench.push([sc, f.length > 1 ? (f.length - 1) / ((f[f.length - 1] - f[0]) / 1000) : 0, j.length ? j.reduce((a, [, ms]) => a + ms, 0) / j.length : 0]);
+      }
+      if (render && render.pin) render.pin(0);
+    };
+    run();
+  }
 
   // ---------- Quality ----------
   // The level drawn (see QUALITY): the address (?quality=), else the
@@ -9209,6 +9302,7 @@ const SkySound = (() => {
           gpuTimed: choice === 'auto' || stats ? gpuTimed : null,
           memory: stats && stats.memory,
           pictured: stats && (now => stats.frames.push(now)),
+          parts: stats && stats.parts,
           shown: () => {
             hero.classList.add('shown');
             shownAt = performance.now();
