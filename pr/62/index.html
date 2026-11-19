@@ -3777,6 +3777,10 @@ const float CI_TAU = 4.0;                  // the vertical optical depth of the 
 const float CI_VEIL = 0.4;                 // and of the veil, its mean
 const float CI_BAND = 0.8;                 // and of the body of a band of tufts, its median
 const float CI_THIN = 0.03;                // and of the thin veil where the cirrus gathers, its median
+const float CI_HALO = 0.05;                // which grows into an even veil, the halo's (at the top of the slider)
+const float CI_GAP = 0.05;                 // the share of the veil between the forms
+const vec4 CI_HALOT = vec4(0.01, 0.08, 0.02, 0.1); // the halo veil's depth over which the ring grows, at night and by day
+const vec2 CI_FORM = vec2(0.06, 0.4);       // the ice round about from which the veil is in full
 const int CI_LAYERS = 2;
 // The decks as volumes (km): the lower from 12.2 to 12.6, the upper from
 // 12.35 to 12.8. Each holds its ice by age (ciHeight).
@@ -4114,6 +4118,14 @@ float ciHair(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2, uint sheet) {
 float veilOn0(float c, float m) {
   return CI_VEIL * pow(smoothstep(0.35, 1.0, c), 1.6) * m;
 }
+// The thin, even veil (the crystals that draw the halo): CI_THIN from 0.15
+// to 0.45, growing to CI_HALO by 1 (ciHaloGrow, 0 to 1).
+float ciHaloGrow(float c) {
+  return smoothstep(0.55, 1.0, c);
+}
+float ciThin(float c) {
+  return CI_THIN * smoothstep(0.15, 0.45, c) + (CI_HALO - CI_THIN) * ciHaloGrow(c);
+}
 
 // The cirrus at x on the map (km), on deck k (0: the lower, 1: the upper),
 // seen over a footprint with the axes f1 and f2 (km on the map). In units
@@ -4313,22 +4325,27 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec4 fi
   float vn = fibres && (veilOn0(c, m) > 0.0 || banded > 0.0) ? ciVeilNoise(tc, max(max(length(g1), length(g2)), 1e-7), k == 0 ? 600u : 700u) : 0.0;
   // (It follows the ice's own texture: thinner in the lanes between the
   // patches of strands, so that a deck seen from near it is streaky, not a
-  // fog of soft blobs; by half, 0.5 + 0.75 tex: by all of it, as up to
-  // round 18, the shapes of the tails and the streaks were drawn into it.)
+  // fog of soft blobs; up to 0.45 by half, 0.5 + 0.75 tex: by all of it, as
+  // up to round 18, the shapes of the tails and the streaks were drawn into
+  // it. From 0.45 to 0.85 (fk) the space between the forms opens: there
+  // only CI_GAP of it, and in full only over ice of CI_FORM.y, so that much
+  // cirrus is more and longer strands with blue between them, as
+  // photographs show. Evened out over the sky, as up to issue #9, 90 % of
+  // a view towards the sun at 0.85 was deeper than 0.78: a milky sheet.)
   // (Far off, the ice over some 0.4 km, read below for the body the light
   // feels: following the ice at the pixel, the veil and the bands took up
   // its strands and stood as streaks.)
   float gl = max(max(length(g1), length(g2)), 1e-7);
   float sb = max(4.0, 0.01 / gl);
   vec4 sbs = lite ? si : textureGrad(uIce, tc, g1 * sb, g2 * sb);
-  float tex = smoothstep(0.0, 0.08, lite ? ice : dot(sbs * sbs, wk));
-  float body = CI_BAND * smoothstep(0.2, 0.6, c) * fields * fields * env * m * exp(2.2 * vn - 0.4) * (0.5 + 0.75 * tex);
-  // Much cirrus (from 0.7 to 1) closes up into an even veil: it fills
-  // the lanes between the bands and its patches even out, so that the
-  // moon shines through one milky sheet with its ring, and a deck seen
-  // from under it is grey all over, as in photographs of cirrostratus;
-  // with lanes, much cirrus at night stood as dark lanes across the
-  // moonlit veil, and the ring had no even sheet to show on. It keeps
+  float fk = smoothstep(0.45, 0.85, c), gap = mix(0.5, CI_GAP, fk);
+  float tex = smoothstep(fk * CI_FORM.x, mix(0.08, CI_FORM.y, fk), lite ? ice : dot(sbs * sbs, wk));
+  float body = CI_BAND * smoothstep(0.2, 0.6, c) * fields * fields * env * m * exp(2.2 * vn - 0.4) * (gap + (1.25 - gap) * tex);
+  // Much cirrus (from 0.7 to 1) closes up: the veil fills the lanes between
+  // the bands (where there is ice) and its patches even out, and the thin
+  // veil (ciThin) spreads over the whole sky, the even sheet the moon's
+  // ring shows on; with lanes, much cirrus at night stood as dark lanes
+  // across the moonlit veil, and the ring had no even sheet to show on. It keeps
   // faint streaks (its noise and the hairs weaker by only a little): from
   // 0.55, the even veil wiped out the texture of the decks seen from near
   // the shell (round 14's k5, c2).
@@ -4338,10 +4355,12 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec4 fi
   // generating cells): even all over, a deck seen from just under it was a
   // featureless grey (round 18's k4, s3). Until it evens
   // out, it lies where the cirrus gathers (0.15 of it elsewhere), and comes
-  // in sooner there (its floor less by 0.6).
+  // in sooner there (its floor less by 0.6). The thin veil does not follow
+  // the forms: it is the sheet of smooth crystals that draws the halo.
   float vary = 0.55 + 0.9 * smoothstep(-0.3, 0.3, fsp.w);
-  float thin = CI_THIN * smoothstep(0.15, 0.45, c) * (1.0 - even) * env * (0.25 + 0.75 * fields) * m * exp(1.6 * vn - 0.3);
-  float sheet0 = (veilOn0(c, m) * vary * mix(0.15 + 0.85 * env, 1.0, even) * (0.1 + 1.2 * even + 1.5 * fields * fields) * max(exp((2.2 - 0.6 * even) * vn - 0.4) - 6.0 * pow(1.0 - c, 1.5) * (1.2 - fields) * (1.0 - 0.6 * env), 0.0) * mix(0.5 + 0.7 * tex, 1.0, even) + body + thin) * mix(1.0, F, 0.7 - 0.2 * even);
+  float thinAt = ciThin(c) * mix(env * (0.25 + 0.75 * fields), 1.0, even) * m;
+  float thin = thinAt * exp((1.6 - 0.8 * even) * vn - 0.3);
+  float sheet0 = (veilOn0(c, m) * vary * mix(0.15 + 0.85 * env, 1.0, even) * (0.1 + 1.2 * even + 1.5 * fields * fields) * max(exp((2.2 - 0.6 * even) * vn - 0.4) - 6.0 * pow(1.0 - c, 1.5) * (1.2 - fields) * (1.0 - 0.6 * env), 0.0) * (gap + (1.2 - gap) * tex) + body + thin) * mix(1.0, F, 0.7 - 0.2 * even);
   if (lite) return d + sheet0;
   // The ice over some 0.4 km (or four footprints, if that is wider, sbs,
   // above): the body that the light inside the sheet feels.
@@ -4364,10 +4383,11 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec4 fi
   // the code is left out of those copies.
   float sheet = sheet0;
   float yw = max(vb - floor0, 0.0);
-  // The glow round the sun and the moon reads the veil's mean.
-  float sheetM = veilOn;
+  // The glow round the sun and the moon reads the veil's mean (and the
+  // thin veil's).
+  float sheetM = veilOn + thinAt;
   ciBody = db + sheet;
-  ciVeil = sheet;
+  ciVeil = thin * mix(1.0, F, 0.7 - 0.2 * even);
   ciWide = gain * yw * yw / (yw + knee) + sheetM;
   return d + sheet;
 }
@@ -4762,9 +4782,12 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
                     onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * tsV * li, sameSide), wn);
   // The halo needs smooth hexagonal crystals, which thin cirrus has: it
   // shows faintly in thin fibrous cirrus (as in photographs of halos in
-  // cirrus fibratus), more in a thin, even veil (cirrostratus), and fades
-  // where the ice is thick enough to scatter the light again. By day it
-  // is faint (0.03) and only in a veil: photographs of much cirrus towards
+  // cirrus fibratus), more in the thin, even veil (ciThin: veilT is its
+  // depth along the ray), the more as that veil grows at the top of the
+  // slider (ciHaloGrow: the strands there are thick and the space between
+  // them clear, and without it the ring at 1 lost 6 % of its contrast),
+  // and fades where the ice is thick enough to scatter the light again. By
+  // day it is faint (0.03) and only in a veil: photographs of much cirrus towards
   // the sun mostly show none, and 0.05 to 0.17 drew a clear coloured ring
   // in any veil. At night (the moon's light) it is as before.
   // (The light scattered more than once loses it: F takes the halo by
@@ -4782,7 +4805,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // (By how much the light is the sun's: uLightI is the sun's share of its
   // light, 0 to 1, and some 1e-6 for the moon; no switch, so that the look
   // goes over smoothly in the twilight as the light hands over.)
-  float haloW = mix(0.17 + 0.08 * smoothstep(0.03, 0.3, veilT), 0.03 * smoothstep(0.1, 0.4, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
+  float haloW = mix(0.17 + 0.08 * smoothstep(CI_HALOT.x, CI_HALOT.y, veilT) + 0.08 * ciHaloGrow(uCirrus), 0.03 * smoothstep(CI_HALOT.z, CI_HALOT.w, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
   float aL = mix(a, 1.0 - exp(-wideT), nightK);
   float onceL = mix(once, onceW, nightK);
   // The light scattered forward, by wavelength, is uLightI times the

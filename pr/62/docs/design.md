@@ -1896,7 +1896,10 @@ on the map.
   in rows like the scales of a fish (round 10).
   Measured as the share of the view with a vertical depth over 0.03,
   looking up at 35 degrees from 0.3 km: 2, 5, 30, 72, 88, 100, 100 and 100 % at 0.1, 0.25, 0.4,
-  0.6, 0.7, 0.8, 0.9 and 1 (round 18: 5, 8, 37, 71, 83, 95, 100, 100;
+  0.6, 0.7, 0.8, 0.9 and 1; measured again with issue #9's veil, 4, 26,
+  67, 85, 98, 100 and 100 from 0.25 on, against 4, 26, 70, 87, 100, 100
+  and 100 just before it: the cover stays, the depth in it falls (see the
+  veil) (round 18: 5, 8, 37, 71, 83, 95, 100, 100;
   the few forms of little cirrus now gather in groups, so that one view
   sees fewer of them; round 16 by the same measure: 3, 6, 22, 51,
   68, 91, 100, 100: blue between crisp strands, broken strands and
@@ -1910,14 +1913,21 @@ on the map.
   0.7 to 1 it closes up into an even veil (`even`): it fills the lanes
   between the bands (`0.1 + 1.2 even + 1.5 fields^2`), its noise is
   a little weaker (`2.2 - 0.6 even` for 2.2) and it takes a few fewer hairs
-  (0.5 for 0.7), so that it keeps faint streaks, so
-  that the moon shines through one milky sheet with its ring and a deck
-  seen from under it is grey all over, as in photographs of
-  cirrostratus. (With lanes, much cirrus at night stood as dark lanes
-  across the moonlit veil, and the ring had no even sheet to show on.
-  From 0.55, with its noise and hairs weaker by more, the even veil
-  wiped out the texture of the decks seen from near the shell: round
-  14's k5 and c2 were featureless grey.)
+  (0.5 for 0.7), so that it keeps faint streaks. It lies on the forms
+  (see the body of a band, below): where there is no ice round about,
+  only `CI_GAP` = 0.05 of it, so that much cirrus is more and longer
+  strands with a milky body, and blue between them, as photographs of
+  much cirrus fibratus show (some 20 to 60 % of the sky clearly blue
+  between the strands in r03, r06 and a halo in thin cirrus, Commons).
+  Evened out over the whole sky, as up to issue #9, 90 % of a view
+  towards the sun from the ground at `cirrus` 0.85 was deeper than 0.78
+  along the ray, a milky sheet with no blue; now 24 % of it is under 0.3
+  (blue shows), and 4 % at 1. The thin veil (below) is the even sheet
+  the moon's ring shows on. (With lanes, much cirrus at night stood as
+  dark lanes across the moonlit veil, and the ring had no even sheet to
+  show on. From 0.55, with its noise and hairs weaker by more, the even
+  veil wiped out the texture of the decks seen from near the shell:
+  round 14's k5 and c2 were featureless grey.)
   Its depth is
   the exponent of noise (`ciVeilNoise`, times 2.2), so that it spreads as
   cloud depths do (log-normal: thick patches and clear lanes): bands along
@@ -1944,11 +1954,19 @@ on the map.
   of where the tails are, some 43 and 20 km: thicker round the generating
   cells; 0.55 to 1.45 of its depth): even all over, a deck
   seen from just under it was a featureless grey (round 18's k4, s3).
-- **The thin veil.** From `c` = 0.15 to 0.45 (a `smoothstep`), and up to
-  the even veil, the envelope holds a thin veil, `CI_THIN` = 0.03 of
-  vertical depth at its median (the veil's noise as its exponent, times
-  1.6), 0.25 of it outside the bands: the thinly veiled, milky sky between
-  the bands of photographs.
+- **The thin veil** (`ciThin`). From `c` = 0.15 to 0.45 (a `smoothstep`)
+  the envelope holds a thin veil, `CI_THIN` = 0.03 of vertical depth at
+  its median (the veil's noise as its exponent, times 1.6), 0.25 of it
+  outside the bands: the thinly veiled, milky sky between the bands of
+  photographs. From 0.55 to 1 (`ciHaloGrow`, a `smoothstep`) it grows to
+  `CI_HALO` = 0.05 and, with the even veil, spreads over the whole sky
+  and evens out (its noise times 0.8 at the top). It does not follow the
+  forms: it is the sheet of smooth crystals that draws the halo (below),
+  a thin milky sky between the strands, through which the blue still
+  shows. (Up to issue #9 it faded out as the even veil came in, and the
+  ring was drawn on the even veil, some 1 to 3 deep at the top of the
+  slider: thinned to 0.15 there, the moon's ring lost half its
+  contrast.)
 - **The body of a band.** From `c` = 0.2, `CI_BAND` = 0.8 of vertical
   depth at its median, times `smoothstep(0.2, 0.6, c)`, `fields^2`, the
   envelope and the map, with the same noise as the veil for its exponent:
@@ -1957,12 +1975,18 @@ on the map.
   not a row of separate dabs. Seen from below at dusk, these bodies are
   the long lit bands of photographs (up to round 18, at 0.5 of depth and
   under the sheets' streaks, the tails' commas led). It follows the ice's
-  own texture (`0.5 + 0.75 tex`, `tex` = `smoothstep(0, 0.08, ice)`;
-  `0.25 + tex` up to round 18, which drew the shapes of the tails and
-  streaks into it), and so does the veil below
-  `c` = 1 (`0.5 + 0.7 tex`, even at the top): thinner in the lanes
-  between strands, so that a deck seen from near it is streaky, not a
-  fog of soft blobs (round 15's 11 km views). Far off, `tex` reads the
+  own texture (`gap + 1.25 tex - gap tex`), and so does the veil (`gap +
+  1.2 tex - gap tex`): thinner in the lanes between strands, so that a
+  deck seen from near it is streaky, not a fog of soft blobs (round 15's
+  11 km views). Up to `c` = 0.45, `gap` is 0.5 and `tex` is
+  `smoothstep(0, 0.08, ice)`: soft bodies round the few forms. From 0.45
+  to 0.85 (`fk`, a `smoothstep`) the space between the forms opens:
+  `gap` goes to `CI_GAP` = 0.05 and `tex` to `smoothstep(0.06, 0.4,
+  ice)` (`CI_FORM`), so that the strands keep their body and the veil
+  and the bodies leave the space between them. (`0.25 + tex` up to round
+  18 drew the shapes of the tails and streaks into it; up to issue #9 the
+  veil went even at the top, `mix(0.5 + 0.7 tex, 1, even)`, and filled
+  the space between the strands.) Far off, `tex` reads the
   ice over some 0.4 km (the read of `ciBody`, below); read at the pixel
   (round 16), the veil and the bands took up every strand and stood as
   streaks; the march near the eye reads it at the place.
@@ -1971,8 +1995,9 @@ on the map.
   view at `cirrus` 0.85 from 11 km).
 - `ciBody` is the depth of the ice over some 0.4 km (or four footprints if
   that is wider): the light inside the sheet feels it. `ciVeil` is the
-  share of the veil: it draws the halo. `ciWide` is the depth over some
-  10 km, from which the glow round the sun and the moon is drawn; it
+  depth of the thin veil: it draws the halo. `ciWide` is the depth over some
+  10 km, from which the glow round the sun and the moon is drawn (the
+  ice's, the veil's median and the thin veil's); it
   weighs the kinds by the bands and fields evened out by 0.8 (by the
   local ones, the moonlit veil, which follows it at night, stood in
   lanes). It reads the ice over a footprint of some 10 km along the ray's
@@ -2007,13 +2032,19 @@ on the map.
   beyond 120 degrees, against 0.6 up to round 19, whose lobe of 0.7 and
   part back of -0.3 had a mean cosine of 0.55), and no halo of its own
   (the halo below is drawn apart). Then the 22-degree halo
-  with the dispersion of ice (soft, some 1.4 degrees inside; by day only
-  0.03 and only where there is a veil, from a depth of 0.1, since
+  with the dispersion of ice (soft, some 1.4 degrees inside), drawn by
+  the crystals of the thin veil (`ciVeil`, its depth along the ray; see
+  the thin veil): by day only 0.03 and only where there is a thin veil,
+  from a depth of 0.02 to 0.1 along the ray (`CI_HALOT`), since
   photographs of much cirrus towards the sun mostly show none: 0.05 to
   0.17 drew a clear coloured ring in every veil; at night, by the moon,
   0.17 in thin cirrus, as photographs show halos in cirrus fibratus, up
-  to 0.25 where there is a veil, from a depth of 0.02 to 0.15 over some
-  10 km and here; it fades as the ice scatters the light again, as the
+  to 0.25 where there is a thin veil (from 0.01 to 0.08 along the ray),
+  and 0.08 more as the thin veil grows into the halo's (`ciHaloGrow`:
+  with the strands thicker and the space between them clear, the ring at
+  `cirrus` 1 from the ground stood 6 % less above the sky inside it than
+  on the even veil before), where there is a depth of 0.02 to 0.15 over
+  some 10 km and here; it fades as the ice scatters the light again, as the
   rest of the light scattered once does: taken by that twice, and at 0.03
   to 0.07, the ring did not show at night through a veil, where
   photographs show it; and where it shows, that share of the crystals is
