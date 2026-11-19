@@ -18,8 +18,9 @@ const winTemp = () => {
 
 // Script put first in the page's <head>: posts its console lines, the renderer, the GPU time of each animation
 // frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`.
+// With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
 const INJECT = `<script>(() => {
-  const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60);
+  const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(Object.assign({ at: performance.now() / 1000 }, o)) }).catch(() => {});
   for (const k of ['info', 'log', 'warn', 'error']) {
     const f = console[k];
@@ -51,7 +52,7 @@ const INJECT = `<script>(() => {
         if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) times.push(gl.getQueryParameter(p, gl.QUERY_RESULT) / 1e6);
         gl.deleteQuery(p);
       }
-      if (!done && times.length >= FRAMES + 10) {
+      if (!done && !SHOT && times.length >= FRAMES + 10) {
         const s = times.slice(10).sort((a, b) => a - b);
         finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
       }
@@ -64,7 +65,8 @@ const INJECT = `<script>(() => {
       started = true;
       clearInterval(watch);
       post({ ev: 'shown', failed: hero.classList.contains('failed') });
-      if (!ext || hero.classList.contains('failed')) finish({ ev: 'frames' });
+      if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
+      else if (!ext || hero.classList.contains('failed')) finish({ ev: 'frames' });
     }
   }, 20);
 })();</script>`;
@@ -204,7 +206,7 @@ async function runChrome(url, reports, id, { limit, size }) {
 }
 
 // `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
-export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 } }) {
+export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
   if (!fs.existsSync(CHROME)) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
   const reports = new Map();
   const files = new Map();
@@ -242,13 +244,21 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
           url = `http://localhost:${port}/d3d/programs/${id}.html?d3d=${id}`;
         } else {
           files.set(`/d3d/page/${id}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
-          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing&res=1&${withQuality(q)}&d3d=${id}&d3dFrames=${frames}`;
+          // (A picture is taken at the page's own drawing size: no res=1.)
+          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing${shot ? '' : '&res=1'}&${withQuality(q)}&d3d=${id}` +
+            (shot ? `&d3dShot=${shot}` : `&d3dFrames=${frames}`);
         }
         reports.set(id, []);
         const timedOut = await runChrome(url, reports.get(id), id, { limit, size });
         const got = reports.get(id);
         results.push({ page: page.name, run: r + 1, timedOut, got });
         print(page.name, r + 1, mode, got, timedOut, limit);
+        const png = got.find((g) => g.ev === 'shot')?.png;
+        if (png && out) {
+          const file = path.resolve(`${out}-${page.name.replace(/\W+/g, '_')}-${r + 1}.png`);
+          fs.writeFileSync(file, Buffer.from(png.slice(png.indexOf(',') + 1), 'base64'));
+          console.log(`  shot: ${file}`);
+        }
       }
     }
   } finally {

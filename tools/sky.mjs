@@ -23,7 +23,7 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
-  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S]
+  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]
               on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
 common:       --page DIR (the page to test; default: this repository)
 environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
@@ -117,8 +117,9 @@ async function main() {
     if (opt.base) pages.unshift({ name: `base ${opt.base}`, dir: resolveBase(opt.base, REPO) });
     const mode = opt._[0] || 'page';
     if (!['page', 'programs'].includes(mode)) throw new Error(`d3d: no mode ${mode} (page, programs)`);
+    if (opt.shot && (mode !== 'page' || !opt.out)) throw new Error('d3d: --shot needs the mode page and --out PREFIX');
     await d3d(pages, { mode, q: opt.q || '', runs: +(opt.runs || 1), limit: +(opt.limit || 300), frames: +(opt.frames || 60),
-      size: parseSize(opt.size || '1920x1080') });
+      size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null });
     return 0;
   }
   const { Session } = await import('./lib/page.mjs');
@@ -139,7 +140,15 @@ async function main() {
       const r = await run.stills(session, page, { views: opt.views, size, dir: out('stills'), base: opt.base && run.resolveBase(opt.base, REPO) });
       return r.ok ? 0 : 1;
     }
-    if (cmd === 'drive') return await run.drive(session, page, JSON.parse(fs.readFileSync(opt._[0], 'utf8')), size);
+    if (cmd === 'drive') {
+      // One script, or a list of them run one after another in the same Chrome (one wait in the queue).
+      let status = 0;
+      for (const script of [].concat(JSON.parse(fs.readFileSync(opt._[0], 'utf8')))) {
+        if (script.name) console.log(`== ${script.name}`);
+        status = Math.max(status, await run.drive(session, script.page ? path.resolve(script.page) : page, script, size));
+      }
+      return status;
+    }
     if (cmd === 'perf') return await run.perf(session, page, { q: opt.q || '', size, seconds: +(opt.seconds || 5), dpr: +(opt.dpr || 1), mobile: 'mobile' in opt, cpu: +(opt.cpu || 1), noGpu: 'no-gpu' in opt });
     if (cmd === 'check') {
       const { runChecks } = await import('./lib/checks.mjs');
