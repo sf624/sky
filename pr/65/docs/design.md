@@ -2628,6 +2628,12 @@ textures for it, each with a second texture beside it (`aux`):
 - two `pictures` that take turns: the one so far is read while the next is
   drawn by `mean`; then `show` copies the new one to the canvas.
 
+The frame is as large as the picture, except at the quality levels whose
+`frame` is under 1 (`low` and `mid`: half the picture's width and height,
+see [Quality levels](#quality-levels)): then the frame, and with it the
+passes and the light, are drawn smaller, and `mean`, compiled with
+`UPSCALE`, joins them into the picture where their rays fell (below).
+
 **Storage.** Half floats (RGBA16F) where the GPU can draw to them
 (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`, and the
 framebuffer is complete), else RGBA8. Values are kept in steps of
@@ -2681,6 +2687,32 @@ cloud has gone, the neighbourhood check lets its light go. If the
 distance went back to the sea sooner, the light would stay on the sea
 and trail behind a near cloud in flight, in streaks.
 
+**A frame smaller than the picture** (`UPSCALE`, the levels with `frame`
+under 1). All the rays of a frame cross their pixels at the same place,
+`uJitter`, which `mean` is given too. At rest (`uTrust` 63), each pixel of
+the picture takes the ray that fell nearest its middle, weighed by how near
+(`exp(-2 d^2)`, `d` in the picture's pixels: 1 on the middle, 0.13 a
+pixel off), and the mean counts these weights instead of frames (B of
+`aux` holds their sum, rounded up or down at random to its 8 bits' steps,
+so that small weights still count). Over the frames the rays fall all
+over each pixel, and a still comes out as sharp as the picture's own
+size: what the frame draws in a quarter of the pixels, the picture holds
+in all of them, after some four times as many frames. While anything
+moves (`uTrust` under 63), the frame is read through the GPU's filter
+where its rays fell instead, with the weight 0.5, the same for every
+pixel: weighed by their distance, all pixels of the picture that lie in
+the same place of a frame's pixels followed that frame's noise together,
+and a fine grid of them showed on clouds in flight. A pixel without a past
+takes the filtered frame, as half a frame's worth. The trust in motion is
+`(IN_MOTION - 1) * frame` (4.5 at half size) in these weights, about the
+same time as at full size. The `doubt` check reads the frame's 3 by 3
+round the nearest ray.
+
+A frame of a third or two fifths of the picture per side left a grid on
+clouds at rest as well (its pixels fall on the picture's in a pattern that
+repeats every few pixels); half, a whole number of the picture's pixels to
+each of the frame's, does not.
+
 **The weights.** The new frame weighs `1 / (n + 1)`, with `n` the past's
 count, capped by `uTrust`, which the JS sets per frame:
 
@@ -2700,7 +2732,9 @@ takes over.
 **When drawing stops.** At rest (speed 0, no drag), the renderer counts
 the frames since the last change or the last move of the exposure
 (`calm`) and stops once it reaches `SETTLE + RELIGHT` = 38: 39 frames in
-all after the last change, if the exposure does not move. While the
+all after the last change, if the exposure does not move. With a frame
+smaller than the picture, `SETTLE` is divided by the ratio of their pixels
+(`settleFrames`: 128 at half size, 135 frames in all). While the
 aircraft flies, it never stops. Playing at real time, each step of 10 s
 starts the count again (see [Playing](#from-the-address-bar-to-the-first-frame)).
 A still picture for testing therefore needs `speed=0`, and from page load
@@ -2719,6 +2753,8 @@ the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 **Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
 are drawn at `scale` times the canvas size, and `show` stretches them.
+(The picture is drawn at that size; the frame at the level's `frame` times
+it.)
 The wall clock measures frames that follow one another: two measures in a
 row slower than 40 ms shrink `scale` (by `sqrt(30 / ms)`, down to
 `MIN_SCALE` = 0.35); faster than 24 ms grows it by 1.12, up to 1. At rest
@@ -2735,25 +2771,39 @@ asks which level it is.
 
 | | `low` | `mid` | `high` | `max` |
 |---|---|---|---|---|
-| `pixels` | 300,000 | 800,000 | 1920 x 1080 | no limit |
+| `pixels` | 300,000 | 900,000 | 1920 x 1080 | no limit |
 | `dpr` | 1 | 1.5 | 2 | 2 |
-| `pass` | 2 | 2 | 1 | 1 |
+| `frame` | 0.5 | 0.5 | 1 | 1 |
+| `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
 | `ice` | 1024 | 2048 | 4096 | 4096 |
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
-| `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 6, 3, 6 | 10, 5, 10 | 20, 8, 16 | 20, 8, 16 |
-| `Q_MARCH` | 4 | 2 | 1.2 | 1 |
-| `Q_SHAFTS` | 4 | 8 | 12 | 16 |
+| `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 4, 2, 4 | 8, 4, 8 | 20, 8, 16 | 20, 8, 16 |
+| `Q_MARCH` | 6 | 3 | 1.2 | 1 |
+| `Q_SHAFTS` | 1 | 6 | 12 | 16 |
 | `Q_SHADOW_TAPS` | 2 | 4 | 6 | 8 |
-| `Q_CI_STEPS` | 4 | 6 | 10 | 12 |
-| `cost` | 1 | 1.3 | 3 | 3.1 |
-| GPU memory, a phone of 412 x 915 CSS pixels | 84 MB | 148 MB | 476 MB | 476 MB |
+| `Q_CI_STEPS` | 0 | 6 | 10 | 12 |
+| `Q_SKY_NS` | 3 | 5 | 8 | 8 |
+| `Q_MIRROR` | 1 | 1 | 4 | 4 |
+| `Q_LITE` | 1 | 0 | 0 | 0 |
+| `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE`, `Q_CI_SHADE` | 0 | 1 | 1 | 1 |
+| `cost` | 1 | 1.4 | 7 | 7.3 |
+| GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
 
 - `pixels` and `dpr` cap the canvas (`fit`, see [The drawing size](#the-drawing-size)):
   at most that many pixels, and at most that many per CSS pixel. The
   panel's resolution (`#pixels`) is a second cap; the smaller wins. The
   browser stretches a smaller canvas to the screen.
+- `frame`: the frame is drawn at this share of the picture's width and
+  height, and `mean` joins it into the picture where its rays fell (see
+  [the mean over frames](#the-heros-mean-over-frames)): a quarter of the
+  pixels a frame, and still as sharp at rest. In flight the picture is
+  softer, about as sharp as the frame. The shaders read the detail of the
+  clouds, the sea and the cirrus for the picture's pixels, not the
+  frame's (`Q_FRAME` in `fs`, the size of a pixel times it): read for the
+  frame's larger pixels, through coarser levels of the textures, the
+  clouds stayed as soft at rest as a picture of the frame's size.
 - `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
   heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
@@ -2762,20 +2812,37 @@ asks which level it is.
   the level, and no texture is larger than `MAX_TEXTURE_SIZE`.
 - `pass`: the passes before the scene (the low clouds' and the cirrus's)
   draw one pixel for `pass` by `pass` of the frame's, and the scene reads
-  the nearest (`Q_PASS` in `fs`, set from it): the clouds are a quarter of
-  the work, and their edges are softened by the mean over frames, as each
-  frame's jitter spans the larger pixel. The first stage of the clouds'
-  light is a quarter of the passes' pixels, as always.
+  the nearest (`Q_PASS` in `fs`, set from it). The first stage of the
+  clouds' light is a quarter of the passes' pixels, as always. `ciPass`
+  (`Q_CI_PASS`, if larger than `pass`): the cirrus's pass alone, coarser
+  still. Its rays cross their pixels at a jitter of their own
+  (`uCiJitter`, Halton (5, 7); `Q_CI_JITTER`), and the scene reads the ray
+  that fell nearest its own: with the frame's jitter, a ray stayed in the
+  same square of the frame's pixels, and the cirrus came out in stairs.
 - `fs` holds defines put before `fs` (all six of its programs). At the top
   of `fs`, each `Q_` define has `max`'s value unless it is given: `Q_NV`,
   `Q_NSHADE`, `Q_NFAR` (the air's samples along a view ray), `Q_MARCH`
   (the low clouds' steps, times their length: `DS_MIN`, `DS_NEAR`,
   `DS_REL`, and `CLOUD_STEPS` divided by it), `Q_SHAFTS` (the clouds'
   shadow in the air), `Q_SHADOW_TAPS` (the soft edge of the shadow on the
-  sea), `Q_CI_STEPS` (the cirrus's march near the eye) and `Q_WARP_MIP`
-  (the level of the moved map's texels, 2 for 1024).
-- `cost` is the GPU time of a frame of as many pixels, relative to
-  `low`'s, from measures on one GPU (see [development.md](development.md#gpu-time)):
+  sea), `Q_CI_STEPS` (the cirrus's march near the eye; 0: no march, every
+  ray reads each deck flat, as rays farther off do), `Q_WARP_MIP`
+  (the level of the moved map's texels, 2 for 1024), `Q_SKY_NS` (the
+  air's samples of the sky that the sea mirrors, `skyAt`), `Q_MIRROR`
+  (the clouds the sea mirrors: all four directions of a pixel, or one,
+  drawn by their weights anew each frame: the mean over the frames is the
+  same), `Q_LITE` (the first stage of the clouds' light reads the sky one
+  way and the column once, as the second does), and three that leave out
+  what a small picture does not show: `Q_MICRO` (the billows finer than
+  the fine noise, near the eye), `Q_HAIRS` (the cirrus's hairs: `ciHair`
+  is 1) and `Q_SPARKLE` (the sea's glitter at night is its mean, not
+  separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
+  the low clouds and the sea and does not dim the glare: the scene then
+  holds no copy of the cirrus's code). The programs of `low` are smaller
+  for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
+  at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
+- `cost` is the GPU time of a frame for a canvas of as many pixels,
+  relative to `low`'s, from measures on one GPU (see [development.md](development.md#gpu-time)):
   the automatic choice takes the ratio of two levels from it.
 
 A level is made by `makeSky` as a whole: its programs, its textures, its
@@ -2809,10 +2876,15 @@ on. Once a context exists, `makeSky` asks for the level (its option
   do not give the name). With `deviceMemory` or `hardwareConcurrency` at
   4 or less, at most `mid`.
 - Never above the ceiling (`sky.qualityAuto`): a level it once stepped
-  down from.
+  down from. On a phone or tablet the ceiling is `mid`: a phone starts at
+  `low` (or at the level it reached last time, `mid` at most) and never
+  goes higher than `mid`.
 
 Then it measures. `render` passes the wall-clock time of each frame that
-follows another and its drawing scale to `timed`. After the first
+follows another and its drawing scale to `timed`, and, where the GPU can
+tell it (`EXT_disjoint_timer_query_webgl2`), the GPU's time of each frame
+drawn to `gpuTimed` (one query round the whole frame, read a few frames
+later, when the GPU has it: the read does not wait). After the first
 picture, `AUTO_WAIT` (2 s) is let go by; then windows of at least
 `AUTO_SPAN` (3 s) and 20 frames:
 
@@ -2820,12 +2892,14 @@ picture, `AUTO_WAIT` (2 s) is let go by; then windows of at least
   mean, steps down: the dynamic resolution had to draw under a third of
   the pixels to keep 25 frames a second. The level stepped down from
   becomes the ceiling, and no step up follows in this visit.
-- A window drawn at full size throughout, whose frames would still take
-  under `AUTO_FAST` (30 ms) at the level above (its time times the ratio
-  of the two `cost`s), steps up. On a 60 Hz screen a frame is never
-  shorter than 16.7 ms, so with a ratio of two or more this needs a
-  faster screen: on a desktop the guess decides the level, and the
-  measure can only step down.
+- A window drawn at full size throughout steps up if the level above
+  would have time to spare, by its `work` (its `cost` times its canvas's
+  pixels) over this level's: with the GPU's times (20 of them or more in
+  the window), if its frames would take under `AUTO_GPU` (12 ms) of the
+  GPU's; else by the wall clock, under `AUTO_FAST` (30 ms). The wall
+  clock cannot tell how much of a frame is left: on a 60 Hz screen a
+  frame is never shorter than 16.7 ms, so without the GPU's times the
+  step up needs a faster screen, and the guess decides the level.
 - At most `AUTO_STEPS` (3) steps a visit. The level reached and the
   ceiling are kept (`sky.qualityAuto`) for the next visit. Choosing Auto
   in the panel forgets both.
@@ -2853,6 +2927,23 @@ did not last: as a level starts, `sky.qualityTrying` holds it, and
 `QUALITY_OK_MS` (10 s) after its first picture it is removed. Found at
 the next visit (the tab died, or the browser gave up on the page), the
 page starts a level lower.
+
+**What a level costs on a device** (`?stats`, or `?stats=1`). A small
+overlay over the top left of the page (`showStats`, every half second),
+for a screenshot from a phone, which has no console: the frames a second
+over the last `STATS_SPAN` (3 s) and the longest gap between two of them
+(or "not drawing" at rest), the GPU's time a frame where the GPU tells it
+(the same queries as the automatic choice), the level (and "(auto)"), the
+canvas's size, the CSS size it fills and the device pixel ratio, the sizes
+of the picture, the frame, the low clouds' pass, the first stage of their
+light and the cirrus's pass, the drawing scale, the time from opening the
+page to the first picture, the GPU memory of the level (its textures,
+counted as `makeSky` makes them, by wrapping the calls that allocate and
+free them on its context, `countMemory`; and the canvas's own buffers as 12
+bytes a pixel), the contexts lost and the levels that failed, and the GPU's
+name. Without `?stats`, none of this runs (the GPU's times are then asked
+only for the automatic choice, not for a level named in the address or
+the panel).
 
 ## Textures made at start
 

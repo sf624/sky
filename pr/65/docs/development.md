@@ -55,6 +55,7 @@ These are read directly.
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
+| `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the level, the canvas and the sizes drawn, the first picture, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
@@ -434,17 +435,25 @@ The phone is 412 x 915 CSS pixels at a device pixel ratio of 2.6 (`perf
 
 | Level | 2560 x 1440 window | all pixels (2560 x 1440) | phone |
 |---|---|---|---|
-| `low` | 1.8 to 3.0 ms (730 x 411) | 7.0 ms | 2.7 to 3.2 ms (368 x 816) |
-| `mid` | 3.2 to 3.4 ms (1193 x 671) | 9.1 ms | 2.8 to 3.7 ms (600 x 1333) |
+| `low` | | 2.9 to 3.3 ms (the frame at 1280 x 720) | 1.5 ms (368 x 816; the frame 184 x 408) |
+| `mid` | | 4.3 to 4.4 ms (the frame at 1280 x 720) | |
 | `high` | 12.9 ms (1920 x 1080) | 21.0 ms | 7.6 ms (824 x 1830) |
 | `max` | 21.9 ms (2560 x 1440) | 21.9 ms | 8.0 ms (824 x 1830) |
 
+(`low` and `mid` measured on 2026-11-19 before `low` left out the
+cirrus's march near the eye and its shadows; before the frame was drawn
+at half size, `low` took 7.0 ms for all pixels and 2.7 to 3.2 ms at the
+phone's size, `mid` 9.1 ms.)
+
 Small canvases keep this GPU busy for only part of a draw: at 0.3 million
-pixels `low` takes 2.7 ms, where its cost per pixel at 3.7 million gives
-0.6 ms. A phone's GPU, some fifty times slower, is busy throughout, so
+pixels the old `low` took 2.7 ms, where its cost per pixel at 3.7 million
+gave 0.6 ms. A phone's GPU, some fifty times slower, is busy throughout, so
 its time follows the cost per pixel more than this GPU's at the same
-size. The first picture comes 6.7 to 8.0 s after navigation at every
-level: the programs are the same, only their defines differ.
+size: compare levels by the column "all pixels". The first picture comes
+some 7 s after navigation at every level on this machine, most of it the
+driver finishing the programs at their first draws; on Direct3D 11 (`d3d
+page`, 1898 x 982, one run each, before the last cuts) `low` 13.2 s, `mid`
+17.2 s, `high` 17.1 s, `max` 18.5 s.
 
 ## GLSL rules
 
