@@ -360,7 +360,13 @@ Cornette-Shanks form (`cornetteShanks`), by height:
 **The march.** `NV` = 20 samples at
 `t = tmax * f * f`: denser near the eye. In twilight the view ray may pass
 through the planet's shadow: in parallel light, a cylinder of radius `RG`
-behind the planet (`shadowSpan`). Then the march has three runs, each
+behind the planet (`shadowSpan`: the part of the ray inside the cylinder
+and behind the plane through the planet's centre facing the light). By
+day the eye is inside the cylinder on the light's side; until issue #54
+the span was cut by the chord's middle alone, so that every ray above a
+curve through the sun was marched as if it crossed the shadow, with 8
+samples instead of 20: a step of about 1 % across the sky. Then the
+march has three runs, each
 denser at its start: `NV` samples from the eye to the shadow, `NSHADE` = 8
 in it, and `NFAR` = 16 in the lit air beyond (a run of no length is
 skipped). The light scattered once rises steeply from the shadow's edge;
