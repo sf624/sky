@@ -200,6 +200,14 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
   const s = (m, p) => session.chrome.send(m, p, sessionId);
   const ev = async (expression) => (await s('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value;
   await s('Page.enable');
+  // With ?timing, the page's console lines of its loading (see docs/design.md), printed at the end.
+  const lines = [], listen = (m) => {
+    if (m.sessionId === sessionId && m.method === 'Runtime.consoleAPICalled' && m.params.type === 'info') lines.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
+  };
+  if (/(^|&)timing(=|&|$)/.test(q.slice(1))) {
+    session.chrome.on(listen);
+    await s('Runtime.enable');
+  }
   await s('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: dpr, mobile });
   if (mobile) await s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await s('Page.addScriptToEvaluateOnNewDocument', { source: PERF });
@@ -232,6 +240,8 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
     console.log(`${k}: ${a.length} draws, GPU ms median ${a[a.length >> 1].toFixed(2)}, p90 ${a[Math.floor(a.length * 0.9)].toFixed(2)}`);
   }
   if (!Object.keys(g.kinds).length) console.log('no GPU times (no draws while measuring, or no timer extension)');
+  session.chrome.off(listen);
+  for (const l of lines) console.log(`console: ${l}`);
   await session.chrome.send('Target.closeTarget', { targetId });
   return 0;
 }
