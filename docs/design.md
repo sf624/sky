@@ -147,9 +147,11 @@ The JS then runs once, at load, and does little:
      right after its draws, the meter sometimes read the picture before it
      was drawn, about one load in fifteen on the test machine with the
      256^3 body: the first frame then began some 17 stops too bright.)
-     With cirrus the frame is drawn and metered again, at the exposure the
-     last reading gave, until a reading lies within `ADAPT_START` of the
-     exposure it was drawn at (see [Exposure](#exposure-and-the-tone-curve)).
+     Where the night eye hangs on the exposure (late twilight and night),
+     the frame is drawn and metered again, at the exposure the last reading
+     gave, until a reading lies within `ADAPT_START` of the exposure it was
+     drawn at (see [Exposure](#exposure-and-the-tone-curve)); by day one
+     reading does.
    - A context lost meanwhile (`webglcontextlost`: the GPU process
      restarted, or its driver gave up) ends the loading with an error at the
      next wait, instead of waiting for a fence for ever.
@@ -1052,7 +1054,16 @@ each cloud, not on its surface; no normal of the field enters it.
   light strays in a cloud, and the shadows soften; the stray grows with
   the depth the light has come through, by 1 + `tau` / `STRAY_TAU` (8), at
   most `STRAY_MAX` = 12 times: light that went far through a cloud comes
-  from a wide part of it), and beyond that the
+  from a wide part of it; every step reads the field at the level of the
+  first: read half a level coarser at each step, as until #68, a small
+  heap had too little depth towards the light, because the smoothed field
+  falls under the cloud's edge where the field itself does not: seen
+  towards the sun from 0.3 km, the heaps of `g1` had a median depth
+  towards the light of 3.2 where a march of 20 m steps through the field
+  finds 6.4, now 5.0, and glowed through; towers did not change, and the
+  cost did not change measurably. With the fine noise in the later steps
+  too the depth came out at 7, but the shaded sides of towers turned
+  mottled), and beyond that the
   map of the clouds' shadow (`cloudShadow`, read where the steps ended: it
   holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low; `tauB`,
@@ -2140,7 +2151,13 @@ on the map.
   `CI_ROLL` = 1.8 times the screen's white (after the exposure,
   `x -> R (1 - exp(-x / R))`), so the texture of the ice stays outside a
   bright round zone round the sun, as in a photograph. The rest of the
-  cirrus's light is untouched. The aureole follows the ice in front by
+  cirrus's light is untouched. The meter does not see that roll, which
+  hangs on the exposure: it sees the light scattered forward rolled off
+  the same way towards `CI_METER` = 12 times the light of the sky at the
+  sheet (`msS` and `msM`, the light from round about), about where the
+  screen rolls it off by day (11 to 28 times in the views measured). What
+  the meter is to see differently, `HM`, joins the sun's disc in `G`
+  (see [Exposure](#exposure-and-the-tone-curve)). The aureole follows the ice in front by
   0.4 (0.25 before).
 - The cirrus's shadow dims the direct light on the low clouds and the sea
   (half the depth counts: ice scatters mostly forward). It reads the mean
@@ -2358,7 +2375,10 @@ facing the sun as away from it (h11-vueling01 and 03); counted in full,
 the glitter held the view towards the sun 1.5 to 2.4 stops below the
 view away, and the sky there was navy (round 10). Every other light
 counts in full, the moon, the stars, the Milky Way and the zodiacal
-light among them. Before, the zodiacal light was left out (`zodiY`): it
+light among them, but for the light that cirrus scatters forward, which
+the meter sees rolled off scene by scene rather than on the screen (`HM`,
+see [Cirrus](#cirrus)): so the level does not hang on the exposure, but
+for what the night eye sees. Before, the zodiacal light was left out (`zodiY`): it
 was drawn then some four times its own light, and counted in, it darkened
 a spring evening's view of its cone by 0.25 to 0.56 stops.
 
@@ -2376,35 +2396,56 @@ the page starts adapted. The loading has drawn that frame before and read
 its meter without waiting (`prime`, see
 [From the address bar](#from-the-address-bar-to-the-first-frame)); only if
 something changed since (a resize, say) does the first frame read it
-itself, the one read that waits. With cirrus, `prime` draws and meters it
-again at the exposure the last reading gave, until a reading lies within
+itself, the one read that waits. The level is taken before the exposure,
+so one reading is the exposure the picture asks for, whatever the
+exposure it was drawn at; but what the night eye sees (`uNightEye` and
+`uNightGrey`, from the exposure) changes the level. Where they differ
+between the exposure drawn at and the one read, `prime` draws and meters
+the picture again at the one read, until a reading lies within
 `ADAPT_START` of the exposure it was drawn at (at most `PRIME_DRAWS` = 6
-draws): the exposure found is then the one the picture asks for (a fixed
-point: the next reading moves by less still), and the page does not fade
-at its start. The light the cirrus scatters forward rolls off on the
-screen (`CI_ROLL`, after the exposure), so a bright sheet near the sun
-meters darker at a higher exposure. In the default view a picture drawn
-at 0 (log2) reads -0.91, at -0.91 -1.19, at -1.19 -1.24, at -1.24 -1.25:
-four draws. Each draw leaves 0.2 to 0.3 of the gap. With two draws only,
-the page started 0.06 stops too bright and faded down over its first 27
-frames, so that at rest it drew 68 frames where 40 do.
+draws, a fixed point: the next reading moves by less still), and the
+page does not fade at its start. Before, the light the cirrus scatters
+forward was metered as the screen rolls it off (`CI_ROLL`, after the
+exposure), and with cirrus every first picture was drawn up to six times:
+in the default view at 0 (log2), -0.91, -1.19 and -1.24, four draws.
 
 **The exposure the picture asks for** (`exposureFor`, log2) comes from the
-2304 block levels, sorted:
+2304 block levels, sorted. Each share below is read as a mean of the
+sorted levels over the shares `BAND` = 0.1 on either side of it
+(`HIGH_BAND` = 0.025 for `high`), weighed by a triangle (`bandOf`): a block
+that crosses the band's edge counts for nothing there, so the level moves
+smoothly as the view does. Read as single blocks (order statistics), one
+block decided over clumpy clouds, and in flight the exposure moved by up
+to 0.011 stops over 20 frames from place to place. The band of glow
+(`PEAK_SHARE`, a few blocks) is still read as one.
 
 - `low`, the level of the darker quarter (`LOW_SHARE`), but at least
   `NIGHT_LEVEL` = -25.5 (a moonless night sky);
 - `high`, the level that only the brightest 3% of the blocks pass
-  (`HIGH_SHARE`);
+  (`HIGH_SHARE`); and `lit`, the same with the blocks near the sun
+  counting for less: from `SUN_SHARE` = 0.5 of their light within
+  `SUN_NEAR` = 10 degrees of the sun to all of it from 45 degrees (a
+  smoothstep, at each block's middle, `near`, from the view the picture
+  was metered in). A camera lets the sun's surroundings run into white,
+  the bright edges of the clouds before it among them, and exposes for
+  the rest. Held below white, the edges of cumulus within 15 degrees of
+  the sun set the exposure of a view up towards it with thin cirrus, and
+  the sky round them came out dark, sRGB about (48, 64, 96), where
+  photographs show a lighter blue (about 100 to 140 of luma: p4, a
+  camera). (With 0.35 that sky came out at 96 to 104 of luma in `g1`,
+  but the heaps before the sun a flat white, 211 at their median; with
+  0.5, 86 to 94 and 198, their darker twentieth 142 instead of 157);
 - `key` = `KEY` - `EYE` * `low` (`KEY` = -1.3): as the view darkens,
   the eye opens up `EYE` = 0.85 stops for each stop, not all the way. So
   a night is darker than a day and dusk is in between, and black sea at night is exposed as
   the night sky, not lifted into noise;
-- `white` brings `high` to `WHITE` (2^0.3 before the tone curve: just
-  below white) in daylight (`high` at `DAY_HIGH` = 0.5 or more), and `DIM`
-  = 0.6 stops lower for each stop that `high` is below that: the
-  brightest parts of a dim view are not white either (the moonlit clouds
-  of a night);
+- `white` brings `lit` to `WHITE` (2^0.3 before the tone curve: at the
+  start of its shoulder, about 218 of 255) in daylight (`lit` at
+  `DAY_HIGH` = 0.5 or more), and `DIM` = 0.6 stops lower for each stop
+  that it is below that: the brightest parts of a dim view are not white
+  either (the moonlit clouds of a night). By day `lit` stands for `high`;
+  as twilight's exposure takes over (`DUSK`, below), `high` again, so
+  that twilight, its band of glow and the night are metered as before;
 - `mid`, the median level, but at least `NIGHT_LEVEL`;
 - by day and by night, the exposure is the lesser of `key` and `white`, but not less than a
   floor: the exposure that takes `mid` only `DEEP` = 0.8 of the way from
@@ -2512,7 +2553,12 @@ the comparison, so the check now reads the flight's exposure at its last
 frame (`window.__exposure`, log2) and draws the still at it (`?expo=`
 pins the exposure): 1.21 and 1.12. Separately it asserts that the
 exposure stays steady, moving under 0.01 stops over the last 20 frames
-(measured 0.0024 and 0.0030). `res` draws its still the same way. The
+(measured 0.0022 and 0.0061, against main's 0.0025 and 0.0045 then: in
+the low flight a smooth drift as the clouds go by, its largest step from
+frame to frame 0.0006 stops). With the band means the exposure moves in
+smaller steps than with single blocks: over 120 frames at 0.3 km its
+largest step was 0.0015 stops (0.0027 before), towards the sun with
+cumulus 0.0015 (0.0043), at 4.6 km 0.0003 (0.0008). `res` draws its still the same way. The
 base has neither, and is compared as it comes.
 
 At the end of `main`:
@@ -2601,8 +2647,26 @@ At the end of `main`:
    everything alike: the Milky Way, the zodiacal light and the stars stand
    out of a moonless sky, and fade under a moon because the moonlit sky
    lies over them and the curve is gentler there.
-6. Tone mapping `1 - exp(-col)`, channel by channel, then the display
-   power `1 / 2.2`. Steps 2, 4, 5 and 6 are those of `main`.
+6. Tone mapping, channel by channel: `1 - exp(-col)` up to the knee
+   `SHOULDER.x` = 0.75 (of the looked value: about 191 of 255 after the
+   display power), and above it `1 - exp(-k) (1 + (col - k) / m)^-m`,
+   `m` = `SHOULDER.y` = 1.5: a shoulder that falls off as a power, meeting
+   the curve below with the same value and slope. Then the display power
+   `1 / 2.2`. Before, the exponential ran on to the top: lit cloud one
+   stop over the meter's highlights (`WHITE`) stood at 247 and 1.3 stops
+   over at 253, so the tops of cumulus ran together into a flat white
+   (on a control view of one cumulus, 41 % of it at 250 or more; luma
+   p5/p50/p95 183/216/254, where a path-traced picture of the same cloud
+   has 145/206/237). Now the meter's highlights stand at 219 (222
+   before), half a stop over at 234 (241), one stop over at 243 (252),
+   two at 252 (255), and white is reached some three stops over: lit
+   cloud keeps its gradation, and only
+   far brighter light (the sun's disc and glow, glints, a backlit edge
+   near the sun) runs into white. Below the knee nothing changed, nor do
+   twilight's and the night's pictures, which seldom reach it. Channel by
+   channel as before: a bright sky or band of glow turns towards white in
+   its strongest channel first, now more slowly. Steps 2, 4, 5 and 6 are
+   those of `main`.
 7. Rounding at random to the storage steps (next section).
 
 ## The hero's mean over frames

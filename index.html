@@ -1713,6 +1713,7 @@ const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little b
 const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
 const vec2 SKY_BLUE = vec2(0.001, 0.01);
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
+const vec2 SHOULDER = vec2(0.75, 1.5);   // the tone curve's knee (on the looked value) and the power of its shoulder (see main)
 const int GRID = 128;
 const int SLOTS = 8;
 const float LN_FLUX_MAX = 5.9915;   // ln(400)
@@ -3146,13 +3147,20 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // the map: there three more steps, by degrees.
       // The light's: the optical depth of the clouds towards the light over
       // the next 26 first steps' worth of distance (the first: step); the
-      // steps grow. The first three see the fine noise, smoothed over some
-      // tens of metres (light spreads that far in a cloud), and the depth of
-      // the first two comes apart (crisp, for tauF, where it is wanted: see
-      // below): bumps shade the creases beside them softly. The others make
-      // tauCM, where the first stage did not serve. The levels of the reads
-      // shrink with the step below 50 m (kl < 0), so that a nearer cloud is
-      // shaded as a far one is, at a smaller size. The later steps are moved
+      // steps grow. All read the field at the level of the first; the
+      // first three see the fine noise, smoothed over some tens of metres
+      // (light spreads that far in a cloud), and the depth of the first two
+      // comes apart (crisp, for tauF, where it is wanted: see below): bumps
+      // shade the creases beside them softly. The others make tauCM, where
+      // the first stage did not serve. (Read half a level coarser at each
+      // step, a small heap had too little depth towards the light: the
+      // smoothed field falls under the edge of the cloud where the field
+      // itself does not, and a heap of 6 seen towards the sun was lit as
+      // one of 3, through and through. With the fine noise in every step
+      // too, the depth came out right, 6 to 7, but the shaded sides of
+      // towers were mottled.) The levels of the reads shrink with the step
+      // below 50 m (kl < 0), so that a nearer cloud is shaded as a far one
+      // is, at a smaller size. The later steps are moved
       // aside by off, each a third of a turn from the one before: light
       // strays inside a cloud, and over the frames the shadows of other
       // clouds soften. The stray grows with the depth the light has come
@@ -3195,7 +3203,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         } else {
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
-          l = j < 2 ? max(lod, kl - 1.0) : max(lod, kl) + 0.5 * float(j);
+          l = max(lod, kl - 1.0);
           x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
@@ -3551,7 +3559,7 @@ float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
 // averages away stays in the variance, so that the light of the glitter
 // is the same from near and far.
 // G: the glitter alone (for the meter).
-void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vis, float tau, inout vec4 L[3], out vec4 G[3]) {
+void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vis, float tau, inout vec4 L[3], inout vec4 G[3]) {
   vec3 n = normalize(pg);
   vec3 ps = pg + n * 0.001;
   float cv = max(dot(n, -d), 0.0);
@@ -3660,7 +3668,6 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   foam *= 0.5;                                       // the albedo of thick foam
 
   vec4 T[3], lit[3];
-  G[0] = vec4(0.0); G[1] = vec4(0.0); G[2] = vec4(0.0);
   for (int k = 0; k < 3; k++) {
     T[k] = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     lit[k] = vec4(0.0);
@@ -3684,8 +3691,9 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     float direct = exp(-tau);
     for (int k = 0; k < 3; k++) {
       lit[k] = uLightI * exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
-      G[k] = T[k] * lit[k] * direct * glint;
-      L[k] += G[k] + T[k] * lit[k] * soft * c / PI * (SEA[k] + foam);
+      vec4 g = T[k] * lit[k] * direct * glint;
+      G[k] += g;
+      L[k] += g + T[k] * lit[k] * soft * c / PI * (SEA[k] + foam);
     }
   }
   // The sky, mirrored by the tilted footprint. Rough water mirrors less at
@@ -3797,6 +3805,7 @@ const int CI_SHEETS = 4;
 // and a finer read magnified the texels of the ice into rows of beads.
 const float CI_MINF = 0.02;
 const float CI_ROLL = 1.8;                 // the light scattered forward rolls off towards it
+const float CI_METER = 12.0;               // ...and for the meter, towards this many times the light of the sky at the sheet
 // The share of the ice's extinction that is diffraction by its crystals
 // (some 100 um): light turned by less than a degree, which goes on as if
 // not scattered. What lies behind the cirrus (the sky, the sea, the
@@ -4825,7 +4834,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
 
 // The light of the cirrus (H) at tHigh along the ray, from the numbers lk
 // of its pass (see highCloud).
-void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3]) {
+void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3], out vec4 HM[3]) {
   vec3 pc = o + d * tHigh, up = normalize(pc);
   float mu = dot(d, uLight), th = acos(clamp(mu, -1.0, 1.0));
   float mus = dot(up, uLight);
@@ -4858,7 +4867,20 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3]
   // (after the exposure), so that the texture of the ice stays.
   float lum = ISUN * uExposure * (dot(uWG[0], F[0]) + dot(uWG[1], F[1]) + dot(uWG[2], F[2]));
   float roll = lum > 1e-4 ? CI_ROLL * (1.0 - exp(-lum / CI_ROLL)) / lum : 1.0;
-  for (int k = 0; k < 3; k++) H[k] += roll * F[k];
+  // The meter does not see that roll, which hangs on the exposure (a
+  // brighter exposure would meter a darker sheet, and the first picture
+  // would have to be drawn again until the two agree): it sees the light
+  // rolled off towards CI_METER times the light of the sky at the sheet,
+  // about where the screen rolls it off by day. HM is what main takes out
+  // of the light it meters, with the sun's disc (G), for the difference.
+  float sky = dot(uWG[0], uSunI * msS[0] + uMoonI * msM[0]) + dot(uWG[1], uSunI * msS[1] + uMoonI * msM[1])
+            + dot(uWG[2], uSunI * msS[2] + uMoonI * msM[2]);
+  float rel = (dot(uWG[0], F[0]) + dot(uWG[1], F[1]) + dot(uWG[2], F[2])) / max(CI_METER * sky, 1e-30);
+  float rollM = rel > 1e-4 ? (1.0 - exp(-rel)) / rel : 1.0;
+  for (int k = 0; k < 3; k++) {
+    H[k] += roll * F[k];
+    HM[k] = (roll - rollM) / (1.0 - METER_GLINT) * F[k];
+  }
 }
 
 // A distance (km; negative: infinitely far) as a number from 0 to 1, in 16
@@ -5040,7 +5062,7 @@ void main() {
   vec3 cloudOl = vec3(0.0);
   float cloudSun = 0.0;
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
-  vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
+  vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), HM[3] = H;
   if (uCloud > 0.0) {
     ivec3 here = ivec3(gl_FragCoord.xy, 1);
     uvec4 cl = texelFetch(uPasses, here, 0);
@@ -5079,7 +5101,7 @@ void main() {
     uvec4 ci = texelFetch(uPasses, here, 0);
     Th = texelFetch(uPassDepth, here, 0).r;
     tHigh = uintBitsToFloat(ci.x);
-    if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, uintBitsToFloat(ci.yzw), H);
+    if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, uintBitsToFloat(ci.yzw), H, HM);
   }
   float mu = dot(d, uSun);
   vec3 phaseSun = phases(mu);
@@ -5216,7 +5238,9 @@ void main() {
     if (atLayer) {
       bool isClouds = (layer == 0) == cloudsFirst;
       for (int k = 0; k < 3; k++) {
-        L[k] += visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z)) * (isClouds ? C[k] : H[k]);
+        vec4 to = visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
+        L[k] += to * (isClouds ? C[k] : H[k]);
+        if (!isClouds) G[k] += to * HM[k];
       }
       vis *= isClouds ? Tc : Th;
       visX *= isClouds ? Tc : Th + CI_FWD * (1.0 - Th);
@@ -5313,7 +5337,7 @@ void main() {
     // airglow's radiance, each magnitude brighter STAR_LN_MAG brighter.
     float stars = uNight * STAR_GAIN * free;
     for (int k = 0; k < 3; k++) {
-      G[k] = tk[k] * sun;
+      G[k] += tk[k] * sun;
       L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
   }
@@ -5383,7 +5407,7 @@ void main() {
     dot(uWR[0], G[0]) + dot(uWR[1], G[1]) + dot(uWR[2], G[2]),
     dot(uWG[0], G[0]) + dot(uWG[1], G[1]) + dot(uWG[2], G[2]),
     dot(uWB[0], G[0]) + dot(uWB[1], G[1]) + dot(uWB[2], G[2])));
-  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * max(glintY, 0.0);
+  float metered = dot(col, vec3(0.2126, 0.7152, 0.0722)) - (1.0 - METER_GLINT) * glintY;
   float level = (log2(max(metered, 1e-30)) - uLogRange.x) / (uLogRange.y - uLogRange.x);
   col *= uExposure;
   // No shoulder that keeps the hue: each channel meets the curve below on
@@ -5426,8 +5450,12 @@ void main() {
     float pivot = LOOK_PIVOT * pow(DARK_PIVOT / LOOK_PIVOT, dark);
     looked = mix(looked, col * pow(yl, n - 1.0) * pow(pivot, uLook - n), rodShare);
   }
-  col = looked;
-  col = 1.0 - exp(-col);                             // tone mapping
+  // Tone mapping: 1 - exp(-col) up to the knee (SHOULDER.x); above it the
+  // shoulder falls off as a power (SHOULDER.y) instead of exponentially, so
+  // that lit cloud keeps its gradation some two stops further up, and only
+  // far brighter light (the sun's glow, glints) runs into white. The two
+  // meet with the same value and slope.
+  col = 1.0 - exp(-min(looked, SHOULDER.x)) * pow(1.0 + max(looked - SHOULDER.x, 0.0) / SHOULDER.y, vec3(-SHOULDER.y));
   col = pow(col, vec3(1.0 / 2.2));                   // display encoding
   // How far is what this pixel shows? As far as the clouds, if they hide
   // enough of what is behind or give enough of its light, or else as far
@@ -6174,6 +6202,10 @@ const SkySound = (() => {
   const WHITE = 0.3;             // ...end at this level after exposure (just below white)...
   const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
   const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
+  const BAND = 0.1;              // each share is read as a mean over shares this far on either side (HIGH_BAND for HIGH_SHARE)
+  const HIGH_BAND = 0.025;
+  const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
+  const SUN_SHARE = 0.5;         // ...down to this share of their light
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
   const DUSK = [8, 1];           // twilight's exposure takes over as the sun goes from 8 to 1 degrees:
   const DUSK_SHARE = 0.65;       // ...set by the level that the brighter third of the picture passes (the sky):
@@ -6736,7 +6768,11 @@ const SkySound = (() => {
   function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     const key = KEY - EYE * low;
-    const white = WHITE - high - DIM * Math.max(0, DAY_HIGH - high);
+    // By day, the highlights near the sun count for less (st.lit), and
+    // as twilight's exposure takes over, in full again.
+    const day = 1 - smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1]));
+    const lit = high + day * (st.lit - st.high);
+    const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const byDay = Math.max(Math.min(key, white), floor);
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
@@ -6783,13 +6819,30 @@ const SkySound = (() => {
             - Math.log2(Math.max(state.sunOn, 1e-30)) - airLevel(state.alt, state.elev);
     return smooth01((q - MOON_AIR[0]) / (MOON_AIR[1] - MOON_AIR[0]));
   }
-  function exposureFor(v) {
-    const q = Float64Array.from(v).sort();
-    const share = k => {
-      const i = k * (q.length - 1), i0 = Math.floor(i);
-      return q[i0] + (q[Math.min(i0 + 1, q.length - 1)] - q[i0]) * (i - i0);
-    };
-    const st = { low: share(LOW_SHARE), high: share(1 - HIGH_SHARE), mid: share(0.5), sky: share(DUSK_SHARE), peak: share(1 - PEAK_SHARE) };
+  // The level at share k of the sorted levels q, as a mean over the shares
+  // k - b to k + b, weighed by a triangle: a block that crosses the band's
+  // edge counts for nothing there, so the level moves smoothly as the view
+  // does, where a single block decided before (from place to place in
+  // flight, the exposure moved by up to 0.011 stops over 20 frames). For
+  // the band of glow (PEAK_SHARE), a few blocks, b is 0.
+  const bandOf = (q, k, b) => {
+    const n = q.length - 1;
+    if (b === 0) {
+      const i = k * n, i0 = Math.floor(i);
+      return q[i0] + (q[Math.min(i0 + 1, n)] - q[i0]) * (i - i0);
+    }
+    let s = 0, w = 0;
+    for (let i = Math.max(0, Math.ceil((k - b) * n)); i <= Math.min(n, Math.floor((k + b) * n)); i++) {
+      const t = 1 - Math.abs(i / n - k) / b;
+      s += t * q[i]; w += t;
+    }
+    return s / w;
+  };
+  function exposureFor(v, near) {
+    const q = Float64Array.from(v).sort(), share = k => bandOf(q, k, BAND);
+    const lit = Float64Array.from(v, (x, i) => x + near[i]).sort();
+    const st = { low: share(LOW_SHARE), high: bandOf(q, 1 - HIGH_SHARE, HIGH_BAND), mid: share(0.5), sky: share(DUSK_SHARE),
+                 peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND) };
     let E = exposureAt(st, state.elev, 0);
     if (state.elev < DUSK[0]) {
       const here = airLevel(state.alt, state.elev);
@@ -7576,11 +7629,32 @@ const SkySound = (() => {
       for (let i = 0; i < levels.length; i++) {
         levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
       }
-      target = exposureFor(levels);
+      target = exposureFor(levels, near);
+    };
+    // How much less each block counts for being near the sun (log2, for
+    // the highlights by day: see exposureFor), from the view it was metered
+    // in: SUN_SHARE of its light within SUN_NEAR[0] degrees of the sun, all
+    // of it from SUN_NEAR[1] degrees, at the block's middle. A camera lets
+    // the sun's surroundings run into white, the bright edges of the clouds
+    // before it among them, and exposes for the rest; held below white, they
+    // kept the sky round them dark, sRGB about (48, 64, 96) beside thin
+    // cirrus, where photographs show a lighter blue.
+    const near = new Float64Array(METER[0] * METER[1]);
+    const weigh = p => {
+      const v = view(), c = camera(v.yaw, v.pitch), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
+      for (let j = 0, i = 0; j < METER[1]; j++) {
+        for (let k = 0; k < METER[0]; k++, i++) {
+          const x = ((k + 0.5) / METER[0] * 2 - 1) * a * t, y = ((j + 0.5) / METER[1] * 2 - 1) * t;
+          const dx = c[0] * x + c[3] * y + c[6], dy = c[1] * x + c[4] * y + c[7], dz = c[2] * x + c[5] * y + c[8];
+          const deg = Math.acos(Math.min(1, (dx * s[0] + dy * s[1] + dz * s[2]) / Math.hypot(dx, dy, dz))) / RAD;
+          near[i] = Math.log2(SUN_SHARE + (1 - SUN_SHARE) * smooth01((deg - SUN_NEAR[0]) / (SUN_NEAR[1] - SUN_NEAR[0])));
+        }
+      }
     };
     // Meters the picture p. The meter is read at once (when: 'now'),
     // METER_LAG frames later ('later': poll), or by prime.
     const meterPicture = (p, when) => {
+      weigh(p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.viewport(0, 0, METER[0], METER[1]);
       gl.useProgram(meter);
@@ -8057,24 +8131,24 @@ const SkySound = (() => {
     // meter read once the GPU has drawn it: so the first frame need not
     // wait for the GPU. On drivers that finish a program at its first draw,
     // this also gets that out of the way before the first frame.
-    // With cirrus it is drawn again, at the exposure the last reading gave,
-    // and metered again, until a reading lies within ADAPT_START of the
-    // exposure it was drawn at: the exposure the picture asks for is then
-    // found, a fixed point (the next reading moves by less still), and the
-    // page does not fade at its start. The light the cirrus scatters forward
-    // rolls off on the screen (see cirrusLight), so a bright sheet near the
-    // sun meters darker at a higher exposure: in the default view a picture
-    // drawn at 0 (log2) reads -0.91, at -0.91 -1.19, at -1.19 -1.24, at
-    // -1.24 -1.25. Each draw leaves 0.2 to 0.3 of the gap. Drawn twice only,
-    // the page started 0.06 stops too bright and faded down over its first
-    // half second, drawing for 68 frames at rest where 40 do.
+    // The meter reads the light before the exposure, so one reading gives
+    // the exposure the picture asks for, whatever exposure it was drawn at;
+    // but for what the night eye sees (the rods, uNightEye and uNightGrey),
+    // which hangs on the exposure. Where that differs between the exposure
+    // drawn at and the one read, the picture is drawn and metered again at
+    // the one read, until a reading lies within ADAPT_START of the exposure
+    // it was drawn at (a fixed point: the next reading moves by less still),
+    // so that the page does not fade at its start. (Before, the light the
+    // cirrus scatters forward was metered as it rolls off on the screen,
+    // after the exposure, and with cirrus every first picture was drawn up
+    // to six times: four in the default view.)
     const probe = () => {
       const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn];
       const drew = render(true, performance.now(), true);
       [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
       return drew;
     };
-    const PRIME_DRAWS = 6;                   // at most (the default view needs 4)
+    const PRIME_DRAWS = 6;                   // at most
     const prime = async () => {
       if (!probe()) return;                  // the canvas has no place on the page yet
       // Its meter, once the GPU has drawn it: metered at once after its
@@ -8096,8 +8170,9 @@ const SkySound = (() => {
       gl.useProgram(prog);
       await settle();
       readMeter();
-      if (pin !== null || !(state.cirrus > 0)) return;
-      for (let n = 1; n < PRIME_DRAWS && target !== null && Math.abs(target - firstE) > ADAPT_START; n++) {
+      const eyed = (a, b) => nightEyeFor(a) !== nightEyeFor(b) || nightGreyFor(a) !== nightGreyFor(b);
+      if (pin !== null) return;
+      for (let n = 1; n < PRIME_DRAWS && target !== null && Math.abs(target - firstE) > ADAPT_START && eyed(target, firstE); n++) {
         firstE = target;
         probe();
         await settle();
