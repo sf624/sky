@@ -977,13 +977,14 @@ clouds.
 slowly across the picture. So the hero draws the low clouds' pass
 (`CLOUD_PASS`) twice a frame (`uStage`): stage 0, at half the width and
 height, marches each ray to the first cloud it meets and keeps the slow
-parts of its light there (`uLightMap`: six half floats, two to each of
-three of four 32-bit integers, rounded towards zero as the GPU rounds into a
+parts of its light there (`uLightMap`: seven half floats, two to each of
+four 32-bit integers, rounded towards zero as the GPU rounds into a
 target of half floats: the distance where the ray entered that cloud, the
 depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
-sky's lean towards the sun's side, and the depth towards the light over its
-first two steps), taken where the ray entered the cloud (marching on to the point
+sky's lean towards the sun's side, the depth towards the light over its
+first two steps, and over its own steps past those without the map of the
+clouds' shadow, `tauN`), taken where the ray entered the cloud (marching on to the point
 where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
@@ -1087,6 +1088,29 @@ each cloud, not on its surface; no normal of the field enters it.
   scattered many times builds up over the first tens of metres, so a thin
   billow, a shred or a rim, which the eye sees through before it gets deep,
   is darker than a deep one.
+- *In a crease on the lit side* both are less (`crease`; not from the
+  Monte Carlo, whose spheres have no creases): by up to `CREASE.x` = 0.8
+  as `1 - e^(-tauLoc / CREASE.y)`, `CREASE.y` = 4, where `tauLoc` is the
+  depth towards the light over the light's own steps (`tauF` and `tauN`:
+  out to 27.8 first steps, some 0.4 to 1.4 km), and only on the side of a
+  mass that the light falls on: by `smoothstep(0.5, 0.9, tauB / (tauB +
+  tauLoc))` (`CREASE.zw`), much more cloud behind the place than towards
+  the light. On a sphere, a place with much cloud behind it and some depth
+  towards the light lies near the edge of the lit face, where light goes
+  in right beside it, and the fit keeps it bright (`K` = 0.0074: a depth of
+  20 takes 13 % off); in a crease the heads round it take that light. With
+  the fit alone, creases on the lit side were 0.85 to 0.9 as bright as the
+  heads round them (on the picture, the darkest tenth of the cloud against
+  the brightest within 25 pixels at 1280x720), the heaps smooth white
+  mounds like snow; photographs of heaps from above and of towers from the
+  side show 0.57 to 0.79 (0.84 to 0.89 with the sun behind the eye: then
+  the creases are lit too). Now 0.72 to 0.81, and still 0.86 to 0.88 with
+  the sun behind the eye or looking straight down.
+  The map of the clouds' shadow is left out of `tauLoc`: its heights lie
+  hundreds of metres apart, and with the sun low it drew bands across the
+  towers (`tauCM` itself, and with it the light scattered once, still
+  shows them faintly there). The shaded side keeps its light (more cloud towards the light
+  than behind), and so do small heaps and thin cloud (little behind).
 - *The sky's light*: how much of the sky the place sees (`sky`): the light
   that comes through the cloud along directions drawn over the sky's
   hemisphere by the cosine to the up, new for each pixel and frame, two of
@@ -2590,7 +2614,7 @@ textures for it, each with a second texture beside it (`aux`):
 
 - `light`: the first stage of the clouds' light (`lightMap`), drawn by
   the low clouds' pass (`CLOUD_PASS`) with `uStage` 0 at half the width
-  and height into one texture of RGBA32UI on unit 18 (six half floats),
+  and height into one texture of RGBA32UI on unit 18 (seven half floats),
   before the frame (see Low clouds);
 - `passes` (`passTarget`): the cirrus's pass and the low clouds' (`fs`
   with `CIRRUS_PASS` and `CLOUD_PASS`), the two layers of a texture of
