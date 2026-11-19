@@ -1612,6 +1612,17 @@ precision highp int;
 #ifndef Q_AIR_LUT
 #define Q_AIR_LUT 0       // 1: the scene reads the air's light from a table made ahead (AIR_LUT), not by a march
 #endif
+#ifndef Q_DETAIL_KM
+#define Q_DETAIL_KM 1e9   // the low clouds' fine noise only nearer than this (km)
+#endif
+#ifndef Q_TC_END
+#define Q_TC_END 0.01     // the march through the low clouds ends when less than this gets through
+#endif
+#ifdef Q_BENCH_CLOUD_LOD  // (?stats=bench3: the clouds' detail for the frame's pixels)
+#define CLOUD_FRAME 1.0
+#else
+#define CLOUD_FRAME Q_FRAME
+#endif
 #ifndef Q_LEAN
 #define Q_LEAN 1          // 0: the air's light leans no way (no MIE_LEAN: addLight reads msLean not)
 #endif
@@ -2764,7 +2775,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float c = min(f, base);
   fb = f - base;
   billowy = smoothstep(0.15, 0.45, heapUp) * mix(0.5, 1.0, upshear);
-  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME * length(p));
+  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * CLOUD_FRAME * length(p));
   // Hard, growing turrets have a crisp edge (10 m); older cloud a deeper
   // fringe. Billows smaller than the edge melt into it: a deeper one made
   // every top look like cotton wool.
@@ -2802,7 +2813,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // under it.)
   float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = carved * geoNear;
   float fat = steep * RELIEF * rough * sg * ERO_F;
-  if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
+  if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && length(p) < Q_DETAIL_KM && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
     float d = cloudDetail(q.xyz, lod, rough), fo = f + fat;
     // The sides and tops have billows; a base is flat, and only its broad
     // mottling shows. Here and there a shred hangs below it.
@@ -3063,7 +3074,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float sLean, out float tBar, out vec4 mapA, out vec4 mapB) {
   const float DS_MIN = 0.02 * Q_MARCH, DS_NEAR = 0.008 * Q_MARCH, DS_REL = 0.0045 * Q_MARCH, COARSE = 3.0, FINE = 0.35;
   Tc = 1.0; sOne = 0.0; sMany = 0.0; sAmb = 0.0; sLean = 0.0; tBar = -1.0;
-  float pix = 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME;
+  float pix = 2.0 * uTan / uRes.y * PASS_PIX * CLOUD_FRAME;
   // The steps grow with the distance. On a long path they grow faster, to
   // end within the budget; the nearest stay fine.
   const float BUDGET = COARSE * 80.0;
@@ -3153,7 +3164,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
-      if (t >= tb || Tc < 0.01) {
+      if (t >= tb || Tc < Q_TC_END) {
         // (A cloud still waiting for its point takes the light of the last
         // sample.)
         need = waiting;
@@ -3664,7 +3675,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     t += next;
     i++;
   }
-  if (Tc < 0.01) Tc = 0.0;
+  if (Tc < Q_TC_END) Tc = 0.0;
   if (wsum > 0.0) tBar = tsum / wsum;
   // (Only the first stage, which returns above, keeps a light.)
   mapA = vec4(-1.0);
@@ -5663,6 +5674,12 @@ void main() {
     // the deck: else the air under it, a hundred km of it towards the
     // horizon, glowed as a thin pale blue band.
     float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
+#if Q_AIR_LUT
+    // (As the table takes them, the clouds' shadows by their mean: the
+    // pixels near the sun or the moon that march stood out as a dark disc
+    // where the shadows came out in full.)
+    direct = mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h)));
+#endif
     direct *= mix(1.0, ciShade, low);
     direct = mix(1.0, direct, uLightShare);          // the clouds' shadows come and go with their light
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
@@ -8796,7 +8813,7 @@ const SkySound = (() => {
       // The first stage of the clouds' light, then the frame, which reads it.
       // (benchRepeat, benchSkip: ?stats=bench3 only.)
       for (let r = 0; r < benchRepeat; r++) {
-        if (v.cloud > 0 && !benchSkip.light) {
+        if (v.cloud > 0 && !benchSkip.light && !(benchSkip.lightOdd && drawn % 2)) {
           light = lightMap(light, full[0], full[1]);
           gl.bindFramebuffer(gl.FRAMEBUFFER, light.target);
           bind(18, null);
@@ -9536,12 +9553,11 @@ const SkySound = (() => {
   // first.
   const BENCH3_SKIP = 500, BENCH3_MS = 2500, BENCH3_CAP = 20;
   const BENCH3 = [
-    ['as is'], ['no clouds', { cloud: 0 }], ['no cirrus', { cirrus: 0 }], ['no clouds, cirrus', { cloud: 0, cirrus: 0 }],
-    ['no light pass', { skip: { light: true } }], ['no shadow maps', { skip: { maps: true } }],
-    ['no air', { scene: '#define Q_BENCH_NOAIR' }], ['no sea light', { scene: '#define Q_BENCH_NOSEA' }],
-    ['air marched', { scene: '#undef Q_AIR_LUT\n#define Q_AIR_LUT 0' }], ['LEAN 0', { scene: '#define Q_LEAN 0' }],
-    ['LIGHT_FINE 0', { clouds: '#define Q_LIGHT_FINE 0' }], ['cirrus read once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
-    ['as is again'],
+    ['no clouds', { cloud: 0 }], ['no cirrus', { cirrus: 0 }], ['no light pass', { skip: { light: true } }],
+    ['light every 2nd', { skip: { lightOdd: true } }], ['detail < 6 km', { clouds: '#define Q_DETAIL_KM 6.0' }],
+    ['detail < 3 km', { clouds: '#define Q_DETAIL_KM 3.0' }], ['stop at 5 %', { clouds: '#define Q_TC_END 0.05' }],
+    ['LOD for frame', { clouds: '#define Q_BENCH_CLOUD_LOD' }], ['cirrus once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
+    ['no air', { scene: '#define Q_BENCH_NOAIR' }],
   ];
   if (stats && stats.bench3) {
     const B = stats.bench3;
@@ -9567,41 +9583,51 @@ const SkySound = (() => {
         if (c.clouds) want.push([name + ' clouds', 'CLOUD_PASS', defs(c.clouds)]);
         if (c.cirrus) want.push([name + ' cirrus', 'CIRRUS_PASS', defs(c.cirrus)]);
       }
-      const made = await render.variants(want);
+      const made0 = await render.variants(want);
+      const before = render.sizes() ? render.sizes().scale : 1;
       render.pin(1);
       const kept = { cloud: state.cloud, cirrus: state.cirrus };
-      const rows = [];
-      let K = 1;
-      for (const [i, [name, c = {}]] of BENCH3.entries()) {
-        const missing = (c.scene && !made[name + ' scene']) || (c.clouds && !made[name + ' clouds']) || (c.cirrus && !made[name + ' cirrus']);
-        if (missing) {
-          rows.push(`${name} -`);
-          continue;
-        }
+      // One configuration: set, measured, and put back.
+      const one = async (c, label) => {
+        B.lines = [label];
         if ('cloud' in c) state.cloud = c.cloud;
         if ('cirrus' in c) state.cirrus = c.cirrus;
-        render.use(made[name + ' scene'], made[name + ' clouds'], made[name + ' cirrus']);
-        // (K is found on the first, "as is", the dearest: so that it takes
-        // at least twice BENCH3_CAP, and a cut that halves it still reads
-        // above the cap; then every configuration is measured at that K.)
-        let ms;
-        for (;;) {
-          B.lines = [`bench3 ${i + 1}/${BENCH3.length}: ${name}${K > 1 ? ` (K ${K})` : ''}`];
-          render.bench(K, c.skip);
-          update();
-          ms = await time();
-          if (i > 0 || ms >= 2 * BENCH3_CAP || K >= 8) break;
-          K *= 2;
-        }
+        render.use(c.made && c.made.scene, c.made && c.made.clouds, c.made && c.made.cirrus);
+        render.bench(K, c.skip);
+        update();
+        const ms = await time();
         render.bench(1);
         render.use();
         Object.assign(state, kept);
         update();
-        rows.push(`${name} ${ms.toFixed(1)}`);
+        return ms;
+      };
+      // K, on "as is" after a settling run of it (see BENCH3_CAP).
+      let K = 1, base = await one({}, 'bench3: settling');
+      while (base < 2 * BENCH3_CAP && K < 8) {
+        K *= 2;
+        base = await one({}, `bench3: as is, K ${K}`);
       }
+      // Each row against an "as is" just before it: the phone's speed
+      // drifts over the run (it grows warm), and the pair sees the same.
+      const rows = [];
+      for (const [i, [name, c = {}]] of BENCH3.entries()) {
+        const made = { scene: made0[name + ' scene'], clouds: made0[name + ' clouds'], cirrus: made0[name + ' cirrus'] };
+        if ((c.scene && !made.scene) || (c.clouds && !made.clouds) || (c.cirrus && !made.cirrus)) {
+          rows.push(`${name} -`);
+          continue;
+        }
+        const a = await one({}, `bench3 ${i + 1}/${BENCH3.length}: as is`);
+        const b = await one({ ...c, made }, `bench3 ${i + 1}/${BENCH3.length}: ${name}`);
+        rows.push(`${name} ${b.toFixed(1)} (${b - a >= 0 ? '+' : ''}${(b - a).toFixed(1)})`);
+      }
+      // (The drawing scale as it was, and the frames since.)
+      render.pin(before);
       render.pin(0);
-      B.lines = [`bench3, ms a frame at scale 1, the passes and scene drawn K = ${K} times (timer query ${timer ? 'yes' : 'no'}):`];
-      for (let i = 0; i < rows.length; i += 3) B.lines.push('  ' + rows.slice(i, i + 3).join(', '));
+      stats.frames = [];
+      stats.js = [];
+      B.lines = [`bench3, ms a frame at scale 1 (+/- against as is just before), K = ${K}, as is ${base.toFixed(1)} (timer query ${timer ? 'yes' : 'no'}):`];
+      for (let i = 0; i < rows.length; i += 2) B.lines.push('  ' + rows.slice(i, i + 2).join(', '));
     };
     run().catch(err => { B.lines = ['bench3 failed: ' + String(err && err.message || err).slice(0, 200)]; });
   }
