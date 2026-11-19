@@ -134,7 +134,7 @@ canvas sky, frame 1, call 113 of 133 in A, 113 of 133 in B:
             ["size", 800, 600], ["frames", 2], ["sleep", 100], ["shot", "b.png", {"x": 0, "y": 0, "width": 200, "height": 100}]] }
 ```
 
-`step` takes frames and ms; `shot` a file and an optional clip; `eval` prints the value of a JavaScript expression in the page; `draws` prints the draw calls so far per canvas (to the screen, offscreen, and the size of the largest offscreen draw since the last draw to the screen: the size the picture is drawn at); `mouse` sends a DevTools `Input.dispatchMouseEvent`; `size` changes the viewport; `frames` waits for real browser frames; `sleep` waits real ms. Optional: `dpr`, `seed`, `realDate` (true: the real `Date`).
+`step` takes frames and ms; `shot` a file and an optional clip; `eval` prints the value of a JavaScript expression in the page; `draws` prints the draw calls so far per canvas (to the screen, offscreen, and the size of the largest offscreen draw since the last draw to the screen: the size the picture is drawn at); `mouse` sends a DevTools `Input.dispatchMouseEvent`; `size` changes the viewport; `frames` waits for real browser frames; `sleep` waits real ms. Optional: `dpr`, `mobile` (true: the mobile viewport and touch, as `perf --mobile`), `seed`, `realDate` (true: the real `Date`).
 
 ## Environment
 

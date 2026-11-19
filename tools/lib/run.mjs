@@ -129,11 +129,11 @@ ${rows.map((r) => `<tr><td>${r.name}<br><small>?${r.q}</small><br><small>${r.sta
   return { ok };
 }
 
-// A scripted capture. SCRIPT: { q, w, h, dpr, hide (default true), seed, realDate, steps: [ ['step', n, ms], ['shot', file], ['shot', file, {x, y, width,
+// A scripted capture. SCRIPT: { q, w, h, dpr, mobile, hide (default true), seed, realDate, steps: [ ['step', n, ms], ['shot', file], ['shot', file, {x, y, width,
 // height}], ['eval', js], ['mouse', {type, x, y, button, buttons, clickCount}], ['size', w, h], ['sleep', ms],
 // ['draws'], ['frames', n] (real browser frames) ] }
 export async function drive(session, root, script, size) {
-  const p = await session.open(root, script.q || '', { w: script.w || size.w, h: script.h || size.h, hide: script.hide, dpr: script.dpr,
+  const p = await session.open(root, script.q || '', { w: script.w || size.w, h: script.h || size.h, hide: script.hide, dpr: script.dpr, mobile: script.mobile,
     seed: script.seed, ...(script.realDate ? { epoch: null } : {}) });
   try {
     for (const [op, a, b] of script.steps || []) {

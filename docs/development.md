@@ -67,7 +67,9 @@ it is automatic), `sky.lang` (the language, set by the panel's language
 select), `sky.sound` and `sky.volume` (the sound and its volume). The
 address wins over all of them. With the automatic level it also keeps
 `sky.qualityAuto`: the level reached and the highest it may step up to,
-as JSON (`{"level":"mid","ceiling":"high"}`). Each is read and written inside `try`: without storage
+as JSON (`{"level":"mid","ceiling":"high"}`), and `sky.qualityTrying`:
+a level that has started and not yet drawn for 10 s (see
+[design.md](design.md#quality-levels)). Each is read and written inside `try`: without storage
 the page works and forgets.
 
 The page does not check `yaw` and `pitch`: a value that is not a number

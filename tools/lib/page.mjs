@@ -180,7 +180,9 @@ class Page {
   async size(w, h, wait = true) {
     this.w = w;
     this.h = h;
-    await this.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: this.opt.dpr || 1, mobile: false });
+    const mobile = !!this.opt.mobile;
+    await this.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: this.opt.dpr || 1, mobile });
+    if (mobile) await this.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     if (wait) await this.eval('window.__realFrame().then(() => window.__realFrame()).then(() => 0)');
   }
 
