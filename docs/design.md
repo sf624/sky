@@ -2961,7 +2961,7 @@ asks which level it is.
 | `Q_GOLD` | 1 | 1 | 0 | 0 |
 | `Q_WARP_MIP` | 2 | 2 | 1 | 1 |
 | `cost` | 1 | 1.4 | 7 | 7.3 |
-| GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
+| GPU memory, a phone of 411 x 781 CSS pixels at DPR 2.63 (`?stats`, measured) | 83 MB | 137 MB | 455 MB (as `max`'s) | 455 MB |
 
 - `pixels` and `dpr` cap the canvas (`fit`, see [The drawing size](#the-drawing-size)):
   at most that many pixels, and at most that many per CSS pixel. The
