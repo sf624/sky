@@ -618,6 +618,46 @@ float heads(vec3 p, float t1) {
   return s;
 }
 
+// Billows for the fine detail (A of uBody), read 7 times finer than the
+// body (see cloudDetail): round heads that meet in sharp creases, the
+// cauliflower of a growing cumulus. Each cell of a jittered lattice holds
+// a head, the height of a sphere (radius 0.55 to 0.85 of a cell, as high
+// as 0.75 to 1 at random); where two meet, the higher wins, in a sharp
+// crease (the turrets round their clefts over SOFT: read so finely, they
+// made the heads soft lumps).
+float billow(vec3 p, float freq, float seed) {
+  p *= freq;
+  vec3 id = floor(p), f = p - id;
+  float m = -1.0;
+  for (int x = -1; x <= 1; x++) {
+    for (int z = -1; z <= 1; z++) {
+      for (int y = -1; y <= 1; y++) {
+        vec3 g = vec3(x, y, z);
+        vec3 c = rnd(id + g, vec3(freq), seed), e = rnd(id + g, vec3(freq), seed + 7.0);
+        vec3 r = (f - g - (0.15 + 0.7 * c)) / mix(0.55, 0.85, e.x);
+        float d2 = dot(r, r);
+        m = max(m, mix(0.75, 1.0, e.y) * (d2 < 1.0 ? sqrt(1.0 - d2) : 1.0 - d2));
+      }
+    }
+  }
+  return clamp(m, 0.0, 1.0);
+}
+
+// Their seams over three sizes, 16 to 64 cells across the tile (71 m down to
+// 18 m where cloudDetail reads them): 0 on a crown of every size, 1 in the
+// deepest seam. Each size sits on the crowns of the size above it and less
+// in its seams (as the heads, above), so that small heads cover large ones.
+const vec3 BILLOW_W = vec3(0.45, 0.33, 0.22);
+float billows(vec3 p) {
+  float s = 0.0, gate = 1.0;
+  for (int i = 0; i < 3; i++) {
+    float t = billow(p, 16.0 * exp2(float(i)), 240.0 + 10.0 * float(i));
+    s += gate * BILLOW_W[i] * (1.0 - t);
+    gate *= mix(HEADS_GATE, 1.0, smoothstep(0.0, 0.4, t));
+  }
+  return s;
+}
+
 // The same with a chosen gain: nearer 1, more of the small sizes.
 float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   float sum = 0.0, amp = 1.0;
@@ -636,7 +676,7 @@ void main() {
     // the tile of 8 km), and the heads on them (heads).
     vec3 p = vec3(uv, uZ - 2.0);
     float t1 = turrets(p, 8.0, 210.0);
-    outColor = vec4(turrets(p, 4.0, 200.0), t1, heads(p, t1), 0.0);
+    outColor = vec4(turrets(p, 4.0, 200.0), t1, heads(p, t1), billows(p));
   } else if (uZ >= 0.0) {
     // Perlin-Worley (after Schneider, 2015): Worley cells, swollen by billowy Perlin noise.
     vec3 p = vec3(uv, uZ);
@@ -1608,7 +1648,7 @@ uint halfPair(vec2 v) {
   return halfBits(v.x) | (halfBits(v.y) << 16);
 }
 // The first stage's values at a texel: tIn, tauCM, above, sky (a), and
-// skyLean, tauF, tauB (b).
+// skyLean, tauF (b; the rest is free).
 void lightMapAt(ivec2 ij, out vec4 a, out vec4 b) {
   uvec4 u = texelFetch(uLightMap, ij, 0);
   a = vec4(unpackHalf2x16(u.x), unpackHalf2x16(u.y));
@@ -1917,7 +1957,7 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const float GEO_S = 0.15;          // the fine noise on the body: the seams of the heads of 71, 36, 18 m (cloudDetail)
+const float GEO_S = 0.25;          // the fine noise on the body: the seams of the heads of 71, 36, 18 m (cloudDetail)
 const float RELIEF = 0.85;          // the same for the fine noise
 const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
 const vec3 BODY_K = vec3(0.7, 0.4, 0.6); // how far the body's bumps of 2 km and 1 km stand out, and how deep its heads' seams go, km
@@ -1927,7 +1967,8 @@ const float BODY_D = 1.3;           // the fine noise's weight on it, against a 
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
-const float ERO_F = 0.71 * GEO_S;  // the same for the fine heads: their deepest seam (B of uBody is 0.71 at most), see cloudField
+const float ERO_F = 0.55 * GEO_S;  // the same for the fine heads: their deepest seam (B of uBody is 0.71 at most), see cloudField
+const float GEO_PIX = 0.005;        // the fine noise fades out where a pixel is this wide and twice this (km), see cloudDetail
 const float SKIN_F = 0.1;           // and over what depth they fade out deeper than their weight, km
 const float WISP = 0.6;             // how much the fine turrets carve the heads' middles low on a heap (wisps)
 const vec2 TOWER = vec2(0.34, 0.4);  // towers rise over G (the map's height of heaps) from x to x + y
@@ -1972,6 +2013,7 @@ const int LIGHT_STEPS = 26;
 const float UNDER = 0.3;            // the light of the sky left in the air under a full deck
 const float COLUMN = 0.11;          // (1 - g) 0.75: how a deep column dims the light through it
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
+const float STRAY_TAU = 8.0, STRAY_MAX = 12.0; // and how that grows with the depth the light has come through (see clouds)
 const float SPREAD = 0.15;          // how far light spreads sideways on its way down through a deck, km
 const float BELOW = 0.5;            // the gain of the sunlight that came down through a deck, seen from under it
 
@@ -2013,6 +2055,9 @@ float carved = 0.0;
 // And how high in its heap (0 at the base, 1 at the top of the heap's
 // envelope over this place).
 float heapUp = 0.0;
+// And how much of the heap's side there faces upshear (1) or downshear (0),
+// from the slope of the map against the lean (see cloudShape).
+float upshear = 0.5;
 
 // The weather map at x (km), smoothed as a mip level lod of the noise
 // would be. (mip: the level of the map's own texels, as a level of the
@@ -2053,6 +2098,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   base = -9.0;
   relief = 0.0;
   thin = 0.0;
+  upshear = 0.5;
   solidAt = 0.0;
   carved = 0.0;
   y = (h - CB) / (CT - CB);
@@ -2206,6 +2252,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float acrossT = length(across) * (CT - CB) * top / 4.8;
   if (!coarse && solid < 1.0) steep = clamp(length(vec2(acrossT, pow(rise, 2.0 / 3.0))), 0.7, 6.0);
   stB = clamp(length(vec2(acrossT, pow(max(riseB, 0.01), 2.0 / 3.0))), 0.7, 6.0);
+  // Which side of the heap this is: the map's cover rises inwards, so on
+  // the side that faces upshear it rises along the lean.
+  float gs = length(sl.xy);
+  upshear = gs > 1e-3 ? smoothstep(-0.6, 0.6, dot(sl.xy / gs, normalize(LEAN))) : 0.5;
   }
   float dEnv = env / (gTop * stB);
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
@@ -2369,6 +2419,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 // How near the last place cloudField read is, for cloudDetail (1 within 4 km,
 // 0 beyond 8 km).
 float geoNear = 1.0;
+// How billowy the fine noise is there (1) rather than wispy (0): billows on
+// the growing heads, high on a heap and on its side that faces upshear;
+// wisps low on its sides and on the side the shear leans over, where it
+// decays (after Schneider's Nubis, 2022: the kind of detail follows where
+// in the cloud a place is). See cloudField.
+float billowy = 1.0;
 float cloudDetail(vec3 q, float lod, float rough) {
   // Worley noise rises in cones to its points; v (2 - v) rounds them into
   // domes with creases between them, as the billows of a cloud.
@@ -2391,8 +2447,8 @@ float cloudDetail(vec3 q, float lod, float rough) {
     // They only carve (see cloudField): seams in, crowns where the surface
     // is. Low on a heap's sides they carve the heads' middles instead,
     // leaving the seams as ragged wisps.
-    float tb = textureLod(uBody, q * DETAIL, lod + 1.7 + BODY_LOD).z;
-    tb = mix(tb, 1.0 - tb, WISP * (1.0 - smoothstep(0.15, 0.45, heapUp)));
+    float tb = textureLod(uBody, q * DETAIL, lod + 1.7 + BODY_LOD).w;
+    tb = mix(tb, 1.0 - tb, WISP * (1.0 - billowy));
     f -= sg * GEO_S * tb;
   }
   // Near the eye, smaller billows on those: the same noise 8 times finer
@@ -2425,7 +2481,8 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float f = cloudShape(p, lod, fine, y, q, body, lump, base);
   float c = min(f, base);
   fb = f - base;
-  geoNear = 1.0 - smoothstep(4.0, 8.0, length(p));
+  billowy = smoothstep(0.15, 0.45, heapUp) * mix(0.5, 1.0, upshear);
+  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * length(p));
   // Hard, growing turrets have a crisp edge (10 m); older cloud a deeper
   // fringe. Billows smaller than the edge melt into it: a deeper one made
   // every top look like cotton wool.
@@ -2435,7 +2492,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // (35 m). (Until round 17, 12 and 70 m, and photographs of towers showed
   // crisper outlines; then a flight differed from a still by more than the
   // flight check allows with 4 m, with the fine heads read out to 8 km.)
-  edge = mix(edge, mix(0.035, 0.006, smoothstep(0.35, 0.8, heapUp)), solidAt);
+  edge = mix(edge, mix(0.035, 0.006, smoothstep(0.35, 0.8, heapUp) * mix(0.5, 1.0, upshear)), solidAt);
   // Thin cloud (the edge of a heap's foot, and the fragments beside it)
   // frays: its fringe is deeper, some 100 m (the field rises by about 4
   // per km on a small heap's side). From 11 km, scattered cumulus were cut
@@ -2996,7 +3053,6 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           sky = A.w;
           skyLean = B.x / ws;
           if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
-          tauB = B.z / ws;
         }
       }
       if (!mapped) {
@@ -3060,7 +3116,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // seam between heads sees less of the sky than a crown).
       // tauB's: the first three steps, out to 175 m, see the fine turrets:
       // the side of a head away from the light has little behind it, and is
-      // grey, as the Monte Carlo has it for small spheres. The rest, out to
+      // grey, as the Monte Carlo has it for small spheres. Always in the
+      // second stage, at the point (backOn): taken from the first, where the
+      // ray entered the cloud, at half the size, the shaded sides of near
+      // towers were flat plates of one grey with angular outlines (the light
+      // that went into the mass grows fivefold as tauB goes from 0 to 20).
+      // The rest, out to
       // 1.575 km, with the light high (overMap), is the map of the clouds'
       // shadow: the depth between two places on the line of light (moved
       // aside by off: light strays in a cloud). With the light low, its
@@ -3079,10 +3140,14 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // aside by off, each a third of a turn from the one before: light
       // strays inside a cloud, and over the frames the shadows of other
       // clouds soften.
-      bool skyOn = !mapped && !under0, wantF = tauF < 0.0 && !slab, wantCM = !mapped && !slab;
+      bool skyOn = !mapped && !under0, backOn = uStage > 0.5 && !fog && basal * smoothstep(2.0, 6.0, above) <= 0.999, wantF = tauF < 0.0 && !slab, wantCM = !mapped && !slab;
       float overMap = smoothstep(0.25, 0.45, uLight.y);
       float tw = 0.0, sw = 0.0, dw = 0.03, sb = 0.0, db = 0.025, tauL = 0.0, crisp = 0.0;
-      vec3 w = vec3(0.0), offL = off;
+      // (The depth away from the light strays by off turned at random: by
+      // the same interleaved gradient noise as the point and the steps
+      // towards the light, the mean over the frames kept a diagonal hatch.)
+      float ab = 2.0 * PI * hash(gl_FragCoord.xy + 7.13 * uPass + 41.7);
+      vec3 w = vec3(0.0), offL = off, offB = cos(ab) * off + sin(ab) * cross(uLight, off);
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
       for (int n = 0; n < LIGHT_STEPS; n++) {
@@ -3104,8 +3169,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           fine = j < 2;
           wt = dw;
         } else if (n < 16) {
-          if (!skyOn || (j >= 3 && overMap == 1.0)) continue;
-          x = ps - uLight * (sb + 0.5 * db) + off * min(sb / 0.3, 1.0);
+          if (!backOn || (j >= 3 && overMap == 1.0)) continue;
+          x = ps - uLight * (sb + 0.5 * db) + offB * min(sb / 0.3, 1.0);
           l = max(log2(0.5 * db / TEXEL_KM), lod);
           fine = j < 3;
           wt = db * (j < 3 ? 1.0 : 1.0 - overMap);
@@ -3113,7 +3178,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = j < 2 ? max(lod, kl - 1.0) : max(lod, kl) + 0.5 * float(j);
-          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL : vec3(0.0));
+          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
         }
@@ -3143,8 +3208,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           sky *= 0.5;
           skyLean *= 0.5;
         }
-        if (overMap > 0.0) tauB += overMap * max(cloudShadow(ps + eye() + off - 1.575 * uLight) - cloudShadow(ps + eye() + off - 0.175 * uLight), 0.0);
       }
+      if (backOn && overMap > 0.0) tauB += overMap * max(cloudShadow(ps + eye() + off - 1.575 * uLight) - cloudShadow(ps + eye() + off - 0.175 * uLight), 0.0);
       if (!mapped) {
         if (slab) {
           tauCM = above / max(sunUp, 0.05);
@@ -3168,7 +3233,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       if (uStage == 0.0) {
         // The first stage keeps these, and its ray ends here.
         mapA = vec4(tIn, tauCM, above, sky);
-        mapB = vec4(skyLean, tauF, tauB, 0.0);
+        mapB = vec4(skyLean, tauF, 0.0, 0.0);
         return;
       }
       // How deep the point lies under the cloud's surface (P: 0 there, 1 at
