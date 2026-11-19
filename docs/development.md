@@ -47,6 +47,7 @@ These are read directly.
 | `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
+| `quality` | stored choice, else `auto` | The quality level: `low`, `mid`, `high`, `max` or `auto` (see [design.md](design.md#quality-levels)). A level that does not start falls back to the one below. Not stored. The tools add `quality=max` to every page they load, unless the query names a level |
 | `lang` | stored choice, else the browser's language | The page's language: `ja` or `en`. Not stored |
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
@@ -54,15 +55,21 @@ These are read directly.
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
+| `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the level, the canvas and the sizes drawn, the first picture, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=bench` also holds the drawing scale at 1, 0.71, 0.5 and 0.35 in turn and shows the frames a second at each; `stats=bench3` measures the frame with each part taken away and with each candidate cut, at full scale, by the frames a second (some 40 to 60 s after the first picture; touch nothing). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
 With `date` and no `moon`, the moon's age follows the given date.
 
-The page keeps four choices in `localStorage`: `sky.pixels` (the drawing
-limit), `sky.lang` (the language, set by the panel's language select),
-`sky.sound` and `sky.volume` (the sound and its volume). The address wins
-over all of them. Each is read and written inside `try`: without storage
+The page keeps five choices in `localStorage`: `sky.pixels` (the drawing
+limit), `sky.quality` (the quality level chosen in the panel; none when
+it is automatic), `sky.lang` (the language, set by the panel's language
+select), `sky.sound` and `sky.volume` (the sound and its volume). The
+address wins over all of them. With the automatic level it also keeps
+`sky.qualityAuto`: the level reached and the highest it may step up to,
+as JSON (`{"level":"mid","ceiling":"high"}`), and `sky.qualityTrying`:
+a level that has started and not yet drawn for 10 s (see
+[design.md](design.md#quality-levels)). Each is read and written inside `try`: without storage
 the page works and forgets.
 
 The page does not check `yaw` and `pitch`: a value that is not a number
@@ -419,6 +426,37 @@ the dynamic resolution draws a smaller picture while the view moves, down
 to 0.35 of the canvas per side (see
 [design.md](design.md#the-drawing-size)).
 
+**By quality level** (see [design.md](design.md#quality-levels)). Measured
+on the RTX 3090 on 2026-11-19 with `perf` (`res=1`, flying, the default
+view, on main 52edce9; the mean GPU time of all draws per frame shown,
+two runs each). At 2560 x 1440 each level draws its own canvas; "all
+pixels" draws every level at 2560 x 1440 (its `pixels` and `dpr` lifted
+for the measure), the cost per pixel that `cost` in `QUALITY` holds.
+The phone is 412 x 915 CSS pixels at a device pixel ratio of 2.6 (`perf
+--size 412x915 --dpr 2.6`).
+
+| Level | 2560 x 1440 window | all pixels (2560 x 1440) | phone |
+|---|---|---|---|
+| `low` | | 2.9 to 3.3 ms (the frame at 1280 x 720) | 1.5 ms (368 x 816; the frame 184 x 408) |
+| `mid` | | 4.3 to 4.4 ms (the frame at 1280 x 720) | |
+| `high` | 12.9 ms (1920 x 1080) | 21.0 ms | 7.6 ms (824 x 1830) |
+| `max` | 21.9 ms (2560 x 1440) | 21.9 ms | 8.0 ms (824 x 1830) |
+
+(`low` and `mid` measured on 2026-11-19 before `low` left out the
+cirrus's march near the eye and its shadows; before the frame was drawn
+at half size, `low` took 7.0 ms for all pixels and 2.7 to 3.2 ms at the
+phone's size, `mid` 9.1 ms.)
+
+Small canvases keep this GPU busy for only part of a draw: at 0.3 million
+pixels the old `low` took 2.7 ms, where its cost per pixel at 3.7 million
+gave 0.6 ms. A phone's GPU, some fifty times slower, is busy throughout, so
+its time follows the cost per pixel more than this GPU's at the same
+size: compare levels by the column "all pixels". The first picture comes
+some 7 s after navigation at every level on this machine, most of it the
+driver finishing the programs at their first draws; on Direct3D 11 (`d3d
+page`, 1898 x 982, one run each, before the last cuts) `low` 13.2 s, `mid`
+17.2 s, `high` 17.1 s, `max` 18.5 s.
+
 ## GLSL rules
 
 The shaders must run on any WebGL2. The code keeps these rules:
@@ -436,6 +474,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `blendColor`, so `CONSTANT_ALPHA` and `ONE_MINUS_CONSTANT_ALPHA` leave the
   picture as it was. The mean over frames is computed in a shader, with
   two textures that take turns; keep it so, or blend by source alpha.
+- **Precision stated in every shader.** Each fragment shader starts with
+  `precision highp float;`, `precision highp int;` and `highp` for each
+  kind of sampler it reads. Desktop GPUs compute everything at full
+  precision, but in a fragment shader of OpenGL ES the default for `int`
+  and `uint` is `mediump` (16 bits are allowed: the integer hash
+  `ihash`, the bits packed into the passes' targets) and for
+  `sampler2D` `lowp`, and phones' GPUs may take them at their word.
 - **Every extension optional, with a fallback.** The shaders use no
   `#extension`. The JS asks for:
   - `OES_texture_float_linear`: else the filtered tables are RGBA16F;
@@ -562,6 +607,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   for the longest. Measure
   a change of `fs` there: `node tools/sky.mjs d3d programs --base
   origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
+- **A cost of `fs` that a quality level changes is a `Q_` define** at its
+  top, whose default is `max`'s value; `QUALITY` in the JS gives the lower
+  levels' values (see [design.md](design.md#quality-levels)). So `max` compiles to
+  the code it was before there were levels, and a new knob is one line in
+  each place. Compare a change at `max` (the tools' default) and at `low`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
 

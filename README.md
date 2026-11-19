@@ -52,6 +52,7 @@ The panel at the bottom changes the time and the weather.
 - **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
 - **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
 - **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
+- **Quality**: **Low**, **Medium**, **High** or **Max**, or **Auto** (at first). Lower levels draw fewer pixels and take fewer samples, so that phones and laptops can draw the sky at all; Max is the full picture, for strong desktop GPUs. Auto picks a level from what the device says of itself (phones start at Low, the strongest desktop GPUs at Max), then steps down if frames are too slow, or up if they are fast (a phone goes no higher than Medium); it shows the level it chose, as "Auto (Low)". Low and Medium draw each frame at half the size and build the full picture over several frames: still views are sharp, moving ones softer. Changing the level prepares the picture again, which takes a few seconds. A level that cannot start, or whose GPU stops drawing, falls back to the one below. The browser remembers the choice. In the address, `?quality=low` (or `mid`, `high`, `max`, `auto`) sets the level for that visit only.
 
 A view can also be given in the address, for example
 `?time=16.75&yaw=60&pitch=-6`.
@@ -68,7 +69,7 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 
 ## What it needs
 
-- A browser with WebGL2. Without it, the page shows only a gradient of sky colours.
+- A browser with WebGL2. Without it, or when the GPU cannot draw the sky even at Low, the page says so, with the reason in small type.
 - While the page prepares the picture (compiling its shaders can take a few seconds the first time), it shows a dark sky with a line of progress. The browser stays responsive meanwhile.
 - A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
@@ -77,7 +78,8 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 
   While the aircraft flies, every frame is drawn. Laptops and phones will be slower.
   When frames are slow, the page draws fewer pixels while the view moves.
-  Setting the speed to 0, or the resolution to Full HD, makes it lighter.
+  Setting the speed to 0, the resolution to Full HD, or a lower quality makes it lighter.
+  To see what the page costs on a device, add `?stats` to the address: a small box shows the frames a second, the quality, the sizes drawn, the GPU memory and the GPU's name.
 
 The page is a single HTML file. It loads nothing else: the sound is made in
 the browser too.
