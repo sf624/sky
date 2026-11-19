@@ -193,7 +193,7 @@ const PERF = `(() => {
     }
   }, 20);
 })()`;
-export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = false }) {
+export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = false, cpu = 1 }) {
   q = '?' + withQuality(q);
   const { targetId } = await session.chrome.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await session.chrome.send('Target.attachToTarget', { targetId, flatten: true });
@@ -210,6 +210,8 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
   }
   await s('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: dpr, mobile });
   if (mobile) await s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  // --cpu N: the main thread N times slower, as a phone's (DevTools' CPU throttling).
+  if (cpu > 1) await s('Emulation.setCPUThrottlingRate', { rate: cpu });
   await s('Page.addScriptToEvaluateOnNewDocument', { source: PERF });
   await s('Page.navigate', { url: session.server.url(root) + (q || '') });
   // Until the load event, the end of the page's loading (data-sky, see page.mjs) and a first picture.
@@ -241,6 +243,9 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
   }
   if (!Object.keys(g.kinds).length) console.log('no GPU times (no draws while measuring, or no timer extension)');
   session.chrome.off(listen);
+  // With ?stats in the query: the page's overlay as it stands at the end.
+  const overlay = await ev(`(document.querySelector('.stats') || {}).textContent || ''`);
+  if (overlay) console.log('stats:\n  ' + overlay.split('\n').join('\n  '));
   for (const l of lines) console.log(`console: ${l}`);
   await session.chrome.send('Target.closeTarget', { targetId });
   return 0;
