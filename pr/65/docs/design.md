@@ -560,7 +560,9 @@ layer, to the second, to the end), the table's light at its end less at
 its start, through the layers before it, and the layers' light through the
 table's depth at them (`airAt`), as the march adds them. Within 8 degrees
 of the sun or the moon (`LUT_NEAR`), whose glow is finer than the table's
-texels, the pixel marches as before. What the table leaves out: the clouds'
+texels, the pixel marches as before, with the clouds' shadows by the same
+mean as the table's (with them in full, those pixels stood out as a dark
+disc round the sun behind broken cloud). What the table leaves out: the clouds'
 shadows in the air (`low` took one sample of them, `Q_SHAFTS` 1; the table
 takes their mean instead, the direct light below the tops times 1 to 0.15
 as the amount of cloud goes from 0.4 to 1: without it, the air under a deck
@@ -787,9 +789,31 @@ smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cov
   still at the place reached by more than the `flight` check allows.
 - The extinction in the body grows with the height over its base
   (`cloudExtinction`), as the water does in air that rises and cools
-  without mixing (adiabatic), with its 2/3 power: `clamp((h - base /
+  without mixing (adiabatic), with its 2/3 power: `clamp(wet (h - base /
   1 km)^(2/3), 0.3, 1.2)` of `SIGMA`; elsewhere `0.45` at the base to 1 at
-  1.1 km. So a small heap is thin, and a tower's top dense.
+  1.1 km. Deeper than `MIXED` = 100 m under the body's surface `wet` is
+  `WET` = 3 (about 260 (h / 1 km)^(2/3) per km: 2 g of water per m³ and
+  km of height, 300 drops per cm³), so the core is at 1.2 `SIGMA` from
+  some 230 m over its base; towards the surface it falls smoothly to 1, a
+  third of that, as air mixed in from outside dries a cloud's edge. So an
+  ordinary heap seen towards the sun from 0.3 km is 12 to 22 deep through
+  its body (the median of its visible points within 30° of the sun, `g1`,
+  `g4` and `m15`, a 20 m march towards the sun; 30 to 40 at the deepest
+  tenth), and grey with bright rims, as in photographs. In linear light
+  against the sky 8° to 40° from the sun, those clouds' darkest twentieth
+  is 0.3 to 0.6, their median 0.9 to 1.6, their brightest twentieth 1.6
+  to 2.5 (a photograph of cumulus before the sun: bodies 0.6 to 0.9, rims
+  1.8 to 2.7); the darker parts slate blue-grey (sRGB about (107, 119,
+  143), saturation 0.26, where that photograph has (111, 129, 153), 0.27).
+  Until 9f326f9 `wet` was 1 throughout (air with four fifths of it mixed
+  in), and the same heaps were 7 to 11 deep: grey-white masses lit
+  through (0.6 to 1.1, 1.2 to 2.0 and 1.9 to 2.9; the darker parts (157,
+  160, 170), saturation 0.08). Dense to 40 m under the surface, the tops
+  seen from above had darker pits between their heads, and the `flight`
+  check failed (cruise 1.15 against main's 0.97). The lower parts of
+  towers (up to 1.3 km over their base) are denser too; their faces were
+  already deep, and their lit faces came out a little brighter (the
+  exposure 0.1 to 0.2 stops lower).
 - `body` (how dense the cloud is) is at least 0.7 of the heap's top over
   the whole body: from the column under them, the heads that overhang a
   heap's thin foot were translucent, and the cloud behind showed through
@@ -914,7 +938,8 @@ line of them, seen from their own height.
 
 `cloudExtinction` turns the field into extinction: `SIGMA` = 90 per km
 once the field is past the edge, with more water higher up and in thicker
-clouds. The edge (`edge`, from `cloudField`) is 10 m deep on hard,
+clouds (in a heap's 3D body 1.2 `SIGMA` from some 230 m over its base:
+see above). The edge (`edge`, from `cloudField`) is 10 m deep on hard,
 growing turrets and `EDGE` = 30 m on older, softer cloud; the extinction
 rises with the square of the depth there, so the outer part is a thin,
 translucent fringe. Billows smaller than the edge melt into it: with
@@ -2899,6 +2924,7 @@ asks which level it is.
 | `Q_MIRROR` | 1 | 1 | 4 | 4 |
 | `Q_LITE` | 1 | 0 | 0 | 0 |
 | `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE`, `Q_CI_SHADE` | 0 | 1 | 1 | 1 |
+| `Q_DETAIL_KM`, `Q_TC_END` | 6, 0.05 | none, 0.01 | none, 0.01 | none, 0.01 |
 | `cost` | 1 | 1.4 | 7 | 7.3 |
 | GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
 
@@ -2968,7 +2994,9 @@ asks which level it is.
   reads the air from a table, see [The air](#the-air)). Four more, for cuts
   not taken (a phone's `?stats=bench3` saved little or nothing with them,
   within its noise, but `Q_LEAN`, which the table makes moot):
-  `Q_LEAN` (0: the air's light leans no way, `msLean` not read),
+  `Q_LEAN` (0: the air's light leans no way, `msLean` not read), and for
+the low clouds `Q_DETAIL_KM` (their fine noise only nearer than this),
+`Q_TC_END` (the march ends when less than this gets through),
   `Q_SWELLS` (of the eight swells), `Q_MIRROR_H` (of the four heights the
   sea's mirror reads the clouds at; the depth scaled up for those left
   out) and `Q_LIGHT_FINE` (0: the clouds' light steps read no fine
@@ -3087,7 +3115,9 @@ name. With `?stats=bench`, from 3 s after the first picture the drawing
 scale is held at 1, 0.71, 0.5 and 0.35 for 4 s each (`BENCH_SCALES`,
 `render.pin`), and the frames a second and the script's time of the last
 2 s of each are shown: what falls with the scale's square is the cost of
-the pixels, what stays is the frame's fixed cost. With `?stats=bench3`, what each part of the frame costs and what each
+the pixels, what stays is the frame's fixed cost.
+
+With `?stats=bench3`, what each part of the frame costs and what each
 candidate cut saves, measured as the first bench does, by the time between
 pictures: a phone's GPU gives no timer queries, and it draws a target only
 when something needs it, so reads of a pixel round a draw time nothing (a
@@ -3095,20 +3125,24 @@ first try, `bench2`, read 0.9 ms for a frame that took some 56). After the
 variants of the programs that it needs are compiled (`render.variants`), the
 scale is held at 1 and each configuration of `BENCH3` is drawn in turn:
 `BENCH3_SKIP` (0.5 s) let go, then the mean time between pictures over
-`BENCH3_MS` (2.5 s). The screen's 60 Hz caps that at 16.7 ms: where the
-first configuration ("as is") reads under twice `BENCH3_CAP` (20 ms), the
-passes and the scene are drawn K times a frame (2, 4 or 8: `render.bench`,
-`benchRepeat`), and every configuration at that K. The configurations: as
-is; without the low clouds, the cirrus, both; without the first stage of
-the clouds' light (the last one kept: `benchSkip.light`) or the depth maps'
-layers (`benchSkip.maps`); variants of the scene without the air
-(`Q_BENCH_NOAIR`: no march, no table), without the sea's light
-(`Q_BENCH_NOSEA`), with the air marched instead of read from the table
-(`Q_AIR_LUT` 0), and with `Q_LEAN` 0; and as is again, last, to show how
-far the phone's own speed has moved over the run (it grows warm). It
-prints its progress ("7/15") and at the end the ms of each, three to a line.
-The steps wait for pictures, not timers (while frames are slow the timers
-wait behind them). Without `?stats`, none of this runs (the GPU's times are then asked
+`BENCH3_MS` (2.5 s). The screen's 60 Hz caps that at 16.7 ms: where "as is" (after a settling
+run of it) reads under twice `BENCH3_CAP` (20 ms), the passes and the
+scene are drawn K times a frame (2, 4 or 8: `render.bench`,
+`benchRepeat`), and every configuration at that K. Each row is measured
+right after an "as is" of its own and given against it: a phone grows warm
+over the run, and its frames grew 28 % slower between the first row and
+the last. The rows: without the low clouds, without the cirrus, without
+the first stage of the clouds' light (the last one kept: `benchSkip.light`)
+or with it drawn every second frame (`lightOdd`); variants of the low
+clouds' pass with the fine noise at every distance or only nearer than 3
+km (`Q_DETAIL_KM`; `low` has 6), ending at 1 % let through (`Q_TC_END`;
+`low` 5 %), and reading their detail for the frame's pixels, not the
+picture's (`Q_BENCH_CLOUD_LOD`); and of the cirrus's pass reading each deck
+once (`Q_BENCH_CI_ONCE`). Afterwards the drawing scale is
+put back as it was and the overlay's frame rate starts afresh. It prints
+its progress ("bench3 7/10: …") and at the end the ms of each row, two to
+a line. The steps wait for pictures, not timers (while frames are slow the
+timers wait behind them). Without `?stats`, none of this runs (the GPU's times are then asked
 only for the automatic choice, not for a level named in the address or
 the panel).
 
@@ -3126,6 +3160,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
+| `uAirLut` | 29 | `low` only: 256 x 48 x 17, RGBA16F, linear | `fs` with `AIR_LUT`, a slice a draw, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
