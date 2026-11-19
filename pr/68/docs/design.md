@@ -1054,7 +1054,16 @@ each cloud, not on its surface; no normal of the field enters it.
   light strays in a cloud, and the shadows soften; the stray grows with
   the depth the light has come through, by 1 + `tau` / `STRAY_TAU` (8), at
   most `STRAY_MAX` = 12 times: light that went far through a cloud comes
-  from a wide part of it), and beyond that the
+  from a wide part of it; every step reads the field at the level of the
+  first: read half a level coarser at each step, as until #68, a small
+  heap had too little depth towards the light, because the smoothed field
+  falls under the cloud's edge where the field itself does not: seen
+  towards the sun from 0.3 km, the heaps of `g1` had a median depth
+  towards the light of 3.2 where a march of 20 m steps through the field
+  finds 6.4, now 5.0, and glowed through; towers did not change, and the
+  cost did not change measurably. With the fine noise in the later steps
+  too the depth came out at 7, but the shaded sides of towers turned
+  mottled), and beyond that the
   map of the clouds' shadow (`cloudShadow`, read where the steps ended: it
   holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low; `tauB`,
@@ -2414,7 +2423,7 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   `NIGHT_LEVEL` = -25.5 (a moonless night sky);
 - `high`, the level that only the brightest 3% of the blocks pass
   (`HIGH_SHARE`); and `lit`, the same with the blocks near the sun
-  counting for less: from `SUN_SHARE` = 0.35 of their light within
+  counting for less: from `SUN_SHARE` = 0.5 of their light within
   `SUN_NEAR` = 10 degrees of the sun to all of it from 45 degrees (a
   smoothstep, at each block's middle, `near`, from the view the picture
   was metered in). A camera lets the sun's surroundings run into white,
@@ -2423,7 +2432,9 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   the sun set the exposure of a view up towards it with thin cirrus, and
   the sky round them came out dark, sRGB about (48, 64, 96), where
   photographs show a lighter blue (about 100 to 140 of luma: p4, a
-  camera);
+  camera). (With 0.35 that sky came out at 96 to 104 of luma in `g1`,
+  but the heaps before the sun a flat white, 211 at their median; with
+  0.5, 86 to 94 and 198, their darker twentieth 142 instead of 157);
 - `key` = `KEY` - `EYE` * `low` (`KEY` = -1.3): as the view darkens,
   the eye opens up `EYE` = 0.85 stops for each stop, not all the way. So
   a night is darker than a day and dusk is in between, and black sea at night is exposed as
