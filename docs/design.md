@@ -2887,12 +2887,13 @@ asks which level it is.
 | `pixels` | 300,000 | 900,000 | 1920 x 1080 | no limit |
 | `dpr` | 1 | 1.5 | 2 | 2 |
 | `frame` | 0.5 | 0.5 | 1 | 1 |
+| `meterAsync` | yes | yes | no | no |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
 | `ice` | 1024 | 2048 | 4096 | 4096 |
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
-| `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 4, 2, 4 | 8, 4, 8 | 20, 8, 16 | 20, 8, 16 |
+| `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 6, 3, 6 | 8, 4, 8 | 20, 8, 16 | 20, 8, 16 |
 | `Q_MARCH` | 4 | 3 | 1.2 | 1 |
 | `Q_SHAFTS` | 1 | 6 | 12 | 16 |
 | `Q_SHADOW_TAPS` | 2 | 4 | 6 | 8 |
@@ -2917,6 +2918,13 @@ asks which level it is.
   frame's (`Q_FRAME` in `fs`, the size of a pixel times it): read for the
   frame's larger pixels, through coarser levels of the textures, the
   clouds stayed as soft at rest as a picture of the frame's size.
+- `meterAsync`: the exposure meter's read in flight (see
+  [Exposure](#exposure-and-the-tone-curve)) goes into a buffer of the GPU's
+  (`PIXEL_PACK_BUFFER`), taken once a fence says it has arrived. A plain
+  `readPixels` makes the browser wait until the GPU has done all that it
+  was given, and a phone's GPU, busy for tens of ms a frame, then stands
+  idle while the next frame is made, every 100 ms. (`max` and `high` keep
+  the plain read: their frames stay as they were.)
 - `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
   heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
@@ -3049,7 +3057,10 @@ overlay over the top left of the page (`showStats`, every half second),
 for a screenshot from a phone, which has no console: the frames a second
 over the last `STATS_SPAN` (3 s) and the longest gap between two of them
 (or "not drawing" at rest), the GPU's time a frame where the GPU tells it
-(the same queries as the automatic choice), the level (and "(auto)"), the
+(the same queries as the automatic choice), the time the page's own
+script takes in the renderer a frame, its mean and its longest (a long one
+there is the CPU waiting for the GPU, as the meter's read does), the level
+(and "(auto)"), the
 canvas's size, the CSS size it fills and the device pixel ratio, the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
