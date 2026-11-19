@@ -57,6 +57,16 @@ These are read directly.
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
+An experiment of issue #64 (the shape of the low clouds) is built only
+when asked for, as defines of `fs` (`SHAPE_DEFS` in the JS): without these
+parameters the preprocessor drops all of its code.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `shape` | none | `1`: the turrets of the heaps' 3D body weigh `SHAPE_K` (1.25) times as much. `2`: three generations of outward displacement (2 km, 1 km and 500 m billows, each read on the surface the last one made) on the 3D body. `3`: two generations (2 km, 1 km) of flat-topped lobes with deep seams, the fine detail weaker on the body. See `SHAPE` in `index.html` |
+| `shapek` | 1.25 (`shape=1`), 1 | The turrets' weight against the envelope |
+| `shapeopt` | none | Other constants of the experiment, `NAME:value` separated by `~` (for example `GEN_A:0.7~GEN_C:0.4`; `SHAPE_FRAME:1` reads the turrets in the heap's own frame, which draws streaks) |
+
 With `date` and no `moon`, the moon's age follows the given date.
 
 The page keeps four choices in `localStorage`: `sky.pixels` (the drawing

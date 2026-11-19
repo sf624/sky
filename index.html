@@ -2085,6 +2085,150 @@ vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
   return mapAt(uWarped, p, x, lod, fine, 1.0);
 }
 
+#ifdef SHAPE
+// An experiment of issue #64 (?shape=N, a define: see SHAPE_DEFS in the
+// JS). The turrets of the heaps' 3D body belong to the tile of the noise:
+// every heap gets bulges of the same sizes, wherever the tile puts them.
+// SHAPE 1 ties them to the heap: its top and its radius come from the dome
+// of the map's G over it (heapFrame), and the turrets are read in a frame
+// of the heap's own (heapQ): about its top, at a size that follows its
+// radius (small heaps smaller bulges, large ones larger), at a place in the
+// tile that follows where the heap stands; and they weigh SHAPE_K times as
+// much. SHAPE 2 adds generations of outward displacement (after Cumulo,
+// the A-Team's clouds, and Wrenninge's pyroclastic noise): each moves the
+// surface out along the envelope's normal by a billow looked up on the
+// surface the previous one made (the place reached along that normal, so
+// that no billow stands off the surface), each half the size of the last
+// (2 km, 1 km and 500 m / the heap's scale); the heads of uBody then carve
+// them (SHAPE_HW of the body's weight). Only on the 3D body: the sheet and
+// the deck, most of what is seen from above at cloud 0.8 and more, keep
+// main's shape.
+// The light, the shadows and the map of the tops read the same shape (the
+// slope is read for the body in coarse reads too).
+#ifndef SHAPE_K
+// (SHAPE 1: at 1.5 the turrets of heaps seen near stood off them as free
+// balls, and overhanging ones were cut flat by the base; at 2 and 3 towers
+// from above were balls on a stick.)
+#define SHAPE_K (SHAPE == 1 ? 1.25 : 1.0)
+#endif
+// SHAPE_FRAME 1 reads the turrets in the heap's frame (heapFrame, heapQ);
+// off by default: where the step to the top changed fast (most towers),
+// the read swept through the tile and drew upright streaks, fans of them
+// from above (see the pull request). Off, toC is 0 and the scale 1: the
+// turrets are the tile's, and the sizes a heap gets still follow how high
+// its dome is (shapeW).
+#ifndef SHAPE_FRAME
+#define SHAPE_FRAME 0
+#endif
+#ifndef SH_MIN
+#define SH_MIN 0.8                      // the heap's scale of the turrets: 2 km / SH their largest cells
+#define SH_MAX 2.0
+#endif
+const float SH_R = 0.7;                 // the largest cell, of the heap's radius
+#if SHAPE == 3
+#ifndef GEN_A
+#define GEN_A 0.7
+#endif
+#ifndef GEN_C
+#define GEN_C 0.55
+#endif
+#ifndef SHAPE_FINE
+#define SHAPE_FINE 0.5
+#endif
+#endif
+#ifndef GEN_A
+#define GEN_A 0.5                       // a generation's billow: how far it moves the surface, of its cell
+#endif
+#ifndef GEN_C
+#define GEN_C 0.43                      // the value of the billows that moves it neither way (their mean: at 0.35 the heaps swelled into walls)
+#endif
+#ifndef SHAPE_HW
+#define SHAPE_HW 1.0                    // the heads' carving on the generations, of the body's (at 0.5, smooth putty)
+#endif
+// The heap's top over the map (cH, km) and over the base (zH, km), and the place in the noise that
+// the tile's own read starts from (farQ, with the shake).
+vec2 cH = vec2(0.0);
+float zH = 0.0;
+vec3 farQ = vec3(0.0);
+// The heap over x, from the dome of the moved map's G there: G^2 is close
+// to a paraboloid over a heap's dome (G = s sqrt(1 - d^2)), so one Newton
+// step on it goes to its top. Its slope and curvature are differences of
+// G^2 1 km apart, read from the map's mip level 3 (texels of 1 km): from
+// its own texels, 8 bits each, the step jumped by hundreds of metres from
+// texel to texel, and the turrets read in the heap's frame were upright
+// streaks. (Not from uSlopeW: that is the slope of the map before it was
+// moved, at the place moved to.) toC: from x to the top (km); r: the
+// dome's radius (km); conf: how far to trust them (0 at a saddle between
+// heaps, far down a dome's foot, off the heaps); gc: G at the top.
+void heapFrame(vec2 x, out vec2 toC, out float r, out float conf, out float gc) {
+  const float D = 1.0, L = 3.0;
+  vec2 u = x / WEATHER_KM, e = vec2(D / WEATHER_KM, 0.0);
+  float g = textureLod(uWarped, u, L).g, q0 = g * g;
+  float qx = pow(textureLod(uWarped, u + e, L).g, 2.0), qX = pow(textureLod(uWarped, u - e, L).g, 2.0);
+  float qz = pow(textureLod(uWarped, u + e.yx, L).g, 2.0), qZ = pow(textureLod(uWarped, u - e.yx, L).g, 2.0);
+  float qd = pow(textureLod(uWarped, u + e.xx, L).g, 2.0);
+  vec2 gq = vec2(qx - qX, qz - qZ) / (2.0 * D);
+  float hxz = qd - qx - qz + q0;
+  mat2 hq = mat2(qx - 2.0 * q0 + qX, hxz, hxz, qz - 2.0 * q0 + qZ) * (1.0 / (D * D));
+  float tr = hq[0][0] + hq[1][1], det = determinant(hq);
+  // (det / tr^2: 0.25 over a round dome, 0 at a ridge or a saddle.)
+  conf = smoothstep(0.03, 0.1, det / max(tr * tr, 1e-8)) * step(tr, 0.0) * smoothstep(0.02, 0.08, g);
+  toC = conf > 0.0 ? -(inverse(hq) * gq) : vec2(0.0);
+  float qc = q0 + 0.5 * dot(gq, toC);
+  r = sqrt(max(4.0 * qc / max(-tr, 1e-6), 0.0));
+  conf *= 1.0 - smoothstep(0.7, 1.0, length(toC) / max(r, 1e-3));
+  // (Where G^2 is not a paraboloid, as on a cone or a flat top, the step
+  // misses: the top it finds is not as high as it says, and the read
+  // fanned out from it in upright streaks. So G is read there too.)
+  float gt = textureLod(uWarped, u + clamp(toC, -6.0, 6.0) / WEATHER_KM, L).g;
+  conf *= 1.0 - smoothstep(0.05, 0.15, abs(sqrt(max(qc, 0.0)) - gt) / max(gt, 0.05));
+  r = clamp(r, 0.2, 6.0);
+  gc = sqrt(max(mix(q0, qc, conf), 0.0));
+  toC *= conf;
+}
+// The place in the noise of P (km from the heap's top),
+// read at scale s (s times finer than the tile) about the heap's top, and
+// moved by o (tiles): x + (1 - s) toC across, so that where the heap is
+// not known (toC 0, s 1) it is the tile's own place. (Turned about the top,
+// or moved by a hash of it, the read swept through the tile wherever toC
+// changed fast, at a heap's rim and between heaps: upright streaks.)
+vec3 heapQ(vec3 P, float s, vec3 o) {
+  return vec3(cH.x + s * P.x, zH + s * P.y, cH.y + s * P.z) / BASE_KM + farQ + o;
+}
+// The weights (km) on a heap whose dome is tk km high, read at scale sH:
+// SHAPE 1, of the turrets of 2 km / sH and 1 km / sH, and of the heads
+// (z); SHAPE 2, of the three generations (2 km, 1 km and 500 m / sH), and of
+// the heads (w). As the body's, each size only on a dome half its size high
+// and more (on a sheet as if twice as high).
+vec4 shapeW(float tk, float sheet, float sH) {
+  vec3 size = vec3(2.0, 1.0, 0.5) / sH, gate = smoothstep(vec3(0.5), vec3(1.5), tk * (1.0 + sheet) / size);
+  float hw = BODY_K.z / sH * gate.z * (1.0 - 0.45 * sheet);
+#if SHAPE == 1
+  return vec4(SHAPE_K * BODY_K.xy / sH * gate.xy, hw, 0.0);
+#else
+  return vec4(SHAPE_K * GEN_A * size * gate * vec3(1.0, 1.0, SHAPE == 3 ? 0.0 : 1.0), SHAPE_HW * hw);
+#endif
+}
+// How far they may move the surface out, at most.
+float shapeMax(vec4 sw) {
+#if SHAPE == 1
+  return (sw.x + sw.y) * (1.0 - BODY_C) + ERO_C * sw.z;
+#else
+  return (sw.x + sw.y + sw.z) * (1.0 - min(GEN_C, 0.45)) + ERO_C * sw.w;
+#endif
+}
+// The weights at most for any sH (before the heap is known): a weight goes
+// as gate / sH, which is under 0.7 of tk (1 + sheet) / size.
+vec4 shapeBound(float tk, float sheet) {
+  float m = 0.7 * tk * (1.0 + sheet);
+#if SHAPE == 1
+  return vec4(SHAPE_K * BODY_K.xy * min(vec2(1.0 / SH_MIN), m / vec2(2.0, 1.0)), BODY_K.z * min(1.0 / SH_MIN, m / 0.5), 0.0);
+#else
+  return vec4(SHAPE_K * GEN_A * min(vec3(2.0, 1.0, 0.5) / SH_MIN, vec3(m)) * vec3(1.0, 1.0, SHAPE == 3 ? 0.0 : 1.0), SHAPE_HW * BODY_K.z * min(1.0 / SH_MIN, m / 0.5));
+#endif
+}
+#endif
+
 // The field at p without the fine noise. lod: how much to smooth, as a mip
 // level of the noise (negative: finer than its texels; the fine noise still
 // gains from that). Also gives the height over the base's level (y, in
@@ -2232,6 +2376,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // Over a dome's top, env rises by gTop per km; before the slope is known,
   // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
   float gTop = 3.0 / (top * (CT - CB));
+#ifdef SHAPE
+  bumpMax = shapeMax(shapeBound(top * (CT - CB), sheet));
+#endif
   float bodyMax = BODY_G * (env / (gTop * (env > 0.0 ? 0.7 : 6.0)) + bumpMax + shift);
   // No noise could make a cloud here, even on the steepest wall (below).
   steep = 1.0;
@@ -2252,7 +2399,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // cost 1.5 to 3 ms of the frame at 1440p, and they smooth the bumps on a
   // wall anyway).
   float stB = 1.0;
+#ifdef SHAPE
+  // (The body's shape needs the slope in coarse reads too, so that the
+  // shadows and the light see the same turrets.)
+  vec2 toC = vec2(0.0), aT = vec2(0.0);
+  float rH = 1.0, confH = 0.0, gH = 0.0;
+  if (!coarse || solid > 0.0) {
+#else
   if (!coarse) {
+#endif
   vec4 sl = ((solid > 0.0 ? mapAt(uSlopeW, p, xl, lod, fine, 1.0) : textureLod(uSlope, xl / WEATHER_KM, lod - 2.0)) * 2.0 - 1.0) * uSlopeMax;
   float dTower = towers * 2.0 * (1.0 - tg) / TOWER.y * smoothstep(0.0, 0.15, tg);
   float rise = max(thick + swell, 0.01);
@@ -2267,7 +2422,19 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // the side that faces upshear it rises along the lean.
   float gs = length(sl.xy);
   upshear = gs > 1e-3 ? smoothstep(-0.6, 0.6, dot(sl.xy / gs, normalize(LEAN))) : 0.5;
+#ifdef SHAPE
+  aT = across * (CT - CB) * top / 4.8;
+#if SHAPE_FRAME
+  if (solid > 0.0) heapFrame(xl, toC, rH, confH, gH);
+#endif
+#endif
   }
+#ifdef SHAPE
+  // The heap's scale: its largest turrets SH_R of its radius.
+  float sH = mix(1.0, clamp(2.0 / (SH_R * rH), SH_MIN, SH_MAX), confH);
+  vec4 sw = shapeW(top * (CT - CB), sheet, sH);
+  bumpMax = shapeMax(sw);
+#endif
   float dEnv = env / (gTop * stB);
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
 #ifdef TOPS_MAP
@@ -2335,6 +2502,52 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // cloud behind showed through as patches with sharp outlines. lump: how
     // far the bumps stand out here, for the light: low in a cleft. The fine
     // noise weighs BODY_D on it, against a dome's top.)
+#ifdef SHAPE
+    cH = xl + toC;
+    farQ = vec3(far.b, 2.5 * far.r, far.g) + shake * (shaken / 128.0);
+    // (Upright, about the height of the heap's top (zH, from G there): about
+    // its base, the read swept upwards through the tile wherever the scale
+    // changed across, and the tops of towers were upright streaks.)
+    zH = (0.12 + 0.32 * gH + 0.25 * tower) * (CT - CB);
+    vec3 P = vec3(-toC.x, h - level - zH, -toC.y);
+    float l0 = max(lod + BODY_LOD + log2(sH), 0.0);
+#if SHAPE == 1
+    vec4 tH = textureLod(uBody, heapQ(P, sH, vec3(0.0)), l0);
+    float hw = sw.z * smoothstep(0.03, 0.25, heapUp);
+    float u = dEnv + sw.x * (tH.x - BODY_C) + sw.y * (tH.y - BODY_C) + shift + ERO_C * hw;
+    float disp = u - dEnv - shift - hw * tH.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
+#else
+    // The generations: the envelope's surface over this place is dEnv + shift
+    // out along its normal there (n0); each generation's billow is read
+    // where the surface so far is along that normal, and moves it out (in
+    // by less). They are strongest on the rising heads (high on the heap, on
+    // the side that faces upshear) and fade low on the heap's sides and at
+    // its base.
+    vec3 n0 = normalize(vec3(-aT.x, pow(max(riseB, 0.01), 2.0 / 3.0), -aT.y));
+    float vig = mix(0.45, 1.0, upshear) * mix(0.4, 1.0, smoothstep(0.1, 0.5, heapUp)) * smoothstep(0.0, 0.15, heapUp);
+    float d = dEnv + shift;
+    vec4 t0 = textureLod(uBody, heapQ(P + n0 * d, sH, vec3(0.0)), l0);
+#if SHAPE == 3
+    // (SHAPE 3: fewer, larger lobes with deep seams, as an artist's cumulus
+    // has them: two generations only, each billow's square root, flat-topped
+    // lobes with narrow seams between them.)
+    d += vig * sw.x * (sqrt(t0.x) - GEN_C);
+    vec4 t1 = textureLod(uBody, heapQ(P + n0 * d, sH, vec3(0.37, 0.21, 0.61)), l0);
+    d += vig * sw.y * (sqrt(t1.y) - GEN_C);
+#else
+    d += vig * sw.x * (t0.x - GEN_C);
+    vec4 t1 = textureLod(uBody, heapQ(P + n0 * d, sH, vec3(0.37, 0.21, 0.61)), l0);
+    d += vig * sw.y * (t1.y - GEN_C);
+    vec4 t2 = textureLod(uBody, heapQ(P + n0 * d, 4.0 * sH, vec3(0.73, 0.47, 0.13)), l0 + 2.0);
+    d += vig * sw.z * (t2.x - GEN_C);
+#endif
+    float hw = sw.w * smoothstep(0.03, 0.25, heapUp);
+    float u = d + ERO_C * hw;
+    float disp = u - dEnv - shift - hw * t1.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
+#endif
+    // (The sheet and the deck below read the tile's own turrets.)
+    if (deck * (1.0 - solid) > 0.0 || fs > -fsMax) t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
+#else
     t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
     // The 2 km and 1 km turrets shape the body (its lobes). The heads on
     // them only carve it: their seams go in by up to their weight, their
@@ -2348,6 +2561,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float hw = bw.z * smoothstep(0.03, 0.25, heapUp);
     float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * hw;
     float disp = u - dEnv - shift - hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
+#endif
     float fb = BODY_G * (dEnv + disp + shift);
     f = mix(f, fb, solid);
     float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
@@ -2533,6 +2747,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   // sides, where the seams cut through the skin of heads to the smooth body
   // under it.)
   float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = carved * geoNear;
+#if defined(SHAPE) && SHAPE == 3
+  // (SHAPE 3: the fine detail weaker on the body's lobes.)
+  rough *= mix(1.0, SHAPE_FINE, solidAt);
+#endif
   float fat = steep * RELIEF * rough * sg * ERO_F;
   if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
     float d = cloudDetail(q.xyz, lod, rough), fo = f + fat;
@@ -6881,13 +7099,25 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
+    // An experiment of issue #64, the shape of the low clouds: `?shape=N`
+    // builds shape N of cloudShape (see SHAPE in fs), `?shapek=K` the
+    // turrets' weight there, `?shapeopt=GEN_A:0.7~GEN_C:0.4` other constants
+    // of it. Defines, not uniforms: without them the preprocessor
+    // drops all of the experiment's code, and the program compiles to the
+    // same code as before (on Direct3D 11 every branch of a uniform is
+    // compiled and inlined).
+    const SHAPE_DEFS = (() => {
+      const s = new URLSearchParams(location.search), n = Math.round(+s.get('shape') || 0), k = +s.get('shapek');
+      return n > 0 ? `#define SHAPE ${n}\n` + (k > 0 ? `#define SHAPE_K ${k.toFixed(3)}\n` : '')
+        + (s.get('shapeopt') || '').split(/[,~]/).filter(o => /^[A-Z_]+:[-0-9.]+$/.test(o)).map(o => `#define ${o.replace(':', ' ')}\n`).join('') : '';
+    })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
       let fsrc = document.getElementById(id).textContent.trim();
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + (defs || '');
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + SHAPE_DEFS + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
