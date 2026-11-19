@@ -2557,8 +2557,15 @@ sky is infinitely far (code 1, nearness 0). The pixel's distance is that
 of the clouds if they hide a tenth of what is behind or give a twentieth
 of its light (`C` against `L`, in one band of wavelengths: a wisp in
 front of the dark sea), else of the sea, else
-infinity; a cirrus sheet counts when nothing else is there, or when it
-hides the rest.
+infinity; a cirrus sheet counts when it hides the rest, and against the
+sky by degrees: by its share of the light (or of what it hides, if more),
+from 0.05 to 0.3 (`smoothstep`), the pixel's nearness is that share of the
+sheet's, so that it moves with the sheet by that share. Next to the sun,
+where the glare is most of the light, it stays nearly put. (Up to issue
+#54 it moved with the sheet from a share of 0.1 on: there, the pixels took
+their past from where the sheet had been, with the glare of another angle
+from the sun, and in flight a dark or bright band with an edge hugged the
+glow round the sun.)
 
 **Reprojection** (`whence` in `mean`): each pixel finds where what it shows
 now was a frame ago. Clouds and sea have come nearer by the eye's way since

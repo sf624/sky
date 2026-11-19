@@ -5315,11 +5315,17 @@ void main() {
   // Against the sky, a sheet too thin to hide much still gives much of the
   // light, and its streaks would smear if they stayed put: it counts by
   // its share of the light (the sun, the moon and stars behind it, by far
-  // the brighter, stay put).
+  // the brighter, stay put). By degrees: the pixel moves with the sheet by
+  // that share, from 0.05 to 0.3 of the light, as if the sheet were that
+  // much farther. (Moved with the sheet from a share of 0.1 on, next to
+  // the sun, where the glare is most of the light and falls off steeply,
+  // the pixels past that share took their past from where the sheet was,
+  // with the glare of another angle from the sun: in flight, a dark or
+  // bright band hugged the glow there, with an edge, issue #54.)
   if (tSeen < 0.0 && tHigh > 0.0) {
-    wHigh = max(wHigh, dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30));
-  }
-  if (wHigh > (tSeen < 0.0 ? 0.1 : 0.5)) tSeen = tHigh;
+    float share = smoothstep(0.05, 0.3, max(wHigh, dot(H[1], vec4(1.0)) / max(dot(L[1], vec4(1.0)), 1e-30)));
+    if (share > 0.0) tSeen = tHigh / share;
+  } else if (wHigh > 0.5) tSeen = tHigh;
   gl_FragDepth = distanceCode(tSeen);
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
