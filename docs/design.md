@@ -558,16 +558,24 @@ hold the night's.
 The scene then takes, for each segment of its ray (the eye to the first
 layer, to the second, to the end), the table's light at its end less at
 its start, through the layers before it, and the layers' light through the
-table's depth at them (`airAt`), as the march adds them. Within 8 degrees
-of the sun or the moon (`LUT_NEAR`), whose glow is finer than the table's
-texels, the pixel marches as before, with the clouds' shadows by the same
-mean as the table's (with them in full, those pixels stood out as a dark
-disc round the sun behind broken cloud). What the table leaves out: the clouds'
-shadows in the air (`low` took one sample of them, `Q_SHAFTS` 1; the table
-takes their mean instead, the direct light below the tops times 1 to 0.15
-as the amount of cloud goes from 0.4 to 1: without it, the air under a deck
-shone orange at its far edge at dusk) and the
-thin cloud's shade on the low air (`low` has none, `Q_CI_SHADE` 0). The
+table's depth at them (`airAt`), as the march adds them. The table holds
+the clouds' shadows only by their mean (the direct light below the tops
+times 1 to 0.15 as the amount of cloud goes from 0.4 to 1: without it, the
+air under a deck shone orange at its far edge at dusk). So the part of each
+segment below the tops takes the shadow at `LUT_SHADE` (4) places in it,
+denser near the eye and new each frame (`shaftJitter`, as the march's
+shafts), over that mean: its light times the mean light let through there
+over the table's mean (with one place, the mean at rest kept the jitter's
+pattern over the far air). With the mean
+alone, the air between the eye and a cloud towards the sun, which lies in
+that cloud's shadow, shone with the sun's glow, and a deck overhead looked
+thin enough to show the sun through it; and the shafts of shadow over the
+sea were gone. Within 8 degrees of the sun or the moon (`LUT_NEAR`), whose
+glow is finer than the table's texels, the pixel marches as before, with
+the clouds' shadows in full; so does `skyAt`, the sky the sea mirrors
+(mirrored in the glitter, the table's glow, spread over its texels, filled
+the clouds' shadows on the sea). The table leaves out the thin cloud's
+shade on the low air (`low` has none, `Q_CI_SHADE` 0). The
 sky's light on the clouds (`SKY_LIGHT`) keeps its own march.
 
 ## Low clouds
@@ -2950,7 +2958,8 @@ asks which level it is.
 | `Q_MIRROR` | 1 | 1 | 4 | 4 |
 | `Q_LITE` | 1 | 0 | 0 | 0 |
 | `Q_MICRO`, `Q_HAIRS`, `Q_SPARKLE`, `Q_CI_SHADE` | 0 | 1 | 1 | 1 |
-| `Q_DETAIL_KM`, `Q_TC_END` | 6, 0.05 | none, 0.01 | none, 0.01 | none, 0.01 |
+| `Q_GOLD` | 1 | 1 | 0 | 0 |
+| `Q_WARP_MIP` | 2 | 2 | 1 | 1 |
 | `cost` | 1 | 1.4 | 7 | 7.3 |
 | GPU memory, a phone of 412 x 915 CSS pixels at DPR 2.6 (`?stats`) | 81 MB | 143 MB | 476 MB | 476 MB |
 
@@ -3017,18 +3026,20 @@ asks which level it is.
   separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
   the low clouds and the sea and does not dim the glare: the scene then
   holds no copy of the cirrus's code), and `Q_AIR_LUT` (1: the scene
-  reads the air from a table, see [The air](#the-air)). Four more, for cuts
-  not taken (a phone's `?stats=bench3` saved little or nothing with them,
-  within its noise, but `Q_LEAN`, which the table makes moot):
-  `Q_LEAN` (0: the air's light leans no way, `msLean` not read), and for
-the low clouds `Q_DETAIL_KM` (their fine noise only nearer than this),
-`Q_TC_END` (the march ends when less than this gets through),
-  `Q_SWELLS` (of the eight swells), `Q_MIRROR_H` (of the four heights the
-  sea's mirror reads the clouds at; the depth scaled up for those left
-  out) and `Q_LIGHT_FINE` (0: the clouds' light steps read no fine
-  noise). The programs of `low` are smaller
+  reads the air from a table, see [The air](#the-air)), and `Q_GOLD` (1:
+  the jitters of the low clouds' march, of the point where their light is
+  worked out and of the shafts step by the golden ratio and the plastic
+  number each frame; IGN shifted along the diagonal, as at `max`, runs
+  through its values unevenly at each pixel, and with `low`'s long steps
+  the light's point stayed in the mean at rest as a fine diagonal hatch
+  over the bases of clouds overhead). The programs of `low` are smaller
   for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
   at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
+  Cuts tried with `?stats=bench3` on a phone and left out, as they saved
+  nothing within its noise: the air's light leaning no way, fewer swells,
+  fewer heights in the sea's mirror, no fine noise in the clouds' light,
+  the clouds' fine noise only within 3 or 6 km, and the march ending at 5 %
+  let through instead of 1 %.
 - `cost` is the GPU time of a frame for a canvas of as many pixels,
   relative to `low`'s, from measures on one GPU (see [development.md](development.md#gpu-time)):
   the automatic choice takes the ratio of two levels from it.
@@ -3078,7 +3089,11 @@ picture, `AUTO_WAIT` (2 s) is let go by; then windows of at least
 
 - A window drawn at under `AUTO_SMALL` (0.6) of the size per side, on the
   mean, steps down: the dynamic resolution had to draw under a third of
-  the pixels to keep 25 frames a second. The level stepped down from
+  the pixels to keep 25 frames a second. Where the GPU tells its times (20
+  of them or more in the window), only if the GPU is busy: its time a
+  frame, divided by the square of the scale, at least `AUTO_FAST` (30 ms).
+  Frames slowed by something else (a busy CPU, a throttled window) are no
+  reason to draw less, and a level stepped down from is not tried again. The level stepped down from
   becomes the ceiling, and no step up follows in this visit.
 - A window drawn at full size throughout steps up if the level above
   would have time to spare, by its `work` (its `cost` times its canvas's
@@ -3107,14 +3122,21 @@ A context lost once the page draws (the GPU process gave up, or reset
 the GPU: on a phone, as the targets are made again for full screen) is
 not left as a white canvas: the loading state comes back, its text
 saying so (`TEXT.lost`), and the level below is made once the browser
-gives the context back (after 10 s without it, the failure's text).
+gives the context back (after 10 s without it, the failure's text). At
+`low`, the first such loss of a visit makes `low` again (`TEXT.lostAgain`):
+a phone's GPU process may be reset by something else, and `low` drew
+before; the second shows the failure's text.
 A level that fails steps the choice down for good: the automatic one
 takes the level below as its ceiling; a level chosen in the panel (not
 in the address) becomes the level below. And a level that started but
 did not last: as a level starts, `sky.qualityTrying` holds it, and
-`QUALITY_OK_MS` (10 s) after its first picture it is removed. Found at
-the next visit (the tab died, or the browser gave up on the page), the
-page starts a level lower.
+`QUALITY_OK_MS` (10 s) after its first picture it is removed, and so it
+is when the visit ends in the usual way (`pagehide`: a reload, another
+page, the tab closed, also during the loading). Found at the next visit
+(the tab died, or the browser gave up on the page), the page starts a
+level lower: the automatic choice takes the level below as its ceiling,
+and a level chosen in the panel becomes the level below for that visit.
+A level named in the address ignores it.
 
 **What a level costs on a device** (`?stats`, or `?stats=1`). A small
 overlay over the top left of the page (`showStats`, every half second),
@@ -3159,14 +3181,13 @@ right after an "as is" of its own and given against it: a phone grows warm
 over the run, and its frames grew 28 % slower between the first row and
 the last. The rows: without the low clouds, without the cirrus, without
 the first stage of the clouds' light (the last one kept: `benchSkip.light`)
-or with it drawn every second frame (`lightOdd`); variants of the low
-clouds' pass with the fine noise at every distance or only nearer than 3
-km (`Q_DETAIL_KM`; `low` has 6), ending at 1 % let through (`Q_TC_END`;
-`low` 5 %), and reading their detail for the frame's pixels, not the
+or with it drawn every second frame (`lightOdd`); a variant of the low
+clouds' pass reading their detail for the frame's pixels, not the
 picture's (`Q_BENCH_CLOUD_LOD`); and of the cirrus's pass reading each deck
-once (`Q_BENCH_CI_ONCE`). Afterwards the drawing scale is
+once (`Q_BENCH_CI_ONCE`). These variants are compiled only with
+`?stats=bench3`. Afterwards the drawing scale is
 put back as it was and the overlay's frame rate starts afresh. It prints
-its progress ("bench3 7/10: …") and at the end the ms of each row, two to
+its progress ("bench3 4/6: …") and at the end the ms of each row, two to
 a line. The steps wait for pictures, not timers (while frames are slow the
 timers wait behind them). Without `?stats`, none of this runs (the GPU's times are then asked
 only for the automatic choice, not for a level named in the address or
