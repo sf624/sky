@@ -192,6 +192,11 @@
   .hero.shown .loading .line, .hero.shown .loading p { animation: none; }
   /* The loading failed: its text says so, and the line goes. */
   .hero.failed .loading .line { visibility: hidden; }
+  .loading .why {
+    max-width: min(90vw, 60em); max-height: 40vh; overflow: auto; margin: 1em auto 0;
+    font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+    text-align: left; opacity: .7; user-select: text; -webkit-user-select: text;
+  }
   .loading .line {
     position: relative;
     width: min(220px, 50vw);
@@ -336,7 +341,7 @@ const TEXT = {
     subtitle: 'レイリー散乱で描く、雲の上の空',
     hint: 'ドラッグで見回す',
     loading: '読み込み中…',
-    failed: '空を描けませんでした（詳しくはコンソールに）',
+    failed: '空を描けませんでした',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
     play: '時間を進める', now: 'いまの日時',
@@ -362,7 +367,7 @@ const TEXT = {
     subtitle: 'The sky above the clouds, drawn with Rayleigh scattering',
     hint: 'Drag to look around',
     loading: 'Loading…',
-    failed: 'The sky could not be drawn (see the console)',
+    failed: 'The sky could not be drawn',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
     play: 'Play time-lapse', now: 'Now',
@@ -8489,6 +8494,17 @@ const SkySound = (() => {
       said.dataset.t = 'failed';
       said.textContent = TEXT[LANG].failed;
       hero.classList.add('failed');
+      // The reason goes on the page too: a phone has no console to read.
+      const why = document.createElement('pre');
+      why.className = 'why';
+      let gpu = '';
+      try {
+        const g = heroCanvas.getContext('webgl2');
+        const info = g && g.getExtension('WEBGL_debug_renderer_info');
+        gpu = g ? String(g.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no WebGL2';
+      } catch (e) {}
+      why.textContent = (String(err && err.message || err).trim().slice(0, 1200) + '\n' + gpu).trim();
+      said.after(why);
       return null;
     })
     .then(made => {
