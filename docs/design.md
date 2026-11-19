@@ -977,14 +977,15 @@ clouds.
 slowly across the picture. So the hero draws the low clouds' pass
 (`CLOUD_PASS`) twice a frame (`uStage`): stage 0, at half the width and
 height, marches each ray to the first cloud it meets and keeps the slow
-parts of its light there (`uLightMap`: seven half floats, two to each of
+parts of its light there (`uLightMap`: eight half floats, two to each of
 four 32-bit integers, rounded towards zero as the GPU rounds into a
 target of half floats: the distance where the ray entered that cloud, the
 depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
 sky's lean towards the sun's side, the depth towards the light over its
 first two steps, and over its own steps past those without the map of the
-clouds' shadow, `tauN`), taken where the ray entered the cloud (marching on to the point
+clouds' shadow, `tauN`, and how open the place lies towards the light,
+`open`), taken where the ray entered the cloud (marching on to the point
 where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
@@ -1088,9 +1089,34 @@ each cloud, not on its surface; no normal of the field enters it.
   scattered many times builds up over the first tens of metres, so a thin
   billow, a shred or a rim, which the eye sees through before it gets deep,
   is darker than a deep one.
-- *In a crease on the lit side* both are less (`crease`; not from the
-  Monte Carlo, whose spheres have no creases): by up to `CREASE.x` = 0.8
-  as `1 - e^(-tauLoc / CREASE.y)`, `CREASE.y` = 4, where `tauLoc` is the
+- *Open towards the light* (`open`; not from the Monte Carlo, whose
+  spheres are open all round): both are times `mix(OPEN.z, 1, open)`,
+  `OPEN.z` = 0.3. Light scattered many times comes out where light went
+  in near by (Bouthors et al. 2008: a place gathers the light of the lit
+  surface it sees), so it follows the cosine of the light on a lobe of
+  some hundreds of metres, not on each billow, and it is less where
+  neighbours stand towards the light. `open` is the mean of `e^(-OPEN.x
+  tau)`, `OPEN.x` = 0.3, along two directions drawn each frame round the
+  light, mirrored about it (by the cosine to it, narrowed by `OPEN.y` =
+  0.3: some 17 degrees), each in the five steps of the sky's directions
+  out to 2.4 km (the later ones read the field smoothed as they are long).
+  The first stage works it out with the sky's directions and keeps it in
+  the light map. A lobe that faces the light keeps all of its light; its
+  flanks and the seams between lobes sink smoothly; a place under a lobe
+  that stands towards the light keeps 0.3 of it. With one direction a
+  frame, the flight check's difference low down rose by a tenth (1.24, its
+  limit 1.28); with two, 1.16.
+  Measured against a path-traced render of a real cumulus volume (the
+  Walt Disney Animation Studios cloud data set, same camera and sun, local
+  only): the standard deviation of the cloud's luminance blurred over 2 %
+  of its width, over its median, went from 0.111 to 0.145 (the path
+  tracer 0.155), the darkest twentieth from 170 to 143 of 255 (145), and
+  the dark pits that the crease term below drew in the tops of the heap
+  went. From above with the sun high nearly all that is seen faces the
+  light, and the views change little.
+- *In a crease on the lit side* both are less again (`crease`; not from
+  the Monte Carlo, whose spheres have no creases): by up to `CREASE.x` =
+  0.5 as `1 - e^(-tauLoc / CREASE.y)`, `CREASE.y` = 4, where `tauLoc` is the
   depth towards the light over the light's own steps (`tauF` and `tauN`:
   out to 27.8 first steps, some 0.4 to 1.4 km), and only on the side of a
   mass that the light falls on: by `smoothstep(0.5, 0.9, tauB / (tauB +
@@ -1098,14 +1124,16 @@ each cloud, not on its surface; no normal of the field enters it.
   the light. On a sphere, a place with much cloud behind it and some depth
   towards the light lies near the edge of the lit face, where light goes
   in right beside it, and the fit keeps it bright (`K` = 0.0074: a depth of
-  20 takes 13 % off); in a crease the heads round it take that light. With
-  the fit alone, creases on the lit side were 0.85 to 0.9 as bright as the
-  heads round them (on the picture, the darkest tenth of the cloud against
-  the brightest within 25 pixels at 1280x720), the heaps smooth white
-  mounds like snow; photographs of heaps from above and of towers from the
-  side show 0.57 to 0.79 (0.84 to 0.89 with the sun behind the eye: then
-  the creases are lit too). Now 0.72 to 0.81, and still 0.86 to 0.88 with
-  the sun behind the eye or looking straight down.
+  20 takes 13 % off); in a crease the heads round it take that light.
+  Photographs of heaps from above and of towers from the side show creases
+  0.57 to 0.79 as bright as the heads round them (on the picture, the
+  darkest tenth of the cloud against the brightest within 25 pixels at
+  1280x720; 0.84 to 0.89 with the sun behind the eye). Alone, at 0.8, the
+  term made them 0.72 to 0.81, but with the fine noise in `tauF` it drew
+  thin dark lines, and dark pits in the tops of a big heap; with `open`
+  it is 0.5. The measure then reads 0.70 to 0.86: darker shaded parts
+  raise the meter's exposure, and the lit heads round the creases come
+  closer to white.
   The map of the clouds' shadow is left out of `tauLoc`: its heights lie
   hundreds of metres apart, and with the sun low it drew bands across the
   towers (`tauCM` itself, and with it the light scattered once, still
@@ -2614,7 +2642,7 @@ textures for it, each with a second texture beside it (`aux`):
 
 - `light`: the first stage of the clouds' light (`lightMap`), drawn by
   the low clouds' pass (`CLOUD_PASS`) with `uStage` 0 at half the width
-  and height into one texture of RGBA32UI on unit 18 (seven half floats),
+  and height into one texture of RGBA32UI on unit 18 (eight half floats),
   before the frame (see Low clouds);
 - `passes` (`passTarget`): the cirrus's pass and the low clouds' (`fs`
   with `CIRRUS_PASS` and `CLOUD_PASS`), the two layers of a texture of

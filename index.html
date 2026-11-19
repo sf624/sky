@@ -1609,7 +1609,7 @@ uniform sampler2D uWarped, uSlopeW;
 layout(location = 0) out uvec4 outCirrus;
 #elif defined(CLOUD_PASS)
 // The low clouds' pass (see clouds): in the first stage, the slow parts of
-// their light as seven half floats; in the second, tBar, sOne + sMany, sAmb
+// their light as eight half floats; in the second, tBar, sOne + sMany, sAmb
 // and sLean as their bits, and Tc as the depth.
 layout(location = 0) out uvec4 outClouds;
 #else
@@ -1653,7 +1653,7 @@ uint halfPair(vec2 v) {
   return halfBits(v.x) | (halfBits(v.y) << 16);
 }
 // The first stage's values at a texel: tIn, tauCM, above, sky (a), and
-// skyLean, tauF, tauN (b; the rest is free).
+// skyLean, tauF, tauN, open (b).
 void lightMapAt(ivec2 ij, out vec4 a, out vec4 b) {
   uvec4 u = texelFetch(uLightMap, ij, 0);
   a = vec4(unpackHalf2x16(u.x), unpackHalf2x16(u.y));
@@ -1999,17 +1999,21 @@ const float LIGHT_MIN = 0.015;       // the first step towards the light, at lea
 // little cloud surrounds a point (DARK, at the surface of the field smoothed
 // over DARK_KM). The sky's light (SKYV: gain, K of 1 / (1 + K tau) through
 // the cloud, and its DARK).
-// Not from the Monte Carlo: in a crease on the lit side the sun's light
-// scattered many times is less (CREASE: at most this share less, the
-// depth towards the light over which it goes, and the share of the depth
-// round the place that lies away from the light over which it comes in;
-// see clouds).
+// Not from the Monte Carlo: how open the place lies towards the light over
+// some hundreds of metres scales the sun's light scattered many times
+// (OPEN: x, the law e^(-x tau) of the depth along a direction of a cone
+// round the light; y, the cone's width; z, what is left where none of it
+// is open), and in a crease on the lit side it is less (CREASE: at most
+// this share less, the depth towards the light over which it goes, and the
+// share of the depth round the place that lies away from the light over
+// which it comes in); see clouds.
 const vec3 MS1 = vec3(1.386, 0.429, 0.111);
 const float MS_UP = 0.704;
 const vec3 MSD = vec3(5.0, 0.0074, 0.039);
 const float DARK = 0.589, DARK_KM = 0.07;
-const vec4 CREASE = vec4(0.8, 4.0, 0.5, 0.9);
 const vec3 SKYV = vec3(2.205, 0.0382, 0.317);
+const vec3 OPEN = vec3(0.3, 0.3, 0.3);
+const vec4 CREASE = vec4(0.5, 4.0, 0.5, 0.9);
 // The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
 // what a white matt surface facing up under the sky as drawn sends out, of
 // 2 cloudSky (uSkyLight: 0.3 to 0.7, more low down and at dusk). The Monte
@@ -2020,7 +2024,7 @@ const float SKY_UNIT = 0.35;
 // out (see clouds).
 const float LIGHT_TAU = 4.5;
 // The steps of the light's marches from such a point (see clouds).
-const int LIGHT_STEPS = 26;
+const int LIGHT_STEPS = 36;
 const float UNDER = 0.3;            // the light of the sky left in the air under a full deck
 const float COLUMN = 0.11;          // (1 - g) 0.75: how a deep column dims the light through it
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
@@ -3019,12 +3023,13 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // thin fringe: only for the first, the outlines of billows seen
       // against those behind them were worked out in full, 4 ms of the
       // frame among the tops.)
-      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, tauN = 0.0;
+      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, tauN = 0.0, open = 1.0;
       // (For the sky's directions, below.)
       bool under0 = true;
       vec3 sunSide = vec3(0.0);
       float u1 = 0.0;
-      vec2 h = vec2(0.0);
+      vec2 h = vec2(0.0), hs = vec2(0.0);
+      float us = 0.0;
       bool mapped = false, behind = uStage == 1.0;
       if (uStage > 0.5) {
         vec2 hp = gl_FragCoord.xy * 0.5 - 0.5, fr = fract(hp);
@@ -3069,6 +3074,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           skyLean = B.x / ws;
           if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
           tauN = B.z / ws;
+          open = B.w / ws;
         }
       }
       if (!mapped) {
@@ -3106,6 +3112,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         u1 = ign(gl_FragCoord.xy + 5.588238 * uPass + 61.0);
         float u2 = ign(gl_FragCoord.yx + 5.588238 * uPass + 73.0);
         h = sqrt(u1) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2));
+        us = ign(gl_FragCoord.xy + 5.588238 * uPass + 67.0);
+        float u4 = ign(gl_FragCoord.yx + 5.588238 * uPass + 53.0);
+        hs = sqrt(us) * vec2(cos(2.0 * PI * u4), sin(2.0 * PI * u4));
         sky = 0.0;
         skyLean = 0.0;
         // The depth away from the light (tauB, out to 1.5 km): how much of
@@ -3124,12 +3133,15 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       float slabbed = sunUp > 0.0 ? smoothstep(8.0, 14.0, above) * basal : 0.0;
       bool slab = slabbed == 1.0;
       // The marches of the light, as one loop of LIGHT_STEPS reads of the
-      // field: the sky's two directions (steps 0 to 9, five each), the depth
-      // away from the light (tauB, 10 to 15) and towards it (16 to 25). Each call of cloudDensity is a copy of the field for
+      // field: the sky's two directions (steps 0 to 9, five each), two
+      // round the light (open, 10 to 19), the depth away from the light
+      // (tauB, 20 to 25) and towards it (26 to 35). Each call of
+      // cloudDensity is a copy of the field for
       // Direct3D's compiler (ANGLE on Windows), which took far longer over
       // four loops, each with its call.
       // The sky's: the first two steps, 30 and 90 m, see the fine turrets (a
-      // seam between heads sees less of the sky than a crown).
+      // seam between heads sees less of the sky than a crown). The two round
+      // the light, mirrored about it, take the same steps (see open, below).
       // tauB's: the first three steps, out to 175 m, see the fine turrets:
       // the side of a head away from the light has little behind it, and is
       // grey, as the Monte Carlo has it for small spheres. Always in the
@@ -3169,14 +3181,15 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
       for (int n = 0; n < LIGHT_STEPS; n++) {
-        int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n - 16;
+        int j = n < 20 ? n % 5 : n < 26 ? n - 20 : n - 26;
         vec3 x;
         float l, wt;
         bool fine, moved = false;
-        if (n < 10) {
-          if (!skyOn || (n >= 5 && behind)) continue;
+        if (n < 20) {
+          if (!skyOn || (n >= 5 && n < 10 && behind)) continue;
           if (j == 0) {
-            w = (n == 0 ? 1.0 : -1.0) * (h.x * eastL + h.y * northL) + sqrt(1.0 - u1) * upL;
+            w = n < 10 ? (n == 0 ? 1.0 : -1.0) * (h.x * eastL + h.y * northL) + sqrt(1.0 - u1) * upL
+                       : normalize((n < 15 ? OPEN.y : -OPEN.y) * (hs.x * side + hs.y * cross(uLight, side)) + sqrt(1.0 - us) * uLight);
             tw = 0.0;
             sw = 0.0;
             dw = 0.03;
@@ -3186,7 +3199,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           l = max(log2(0.5 * dw / TEXEL_KM), lod);
           fine = j < 2;
           wt = dw;
-        } else if (n < 16) {
+        } else if (n < 26) {
           if (!backOn || (j >= 3 && overMap == 1.0)) continue;
           x = ps - uLight * (sb + 0.5 * db) + offB * min(sb / 0.3, 1.0);
           l = max(log2(0.5 * db / TEXEL_KM), lod);
@@ -3200,17 +3213,19 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           fine = !moved;
           wt = dl;
         }
-        float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
-        if (n < 10) {
+        float dt = n < 26 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
+        if (n < 20) {
           tw += dt;
           sw += dw;
           dw *= 3.0;
-          if (j == 4) {
+          if (j == 4 && n < 10) {
             float tk = skyThrough(tw);
             sky += tk;
             skyLean += exp(-tw) * dot(w, sunSide);
           }
-        } else if (n < 16) {
+          if (n == 14) open = 0.5 * exp(-OPEN.x * tw);
+          if (n == 19) open += 0.5 * exp(-OPEN.x * tw);
+        } else if (n < 26) {
           tauB += dt;
           sb += db;
           db *= 2.0;
@@ -3255,7 +3270,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       if (uStage == 0.0) {
         // The first stage keeps these, and its ray ends here.
         mapA = vec4(tIn, tauCM, above, sky);
-        mapB = vec4(skyLean, tauF, tauN, 0.0);
+        mapB = vec4(skyLean, tauF, tauN, open);
         return;
       }
       // How deep the point lies under the cloud's surface (P: 0 there, 1 at
@@ -3290,24 +3305,37 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       float dark = mix(DARK, 1.0, P), kb = MSD.y * tauB;
       float ms = MS1.x * hg(mu, MS1.y) * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb);
       float diffuse = MSD.x / (4.0 * PI) * dark * (MSD.z + kb) / (1.0 + MSD.y * tauCM + kb);
+      // How open the place lies towards the light over some hundreds of
+      // metres scales both (not from the Monte Carlo, whose spheres are open
+      // all round): light scattered many times comes out where light went
+      // in near by (Bouthors et al. 2008: a place gathers the light of the
+      // lit surface it sees), and so with the cosine of the light on a big
+      // lobe, not of each billow. open: the mean of e^(-OPEN.x tau) along two
+      // directions drawn each frame round the light, mirrored about it (by
+      // the cosine to it, narrowed by OPEN.y: some 17 degrees), out to 2.4
+      // km (steps of 30 m to 1.2 km, the later ones of the field smoothed as
+      // they are long); the mean over the frames is the light's side seen
+      // from the place, softly. (With one direction, the flight check's
+      // difference low down rose by a tenth, to 1.24 of its limit 1.28.) A lobe
+      // that faces the light keeps all; its flanks and the seams between
+      // lobes, where neighbours stand towards the light, sink smoothly, to
+      // OPEN.z where none of that side is open.
       // In a crease on the lit side, between heads that shade it, less of
-      // that light. The spheres of the Monte Carlo have no creases: there,
-      // a place with much cloud behind it and some depth towards the light
-      // lies near the edge of the lit face, where light goes in beside it.
-      // In a crease the heads beside it take that light, and photographs
-      // show creases 0.6 to 0.8 as bright as the heads round them (0.85 to
-      // 0.9 only with the sun behind the eye, where the creases are lit). So
-      // the light scattered many times is less by up to CREASE.x as the
-      // depth towards the light over the light's own steps (tauLoc, without
-      // the map of the clouds' shadow: its heights lie hundreds of metres
-      // apart, and with the sun low it drew bands across towers) grows past
-      // CREASE.y; only where the place lies on the side of its mass that the
-      // light falls on (much more cloud behind it than towards the light,
-      // tauB against tauLoc): the shaded side keeps its light.
+      // that light again: the depth towards the light over the light's own
+      // steps (tauLoc, with the fine noise; without the map of the clouds'
+      // shadow, whose heights lie hundreds of metres apart and drew bands
+      // across towers with the sun low) takes up to CREASE.x off as it grows
+      // past CREASE.y, only where much more cloud lies behind the place than
+      // towards the light (tauB against tauLoc): the shaded side keeps its
+      // light. Photographs show creases 0.6 to 0.8 as bright as the heads
+      // round them. (Alone, at 0.8, it drew thin dark lines, and dark pits
+      // in the tops of a big heap; with open, at 0.5, the creases keep some
+      // of their relief without them.)
+      float opened = mix(OPEN.z, 1.0, open);
       float tauLoc = tauF + tauN;
       float crease = 1.0 - CREASE.x * smoothstep(CREASE.z, CREASE.w, tauB / (tauB + tauLoc + 1e-3)) * (1.0 - exp(-tauLoc / CREASE.y));
-      ms *= crease;
-      diffuse *= crease;
+      ms *= opened * crease;
+      diffuse *= opened * crease;
       // Seen from below, a cloud under more of itself shows the light that
       // came down through it, the sun's and the sky's, spread out
       // (throughDeck): a slab of optical depth above lets through 1 / (1 +
