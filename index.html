@@ -464,7 +464,14 @@ precision highp sampler2D;
 // first: see heaps). Everything repeats.
 uniform float uZ;
 uniform float uSize;
+#ifdef HEAP_ID
+// (The map of the heaps: see packHeap.)
+out uvec4 outHeap;
+// The weather map, drawn before it.
+uniform sampler2D uWeatherIn;
+#else
 out vec4 outColor;
+#endif
 
 // An integer hash: xor-shifts and multiplies, Wellons' lowbias32
 // (hash-prospector, public domain). Inputs one apart give unrelated words.
@@ -552,17 +559,37 @@ float perlinFbm(vec3 p, vec3 freq, int octaves, float seed) {
 // high the heap's top stands, wider heaps higher (G of the map).
 uniform sampler2D uPop;
 const int SIZES = 7;
+#ifdef HEAP_ID
+// The two heaps whose tops stand highest here (the most of each dome's
+// height times its heap's, as G of the map takes it): the way to its
+// middle (km), its radius (km) and a number of its own (0 to 1).
+vec4 heapA = vec4(0.0), heapB = vec4(0.0);
+float scoreA = 0.0, scoreB = 0.0;
+void rankHeap(float score, vec2 c, float r, float seed) {
+  if (score <= scoreB) return;
+  if (score > scoreA) {
+    heapB = heapA;
+    scoreB = scoreA;
+    heapA = vec4(c, r, seed);
+    scoreA = score;
+  } else {
+    heapB = vec4(c, r, seed);
+    scoreB = score;
+  }
+}
+#endif
 // A dome, round all over (a bell, hollow in its flanks, looked like a
 // hill), whose foot meets the others without a kink: its slope falls to
 // nought at the rim (else a crease showed where two met). d: the distance
 // from its middle over its radius.
-void dome(float d, float strength, float high, inout float heap, inout float tall) {
+float dome(float d, float strength, float high, inout float heap, inout float tall) {
   float u = max(1.0 - d * d, 0.0), v = strength * sqrt(u) * smoothstep(0.0, 0.3, u);
   // (Smooth only where both stand: a smooth max of nought and nought is
   // more than nought, and lifted the map round every heap.)
   float w = 0.5 * min(v, heap) + 1e-4, k = max(w - abs(v - heap), 0.0) / w;
   heap = max(heap, v) + 0.25 * w * k * k;
   tall = max(tall, v * high);
+  return v;
 }
 void heaps(vec2 uv, out float heap, out float tall) {
   heap = 0.0;
@@ -586,7 +613,10 @@ void heaps(vec2 uv, out float heap, out float tall) {
         float r = r0 * exp2(0.5 * b.y - 0.25), high = clamp(0.2 + 0.3 * log2(r / 0.25), 0.1, 1.0);
         vec2 c = (g + a.xy - f) * r0 * 2.0;
         float strength = mix(0.55, 1.0, b.x);
-        dome(length(c) / r, strength, high, heap, tall);
+        float v = dome(length(c) / r, strength, high, heap, tall);
+#ifdef HEAP_ID
+        rankHeap(v * high, c, r, b.z);
+#endif
         // Small heaps round the foot of a large one (from 1 km on), half to
         // four fifths as strong.
         if (i >= 4) {
@@ -594,7 +624,11 @@ void heaps(vec2 uv, out float heap, out float tall) {
             vec3 s = rnd(vec3(id + g, 0.0), vec3(freq, freq, 1.0), 302.0 + 10.0 * float(i) + float(j));
             float an = 6.2831853 * (float(j) + s.x) / 6.0, rs = r * (0.12 + 0.16 * s.z);
             vec2 cs = c + r * (0.8 + 0.5 * s.y) * vec2(cos(an), sin(an));
-            dome(length(cs) / rs, strength * mix(0.5, 0.8, s.z), clamp(0.2 + 0.3 * log2(rs / 0.25), 0.1, 1.0), heap, tall);
+            float hs = clamp(0.2 + 0.3 * log2(rs / 0.25), 0.1, 1.0);
+            float vs = dome(length(cs) / rs, strength * mix(0.5, 0.8, s.z), hs, heap, tall);
+#ifdef HEAP_ID
+            rankHeap(vs * hs, cs, rs, fract(37.0 * s.x + 11.0 * s.y));
+#endif
           }
         }
       }
@@ -703,8 +737,33 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   return sum;
 }
 
+#ifdef HEAP_ID
+// The map of the heaps (uHeaps in fs), a texel for each of the weather
+// map's: for the two heaps whose tops stand highest over its middle (see
+// rankHeap), the way from there to the heap's middle (16 bits across and
+// along, -4 to 4 km), its radius (8 bits, to 2.5 km) and its number (8
+// bits), and the weather map's R and G at its middle (8 bits each), which
+// say how high its top stands. A radius of nought: no heap.
+uint packWay(vec2 c) {
+  uvec2 u = uvec2(clamp(round(c * 8192.0 + 32768.0), 0.0, 65535.0));
+  return u.x | u.y << 16u;
+}
+uint packHeap(vec4 h, vec2 uv) {
+  if (h.z <= 0.0) return 0u;
+  ivec2 n = textureSize(uWeatherIn, 0);
+  vec2 rg = texelFetch(uWeatherIn, ivec2(floor(fract(uv + h.xy / 256.0) * vec2(n))) % n, 0).rg;
+  uvec4 b = uvec4(round(vec4(clamp(h.z / 2.5, 0.0, 1.0), h.w, rg) * 255.0));
+  return b.x | b.y << 8u | b.z << 16u | b.w << 24u;
+}
+#endif
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
+#ifdef HEAP_ID
+  float heap, tall;
+  heaps(uv, heap, tall);
+  outHeap = uvec4(packWay(heapA.xy), packWay(heapB.xy), packHeap(heapA, uv), packHeap(heapB, uv));
+#else
   if (uZ >= 2.0) {
     // The heaps' body: the turrets of 2 km and 1 km (4 and 8 cells across
     // the tile of 8 km), and the heads on them (heads).
@@ -778,6 +837,7 @@ void main() {
     float c = 0.55 * rafts + 0.5 * (walls - 0.5) + 0.35 * streets + 0.25 * systems;
     outColor = vec4(smoothstep(-0.1, 0.45, c), 0.0, 0.0, 1.0);
   }
+#endif
 }
 </script>
 
@@ -1726,6 +1786,12 @@ uniform sampler2D uTops;
 // by up to WARP km (see cloudShape), 2048 texels square; and its slope
 // there (uSlopeW). Made with the clouds' amount.
 uniform sampler2D uWarped, uSlopeW;
+// The map of the heaps (see packHeap in the noise shader), a texel for each
+// of the weather map's, read at the place uWarped moved it to (warpAt): for
+// the two heaps whose tops stand highest there, where the middle is, how
+// wide the heap is and how high its top stands. Their bodies are lobes
+// round that middle (see heapLobes).
+uniform highp usampler2D uHeaps;
 #ifdef CIRRUS_PASS
 // The cirrus's pass (see highCloud): tHigh and lk, as their bits, and Th as
 // the depth. One target: see below.
@@ -1742,6 +1808,9 @@ layout(location = 3) out vec4 outLut3;
 // their light as seven half floats; in the second, tBar, sOne + sMany, sAmb
 // and sLean as their bits, and Tc as the depth.
 layout(location = 0) out uvec4 outClouds;
+#elif defined(HEAP_FORM)
+// The map of the heaps for the clouds' amount (see heapForms).
+layout(location = 0) out uvec4 outHeap;
 #else
 layout(location = 0) out vec4 outColor;
 #endif
@@ -2113,6 +2182,16 @@ float hash(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
+// An integer hash: Wellons' lowbias32, as in the noise shader.
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
 // After Jimenez (2014), "Next Generation Post Processing in Call of Duty: Advanced Warfare".
 // Interleaved gradient noise: spreads the start of a march evenly over
 // neighbouring pixels.
@@ -2180,7 +2259,14 @@ const float SKIN_F = 0.1;           // and over what depth they fade out deeper 
 const float WISP = 0.6;             // how much the fine turrets carve the heads' middles low on a heap (wisps)
 const vec2 TOWER = vec2(0.34, 0.4);  // towers rise over G (the map's height of heaps) from x to x + y
 const vec2 LEAN = vec2(0.06, 0.03);   // how far heaps lean with the wind's shear, km per km of height
-const float PILE = 0.2;             // how far a tower's stacked thermals swell, of its envelope
+const float PILE = 0.2;             // how far a tower's stacked thermals swell, of its envelope (the bound of its lobes)
+const float LOBE_MIN = 0.3;         // heaps narrower than this (radius of their cloud, km) have none
+const float LOBE_R = 1.15;          // they lie in a dome this much wider than the heap, as high as its top
+const float LOBE_K = 0.08;          // how far two lobes melt into one, of the heap's radius (clefts)
+const float LOBE_S = 0.3;           // the small lobes on them: a cell of their turrets, of the heap's radius
+const float LOBE_B = 0.5;           // and how far they stand out, of a cell
+const float LOBE_IN = 0.3;          // how far in the field's dome lies under the lobes, of the heap's radius
+const float LOBE_E = 0.1;           // and how far it melts into them, km
 const float WARP = 5.0;             // how far the map's heaps are moved about, km (see cloudShape)
 const float EDGE = 0.03;            // depth under the surface at which an old, soft cloud is dense
 const int CLOUD_STEPS = int(400.0 / Q_MARCH);
@@ -2256,7 +2342,17 @@ float steep = 1.0;
 // later steps, the hollows, the sky's reach) leave it at 1:
 // they smooth the billows over far more than a wall's, and the slope cost
 // 4 ms of the frame among the tops at 1440p.
+// (The scene's own program reads the clouds only so, for the sea: there
+// it is a constant, and the reads of the slope, which a draw could not
+// know it skips, are not in it. A program reads 16 textures at most on
+// Direct3D 11.)
+#if defined(CLOUD_PASS) || defined(SHADOW_MAP) || defined(TOPS_MAP)
 bool coarse = false;
+#define SET_COARSE(v) coarse = (v)
+#else
+const bool coarse = true;
+#define SET_COARSE(v)
+#endif
 // And how thin the heap was over this place (1 at the edge of its foot).
 float thin = 0.0;
 // And how much of the field there was the heaps' 3D body (solid), and how
@@ -2285,6 +2381,177 @@ vec4 mapAt(sampler2D map, vec3 p, vec2 x, float lod, bool fine, float mip) {
 
 vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
   return mapAt(uWarped, p, x, lod, fine, Q_WARP_MIP);
+}
+
+// The place on the weather map that uWarped holds for x (km): where the
+// cover breaks into heaps (sheet less than 1), moved by up to WARP km by
+// the map's own R and G far from here (see cloudShape).
+vec2 warpAt(vec2 x, float sheet) {
+  return sheet >= 1.0 ? x : x + WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
+}
+
+// Where the cover is whole over tens of km (the map's R at mip level 6.5),
+// at x (km): how far the heaps stand on a sheet, how near the top of the
+// slider the clouds are (level1: the heaps on the sheet flatten), and how
+// much towers weigh (see cloudShape).
+vec3 regionAt(vec2 x) {
+  float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
+  float level1 = smoothstep(0.85, 1.0, uCloud + 0.3 * (region - 0.5));
+  return vec3(smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5)), level1, smoothstep(0.1, 0.5, uCloud) * (1.0 - 0.8 * level1));
+}
+
+// How the heaps stand where the weather map holds R and G (rg), towers
+// weighing `towers` and the slider's top and the sheet as level1 and sheet
+// say (see cloudShape): how far it is a tower (tg; tower, with its
+// weight), how far the map stands over its level (e), how far the heaps
+// flatten into a deck, how high a whole heap's top stands (top, of CT -
+// CB), how thick it is (thick) and how far a deck swells (swell).
+void heapForm(vec2 rg, float towers, float level1, float sheet, out float tg, out float tower, out float e, out float deck, out float top, out float thick, out float swell) {
+  tg = clamp((rg.y - TOWER.x) / TOWER.y, 0.0, 1.0);
+  tower = tg * (2.0 - tg) * towers;
+  // (With few clouds, the level stands 0.1 higher: the heaps of the map
+  // are many, and from 13 km 3 % of the sea was cloud at 0.1, where it
+  // was 0.5 %.)
+  e = 3.0 * (rg.x - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud)) - 0.1 * (1.0 - smoothstep(0.1, 0.35, uCloud))) + 1.5 * tower;
+  // A dome over a flat base, with steep sides: a height costs its cube.
+  // Wider clouds are thicker, up to a point; a deck swells where the map
+  // is high.
+  // Where the cover is thick all round, the heaps flatten into a deck of
+  // small cells (stratocumulus).
+  // (Not by the tower's own rise: with it, towers in a thick cover became
+  // decks, and at cloud 0.7 to 0.8 hardly one stood.)
+  deck = smoothstep(2.6, 3.6, e - 1.5 * tower);
+  top = 0.12 + 0.32 * rg.y * (1.0 - 0.6 * max(deck, level1)) + 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, rg.y));
+  thick = 1.0 - exp(-e / 1.6);
+  swell = 0.25 * clamp(e - 1.0, 0.0, 1.0 - 0.6 * sheet);
+}
+
+// A smooth max: the larger, raised by up to k / 4 where the two are within
+// k of each other (no crease where they meet).
+float smax(float a, float b, float k) {
+  float h = max(k - abs(a - b), 0.0) / k;
+  return max(a, b) + 0.25 * k * h * h;
+}
+
+// The height of a heap's dome at x of its width (1 at the middle, 0 at
+// the rim): flat over the middle, as (1 - x^4)^(1/4), so that lobes off
+// the middle reach nearly as high as the top (in a round dome they sank,
+// and one lobe in the middle was the head).
+float domeTop(float x) {
+  float x2 = min(x * x, 1.0);
+  return sqrt(sqrt(1.0 - x2 * x2));
+}
+
+// The lobes of one heap's 3D body (see cloudShape): 4 to 6 of them, by the
+// heap's number, from its foot to its top, each the higher the narrower
+// (0.6 to 0.4 of the heap's radius across, a little flatter than wide),
+// each a little off the middle, turned from the one below by the golden
+// angle, and the upper ones drawn to one side; each high enough to meet
+// the next (a chain, not balls that float apart), and none higher than
+// the heap's dome lets it be (domeTop): the top is a cluster of two or
+// three heads, leaning, and no lobe is the whole head. Far from a place by
+// their box, they are left out. They meet in clefts (a smooth max over
+// LOBE_K of the radius). Photographs of towers and heaps from above show
+// clusters of heads a quarter to a twentieth of the cloud's width, with
+// shaded clefts between them; the turrets of 2 km and 1 km, on a lattice
+// that knew nothing of the heaps, made one smooth ball the whole head of a
+// tower, and stacked balls. On the lobes, smaller ones (bump): the 1 km
+// turrets of uBody, read at a scale of the heap's radius (a cell LOBE_S
+// of it), raise the surface by up to LOBE_B of a cell, so that the sides
+// bulge out at a few hundred metres too (the heads on them only carve).
+// d: the way from the heap's middle to here (km), hb: the height over the
+// bases' level (km), r: the heap's radius, top: how high its top stands
+// over the level (km). Returns how deep this place lies in the lobes, km
+// (negative outside); the small lobes fade out over the lowest quarter of
+// the heap (a base is flat).
+float heapLobes(vec2 d, float hb, float r, float top, uint seed, float lod, out float bump) {
+  uint hs = ihash(seed * 0x9e3779b9u + 0x632be5abu);
+  int n = 4 + int(hs % 3u);
+  vec4 s = vec4(uvec4(hs, hs >> 8u, hs >> 16u, hs >> 24u) & 255u) * (6.2831853 / 256.0);
+  // (Each lobe turned from the last by the golden angle, a rotation; its
+  // numbers from the heap's by a step of the R4 sequence: cheaper than a
+  // hash, a sine and a cosine each.)
+  vec2 way = vec2(cos(s.x), sin(s.x)), lean = 0.2 * r * vec2(cos(s.y), sin(s.y));
+  const vec2 GOLD = vec2(-0.7373688, 0.6754903);
+  float m = -9.0, dt = 1.0 / float(n - 1);
+  // (A loop of a bound the compiler cannot know, as the long marches: unrolled,
+  // the lobes of the two heaps were twelve copies of this, and the clouds' pass
+  // took 4 ms more at 1440p.)
+  for (int k = 0; k < LONG_N(n); k++) {
+    vec4 rk = fract(s.zwzw * vec4(0.159155, 0.159155, 0.31831, 0.31831) + float(k) * vec4(0.7548777, 0.5698403, 0.4301597, 0.3247180));
+    // (t: 0 for the lowest, 1 for the top one, whose top is the heap's; f
+    // nearly t^0.6, so that more of them stand high.)
+    float t = float(k) * dt, f = k == n - 1 ? 1.0 : clamp(t + 0.15 * rk.w - 0.075, 0.0, 1.0);
+    // (At least so high that each meets the next: a chain, not balls
+    // that float apart.)
+    float rh = r * (0.6 - 0.25 * t) * (0.85 + 0.3 * rk.x), rv = max(min(rh * (0.75 + 0.2 * rk.y), 0.6 * top), 0.8 * top / float(n));
+    // (The top one near the middle: round it, a pit.)
+    vec2 o = min(r * (k == n - 1 ? 0.12 * rk.z : 0.05 + 0.25 * rk.z), max(0.92 * r - rh, 0.0)) * way + lean * t * t;
+    // (Inside the heap's dome, LOBE_R of its radius wide and as high as its
+    // top: see lobeBound.)
+    float zMax = max(top - rv, 0.0) * domeTop(length(o) / max(LOBE_R * r - rh, 1e-3));
+    float z = min(mix(0.35 * rv, max(top - rv, 0.35 * rv), f * (1.6 - 0.6 * f)), max(zMax, 0.35 * rv));
+    way = vec2(way.x * GOLD.x - way.y * GOLD.y, way.x * GOLD.y + way.y * GOLD.x);
+    // (Lobes far from here, by their box, are left out: their part would
+    // be far under nought.)
+    vec3 q = vec3(d.x - o.x, hb - z, d.y - o.y);
+    if (max(max(abs(q.x), abs(q.z)) - rh, abs(q.y) - rv) > 0.25 * r + 0.1) continue;
+    // How deep in an ellipsoid (a bound that is near the distance).
+    vec3 ie = vec3(1.0 / rh, 1.0 / rv, 1.0 / rh);
+    q *= ie;
+    float k0 = length(q), k1 = max(length(q * ie), 1e-6);
+    m = smax(m, k0 * (1.0 - k0) / k1, LOBE_K * r);
+  }
+  bump = 0.0;
+  float cell = LOBE_S * r;
+  if (!coarse && abs(m) < LOBE_B * cell) {
+    vec3 off = vec3(uvec3(hs, hs >> 10u, hs >> 20u) & 1023u) / 1024.0;
+    float tb = textureLod(uBody, vec3(d.x, hb, d.y) / (8.0 * cell) + off, max(lod + BODY_LOD - log2(cell), 0.0)).g;
+    bump = LOBE_B * cell * (tb - BODY_C) * smoothstep(0.03, 0.25, hb / top);
+  }
+  // (Low on the heap they give way to its dome, whose turrets and heads
+  // carve it: there the lowest lobes stood out as smooth, bare bulges, seen
+  // from below.)
+  return m + bump - LOBE_IN * r * (1.0 - smoothstep(0.1, 0.4, hb / top));
+}
+
+// One heap of uHeaps (way and id, two of its words) seen from a place cc
+// km from the middle of its texel: the way from the heap's middle (km),
+// the radius of the cloud it makes, and how high its top stands over the
+// bases' level (km); and its number. A radius of nought where it has no
+// lobes that reach here.
+vec4 heapAt(uint way, uint id, vec2 cc, out uint seed) {
+  float r = float(id & 255u) * (2.5 / 255.0);
+  vec2 d = cc - (vec2(way & 65535u, way >> 16u) - 32768.0) / 8192.0;
+  seed = id >> 8u & 255u;
+  return r <= 0.0 || dot(d, d) > 1.44 * r * r ? vec4(0.0) : vec4(d, r, float(id >> 16u & 255u) * (CT / 255.0));
+}
+
+// The bound of a heap's lobes (km): they lie in a dome over its middle,
+// LOBE_R of its radius wide and as high as its top, with the small lobes
+// on them.
+float lobeBound(vec4 hp, float hb) {
+  if (hp.z <= 0.0) return -9.0;
+  float m = 0.25 * LOBE_B * LOBE_S * hp.z + 0.02, a = LOBE_R * hp.z + m, rho = length(hp.xy);
+  return min(a - rho, (hp.w + m) * domeTop(rho / a) - hb);
+}
+
+// The two heaps of uHeaps at xh, the place on the weather map (warpAt).
+void heapsAt(vec2 xh, out vec4 hp, out vec4 hq, out uint sp, out uint sq) {
+  ivec2 nh = textureSize(uHeaps, 0);
+  vec2 th = WEATHER_KM / vec2(nh), ch = floor(xh / th);
+  uvec4 hm = texelFetch(uHeaps, (ivec2(ch) % nh + nh) % nh, 0);
+  hp = heapAt(hm.x, hm.z, xh - (ch + 0.5) * th, sp);
+  hq = heapAt(hm.y, hm.w, xh - (ch + 0.5) * th, sq);
+}
+
+// How high their lobes may reach over the bases' level, km (A of uWarped,
+// see the map of the tops): their domes (lobeBound) at `slack` km nearer
+// their middles.
+float lobeTop(vec4 hp, float slack) {
+  if (hp.z <= 0.0) return -1.0;
+  float m = 0.25 * LOBE_B * LOBE_S * hp.z + 0.02, a = LOBE_R * hp.z + m, rho = max(length(hp.xy) - slack, 0.0) / a;
+  return rho < 1.0 ? (hp.w + m) * domeTop(rho) : -1.0;
 }
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -2321,8 +2588,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 #else
   vec2 x = p.xz + uDrift;
 #endif
-  float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-  float sheet = smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
+  vec3 rg = regionAt(x);
+  float sheet = rg.x;
   // Where the cover breaks into heaps, the map is read at a place moved by
   // up to WARP km: by the map's own cover and height of heaps (R, G) far
   // from here, smoothed over 1.4 km (mip level 2.5): the heaps of the map
@@ -2345,6 +2612,42 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, w.b);
   y = (h - level) / (CT - CB);
   base = 2.0 * (h - level);
+  // (The bound of the lobes from the map's own texels: as the mean of a
+  // mip level it was lower than some lobes, which were cut flat far off.)
+  float lobeTops = textureLod(uWarped, xl / WEATHER_KM, 0.0).a;
+#if defined(CLOUD_PASS) || defined(SHADOW_MAP)
+  // The lobes of the heaps' 3D body (see the body, below), worked out
+  // here, where the field has few terms yet: where the body is, the
+  // program held more at once, and the clouds' pass took 8 ms more under
+  // heaps at 1440p. Under the bound of the lobes (A of the map), the two
+  // heaps whose tops stand highest here (uHeaps): how deep this place lies
+  // in their lobes (dLobe, km), the small lobes' part of that (bump), how
+  // much of the place is theirs (lobed; y: heaps under 0.5 to 0.9 km keep
+  // the 1 km turrets too, which from below give them their small heads),
+  // and how
+  // far their dome lies under
+  // them (inset, km: LOBE_IN of the heap's radius).
+  float dLobe = -9.0, bump = 0.0, inset = 0.0;
+  vec2 lobed = vec2(0.0);
+  if (lobeTops * CT - h > -0.1) {
+    vec4 heapP, heapQ;
+    uint seedP, seedQ;
+    heapsAt(warpAt(xl, sheet), heapP, heapQ, seedP, seedQ);
+    for (int j = 0; j < LONG_N(2); j++) {
+      vec4 hp = j == 0 ? heapP : heapQ;
+      if (hp.z <= 0.0) continue;
+      float wj = smoothstep(LOBE_MIN, 1.5 * LOBE_MIN, hp.z) * (1.0 - smoothstep(0.6, 1.0, length(hp.xy) / hp.z));
+      lobed = max(lobed, vec2(wj, wj * smoothstep(0.5, 0.9, hp.z)));
+      inset = max(inset, LOBE_IN * hp.z * wj);
+      // (Not where its dome lies under the lobes so far by more than they
+      // melt over: the smooth max would not change.)
+      if (lobeBound(hp, h - level) < max(dLobe - LOBE_K * hp.z, -0.1)) continue;
+      float b = 0.0, dj = heapLobes(hp.xy, h - level, hp.z, hp.w, j == 0 ? seedP : seedQ, lod, b);
+      if (dj > dLobe) bump = b;
+      dLobe = smax(dLobe, dj, LOBE_K * hp.z);
+    }
+  }
+#endif
   // The cloud amount sets the level of the map above which clouds stand.
   // Each heap of the map is a dome: its top stands as high as the map's G
   // says (higher in the middle of a heap, and on some heaps more than on
@@ -2357,30 +2660,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // it breaks up first where the cover is less.
   // Near the top of the slider the heaps on it flatten, and few towers
   // stand out of it (they looked like mountains).
-  float level1 = smoothstep(0.85, 1.0, uCloud + 0.3 * (region - 0.5));
+  float level1 = rg.y;
   // A tower stands on the whole of its heap's middle, and some stand higher
   // than others: as the heap's height rose over the tower's width, its top
   // did, and towers were cones, like mountains.
-  float towers = smoothstep(0.1, 0.5, uCloud) * (1.0 - 0.8 * level1);
-  float tg = clamp((w.g - TOWER.x) / TOWER.y, 0.0, 1.0), tw = tg * (2.0 - tg);
-  float tower = tw * towers;
-  // (With few clouds, the level stands 0.1 higher: the heaps of the map
-  // are many, and from 13 km 3 % of the sea was cloud at 0.1, where it
-  // was 0.5 %.)
-  float e = 3.0 * (w.r - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud)) - 0.1 * (1.0 - smoothstep(0.1, 0.35, uCloud))) + 1.5 * tower;
-  // A dome over a flat base, with steep sides: a height costs its cube.
-  // Wider clouds are thicker, up to a point; a deck swells where the map
-  // is high.
-  // Where the cover is thick all round, the heaps flatten into a deck of
-  // small cells (stratocumulus).
-  // (Not by the tower's own rise: with it, towers in a thick cover became
-  // decks, and at cloud 0.7 to 0.8 hardly one stood.)
-  float deck = smoothstep(2.6, 3.6, e - 1.5 * tower);
+  float towers = rg.z;
+  float tg, tower, e, deck, top, thick, swell;
+  heapForm(w.rg, towers, level1, sheet, tg, tower, e, deck, top, thick, swell);
   float sheetTop = (0.25 + 0.35 * sheet) * (0.8 + 0.4 * smoothstep(0.3, 0.7, w.r)) / (CT - CB);
-  float top = 0.12 + 0.32 * w.g * (1.0 - 0.6 * max(deck, level1)) + 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, w.g));
-  float thick = 1.0 - exp(-e / 1.6);
   float cube = top * top * top;
-  float swell = 0.25 * clamp(e - 1.0, 0.0, 1.0 - 0.6 * sheet);
   float f = 1.6 * (thick + swell - y * y * y / cube) - 4.0 * max(y - 0.85, 0.0);
   // The cube costs nothing near the base: there the thin edge of a cloud,
   // where the map is barely over its level, would reach out sideways as a
@@ -2434,7 +2722,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // Over a dome's top, env rises by gTop per km; before the slope is known,
   // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
   float gTop = 3.0 / (top * (CT - CB));
-  float bodyMax = BODY_G * (env / (gTop * (env > 0.0 ? 0.7 : 6.0)) + bumpMax + shift);
+  // The bound of the heaps' lobes (see the body, below): the map holds how
+  // high they may reach (A of uWarped), so that a place over them or off
+  // them costs no more than before.
+  float lobeMax = solid > 0.0 ? lobeTops * CT - h + ERO_C * bw.z : -9.0;
+  float bodyMax = BODY_G * (max(env / (gTop * (env > 0.0 ? 0.7 : 6.0)) + bumpMax, lobeMax) + shift);
   // No noise could make a cloud here, even on the steepest wall (below).
   steep = 1.0;
   thin = 1.0 - smoothstep(0.05, 0.4, thick + swell);
@@ -2481,7 +2773,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // How fast the heaps' field rises over their top, per unit of y.
   float gF = 4.8 * max(steep, 0.7) / top;
   float hUp = mix((f + 0.9 * lumps * steep) / gF, bodyMax / (BODY_G * (CT - CB)), solid) + topR;
-  bodyMax = BODY_G * (dEnv + bumpMax + shift);
+  bodyMax = BODY_G * (max(dEnv + bumpMax, lobeMax) + shift);
 #ifdef TOPS_MAP
   // (The map of the tops wants the bound of this way out.)
   return max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0);
@@ -2560,9 +2852,31 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // foot of its sides were a rubble of heads; in photographs a base is
     // flat.)
     float hw = bw.z * smoothstep(0.03, 0.25, heapUp);
-    float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * hw;
-    float disp = u - dEnv - shift - hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
-    float fb = BODY_G * (dEnv + disp + shift);
+    // The lobes of the two heaps whose tops stand highest here (uHeaps),
+    // over the field's dome without the tower, which lies LOBE_IN of the
+    // heap's radius under them (where the lobes are): its walls and round
+    // top made towers drums and cones. Each heap's top stands as high as
+    // the field's over its middle.
+    float top0 = top - 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, w.g));
+    float env0 = thick + swell - y * y * y / (top0 * top0 * top0) - 4.0 * max(y - 0.85, 0.0) - 0.2 * rim * rim;
+    // Heaps without lobes (narrower than LOBE_MIN) and the edges of the
+    // others (1 - lobed) keep the turrets of 2 km and 1 km, small heaps
+    // with lobes the 1 km ones, as large as their dome's height without the
+    // tower lets them be (as large as a tower's let them, a small tower
+    // was one smooth boulder).
+    vec2 bt = BODY_K.xy * smoothstep(vec2(0.5), vec2(1.5), top0 * (CT - CB) * (1.0 + sheet) / vec2(2.0, 1.0)) * (t.xy - BODY_C);
+#if defined(CLOUD_PASS) || defined(SHADOW_MAP)
+    float u = smax(env0 * top0 * (CT - CB) / (3.0 * stB) - inset, dLobe, LOBE_E) + dot(1.0 - lobed, bt) + shift + ERO_C * hw;
+#else
+    // (The scene's own program reads the clouds only for the sea, smoothed
+    // over far more than a lobe: there the field's dome keeps the tower.)
+    float u = dEnv + bt.x + bt.y + shift + ERO_C * hw, bump = 0.0;
+#endif
+    float carve = hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
+    float disp = bump + ERO_C * hw - carve;
+    // (Never over the bound that the early ways out and the map of the
+    // tops take.)
+    float fb = min(BODY_G * (u - carve), bodyMax);
     fBody = fb;
     f = mix(f, fb, solid);
     float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
@@ -2845,9 +3159,9 @@ float cloudExtinction(float f, float lod, float y, float body, float edge) {
 // as a read that sums a depth over long steps: see coarse).
 float cloudDensity(vec3 p, float lod, bool fine) {
   float y, bump, body, edge;
-  coarse = !fine;
+  SET_COARSE(!fine);
   float f = cloudField(p, lod, fine, y, bump, body, edge);
-  coarse = false;
+  SET_COARSE(false);
   return f > 0.0 ? cloudExtinction(f, lod, y, body, edge) : 0.0;
 }
 
@@ -4058,9 +4372,9 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       for (int i = 0; i < 4; i++) {
         vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
         float y, bump, body, edge;
-        coarse = true;
+        SET_COARSE(true);
         float f = cloudField(xk + n * h.x, lodk, false, y, bump, body, edge);
-        coarse = false;
+        SET_COARSE(false);
         if (f > 0.0) tv += cloudExtinction(f, min(lodk, 2.0), y, body, edge) * h.y;
       }
       vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
@@ -4154,16 +4468,6 @@ uniform sampler2D uCiMap;
 // unroll a loop that writes an array at an index it cannot know, and
 // cannot unroll one whose bound it cannot know (see the GLSL rules).
 #define CI_N(n) ((n) + int(min(uCirrus, 0.0)))
-
-// An integer hash: Wellons' lowbias32, as in the noise shader.
-uint ihash(uint x) {
-  x ^= x >> 16u;
-  x *= 0x7feb352du;
-  x ^= x >> 15u;
-  x *= 0x846ca68bu;
-  x ^= x >> 16u;
-  return x;
-}
 
 // Gradient noise in 2D (within about -0.7 to 0.7), repeating every `per`
 // cells (whole numbers); the lattice wraps by hand (see the GLSL rules).
@@ -5278,10 +5582,21 @@ void main() {
   if (uTopsPass < 0.0) {
     // uWarped (uTopsPass -2) or uSlopeW (-1), uRes texels square.
     vec2 x = gl_FragCoord.xy / uRes * WEATHER_KM;
-    float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-    float sheet = smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
-    vec2 xw = x + WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
-    outColor = uTopsPass < -1.5 ? textureLod(uWeather, xw / WEATHER_KM, 0.0) : textureLod(uSlope, xw / WEATHER_KM, 0.0);
+    float sheet = regionAt(x).x;
+    vec2 xw = warpAt(x, sheet);
+    if (uTopsPass < -1.5) {
+      // A: how high the heaps' lobes may reach here (of CT), over 1.5
+      // texels round it, rounded up to the 8 bits kept.
+      vec4 w = textureLod(uWeather, xw / WEATHER_KM, 0.0), hp, hq;
+      uint sp, sq;
+      heapsAt(xw, hp, hq, sp, sq);
+      float slack = 1.5 * WEATHER_KM / uRes.x, lt = max(lobeTop(hp, slack), lobeTop(hq, slack));
+      float level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, w.b);
+      w.a = lt > 0.0 ? ceil(clamp((level + lt) / CT, 0.0, 1.0) * 255.0) / 255.0 : 0.0;
+      outColor = w;
+    } else {
+      outColor = textureLod(uSlope, xw / WEATHER_KM, 0.0);
+    }
     return;
   }
   if (uTopsPass == 0.0) {
@@ -5302,6 +5617,35 @@ void main() {
     }
   }
   outColor = m;
+}
+#elif defined(HEAP_FORM)
+// The map of the heaps for this amount of cloud (uHeaps), drawn from the
+// one baked at start (uHeapsIn, see packHeap in the noise shader) when the
+// amount changes: for each of the two heaps, the way to its middle, and in
+// place of the map's R and G at its middle, the radius of the cloud it
+// makes and how high its top stands (8 bits each, to 2.5 km and to CT),
+// as the field has them there (heapForm), so that cloudShape only reads
+// them (worked out there, they cost 8 ms of the frame at 1440p under heaps).
+uniform highp usampler2D uHeapsIn;
+uint heapForms(uint id, vec3 rg) {
+  float r = float(id & 255u) * (2.5 / 255.0);
+  float tg, tower, e, deck, top, thick, swell;
+  heapForm(vec2(id >> 16u & 255u, id >> 24u) / 255.0, rg.z, rg.y, rg.x, tg, tower, e, deck, top, thick, swell);
+  float h = top * (CT - CB) * pow(max((thick + swell) * (1.0 + 0.25 * tower), 0.0), 1.0 / 3.0);
+  // Only the middle of a heap that stands a little over the level the
+  // clouds' amount sets is cloud: its dome adds 0.6 of its strength (some
+  // 0.8) to R, as sqrt(1 - d^2) at d of its radius, so the cloud's edge
+  // lies where e has fallen by 3 times that from its middle.
+  float c = 1.0 - clamp(e / 1.44, 0.0, 1.0);
+  r *= sqrt(1.0 - c * c);
+  if (h < 0.1 || r < LOBE_MIN) return 0u;
+  return uint(round(r * (255.0 / 2.5))) | (id & 0xff00u) | uint(ceil(clamp(h / CT, 0.0, 1.0) * 255.0)) << 16u;
+}
+void main() {
+  ivec2 ij = ivec2(gl_FragCoord.xy);
+  uvec4 h = texelFetch(uHeapsIn, ij, 0);
+  vec3 rg = regionAt((vec2(ij) + 0.5) / vec2(textureSize(uHeapsIn, 0)) * WEATHER_KM);
+  outHeap = uvec4(h.xy, heapForms(h.z, rg), heapForms(h.w, rg));
 }
 #elif defined(AIR_LUT)
 // One texel of the air's table (see Q_AIR_LUT), slice uLutSlice: the air
@@ -7666,13 +8010,13 @@ const SkySound = (() => {
     // fs as the low clouds' pass (see CLOUD_PASS).
     const cloudProg = link('fs', '#define CLOUD_PASS');
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
-    const noiseProgram = link('noise'), wavesProgram = link('waves'), slopeProgram = link('slope');
+    const noiseProgram = link('noise'), heapProgram = link('noise', '#define HEAP_ID'), wavesProgram = link('waves'), slopeProgram = link('slope');
     const mean = link('mean', Q.frame < 1 ? '#define UPSCALE' : ''), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
     const shadowProg = link('fs', '#define SHADOW_MAP');
     // And as the map of the tops (see uTops), and as the sky's light on the
     // clouds (see uSkyLight).
-    const topsProg = link('fs', '#define TOPS_MAP'), skyProg = link('fs', '#define SKY_LIGHT');
+    const topsProg = link('fs', '#define TOPS_MAP'), skyProg = link('fs', '#define SKY_LIGHT'), heapFormProg = link('fs', '#define HEAP_FORM');
     // And as the table of the air's light (see Q_AIR_LUT), where the level
     // reads it (`airLut`) and the GPU can draw half floats.
     const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT') : null;
@@ -7940,9 +8284,10 @@ const SkySound = (() => {
     }
 
     // Cloud textures: the 3D noise on unit 2, the weather map on unit 3, the
-    // heaps' turrets on unit 22. The noise program draws them, slice by
-    // slice, and the weather map in strips of 64 rows (the scissor), in
-    // batches.
+    // heaps' turrets on unit 22, the map of the heaps on unit 30 (as baked:
+    // see uHeaps in fs for the one the clouds read). The noise
+    // program draws them, slice by slice, and the maps in strips of 64 rows
+    // (the scissor), in batches.
     {
       const n = NOISE, m = WEATHER, STRIP = 64;
       gl.activeTexture(gl.TEXTURE2);
@@ -7957,6 +8302,13 @@ const SkySound = (() => {
       const weather = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, weather);
       gl.texStorage2D(gl.TEXTURE_2D, Math.log2(m) + 1, gl.RGBA8, m, m);
+      // (Whole numbers, read texel by texel: see uHeaps in fs.)
+      gl.activeTexture(gl.TEXTURE30);
+      const heapMap = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, heapMap);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32UI, m, m);
+      for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+      gl.activeTexture(gl.TEXTURE3);
       {
         const draw = noiseProgram;
         gl.useProgram(draw);
@@ -8017,8 +8369,24 @@ const SkySound = (() => {
             gl.drawArrays(gl.TRIANGLES, 0, 3);
           }]);
         }
+        // The map of the heaps, by the noise shader's other program, which
+        // reads the weather map (unit 3) at each heap's middle.
+        parts.push([0, () => {
+          gl.useProgram(heapProgram);
+          gl.uniform1f(gl.getUniformLocation(heapProgram, 'uSize'), m);
+          gl.uniform1i(gl.getUniformLocation(heapProgram, 'uPop'), 28);
+          gl.uniform1i(gl.getUniformLocation(heapProgram, 'uWeatherIn'), 3);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, heapMap, 0);
+        }]);
+        for (let y = 0; y < m; y += STRIP) {
+          parts.push([STRIP * m / (n * n), () => {
+            gl.scissor(0, y, m, STRIP);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }]);
+        }
         parts.push([0, () => {
           gl.disable(gl.SCISSOR_TEST);
+          gl.useProgram(draw);
           gl.activeTexture(gl.TEXTURE28);
           gl.bindTexture(gl.TEXTURE_2D, null);
           gl.activeTexture(gl.TEXTURE3);
@@ -8030,6 +8398,7 @@ const SkySound = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.deleteFramebuffer(target);
         gl.deleteProgram(draw);
+        gl.deleteProgram(heapProgram);
       }
       smooth(gl.TEXTURE_2D);
       // The map's slope, on unit 21, drawn from it (see the slope program).
@@ -8122,6 +8491,7 @@ const SkySound = (() => {
     C('uniform1i', 'uWeather', 3);
     C('uniform1i', 'uSlope', 21);
     C('uniform1i', 'uBody', 22);
+    C('uniform1i', 'uHeaps', 19);
     C('uniform1f', 'uSlopeMax', SLOPE_MAX);
     C('uniform1i', 'uWaves', 4);
     C('uniform1i', 'uIce', 10);
@@ -8438,6 +8808,7 @@ const SkySound = (() => {
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uSlope'), 21);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uBody'), 22);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uHeaps'), 19);
     gl.uniform1f(gl.getUniformLocation(shadowProg, 'uSlopeMax'), SLOPE_MAX);
     const depthMap = (unit, size, column) => {
       const m = { size, column, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
@@ -8533,6 +8904,7 @@ const SkySound = (() => {
     const uCloudTops = gl.getUniformLocation(topsProg, 'uCloud'), uTopsPass = gl.getUniformLocation(topsProg, 'uTopsPass');
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uWeather'), 3);
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uSlope'), 21);
+    gl.uniform1i(gl.getUniformLocation(topsProg, 'uHeaps'), 19);
     gl.uniform1f(gl.getUniformLocation(topsProg, 'uSlopeMax'), SLOPE_MAX);
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uTopsIn'), 24);
     const tops = [24, 23].map(unit => {
@@ -8574,7 +8946,29 @@ const SkySound = (() => {
     gl.useProgram(prog);
     C('uniform1i', 'uWarped', 25);
     C('uniform1i', 'uSlopeW', 26);
+    // The map of the heaps for the clouds' amount (see uHeaps in fs), on unit
+    // 19, drawn by heapFormProg from the one baked at start (unit 30) before
+    // the warped map, which reads it.
+    const heapForms = { texture: gl.createTexture(), target: gl.createFramebuffer() };
+    gl.activeTexture(gl.TEXTURE19);
+    gl.bindTexture(gl.TEXTURE_2D, heapForms.texture);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32UI, WEATHER, WEATHER);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, heapForms.target);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, heapForms.texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(heapFormProg);
+    const uCloudForms = gl.getUniformLocation(heapFormProg, 'uCloud');
+    gl.uniform1i(gl.getUniformLocation(heapFormProg, 'uWeather'), 3);
+    gl.uniform1i(gl.getUniformLocation(heapFormProg, 'uHeapsIn'), 30);
+    gl.useProgram(prog);
     const drawTops = cloud => {
+      gl.useProgram(heapFormProg);
+      gl.uniform1f(uCloudForms, cloud);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, heapForms.target);
+      gl.viewport(0, 0, WEATHER, WEATHER);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.useProgram(topsProg);
       gl.uniform1f(uCloudTops, cloud);
       // (Units 25 and 26 are the targets of these draws: free while they run.)

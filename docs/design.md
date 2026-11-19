@@ -14,10 +14,10 @@ blocks. It loads no other file.
 |---|---|---|
 | (no id) | JS | `TEXT`, the strings in Japanese and English, and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
-| `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
+| `noise` | fragment shader | Draws the cloud noise and the weather map once, at start; compiled again with `HEAP_ID`, the map of the heaps. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled six more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `HEAP_FORM`, the map of the heaps for the clouds' amount; with `SKY_LIGHT`, the sky's light on the clouds. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
@@ -716,19 +716,54 @@ envelope from the weather map, with a 3D shape on its surface.
   As `env` itself, the surface of round 11 had a gentle slope across the
   side of a heap, and the turrets alone made its outside: a union of free
   balls, with more of them standing off the heap.
-- **A tower is thermals stacked one on another**: its envelope swells
-  and narrows by `PILE` = 0.2 of `rise` every 0.9 km of height (the phase
-  drifts from place to place with `far`), and is up to a quarter wider
-  towards its top. With one envelope from base to top, the walls of towers
-  read as pillars. Every heap **leans** with the wind's shear: the map is
+- That envelope, with the tower in it (its swell by `PILE` = 0.2 of
+  `rise` every 0.9 km of height, a quarter wider towards its top), is now
+  only the **bound** of the body, for the early ways out and the map of
+  the tops: as the body itself, its upright walls and round top made
+  towers drums, cones and columns with one ball on top, from above. The
+  body is the dome without the tower (`env0`, `top0`), and lobes round
+  each heap (below). Every heap **leans** with the wind's shear: the map is
   read `LEAN` = (0.06, 0.03) km upwind for each km of height (twice that
 drew towers seen from above as teardrops with a pointed tail).
+- **The lobes of a heap** (`heapLobes`). The map of the heaps (`uHeaps`,
+  see [Textures made at start](#textures-made-at-start)) gives, for each
+  texel of the weather map, the two heaps whose tops stand highest there:
+  where each heap's middle is, the radius of the cloud it makes and how
+  high its top stands (the field's own, over its middle). It is read at
+  the place the warped map moved this one to (`warpAt`), so the lobes
+  follow the outlines. Each heap of 300 m and more (`LOBE_MIN`) is 4 to 6
+  lobes, by its number: ellipsoids 0.6 to 0.35 of its radius across,
+  from its foot to its top, each a little off the middle and turned from
+  the one below by the golden angle, the upper ones drawn to one side,
+  each high enough to meet the next, the top one near the middle, and
+  none higher than the heap's dome lets it be (`domeTop`, flat over the
+  middle: in a round dome the lobes off the middle sank, and one lobe was
+  the whole head). They meet in clefts (a smooth max over `LOBE_K` = 0.08
+  of the radius); the two heaps' lobes too. On them, smaller lobes: the 1
+  km turrets of `uBody` (G) read at the heap's scale, a cell `LOBE_S` =
+  0.3 of its radius, raise the surface by up to `LOBE_B` = 0.5 of a cell
+  (not on the lowest quarter of the heap). The dome lies `LOBE_IN` = 0.3
+  of the radius under the lobes and melts into them over `LOBE_E` = 100
+  m. Photographs of towers and heaps from above show clusters of convex
+  heads a quarter to a twentieth of the cloud's width, deep shaded clefts,
+  and tops that are clusters of heads; the lattice of turrets below, which
+  knew nothing of the heaps, made one smooth ball the whole head of a
+  tower, and stacked balls. The lobes are worked out near the start of
+  `cloudShape`, where the field has few terms yet (where the body is, the
+  program held more at once, and the clouds' pass took 8 ms more under
+  heaps at 1440p), under the bound of the lobes kept in A of the warped
+  map. The scene's own program, which reads the clouds only for the sea,
+  keeps the envelope with the tower and the turrets there.
 - On that surface stand the turrets and heads of `uBody` (see
   [Textures made at start](#textures-made-at-start)), one read at the same
   place in the noise as the billows (`q`). The turrets of 2 km and 1 km
-  shape it, as bumps: each moves the surface out by up to `BODY_K` (700
+  shape heaps without lobes and the edges of the others (small heaps with
+  lobes keep the 1 km ones, which from below give them their small
+  heads), as bumps: each moves the surface out by up to `BODY_K` (700
 and 400 m), in by less (`BODY_C` = 0.45 is the value that moves it
-neither way; with 600 and 300 m, heaps from above were round blobs). The heads baked on them
+neither way; with 600 and 300 m, heaps from above were round blobs), as
+  large as the dome's height without the tower lets them be (as large as
+  a tower's, a small tower was one smooth boulder). The heads baked on them
   (500, 250 and 125 m) only carve it (erosion, after Schneider's clouds
   for games, 2015 to 2017): their seams go in by up to `BODY_K.z` = 600 m
   in all, the body's surface stands `ERO_C` = 0.4 of that out for them
@@ -746,7 +781,9 @@ neither way; with 600 and 300 m, heaps from above were round blobs). The heads b
   and 140 m deep, read per step from two channels; heads of 125 m came
   only from the fine noise within 4 to 8 km, and a tower seen from 8 km
   was a few large, soft lobes.)
-- The field is `BODY_G (dEnv + bumps + shift)`, with `BODY_G` = 2 per km.
+- The field is `BODY_G (smax(dEnv0 - inset, lobes) + turrets + shift)`
+  less the heads' seams, with `BODY_G` = 2 per km, and never over the
+  bound above.
   `shift` (`BODY_B` = -60 m, 90 m less from `cloud` 0.4 to 0.7, and 50 m
 less below 0.15, easing to none by 0.4: the heads of round 18 ate the
 smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cover of the slider;
@@ -3219,6 +3256,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 | `uAirLut` | 29 | `low` only: 256 x 48 x 17, RGBA16F, linear | `fs` with `AIR_LUT`, a slice a draw, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| (the map of the heaps, as baked) | 30 | 1024^2 over 256 km, RGBA32UI, nearest | `noise` shader with `HEAP_ID` (`packHeap`, after `uWeather`, which it reads) | For each texel, the two heaps whose tops stand highest over its middle (the most of a dome's height times its heap's, as G takes it): the way to the heap's middle (16 bits across and along), its radius and its number (8 bits each), and R and G of the weather map at its middle (8 bits each) |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
@@ -3227,11 +3265,13 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
-changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
+changes), by `fs` itself compiled with `HEAP_FORM` (`heapFormProg`, first)
+and `TOPS_MAP` (`topsProg`):
 
 | Texture | Unit | Size and format | Holds |
 |---|---|---|---|
-| `uWarped` | 25 | the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds) |
+| `uHeaps` | 19 | 1024^2 over 256 km, RGBA32UI, nearest | The map of the heaps on unit 30, with the radius of the cloud each heap makes and the height of its top (`heapForm` at its middle, 8 bits each) in place of R and G: for the heaps' lobes (see Low clouds) |
+| `uWarped` | 25 | the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds); in A, how high the heaps' lobes may reach there (of `CT`, over 1.5 texels round it, rounded up) |
 | `uSlopeW` | 26 | as `uWarped` | `uSlope` read at the same moved place |
 | `uTops` | 23 | 1024^2, RGBA8, nearest | How high the march may meet cloud within 1, 2, 4 and 8 texels (250 m to 2 km), rounded up (see the march) |
 
