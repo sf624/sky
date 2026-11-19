@@ -2035,9 +2035,14 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 // and the moon) to keep half floats' range by night.
 const float LUT_AZ = 64.0, LUT_EL = 48.0, LUT_S = 16.0, LUT_T0 = 0.05, LUT_T1 = 1200.0;
 uniform float uLutScale;
-// The sun's way along the ground at a place whose up is `up`, and the way across it.
+// The stronger light (the sun's or the moon's direction), which the
+// azimuth is measured from: the table's seam, behind it, then lies where its
+// light is the same on either side (from the sun's, the moonlit sky stepped
+// there).
+uniform vec3 uLutLight;
+// The light's way along the ground at a place whose up is `up`, and the way across it.
 void lutAxes(vec3 up, out vec3 sh, out vec3 side) {
-  sh = uSun - up * dot(uSun, up);
+  sh = uLutLight - up * dot(uLutLight, up);
   sh = dot(sh, sh) > 1e-8 ? normalize(sh) : normalize(cross(up, vec3(0.0, 0.0, 1.0)));
   side = cross(up, sh);
 }
@@ -4825,6 +4830,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
     // there: a line across the sky where the march ends, some 20 degrees up
     // from 11 km, through the sun of a November afternoon, issue #54.)
     float ra = s0 + wn * max(tE - s0, 0.0), many = smoothstep(2.0, 4.0, way) * smoothstep(0.01, 0.3, s1 - ra);
+#ifdef Q_BENCH_CI_ONCE
+    many = 0.0;                                      // (?stats=bench3: one read of each deck)
+#endif
     if (many > 0.0) {
       float tj = clamp(t + 0.25 * (s1 - s0), ra, s1);
       tj = tj - t < 0.1 * (s1 - s0) ? mix(ra, s1, 0.25) : tj;
@@ -8070,7 +8078,7 @@ const SkySound = (() => {
         // (The cirrus's may be coarser still: ciPass, Q_CI_PASS in fs.)
         const ciPass = Q.ciPass || Q.pass;
         if (ciPass > 1) gl.viewport(0, 0, Math.ceil(w / ciPass), Math.ceil(h / ciPass));
-        if (state.cirrus > 0 && ciProg) pass(ciProg, 0);
+        if (state.cirrus > 0 && ciProg) pass(ciUse || ciProg, 0);
         if (ciPass !== Q.pass) gl.viewport(0, 0, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
         if (v.cloud > 0) pass(cloudUse, 1);
         if (ciPass > 1) gl.viewport(0, 0, vw, vh);
@@ -8363,6 +8371,7 @@ const SkySound = (() => {
     }
     // The light the table is kept in units of (see uLutScale).
     const lutScale = () => Math.max(state.sunOn, state.moonI * moonAirFor(), 1e-30);
+    const lutLight = () => state.moonI * moonAirFor() > state.sunOn ? state.moon : state.sun;
     // The map of the tops (see uTops in fs), on unit 23, one texel for each
     // of the weather map's: fs draws it (topsProg) in two draws, the tops
     // over each texel into a first texture (on unit 24), then the highest of
@@ -8452,7 +8461,7 @@ const SkySound = (() => {
     for (const p of [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
     // (The scene's and the low clouds' programs that draw uses: other
     // variants only for ?stats=bench3.)
-    let sceneUse = prog, cloudUse = cloudProg, benchRepeat = 1, benchSkip = {};
+    let sceneUse = prog, cloudUse = cloudProg, ciUse = null, benchRepeat = 1, benchSkip = {};
     // A picture of w by h pixels: `old` if it has that size, else a new one
     // in its place. The frame (`depth`) keeps its distances as its depth
     // (see distanceCode), the pictures as a second target.
@@ -8641,7 +8650,7 @@ const SkySound = (() => {
       if (lut && lutKey !== lut.for) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, lut.target);
         for (let sl = 0; sl <= LUT_S; sl++) {
-          draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutScale', lutScale()]], 3);
+          draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]], 3);
           gl.activeTexture(gl.TEXTURE29);
           gl.bindTexture(gl.TEXTURE_3D, lut.texture);
           for (let q = 0; q < 4; q++) {
@@ -8705,7 +8714,7 @@ const SkySound = (() => {
       if (stale && !benchSkip.maps) drawLayer(...stale);
       // (Where things were when each layer was drawn, for every program
       // that reads the maps.)
-      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale()]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
+      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
       lap('maps');
       // The first stage of the clouds' light, then the frame, which reads it.
       // (benchRepeat, benchSkip: ?stats=bench3 only.)
@@ -8848,7 +8857,7 @@ const SkySound = (() => {
     // a frame draws its passes and its scene, and which it skips.)
     render.variants = async list => {
       const made = {};
-      for (const [name, cloud, defs] of list) made[name] = link('fs', (cloud ? '#define CLOUD_PASS\n' : '') + defs);
+      for (const [name, pass, defs] of list) made[name] = link('fs', (pass ? `#define ${pass}\n` : '') + defs);
       const progs = programs.slice(-list.length);
       for (let i = 0; i < 900 && parallel && progs.some(([p]) => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)); i++) await new Promise(r => setTimeout(r, 100));
       for (const [name] of list) {
@@ -8866,9 +8875,10 @@ const SkySound = (() => {
       benchRepeat = repeat || 1;
       benchSkip = skip || {};
     };
-    render.use = (scene, cloud) => {
+    render.use = (scene, cloud, cirrus) => {
       sceneUse = scene || prog;
       cloudUse = cloud || cloudProg;
+      ciUse = cirrus || null;
     };
     // (?stats=bench: the drawing scale held at s, or let go with 0.)
     render.pin = s => {
@@ -9453,6 +9463,7 @@ const SkySound = (() => {
     ['no light pass', { skip: { light: true } }], ['no shadow maps', { skip: { maps: true } }],
     ['no air', { scene: '#define Q_BENCH_NOAIR' }], ['no sea light', { scene: '#define Q_BENCH_NOSEA' }],
     ['air marched', { scene: '#undef Q_AIR_LUT\n#define Q_AIR_LUT 0' }], ['LEAN 0', { scene: '#define Q_LEAN 0' }],
+    ['LIGHT_FINE 0', { clouds: '#define Q_LIGHT_FINE 0' }], ['cirrus read once', { cirrus: '#define Q_BENCH_CI_ONCE' }],
     ['as is again'],
   ];
   if (stats && stats.bench3) {
@@ -9475,8 +9486,9 @@ const SkySound = (() => {
       B.lines = ['bench3: compiling the variants'];
       const want = [];
       for (const [name, c = {}] of BENCH3) {
-        if (c.scene) want.push([name + ' scene', false, defs(c.scene)]);
-        if (c.clouds) want.push([name + ' clouds', true, defs(c.clouds)]);
+        if (c.scene) want.push([name + ' scene', '', defs(c.scene)]);
+        if (c.clouds) want.push([name + ' clouds', 'CLOUD_PASS', defs(c.clouds)]);
+        if (c.cirrus) want.push([name + ' cirrus', 'CIRRUS_PASS', defs(c.cirrus)]);
       }
       const made = await render.variants(want);
       render.pin(1);
@@ -9484,14 +9496,14 @@ const SkySound = (() => {
       const rows = [];
       let K = 1;
       for (const [i, [name, c = {}]] of BENCH3.entries()) {
-        const missing = (c.scene && !made[name + ' scene']) || (c.clouds && !made[name + ' clouds']);
+        const missing = (c.scene && !made[name + ' scene']) || (c.clouds && !made[name + ' clouds']) || (c.cirrus && !made[name + ' cirrus']);
         if (missing) {
           rows.push(`${name} -`);
           continue;
         }
         if ('cloud' in c) state.cloud = c.cloud;
         if ('cirrus' in c) state.cirrus = c.cirrus;
-        render.use(made[name + ' scene'], made[name + ' clouds']);
+        render.use(made[name + ' scene'], made[name + ' clouds'], made[name + ' cirrus']);
         // (K is found on the first, "as is", the dearest: so that it takes
         // at least twice BENCH3_CAP, and a cut that halves it still reads
         // above the cap; then every configuration is measured at that K.)

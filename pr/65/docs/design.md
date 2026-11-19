@@ -540,8 +540,10 @@ samples, more than the level's own, and without the clouds' shadows) for
 `LUT_AZ` x `LUT_EL` (64 x 48) directions round the eye and `LUT_S` (16)
 distances along each, from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
 evenly in their log; a ray that ends sooner (at the sea) keeps its end's
-values beyond. The directions are the azimuth from the sun's, squeezed
-towards it (a square root: its glow), and the elevation from the horizon,
+values beyond. The directions are the azimuth from the stronger light's (the sun's,
+or the moon's at night: `uLutLight`; from the sun's, the moonlit sky
+stepped at the table's seam behind it), squeezed towards it (a square
+root: its glow), and the elevation from the horizon,
 squeezed towards the horizon, which lies at the middle of the table
 (`lutUV`, `lutDir`). One more slice holds the sky as the sea sees it, from
 its surface through the whole air (for `skyAt`). The table is one 3D
