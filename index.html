@@ -1583,8 +1583,8 @@ uniform sampler2D uWeather;
 uniform sampler2D uSlope;
 uniform float uSlopeMax;
 // The heaps' body (see cloudShape), baked at start: R, G the turrets of 2
-// km and 1 km; B the seams of the heads on them (500 m to 125 m; A is
-// free). BODY_LOD: the mip level of its texels, as a
+// km and 1 km; B the seams of the heads on them (500 m to 125 m); A the
+// seams of the billows of the fine noise (see cloudDetail). BODY_LOD: the mip level of its texels, as a
 // level of the noise (1 for 256 texels a side, 0 for 128).
 uniform sampler3D uBody;
 #ifndef BODY_LOD
@@ -1957,7 +1957,7 @@ const float TEXEL_KM = BASE_KM / 128.0;
 const float DETAIL = 7.0;           // tiles of the fine noise per tile (whole numbers: see uDrift)
 const float SIGMA = 90.0;           // extinction inside a dense cloud, per km
 const float LUMPS = 1.3;            // how far the noise of the tile moves the surface, in units of the field
-const float GEO_S = 0.25;          // the fine noise on the body: the seams of the heads of 71, 36, 18 m (cloudDetail)
+const float GEO_S = 0.25;          // the fine noise on the body: the seams of the billows of 71, 36, 18 m (cloudDetail)
 const float RELIEF = 0.85;          // the same for the fine noise
 const float BODY_G = 2.0;           // the heaps' 3D body: the field per km under its surface
 const vec3 BODY_K = vec3(0.7, 0.4, 0.6); // how far the body's bumps of 2 km and 1 km stand out, and how deep its heads' seams go, km
@@ -1967,7 +1967,7 @@ const float BODY_D = 1.3;           // the fine noise's weight on it, against a 
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
-const float ERO_F = 0.55 * GEO_S;  // the same for the fine heads: their deepest seam (B of uBody is 0.71 at most), see cloudField
+const float ERO_F = 0.55 * GEO_S;  // how far out the body's surface stands for the billows, of their weight (their mean is 0.43), see cloudField
 const float GEO_PIX = 0.005;        // the fine noise fades out where a pixel is this wide and twice this (km), see cloudDetail
 const float SKIN_F = 0.1;           // and over what depth they fade out deeper than their weight, km
 const float WISP = 0.6;             // how much the fine turrets carve the heads' middles low on a heap (wisps)
@@ -2416,8 +2416,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 // on larger ones: a cauliflower. Equal weights made a foam.
 // Nothing smaller: light spreads over tens of metres inside a cloud, and
 // near the eye a cloud is a fog.
-// How near the last place cloudField read is, for cloudDetail (1 within 4 km,
-// 0 beyond 8 km).
+// How near the last place cloudField read is, for cloudDetail (1 where a
+// pixel there is under GEO_PIX wide, 0 where it is twice that).
 float geoNear = 1.0;
 // How billowy the fine noise is there (1) rather than wispy (0): billows on
 // the growing heads, high on a heap and on its side that faces upshear;
@@ -2428,14 +2428,16 @@ float billowy = 1.0;
 float cloudDetail(vec3 q, float lod, float rough) {
   // Worley noise rises in cones to its points; v (2 - v) rounds them into
   // domes with creases between them, as the billows of a cloud.
-  // On the heaps' 3D body, its heads again, 7 times smaller (71 m to 18
-  // m): the same form all the way down, a cauliflower. (The Worley
-  // billows there made close heaps smooth cream, like wax.)
-  // Only within 4 to 8 km: farther, where they are a pixel or less, a
-  // flight differed from a still at the place reached by more than the
-  // flight check allows (round 14's turrets of 290 m to 36 m: 1.53 against
-  // a limit of 1.26). Farther, the body has no fine noise: its heads of
-  // 125 m and more come from uBody itself, read at the pixel's level.
+  // On the heaps' 3D body, the billows of uBody (A, 71 m to 18 m): round
+  // heads in sharp creases, the same form as its heads all the way down, a
+  // cauliflower. (The Worley billows there made close heaps smooth cream,
+  // like wax; its heads again, whose clefts are rounded, soft lumps.)
+  // Only where a pixel is under 5 to 10 m wide (GEO_PIX): farther, where
+  // they are a pixel or less, a flight differed from a still at the place
+  // reached by more than the flight check allows (round 14's turrets of
+  // 290 m to 36 m read out to 8 km: 1.53 against a limit of 1.26).
+  // Farther, the body has no fine noise: its heads of 125 m and more come
+  // from uBody itself, read at the pixel's level.
   // (Until round 17 the Worley billows took over there, and blurred them.)
   float f = 0.0, sg = carved * geoNear;
   if (carved < 1.0) {
@@ -2445,8 +2447,9 @@ float cloudDetail(vec3 q, float lod, float rough) {
   }
   if (sg > 0.0) {
     // They only carve (see cloudField): seams in, crowns where the surface
-    // is. Low on a heap's sides they carve the heads' middles instead,
-    // leaving the seams as ragged wisps.
+    // is. Where the cloud is less billowy (low on a heap's sides, and on
+    // the side the shear leans over), they carve the heads' middles
+    // instead, leaving the seams as ragged wisps.
     float tb = textureLod(uBody, q * DETAIL, lod + 1.7 + BODY_LOD).w;
     tb = mix(tb, 1.0 - tb, WISP * (1.0 - billowy));
     f -= sg * GEO_S * tb;
@@ -2510,9 +2513,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
   bump = 0.0;
   // (Scaled as the billows are: see steep.) On the heaps' 3D body the fine
-  // turrets only carve: its surface stands out by fat for them, their
-  // seams go in from there down to the body's surface, no deeper, and they
-  // fade within SKIN_F of it. (Round 18's seams went in twice as deep,
+  // billows only carve: its surface stands out by fat for them (a little
+  // more than their mean, so that the cover stays: by their deepest seam,
+  // the heaps grew), their seams go in from there, and they fade within
+  // SKIN_F deeper than their weight. (Round 18's seams went in twice as deep,
   // some 150 m for heads of 71 m and less, and up to 90 m below the body's
   // surface: near towers had flat patches with stepped outlines in their
   // sides, where the seams cut through the skin of heads to the smooth body
@@ -3139,7 +3143,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // shaded as a far one is, at a smaller size. The later steps are moved
       // aside by off, each a third of a turn from the one before: light
       // strays inside a cloud, and over the frames the shadows of other
-      // clouds soften.
+      // clouds soften. The stray grows with the depth the light has come
+      // through (STRAY_TAU): light that went far through a cloud comes from
+      // a wide part of it.
       bool skyOn = !mapped && !under0, backOn = uStage > 0.5 && !fog && basal * smoothstep(2.0, 6.0, above) <= 0.999, wantF = tauF < 0.0 && !slab, wantCM = !mapped && !slab;
       float overMap = smoothstep(0.25, 0.45, uLight.y);
       float tw = 0.0, sw = 0.0, dw = 0.03, sb = 0.0, db = 0.025, tauL = 0.0, crisp = 0.0;
@@ -7159,9 +7165,9 @@ const SkySound = (() => {
           }]);
         }
         // (A slice of the body holds (BODY / n)^2 texels of noise, each
-        // with half as many turrets again.)
+        // with half as many turrets again, and as many billows again.)
         for (let z = 0; z < BODY; z++) {
-          parts.push([1.5 * (BODY / n) ** 2, () => {
+          parts.push([2.4 * (BODY / n) ** 2, () => {
             if (z === 0) {
               gl.viewport(0, 0, BODY, BODY);
               gl.uniform1f(uSize, BODY);
