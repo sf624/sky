@@ -2975,7 +2975,24 @@ name. With `?stats=bench`, from 3 s after the first picture the drawing
 scale is held at 1, 0.71, 0.5 and 0.35 for 4 s each (`BENCH_SCALES`,
 `render.pin`), and the frames a second and the script's time of the last
 2 s of each are shown: what falls with the scale's square is the cost of
-the pixels, what stays is the frame's fixed cost. Without `?stats`, none of this runs (the GPU's times are then asked
+the pixels, what stays is the frame's fixed cost. With `?stats=bench2`,
+from 2 s after the first picture, at full scale (held), each draw is timed
+on its own for `BENCH2_FRAMES` (6) frames: a read of a pixel of a target of
+its own (RGBA8, 1 x 1) before and after it, which waits until the GPU has
+done all it was given, less such a read alone (`countDraws`; a read of the
+draw's own target, of whatever format, lost the context on this GPU). The
+table gives the GPU's ms a frame of each kind of draw (light, cirrus,
+clouds, scene, mean, show, meter, shadow), then the frame's ms with one
+thing taken away each time: the low clouds, the cirrus, the sea (looking up
+35 degrees), most of the sky (looking down 50), and two variants of the
+scene compiled for it, without the air's march (`Q_BENCH_NOAIR`) and
+without the sea's light (`Q_BENCH_NOSEA`, `render.variants`,
+`render.use`). Its steps wait for frames, not timers: with every draw
+waiting for the GPU, a frame took all of the main thread and the timers
+waited. It also says whether the GPU tells its time
+(`EXT_disjoint_timer_query_webgl2`). (A variant of the low clouds' pass
+with steps twice as long stopped the page at its first draws on this
+machine: none.) Without `?stats`, none of this runs (the GPU's times are then asked
 only for the automatic choice, not for a level named in the address or
 the panel).
 
