@@ -703,25 +703,39 @@ smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cov
   19.5, 85.3, 97.1 and 98.7 % at `cloud` 0.1 to 1 (round 17: 0.5, 1.8,
   4.3, 5.8, 8.8, 14.4, 21.0, 83.6, 96.5, 98.7 %).
 - The fine noise (`cloudDetail`) is weighed `BODY_D` = 1.3 on the body
-  (`steep` there). On the body it is the heads of `uBody` again, read 7
-  times finer (`DETAIL`): heads of 71, 36 and 18 m, their seams `GEO_S` =
-  0.15 deep in all, so that the heads go on down in the same form, a
-  cauliflower from 2 km to 18 m (the `MICRO` noise adds smaller billows
-  near). They carve too: the surface stands out by `fat` (`ERO_F`: their
-  deepest seam, 0.71 of their weight), their seams go in from there down
-  to the body's surface and no deeper, and deeper than their weight they
-  fade out over `SKIN_F` = 100 m. (In round 18 the seams went twice as
-  deep and the surface stood out by their mean, 0.4: the seams of heads of
-  71 m and less went 90 m under the body's surface, and cut the skin of
-  heads through to the smooth body in patches with stepped outlines.) Low on a heap's sides
-  (`heapUp` under 0.15 to 0.45) they carve the heads' middles instead
-  (`WISP` = 0.6 of the way), and leave the seams as ragged wisps. All this
-  within 4 km of the eye, fading out by 8 km; farther the body has no fine
-  noise at all (until round 17 the Worley billows of the sheet took over
-  there and blurred the body's heads). (Read out to 8 km and farther,
-  where they are a pixel or less, round 14's fine turrets made a flight
-  differ from a still at the place reached by more than the `flight`
-  check allows: 1.53 against 1.26.) With the Worley billows of the sheet
+  (`steep` there). On the body it is the billows of `uBody` (A), read 7
+  times finer (`DETAIL`): heads of 71, 36 and 18 m that meet in sharp
+  creases (see [Textures made at start](#textures-made-at-start)), their
+  seams `GEO_S` = 0.25 deep in all, so that the heads go on down in the
+  same form, a cauliflower from 2 km to 18 m (the `MICRO` noise adds
+  smaller billows near). (Until #50 R1 the heads of B were read there
+  again: turrets whose clefts are rounded over `SOFT`, seams 0.15 deep;
+  from near, heads so made were soft lumps.) They carve too: the surface
+  stands out by `fat` (`ERO_F` = 0.55 of their weight, a little more than
+  their mean, 0.43, so that the cover stays: by their deepest seam, the
+  heaps grew), their seams go in from there, and deeper than their weight
+  they fade out over `SKIN_F` = 100 m. (In round 18 the seams went twice
+  as deep and the surface stood out by their mean, 0.4: the seams of heads
+  of 71 m and less went 90 m under the body's surface, and cut the skin of
+  heads through to the smooth body in patches with stepped outlines.)
+  **The kind of detail** follows where in the heap a place is (after
+  Schneider's Nubis, 2022 and 2023, where a profile of the cloud chooses
+  between billowy and wispy detail): `billowy` is 1 on the growing heads,
+  high on a heap (`heapUp` over 0.45) on its side that faces upshear, half
+  that on the side the shear leans over (`upshear`: the slope of the map
+  against `LEAN`, read with the body's slope), and 0 low on its sides
+  (`heapUp` under 0.15). Where it is less, the billows carve the heads'
+  middles instead (`WISP` = 0.6 of the way), and leave the seams as ragged
+  wisps; the edge is softer there too (below). The fine noise reaches as
+  far as a pixel is under `GEO_PIX` = 5 m wide, fading out by 10 m (6 to
+  12 km at 1440p, 4.5 to 9 km at 1080p): farther, its heads are a few
+  pixels or less, and the body has no fine noise at all (until #50 R1, 4
+  to 8 km at every size; until round 17 the Worley billows of the sheet
+  took over there and blurred the body's heads). (Read out to 8 km and
+  farther, where they are a pixel or less, round 14's fine turrets made a
+  flight differ from a still at the place reached by more than the
+  `flight` check allows: 1.53 against 1.26.) With the Worley billows of
+  the sheet
   near, close heaps were smooth cream, like whipped cream or wax: large
   soft lobes. On the body the cloud is at least
   0.9 rough (`q.w`): older, smoother cloud left some heaps without relief
@@ -740,7 +754,8 @@ smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cov
   (`thin`).
 - The edge (`cloudField`) is 6 m deep on the upper part of a heap (its
   rising heads) and 35 m on its lower sides, by `heapUp`, the height over
-  the base against the envelope's top there (12 and 70 m until round 17:
+  the base against the envelope's top there, and halfway to 35 m high on
+  the side the shear leans over (`upshear`) (12 and 70 m until round 17:
   photographs of towers have crisper outlines; then, with the fine heads
   read out to 8 km, 4 m failed the `flight` check). From 15 to 45 km
   away on, every edge of the body becomes a veil 150 m deep: from 11 km,
@@ -962,13 +977,13 @@ clouds.
 slowly across the picture. So the hero draws the low clouds' pass
 (`CLOUD_PASS`) twice a frame (`uStage`): stage 0, at half the width and
 height, marches each ray to the first cloud it meets and keeps the slow
-parts of its light there (`uLightMap`: seven half floats, two to each of
-four 32-bit integers, rounded towards zero as the GPU rounds into a
+parts of its light there (`uLightMap`: six half floats, two to each of
+three of four 32-bit integers, rounded towards zero as the GPU rounds into a
 target of half floats: the distance where the ray entered that cloud, the
 depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
-sky's lean towards the sun's side, the depth towards the light over its
-first two steps, and the depth away from the light), taken where the ray entered the cloud (marching on to the point
+sky's lean towards the sun's side, and the depth towards the light over its
+first two steps), taken where the ray entered the cloud (marching on to the point
 where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
@@ -988,6 +1003,16 @@ of a stride further for each pixel and frame); and where none of them met
 any cloud, nor does this ray (a cloud that all of them miss is under 2
 pixels wide; a few specks of a pixel or two go, from 11 km). Together
 these took a third off the second stage among the heaps and under a deck.
+The depth away from the light (`tauB`, below) is not among them: stage 1
+works it out at its own point. Taken from the first stage, where the ray
+entered the cloud at half the size, the shaded sides of near towers were
+flat plates of one grey with angular outlines (the light that went into
+the mass grows fivefold as `tauB` goes from 0 to 20, so it followed each
+head's own value; measured with the terms of the light drawn one by one
+on the view `cE8c`). It costs 2.5 to 4.5 ms of the frame at 1440p near the
+heaps. Its stray (below) turns by a hash of its own: by the interleaved
+gradient noise of the other draws, the mean over the frames kept a
+diagonal hatch.
 Stage 1 keeps what the scene takes of the clouds (`tBar`, the sun's light
 on them, the sky's and its lean, as their bits, and `Tc` as the depth) in
 the second layer of `uPasses` (see [The hero's mean over frames](#the-heros-mean-over-frames)).
@@ -1023,7 +1048,10 @@ each cloud, not on its surface; no normal of the field enters it.
   from the first stage: its billows are many pixels wide there; worked out
   in the second stage everywhere, it cost 0.5 ms in cruise); `tauCM`, past them out to 27.8 first steps (four more steps, moved
   sideways by up to `PENUMBRA` = 60 m each frame, a third of a turn apart:
-  light strays in a cloud, and the shadows soften), and beyond that the
+  light strays in a cloud, and the shadows soften; the stray grows with
+  the depth the light has come through, by 1 + `tau` / `STRAY_TAU` (8), at
+  most `STRAY_MAX` = 12 times: light that went far through a cloud comes
+  from a wide part of it), and beyond that the
   map of the clouds' shadow (`cloudShadow`, read where the steps ended: it
   holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low; `tauB`,
@@ -2531,7 +2559,7 @@ textures for it, each with a second texture beside it (`aux`):
 
 - `light`: the first stage of the clouds' light (`lightMap`), drawn by
   the low clouds' pass (`CLOUD_PASS`) with `uStage` 0 at half the width
-  and height into one texture of RGBA32UI on unit 18 (seven half floats),
+  and height into one texture of RGBA32UI on unit 18 (six half floats),
   before the frame (see Low clouds);
 - `passes` (`passTarget`): the cirrus's pass and the low clouds' (`fs`
   with `CIRRUS_PASS` and `CLOUD_PASS`), the two layers of a texture of
@@ -2653,7 +2681,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uBody` | 22 | 256^3 (128^3 on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A free |
+| `uBody` | 22 | 256^3 (128^3 on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | 4096 x 4096 (1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
@@ -2737,7 +2765,12 @@ cracks between, smooth from a few km.) The texture is 256 texels a side
 (31 m: the 125 m heads need it) on the GPU, 67 MB (77 MB with its mips,
 against 9.6 MB for round 17's 128^3); a renderer on the CPU
 (`WEBGL_debug_renderer_info` says SwiftShader, llvmpipe or software)
-draws it at 128, as before, where the 125 m heads are blurred. `fs` is
+draws it at 128, as before, where the 125 m heads are blurred.
+A holds the billows of the fine noise (`billows`): lattices of heads of
+16, 32 and 64 cells per tile, each a sphere's height (radius 0.55 to 0.85
+of a cell, as high as 0.75 to 1), where two meet the higher one wins in a
+sharp crease (no `SOFT`); each size weighed 0.45, 0.33 and 0.22 and gated
+by the size above, as the heads are (`BILLOW_W`). Their mean is 0.43. `fs` is
 compiled with `BODY_LOD`, the level of its texels as a level of the noise
 (1 or 0). Drawn with `noise` slice by slice after the noise texture, in
 the same batches, it holds the first picture back by about 0.6 s on the
