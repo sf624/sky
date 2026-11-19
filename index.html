@@ -5616,6 +5616,7 @@ void main() {
     // the moon lights the clouds while the sun lights the air: the map is
     // the moon's.)
     const int LUT_SHADE = 4;
+    const float LUT_SKY = 0.35;
     bool shade = cb > ca && (sunLight || uSunI <= 0.0);
     float tA = 0.0;
     for (int s = 0; s < 3; s++) {
@@ -5633,8 +5634,14 @@ void main() {
           lit += exp(-cloudShadow(o + d * ts));
           mean += mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h)));
         }
-        lit = mix(1.0, lit / float(LUT_SHADE), uLightShare);
-        mean = mix(1.0, mean / float(LUT_SHADE), uLightShare);
+        // (The table's light is the light's, which the shadows take, and the
+        // sky's, scattered many times, which they leave: LUT_SKY of it, about;
+        // taken all, the air under a deck went black towards the horizon.
+        // Towards the light, its glow is nearly all its own: none there, so
+        // that the air meets the march within LUT_NEAR without a seam.)
+        float sky0 = LUT_SKY * (1.0 - smoothstep(0.9, LUT_NEAR, dot(d, uLight)));
+        lit = sky0 + (1.0 - sky0) * mix(1.0, lit / float(LUT_SHADE), uLightShare);
+        mean = sky0 + (1.0 - sky0) * mix(1.0, mean / float(LUT_SHADE), uLightShare);
         // (The light of [a, b]: the table's at b less at a, read where they
         // are not the segment's ends.)
         if (a > tA) airAt(uv, a, false, Lc, odc); else Lc = La;
@@ -5701,7 +5708,14 @@ void main() {
         lit += wt * exp(-cloudShadow(ps));
         sum += wt;
       }
+#if Q_AIR_LUT
+      // (Low: read at a place in the step new each frame. Its few steps
+      // read at their middles left dark blots near the sun, where one fell
+      // in the shadow of a far cloud.)
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(o + d * (prev - dt * fract(shaftJitter + 0.618034 * float(j)))));
+#else
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
+#endif
     }
     // Under a deck the light of the sky reaches the low air only through
     // the deck: else the air under it, a hundred km of it towards the
