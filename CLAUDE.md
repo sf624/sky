@@ -30,6 +30,9 @@ shown to the owner. Before and after pictures alone are not enough.
   feels alike. Say plainly when it does not; do not report "better than
   before" as "real".
 - Look in flight too, not only at stills, and at each altitude.
+- Measure the start on Direct3D 11 (`node tools/sky.mjs d3d`, see
+  `tools/README.md`) before the change is shown: a shader that starts in
+  seconds here can take minutes in Chrome on Windows, or never start.
 - Photographs are for comparison only (for example from Wikimedia Commons,
   with their source noted). They never go into the repository.
 - Put the photo-against-render sheets and the list of differences in the
