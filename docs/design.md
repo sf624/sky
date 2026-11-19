@@ -2893,7 +2893,7 @@ asks which level it is.
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
 | `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 4, 2, 4 | 8, 4, 8 | 20, 8, 16 | 20, 8, 16 |
-| `Q_MARCH` | 6 | 3 | 1.2 | 1 |
+| `Q_MARCH` | 4 | 3 | 1.2 | 1 |
 | `Q_SHAFTS` | 1 | 6 | 12 | 16 |
 | `Q_SHADOW_TAPS` | 2 | 4 | 6 | 8 |
 | `Q_CI_STEPS` | 0 | 6 | 10 | 12 |
@@ -2929,9 +2929,12 @@ asks which level it is.
   clouds' light is a quarter of the passes' pixels, as always. `ciPass`
   (`Q_CI_PASS`, if larger than `pass`): the cirrus's pass alone, coarser
   still. Its rays cross their pixels at a jitter of their own
-  (`uCiJitter`, Halton (5, 7); `Q_CI_JITTER`), and the scene reads the ray
+  (`uPassJitter`, Halton (5, 7); `Q_CI_JITTER`), and the scene reads the ray
   that fell nearest its own: with the frame's jitter, a ray stayed in the
   same square of the frame's pixels, and the cirrus came out in stairs.
+  (The low clouds' pass drawn so, at half the frame per side, took a
+  third of the GPU's time off `low` but came out blurred at rest and in
+  blotches in flight: it stays at the frame's size.)
 - `fs` holds defines put before `fs` (all six of its programs). At the top
   of `fs`, each `Q_` define has `max`'s value unless it is given: `Q_NV`,
   `Q_NSHADE`, `Q_NFAR` (the air's samples along a view ray), `Q_MARCH`

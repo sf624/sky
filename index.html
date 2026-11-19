@@ -1612,13 +1612,16 @@ precision highp int;
 #ifndef Q_SPARKLE
 #define Q_SPARKLE 1       // 0: the glitter at night is its mean, not separate sparkles (sparkle)
 #endif
-// The rays of a cirrus's pass coarser than the frame cross its pixels at
-// uCiJitter, new each frame and apart from the frame's own (uJitter): the
+// The rays of a pass coarser than the frame cross its pixels at
+// uPassJitter, new each frame and apart from the frame's own (uJitter): the
 // scene reads the pass's ray that fell nearest each of its own, and over
 // the frames that lies all round it, not always in the same square.
+// (The cirrus's pass, CI_JIT. The low clouds' pass drawn coarser, at
+// half the frame per side and with a jitter of its own, came out blurred at
+// rest and blotched in flight: it stays at the frame's size.)
 #ifdef Q_CI_JITTER
-uniform vec2 uCiJitter;
-#define CI_JIT uCiJitter
+uniform vec2 uPassJitter;
+#define CI_JIT uPassJitter
 #else
 #define CI_JIT uJitter
 #endif
@@ -5220,8 +5223,8 @@ void main() {
 // The ray of this pixel, of the picture's uRes (scale 2: every second
 // pixel's, for the first stage of the clouds' light): from the eye o along
 // d to tmax, where it leaves the air or meets the sea (ground).
-void viewRay(float scale, float spread, out vec3 o, out vec3 d, out float tmax, out bool ground) {
-  vec2 uv = ((gl_FragCoord.xy * scale + uJitter * spread) * 2.0 - uRes) / uRes.y;
+void viewRay(float scale, float spread, vec2 jitter, out vec3 o, out vec3 d, out float tmax, out bool ground) {
+  vec2 uv = ((gl_FragCoord.xy * scale + jitter * spread) * 2.0 - uRes) / uRes.y;
   d = normalize(uCam * vec3(uv * uTan, 1.0));
   o = vec3(0.0, RG + uAlt, 0.0);
   tmax = raySphere(o, d, RT).y;
@@ -5239,7 +5242,7 @@ void main() {
   vec3 o, d;
   float tmax;
   bool ground;
-  viewRay((uStage == 0.0 ? 2.0 : 1.0) * Q_PASS, Q_PASS, o, d, tmax, ground);
+  viewRay((uStage == 0.0 ? 2.0 : 1.0) * Q_PASS, Q_PASS, uJitter, o, d, tmax, ground);
   float Tc = 1.0, tBar = -1.0, sOne = 0.0, sMany = 0.0, sAmb = 0.0, sLean = 0.0;
   vec4 mapA = vec4(-1.0), mapB = vec4(0.0);
   vec2 top = raySphere(o, d, RG + CT), base = raySphere(o, d, RG + CB);
@@ -5261,7 +5264,7 @@ void main() {
   vec3 o, d;
   float tmax;
   bool ground;
-  viewRay(1.0, 1.0, o, d, tmax, ground);
+  viewRay(1.0, 1.0, uJitter, o, d, tmax, ground);
 
   float betaM = BETA_M * uHaze;
   float extM = betaM * MIE_EXT;
@@ -6459,7 +6462,7 @@ const SkySound = (() => {
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
-      fs: { Q_NV: 4, Q_NSHADE: 2, Q_NFAR: 4, Q_MARCH: '6.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0 } },
+      fs: { Q_NV: 4, Q_NSHADE: 2, Q_NFAR: 4, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 8, Q_NSHADE: 4, Q_NFAR: 8, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7,
@@ -7313,7 +7316,7 @@ const SkySound = (() => {
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1), Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
@@ -8378,7 +8381,7 @@ const SkySound = (() => {
       const k = drawn++ % 1024 + 1;
       const jitter = [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
       const each = [['uniform2f', 'uJitter', ...jitter], ['uniform1f', 'uPass', pass],
-        ...(Q.ciPass > Q.pass ? [['uniform2f', 'uCiJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
+        ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
       gl.uniform1f(uSteps, steps);
       // The map of the tops, for this frame's clouds.
       if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
