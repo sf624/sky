@@ -5405,6 +5405,9 @@ void main() {
     n = sb < tmax ? NV + NSHADE + NFAR : NV + NSHADE;
     if (sa <= 0.0) j = NV;
   }
+#ifdef Q_BENCH_NOAIR
+  n = 0;                                             // (?stats=bench2: no march of the air)
+#endif
   int layer = 0;
   for (int i = 0; i < LONG_N(NV + NSHADE + NFAR + 2); i++) {
     if (j >= n) break;
@@ -5479,7 +5482,9 @@ void main() {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
     float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea) : 0.0;
+#ifndef Q_BENCH_NOSEA
     addSea(pg, d, tmax, od, betaM, extM, visX, shadow, L, G);
+#endif
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way,
     // the zodiacal light and stars, all dimmed and reddened by the air.
@@ -7252,10 +7257,40 @@ const SkySound = (() => {
     gl.scissor = function (x, y, w, h) { sw = w; sh = h; return scissor.apply(gl, arguments); };
     gl.enable = function (cap) { if (cap === gl.SCISSOR_TEST) cut = true; return enable.apply(gl, arguments); };
     gl.disable = function (cap) { if (cap === gl.SCISSOR_TEST) cut = false; return disable.apply(gl, arguments); };
+    // ?stats=bench2: each draw timed on its own, between two reads of a
+    // pixel of a target of its own (RGBA8, 1 x 1), which wait until the GPU
+    // has done all that it was given (less the time of such a read alone,
+    // parts.base).
+    const { useProgram, bindFramebuffer } = gl;
+    let current = null, bound = null, probe = null;
+    const pixel = new Uint8Array(4);
+    gl.useProgram = function (p) { current = p; return useProgram.apply(gl, arguments); };
+    gl.bindFramebuffer = function (target, fb) { if (target === gl.FRAMEBUFFER || target === gl.READ_FRAMEBUFFER) bound = fb; return bindFramebuffer.apply(gl, arguments); };
+    const read = () => {
+      if (!probe) {
+        probe = gl.createFramebuffer();
+        const t = gl.createTexture(), unit = gl.getParameter(gl.ACTIVE_TEXTURE), was = gl.getParameter(gl.TEXTURE_BINDING_2D);
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
+        gl.bindTexture(gl.TEXTURE_2D, was);
+        bindFramebuffer.call(gl, gl.FRAMEBUFFER, probe);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+        gl.activeTexture(unit);
+      }
+      bindFramebuffer.call(gl, gl.FRAMEBUFFER, probe);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+      bindFramebuffer.call(gl, gl.FRAMEBUFFER, bound);
+    };
+    parts.read = read;
     gl.drawArrays = function () {
       parts.draws++;
       parts.pixels += cut ? Math.min(sw, vw) * Math.min(sh, vh) : vw * vh;
-      return drawArrays.apply(gl, arguments);
+      if (!parts.timed) return drawArrays.apply(gl, arguments);
+      read();
+      const t0 = performance.now();
+      drawArrays.apply(gl, arguments);
+      read();
+      parts.timed(parts.names && parts.names.get(current) || '?', cut ? Math.min(sw, vw) : vw, cut ? Math.min(sh, vh) : vh, performance.now() - t0);
     };
   }
 
@@ -7942,13 +7977,13 @@ const SkySound = (() => {
         if (ciPass > 1) gl.viewport(0, 0, Math.ceil(w / ciPass), Math.ceil(h / ciPass));
         if (state.cirrus > 0 && ciProg) pass(ciProg, 0);
         if (ciPass !== Q.pass) gl.viewport(0, 0, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
-        if (v.cloud > 0) pass(cloudProg, 1);
+        if (v.cloud > 0) pass(cloudUse, 1);
         if (ciPass > 1) gl.viewport(0, 0, vw, vh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       }
       // The first stage of the clouds' light is the clouds' pass's, the
       // sky's light on the clouds skyProg's (into the bound framebuffer).
-      const p = stage === 0 ? cloudProg : stage === 2 ? skyProg : prog;
+      const p = stage === 0 ? cloudUse : stage === 2 ? skyProg : sceneUse;
       gl.useProgram(p);
       set(p, view);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -8288,6 +8323,9 @@ const SkySound = (() => {
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
     for (const p of [ciProg, cloudProg, skyProg]) if (p) fixedFor(p);
+    // (The scene's and the low clouds' programs that draw uses: other
+    // variants only for ?stats=bench2.)
+    let sceneUse = prog, cloudUse = cloudProg;
     // A picture of w by h pixels: `old` if it has that size, else a new one
     // in its place. The frame (`depth`) keeps its distances as its depth
     // (see distanceCode), the pictures as a second target.
@@ -8656,6 +8694,27 @@ const SkySound = (() => {
       return more;
     };
     render.sizes = () => sizes;
+    // (?stats=bench2: the program names, for its table; variants of the
+    // scene without the air's march or the sea's light, compiled on demand;
+    // use() swaps them in. A variant of the low clouds' pass with steps twice
+    // as long stopped the page here, the GPU's process stuck at its first
+    // draws: none.)
+    if (parts) parts.names = names;
+    render.variants = async () => {
+      const made = {
+        noAir: link('fs', '#define Q_BENCH_NOAIR'),
+        noSea: link('fs', '#define Q_BENCH_NOSEA'),
+      };
+      const list = programs.slice(-2);
+      for (let i = 0; i < 600 && parallel && list.some(([p]) => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)); i++) await new Promise(r => setTimeout(r, 100));
+      for (const p of list) check(p);
+      for (const p of Object.values(made)) fixedFor(p);
+      return made;
+    };
+    render.use = (scene, cloud) => {
+      sceneUse = scene || prog;
+      cloudUse = cloud || cloudProg;
+    };
     // (?stats=bench: the drawing scale held at s, or let go with 0.)
     render.pin = s => {
       pinnedScale = s;
@@ -9167,7 +9226,7 @@ const SkySound = (() => {
   // nothing of this runs.
   const STATS_SPAN = 3000;
   const stats = params.has('stats') && params.get('stats') !== '0'
-    ? { frames: [], gpu: [], js: [], memory: { bytes: 0 }, first: null, lost: 0, element: null, bench: params.get('stats') === 'bench' ? [] : null,
+    ? { frames: [], shown: 0, gpu: [], js: [], memory: { bytes: 0 }, first: null, lost: 0, element: null, bench: params.get('stats') === 'bench' ? [] : null, bench2: params.get('stats') === 'bench2' ? { lines: ['bench2: waiting'] } : null,
         // The parts of a frame: the script's time in each (a mean over the
         // last few dozen frames), and the draws and pixels of the last frame.
         parts: { mean: new Map(), lap(name, ms) { this.mean.set(name, (this.mean.get(name) ?? ms) * 0.95 + ms * 0.05); }, draws: 0, pixels: 0 } } : null;
@@ -9203,6 +9262,7 @@ const SkySound = (() => {
       stats.parts.mean.size ? 'JS by part ' + [...stats.parts.mean].map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', ') : '',
       stats.drawn ? `${stats.drawn[0]} draws a frame, ${(stats.drawn[1] / 1e6).toFixed(2)} Mpx` : '',
       stats.bench && stats.bench.length ? 'bench ' + stats.bench.map(([sc, f, j]) => `${sc}: ${f.toFixed(1)} fps JS ${j.toFixed(1)}`).join(', ') : '',
+      ...(stats.bench2 ? stats.bench2.lines : []),
       `quality ${level || '-'}${choice === 'auto' ? ' (auto)' : ''}`,
       `canvas ${heroCanvas.width}x${heroCanvas.height}, CSS ${heroCanvas.clientWidth}x${heroCanvas.clientHeight}, DPR ${(window.devicePixelRatio || 1).toFixed(2)}`,
       z ? `picture ${wh(z.picture)}, frame ${wh(z.frame)}, scale ${z.scale.toFixed(2)}` : 'picture -',
@@ -9220,6 +9280,79 @@ const SkySound = (() => {
   // a time that falls with the scale's square is the pixels', one that
   // stays is the frame's fixed cost. Then the scale is let go.
   const BENCH_SCALES = [1, 0.71, 0.5, 0.35], BENCH_MS = 4000;
+  // ?stats=bench2: the GPU's time of each draw, and what each part of the
+  // frame costs. At full scale (held), BENCH2_FRAMES frames are drawn with
+  // each draw timed on its own (see countDraws: a read of a pixel of its
+  // target before and after, less such a read alone), first as the page
+  // is, then with one thing taken away each time: the low clouds, the
+  // cirrus, the sea (looking up), the sky (looking down), and variants of
+  // the programs without the air's march and without the sea's light.
+  // The table: the ms of each
+  // kind of draw, then each variant's frame in ms and what it saves. The
+  // whole takes some 20 to 40 s; touch nothing meanwhile.
+  const BENCH2_FRAMES = 6;
+  if (stats && stats.bench2) {
+    const B = stats.bench2, P = stats.parts;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    // (n frames from now: while every draw waits for the GPU, a frame can
+    // take all of the main thread, and timers wait behind the frames.)
+    const frames = n => new Promise(r => { stats.after = [stats.shown + n, r]; });
+    const short = (name, w, h) => /CLOUD_PASS/.test(name) ? (render.sizes().light[0] === w ? 'light' : 'clouds') : /CIRRUS/.test(name) ? 'cirrus'
+      : /SHADOW_MAP/.test(name) ? 'shadow' : /TOPS_MAP/.test(name) ? 'tops' : /SKY_LIGHT/.test(name) ? 'skylight' : /^fs/.test(name) ? 'scene' : name.split(' ')[0];
+    // The frames drawn with each draw timed: ms by kind, a mean a frame.
+    const measure = async () => {
+      const sums = new Map();
+      P.timed = (name, w, h, ms) => {
+        const k = short(name, w, h);
+        sums.set(k, (sums.get(k) || 0) + Math.max(ms - P.base, 0));
+      };
+      await frames(BENCH2_FRAMES);
+      P.timed = null;
+      const per = [...sums].map(([k, v]) => [k, v / BENCH2_FRAMES]);
+      return { per, total: per.reduce((a, [, v]) => a + v, 0) };
+    };
+    const run = async () => {
+      while (!stats.first || !render || !render.pin) await wait(500);
+      await wait(2000);
+      const gl = heroCanvas.getContext('webgl2');
+      const timer = !!gl.getExtension('EXT_disjoint_timer_query_webgl2');
+      render.pin(1);
+      B.lines = ['bench2: compiling variants'];
+      const variants = await render.variants();
+      await wait(1000);
+      // A read alone, when the GPU has nothing else to do.
+      const base = [];
+      for (let i = 0; i < 9; i++) {
+        P.read();
+        const t = performance.now();
+        P.read();
+        base.push(performance.now() - t);
+      }
+      P.base = base.sort((a, b) => a - b)[4];
+      const kept = { cloud: state.cloud, cirrus: state.cirrus, pitch: state.pitch };
+      const rows = [];
+      let all = null;
+      for (const [name, set] of [['as is', () => {}], ['no clouds', () => { state.cloud = 0; }], ['no cirrus', () => { state.cirrus = 0; }],
+        ['looking up 35', () => { state.pitch = 35 * RAD; }], ['looking down 50', () => { state.pitch = -50 * RAD; }],
+        ['no air march', () => render.use(variants.noAir)], ['no sea light', () => render.use(variants.noSea)]]) {
+        B.lines = [`bench2: ${name}`];
+        set();
+        update();
+        await frames(8);
+        const m = await measure();
+        Object.assign(state, kept);
+        render.use();
+        update();
+        if (!all) all = m;
+        rows.push(`${name} ${m.total.toFixed(1)}${all === m ? '' : ` (${(m.total - all.total >= 0 ? '+' : '') + (m.total - all.total).toFixed(1)})`}`);
+      }
+      render.pin(0);
+      B.lines = [`bench2, GPU ms a frame by draw (read ${P.base.toFixed(2)} ms off; timer query ${timer ? 'yes' : 'no'}):`,
+        '  ' + all.per.map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', '),
+        'frames, ms (+/- against as is):', '  ' + rows.slice(0, 4).join(', '), '  ' + rows.slice(4).join(', ')];
+    };
+    run().catch(err => { B.lines = ['bench2 failed: ' + String(err && err.message || err).slice(0, 200)]; });
+  }
   if (stats && stats.bench) {
     const run = async () => {
       while (!stats.first || !render || !render.pin) await new Promise(r => setTimeout(r, 500));
@@ -9453,7 +9586,11 @@ const SkySound = (() => {
           // name a level, and their GL traces stay those of before.)
           gpuTimed: choice === 'auto' || stats ? gpuTimed : null,
           memory: stats && stats.memory,
-          pictured: stats && (now => stats.frames.push(now)),
+          pictured: stats && (now => {
+            stats.frames.push(now);
+            stats.shown++;
+            if (stats.after && stats.shown >= stats.after[0]) stats.after.splice(0)[1]();
+          }),
           parts: stats && stats.parts,
           shown: () => {
             hero.classList.add('shown');

@@ -193,7 +193,7 @@ const PERF = `(() => {
     }
   }, 20);
 })()`;
-export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = false, cpu = 1 }) {
+export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = false, cpu = 1, noGpu = false }) {
   q = '?' + withQuality(q);
   const { targetId } = await session.chrome.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await session.chrome.send('Target.attachToTarget', { targetId, flatten: true });
@@ -202,7 +202,7 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
   await s('Page.enable');
   // With ?timing, the page's console lines of its loading (see docs/design.md), printed at the end.
   const lines = [], listen = (m) => {
-    if (m.sessionId === sessionId && m.method === 'Runtime.consoleAPICalled' && m.params.type === 'info') lines.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
+    if (m.sessionId === sessionId && m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'info' || m.params.type === 'error')) lines.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
   };
   if (/(^|&)timing(=|&|$)/.test(q.slice(1))) {
     session.chrome.on(listen);
@@ -219,7 +219,7 @@ export async function perf(session, root, { q, size, seconds, dpr = 1, mobile = 
     && (!document.querySelector('canvas') || Object.keys(window.__perf.picture).length > 0)`;
   for (let i = 0; i < 1200 && !(await ev(READY)); i++) await sleep(50);
   await sleep(1500);
-  await ev('window.__perf.on = true, 0');
+  if (!noGpu) await ev('window.__perf.on = true, 0');
   const level = await ev(`[document.querySelector('#quality') && document.querySelector('#quality').value, (document.querySelector('canvas') || {}).width, (document.querySelector('canvas') || {}).height].join(' ')`);
   const fps = await ev(`new Promise((res) => { let n = 0, t0 = performance.now(), last = t0, worst = 0;
     const f = (t) => { n++; worst = Math.max(worst, t - last); last = t;
