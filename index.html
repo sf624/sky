@@ -2304,6 +2304,16 @@ vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
 vec2 topsX;
 float topsH;
 #endif
+// The region of the weather map round x (its cover smoothed over tens of
+// km), and how much of it is one sheet (a deck) at the clouds' amount; a
+// sheet is whole from WHOLE.x to WHOLE.y of it.
+const vec2 WHOLE = vec2(0.2, 0.6);
+float cloudRegion(vec2 x) {
+  return textureLod(uWeather, x / WEATHER_KM, 6.5).r;
+}
+float cloudSheet(float region) {
+  return smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
+}
 #if defined(TGRID) && !defined(TOPS_MAP)
 // (?grid=1) Towers grown as trees of lobes by a worker (see the script
 // "towers"), kept in three grids round the eye (see `grid` in the JS):
@@ -2370,8 +2380,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 #else
   vec2 x = p.xz + uDrift;
 #endif
-  float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-  float sheet = smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
+  float region = cloudRegion(x);
+  float sheet = cloudSheet(region);
   // Where the cover breaks into heaps, the map is read at a place moved by
   // up to WARP km: by the map's own cover and height of heaps (R, G) far
   // from here, smoothed over 1.4 km (mip level 2.5): the heaps of the map
@@ -2644,19 +2654,23 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // in creases; rows of rolls 1.2 km apart across the wind (whole
     // numbers of them across the map), bent over tens of km, where the
     // slow map says, over more than half of a sheet. Each roll swells and
-    // thins every 2 km along its length, half a step on from the roll
-    // beside it: cells in ranks, as photographs of stratocumulus from above
-    // show them (with rolls only in a few places, the sheet was lumps
-    // without order).
+    // thins along its length by the noise's 1 and 2 km cells (cells), so
+    // that its heads are of many sizes, as photographs of stratocumulus
+    // from above show them (with rolls only in a few places, the sheet was
+    // lumps without order). The rolls' phase wanders with the noise's
+    // large cells (n.r), so that their spacing changes from place to place,
+    // and they fade in and out with the same cells. (Until #77 each roll
+    // swelled every 2 km, half a step on from the roll beside it, and all
+    // rolls were 1.2 km apart: from 11 km an overcast deck was a regular
+    // lattice of mounds of one size, like an egg carton.)
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
     float rows = smoothstep(0.3, 0.6, far.a) * sheet;
-    float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571);
+    float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 11.0 * (n.r - 0.571);
     float roll = sin(ph);
-    float along = sin(2.0 * PI * dot(x, vec2(-57.0, 114.0)) / WEATHER_KM + 0.5 * ph + 7.0 * far.g);
     // (Each roll swells more in some places than in others, by the noise's
     // 2 km cells: rolls of one depth over tens of km were straight stripes
     // from above, as no photograph shows them.)
-    float rank = rows * (0.6 * (roll - 0.25) + 0.35 * max(roll + 0.3, 0.0) * along) * mix(0.35, 1.0, smoothstep(0.5, 0.85, n.g));
+    float rank = rows * (0.6 * (roll - 0.25) + 0.35 * max(roll + 0.3, 0.0) * clamp(cells, -1.0, 1.0)) * mix(0.35, 1.0, smoothstep(0.5, 0.85, n.g)) * mix(0.3, 1.0, smoothstep(0.35, 0.75, n.r));
     if (solid <= 0.0 && deck <= 0.0) t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
     // Packed heads: the turrets of 2 km and 1 km raise the sheet, and meet
     // in seams that go down to 40 % of its depth (deeper, they cut it
@@ -2665,7 +2679,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // the body, to SKIN deep.
     // (Only where the sheet is whole: at its first edges the crowns alone
     // stood out of it, a speckle of small dots that shimmered in flight.)
-    float whole = smoothstep(0.2, 0.6, sheet);
+    float whole = smoothstep(WHOLE.x, WHOLE.y, sheet);
     float heads = whole * max(SHEET_H.x * (t.x - BODY_C) + SHEET_H.y * (t.y - BODY_C), -0.4);
     float raise = mix(heads, 0.12 * cells, rows) + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS;
     // The heaps on the sheet stand in its ranks too, with smaller billows.
@@ -3817,6 +3831,16 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // heads then.)
       float tauLoc = tauF * smoothstep(-0.95, -0.6, mu) + tauNn;
       float crease = 1.0 - CREASE.x * smoothstep(CREASE.z, CREASE.w, tauBn / (tauBn + tauLoc + 1e-3)) * (1.0 - exp(-tauLoc / CREASE.y));
+      // Not on the top of a whole sheet, where the heaps have no 3D body
+      // (as free in cloudShape): a deck is one mass, and the light that
+      // went into its lit heads spreads through it under the troughs and
+      // seams beside them. (With the crease over the light's own steps,
+      // the troughs in the shadow of the rolls were flat blue-grey floors
+      // with dark rims, and from 11 km an overcast deck was a lattice of
+      // plates; with it near the place, each head of the deck still had a
+      // thin dark rim.) Heaps with a body keep their creases.
+      float deckTop = smoothstep(WHOLE.x, WHOLE.y, cloudSheet(cloudRegion(ps.xz + uDrift))) * (1.0 - smoothstep(0.3, 0.8, solidHere));
+      crease = mix(crease, 1.0, deckTop);
 #if defined(TGRID) && !defined(TOPS_MAP)
       // (?grid=1: deep in a crease of the towers less of it, and of the
       // sky's, by up to GRID_AO, however the light falls.)
@@ -5510,8 +5534,7 @@ void main() {
   if (uTopsPass < 0.0) {
     // uWarped (uTopsPass -2) or uSlopeW (-1), uRes texels square.
     vec2 x = gl_FragCoord.xy / uRes * WEATHER_KM;
-    float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-    float sheet = smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
+    float sheet = cloudSheet(cloudRegion(x));
     vec2 xw = x + WARP * (1.0 - sheet) * (textureLod(uWeather, x / WEATHER_KM + vec2(0.29, 0.61), 2.5).rg - 0.5);
     outColor = uTopsPass < -1.5 ? textureLod(uWeather, xw / WEATHER_KM, 0.0) : textureLod(uSlope, xw / WEATHER_KM, 0.0);
     return;

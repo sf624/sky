@@ -892,10 +892,15 @@ of it, a speckle of small dots that shimmered in flight. The heaps that flatten 
 same heads and seams. (Until round 17 the top was domes of the noise's
 1 and 2 km Worley cells: from above, a smooth cream with the heaps poking
 through it.) Over more than half of it (`far.a`) rows of
-rolls 1.2 km apart across the wind (whole numbers of them across the map,
-bent over tens of km), each swelling and thinning every 2 km along its
-length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. Each roll swells more
+rolls some 1.2 km apart across the wind (whole numbers of them across the
+map, bent over tens of km), each swelling and thinning along its length by
+the noise's 1 and 2 km Worley cells, so that its heads are of many sizes,
+as photographs of stratocumulus from above show them. Their phase wanders
+with the noise's large cells (`n.r`), so that their spacing changes from
+place to place, and they fade in and out with the same cells. (Until #77
+each roll swelled every 2 km, half a step on from the roll beside it, all
+1.2 km apart: from 11 km an overcast deck was a regular lattice of mounds
+of one size, like an egg carton.) Each roll swells more
 in some places than in others (0.35 to 1 of its depth, by the noise's 2
 km cells): rolls of one depth over tens of km were straight, regular
 stripes from 13 km. The heaps on the sheet
@@ -1224,7 +1229,15 @@ each cloud, not on its surface; no normal of the field enters it.
   within 175 m), and only on the side of a mass that the light falls on:
   by `smoothstep(0.5, 0.9, tauBn / (tauBn + tauLoc))` (`CREASE.zw`), with
   `tauBn` the first three steps of `tauB` (out to 175 m): much more cloud
-  behind the place than towards the light.
+  behind the place than towards the light. Not on the top of a whole sheet (`WHOLE`, as for its heads)
+  where the heaps have no 3D body (`solidHere` under 0.3 to 0.8, as `free`
+  in the one top; heaps with a body keep their creases): a deck is one
+  mass, and the light that went into its lit heads spreads through it
+  under the troughs and seams beside them. (With the crease over the
+  light's own steps, the troughs in the shadow of the rolls were flat
+  blue-grey floors with dark rims, and from 11 km an overcast deck was a
+  lattice of plates; with it near the place, each head of the deck still
+  had a thin dark rim: #77.)
   On a sphere, a place with much cloud behind it and some depth
   towards the light lies near the edge of the lit face, where light goes
   in right beside it, and the fit keeps it bright (`K` = 0.0074: a depth of
