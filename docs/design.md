@@ -35,7 +35,9 @@ time (see the next section).
 - **Lengths** are in km, in the shaders and in the JS.
 - **Axes**: x west, y up, z south. The centre of the planet is the origin.
   The eye is at `(0, RG + uAlt, 0)`, with `RG` = 6360 km (the ground) and
-  `RT` = 6460 km (the top of the air).
+  `RT` = 6460 km (the top of the air). `uAlt` runs from 0.3 to 40 km (see
+  [The altitude](#from-the-address-bar-to-the-first-frame)): the eye is
+  always inside the air, and every ray starts at the eye.
 - **Directions**: `yaw` 0 looks south, 90 degrees west, -90 degrees east;
   a larger `yaw` turns the view to the right (clockwise seen from above),
   and a drag to the right lowers it. `pitch` is positive upwards.
@@ -80,8 +82,8 @@ The JS then runs once, at load, and does little:
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
-   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
-   `pixels` and `res` are read directly (see
+   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,
+   `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -235,6 +237,21 @@ anyway.
 **Now.** The now button sets the date to today, the time to the device's
 clock (taken as local solar time), the moon's age as moving the date does,
 the rate to real time, and plays.
+
+**The altitude.** `state.alt` runs from `ALT_MIN` = 0.3 to `ALT_MAX` = 40
+km. Its slider (`#alt`) is not in km: it has 1000 steps, even in
+log(1 + h / `ALT_H0`), `ALT_H0` = 2 km (`altPlace`, `altAt`), so that it is
+fine low down and coarse high up. On a track of 165 px (the desktop's panel), a pixel
+is about 40 m at 0.3 km, 90 m at 3 km, 230 m at 11 km and 740 m at 40 km
+(before, even from 0.3 to 13 km in steps of 0.1 km: 77 m, and 100 m a
+step); a step of the arrow keys about 7, 15, 38 and 122 m. The value beside it
+(`#altOut`) is a text field: it shows the height as the other values do
+(in m below 20 km, to 10 m; in km above, to 0.1 km) and reads a number
+typed into it (`altTyped`): in km below 300, in metres from 300 on (the
+heights in km end below 300, those in metres start there), or as `m` or
+`km` after it says. The state keeps the height itself, not the slider's
+place: `?alt=11` draws at 11 km exactly, as before; a height set by the
+slider is rounded to the metre.
 
 ## Sun, moon and sky in the JS
 

@@ -19,7 +19,7 @@ clouds, sea, exposure) is checked against real photographs before it is
 shown to the owner. Before and after pictures alone are not enough.
 
 - Cover the representative scenes: low, middle and high altitude (about
-  0.3 km, 3 to 5 km, 11 km), by day, at dusk and at night, with low clouds
+  0.3 km, 3 to 5 km, 11 km) and above the cruise (20 and 40 km), by day, at dusk and at night, with low clouds
   and with thin clouds (few and many), looking towards the sun, away from
   it, up and down. A change of one part still gets the whole matrix once:
   exposure and light reach every scene.
