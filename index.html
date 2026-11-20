@@ -127,6 +127,32 @@
   }
   .panel select option { color: #123; }
   .panel .time select { width: auto; flex: none; margin: 0; }
+  .panel .level button { display: block; margin: 2px 0 0; width: 30px; height: 30px; }
+  /* The stick, for steering on a touch screen (see Steering in the script):
+     bottom left, over the panel, which goes while it is held. It stays when
+     the panel fades, fainter. */
+  .stick {
+    position: absolute; z-index: 2;
+    left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom));
+    width: 104px; height: 104px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .55);
+    background: rgba(24, 58, 120, .26);
+    touch-action: none; transition: opacity .6s;
+  }
+  .stick[hidden] { display: none; }
+  .stick .knob {
+    position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px;
+    border-radius: 50%; background: rgba(255, 255, 255, .5); pointer-events: none;
+    transform: translate(var(--x, 0px), var(--y, 0px));
+  }
+  .stick-level {
+    position: absolute; right: -14px; top: -14px; width: 34px; height: 34px; padding: 0;
+    display: grid; place-items: center; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .6); background: rgba(24, 58, 120, .4); color: #fff;
+  }
+  .stick-level svg { width: 16px; height: 16px; }
+  .hero.still .stick { opacity: .45; }
+  .hero:not(.shown) .stick { visibility: hidden; }
   .title .hint {
     margin: 10px 0 0;
     font-size: 12px;
@@ -247,7 +273,7 @@
   @keyframes sky-appear { to { opacity: 1; } }
   @keyframes sky-sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
   @media (prefers-reduced-motion: reduce) {
-    .title, .panel, .fs { transition: none; }
+    .title, .panel, .fs, .stick { transition: none; }
     .loading .line::after { animation: none; display: none; }
   }
 </style>
@@ -269,6 +295,12 @@
     <svg class="enter" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 6.5V2h4.5M11.5 2H16v4.5M16 11.5V16h-4.5M6.5 16H2v-4.5"/></svg>
     <svg class="leave" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 2v4.5H2M16 6.5h-4.5V2M11.5 16v-4.5H16M2 11.5h4.5V16"/></svg>
   </button>
+  <div class="stick" hidden aria-hidden="true">
+    <div class="knob"></div>
+    <button class="stick-level" type="button" tabindex="-1">
+      <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 9h5M11.5 9h5"/><circle cx="9" cy="9" r="2.5"/></svg>
+    </button>
+  </div>
   <form class="panel" onsubmit="return false">
     <div class="time">
       <button id="play" type="button" aria-label="時間を進める" data-t-label="play">▶</button>
@@ -296,6 +328,24 @@
       <input id="alt" type="range" min="0" max="1035" step="1" aria-label="高度" data-t-label="alt">
       <span class="ticks" aria-hidden="true"></span>
     </label>
+    <label>
+      <span class="row"><span data-t="heading">機首方位</span><output id="headingOut"></output></span>
+      <input id="heading" type="range" min="0" max="359" step="1">
+    </label>
+    <label>
+      <span class="row"><span data-t="bank">バンク角</span><output id="bankOut"></output></span>
+      <input id="bank" type="range" min="-60" max="60" step="1" value="0">
+    </label>
+    <label>
+      <span class="row"><span data-t="climb">上昇・降下</span><output id="climbOut"></output></span>
+      <input id="climb" type="range" min="-15" max="15" step="0.5" value="0">
+    </label>
+    <div class="level">
+      <span class="row"><span data-t="level">水平飛行</span></span>
+      <button id="level" type="button" aria-label="水平飛行に戻す" title="水平飛行に戻す (L)" data-t-label="levelDo" data-t-title="levelKey">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 9h5M11.5 9h5"/><circle cx="9" cy="9" r="2.5"/></svg>
+      </button>
+    </div>
     <label>
       <span class="row"><span data-t="date">日付</span><output id="dateOut"></output></span>
       <input id="date" type="range" min="1" max="365" step="1">
@@ -388,7 +438,7 @@ const TEXT = {
     title: 'Sky — レイリー散乱の空',
     canvas: '巡航中の航空機から見た、空と雲と海',
     subtitle: 'レイリー散乱で描く、雲の上の空',
-    hint: 'ドラッグで見回す',
+    hint: 'ドラッグで見回す・矢印キーで操縦',
     loading: '読み込み中…',
     failed: '空を描けませんでした',
     lost: 'GPU が描くのをやめました。画質を下げてやり直します…',
@@ -409,6 +459,11 @@ const TEXT = {
     lang: '言語 / Language',
     sound: '音', soundOff: 'なし', soundAirliner: '旅客機', soundWhine: 'エンジン近く', soundWind: '風',
     volume: '音量', soundWait: 'クリックで再生',
+    heading: '機首方位', bank: 'バンク角', climb: '上昇・降下', level: '水平飛行',
+    levelDo: '水平飛行に戻す', levelKey: '水平飛行に戻す (L)',
+    compass: ['北', '北東', '東', '南東', '南', '南西', '西', '北西'],
+    bankText: d => d === 0 ? '水平' : (d < 0 ? '左 ' : '右 ') + Math.abs(d) + '°',
+    climbText: (d, ms) => d === 0 ? '水平' : (d > 0 ? '+' : '') + d + '° · ' + (ms > 0 ? '+' : '') + ms + ' m/s',
     // The light of the hour, by the sun's elevation (see showLabels).
     night: '夜', astronomical: '天文薄明', nautical: '航海薄明', civil: '市民薄明',
     morning: '朝', evening: '夕方', day: '昼',
@@ -423,7 +478,7 @@ const TEXT = {
     title: 'Sky — a Rayleigh-scattered sky',
     canvas: 'The sky, clouds and sea, seen from a cruising aircraft',
     subtitle: 'The sky above the clouds, drawn with Rayleigh scattering',
-    hint: 'Drag to look around',
+    hint: 'Drag to look around · steer with the arrow keys',
     loading: 'Loading…',
     failed: 'The sky could not be drawn',
     lost: 'The GPU stopped drawing. Starting again at a lower quality…',
@@ -444,6 +499,11 @@ const TEXT = {
     lang: 'Language / 言語',
     sound: 'Sound', soundOff: 'Off', soundAirliner: 'Airliner', soundWhine: 'Near engines', soundWind: 'Wind',
     volume: 'Volume', soundWait: 'click to play',
+    heading: 'Heading', bank: 'Bank', climb: 'Climb', level: 'Level',
+    levelDo: 'Straight and level', levelKey: 'Straight and level (L)',
+    compass: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'],
+    bankText: d => d === 0 ? 'level' : (d < 0 ? 'left ' : 'right ') + Math.abs(d) + '°',
+    climbText: (d, ms) => d === 0 ? 'level' : (d > 0 ? '+' : '') + d + '° · ' + (ms > 0 ? '+' : '') + ms + ' m/s',
     night: 'night', astronomical: 'astronomical twilight', nautical: 'nautical twilight', civil: 'civil twilight',
     morning: 'morning', evening: 'evening', day: 'day',
     dateText: (month, day) => day + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1],
@@ -8363,7 +8423,8 @@ const SkySound = (() => {
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
     alt: CRUISE, cloud: 0.5, wind: 6, light: [0, 1, 0], lightI: 1, lightShare: 1,
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
-    speed: 900, heading: 0, drift: [0, 0], cirrus: 0.4,
+    // The aircraft's climb (the nose up) and bank (the right wing down), radians (see fly).
+    speed: 900, heading: 0, climb: 0, bank: 0, drift: [0, 0], cirrus: 0.4,
     // Days the sun has moved on beyond state.day while the time ran (see
     // tick): playing past midnight then turns the sky on smoothly. 0 once the
     // date or the time is set.
@@ -8802,11 +8863,28 @@ const SkySound = (() => {
 
   // ---------- Drawing ----------
   // Camera basis as a column-major mat3: right, up, forward.
-  const camera = (yaw, pitch) => {
+  const basis = (yaw, pitch) => {
     const f = [Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw)];
     const r = [Math.cos(yaw), 0, -Math.sin(yaw)];
     const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
-    return new Float32Array([...r, ...u, ...f]);
+    return [...r, ...u, ...f];
+  };
+  const camera = (yaw, pitch) => new Float32Array(basis(yaw, pitch));
+  // The camera of a view from the aircraft (see view() below): the eye's
+  // direction within the aircraft (yaw - heading, pitch), turned by the
+  // aircraft's attitude: its heading, its climb (the nose up) and then its
+  // bank (the right wing down, about the nose). Level, it is
+  // camera(yaw, pitch) itself, to the last bit.
+  const cameraOf = v => {
+    if (!v.bank && !v.climb) return camera(v.yaw, v.pitch);
+    const a = basis(v.heading, v.climb), e = basis(v.yaw - v.heading, v.pitch);
+    const cb = Math.cos(v.bank), sb = Math.sin(v.bank);
+    const R = [0, 1, 2].map(i => a[i] * cb - a[3 + i] * sb), U = [0, 1, 2].map(i => a[3 + i] * cb + a[i] * sb);
+    const m = new Float32Array(9);
+    for (let c = 0; c < 3; c++) {
+      for (let i = 0; i < 3; i++) m[3 * c + i] = R[i] * e[3 * c] + U[i] * e[3 * c + 1] + a[6 + i] * e[3 * c + 2];
+    }
+    return m;
   };
 
   // ?res=0.5 in the address fixes the size of the aircraft's picture while it
@@ -9782,7 +9860,7 @@ const SkySound = (() => {
     // cirrus, where photographs show a lighter blue.
     const near = new Float64Array(METER[0] * METER[1]);
     const weigh = p => {
-      const v = view(), c = camera(v.yaw, v.pitch), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
+      const v = view(), c = cameraOf(v), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
       for (let j = 0, i = 0; j < METER[1]; j++) {
         for (let k = 0; k < METER[0]; k++, i++) {
           const x = ((k + 0.5) / METER[0] * 2 - 1) * a * t, y = ((j + 0.5) / METER[1] * 2 - 1) * t;
@@ -10438,6 +10516,12 @@ const SkySound = (() => {
     };
     // What the last frame showed, to tell what has changed since.
     let camPast = null, driftPast = [0, 0], altPast = 0, lookPast = '';
+    // The altitude the picture is of: in flight a climb moves the eye a few
+    // metres a frame, and the past is moved along with it (way[1]) as over
+    // the sea; a step of the altitude slider (100 m), or any change at rest,
+    // is a new scene, as a change of the light.
+    const CLIMB_STEP = 0.05;
+    let altSeen = 0;
     // Frames drawn since anything moved or changed, and since the light changed.
     let calm = 0, relit = RELIGHT + 1, lastStir = -1e9, still = 0;
     // The exposure moves towards the meter's target (adapting) in the page's
@@ -10476,7 +10560,7 @@ const SkySound = (() => {
       lap('');
       const fitted = fit();
       if (!fitted) return false;
-      const v = view(), cam = camera(v.yaw, v.pitch);
+      const v = view(), cam = cameraOf(v);
       lap('start');
       poll();
       lap('read');
@@ -10504,8 +10588,9 @@ const SkySound = (() => {
       // still while nothing is drawn).
       const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
       restart = false;
-      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
       const flying = state.speed > 0;
+      if (!flying || Math.abs(way[1]) > CLIMB_STEP) altSeen = v.alt;
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, ...(grid ? [grid.version] : [])].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
       if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return false;   // settled
@@ -10847,9 +10932,9 @@ const SkySound = (() => {
     // after the exposure, and with cirrus every first picture was drawn up
     // to six times: four in the default view.)
     const probe = () => {
-      const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn];
+      const kept = [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, altSeen, lookPast, turn];
       const more = render(true, performance.now(), true);
-      [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, lookPast, turn] = kept;
+      [then, restart, lastStir, calm, relit, drawn, camPast, driftPast, altPast, altSeen, lookPast, turn] = kept;
       return more;
     };
     const PRIME_DRAWS = 6;                   // at most
@@ -10946,9 +11031,7 @@ const SkySound = (() => {
     // towards it. After a pause it does not jump.
     const dt = running ? Math.min(Math.max(now - lastFrame, 0) / 1000, 0.1) : 0;
     lastFrame = now;
-    const step = state.speed / 3600 * dt;
-    state.drift[0] = wrap(state.drift[0] + step * Math.sin(state.heading));
-    state.drift[1] = wrap(state.drift[1] + step * Math.cos(state.heading));
+    const steering = fly(dt);
     let more = false;
     const began = stats ? performance.now() : 0;
     if (stats) stats.parts.draws = stats.parts.pixels = 0;
@@ -10962,8 +11045,10 @@ const SkySound = (() => {
       // (A level that fails while it draws: see fall.)
       fall(err);
     }
-    running = more;
-    if (more) kick();
+    // (While a control is held the frames go on, even at rest, where the
+    // picture may have settled before the view begins to turn.)
+    running = more || steering && !!render;
+    if (running) kick();
   }
   function kick() {
     if (queued || !loaded) return;
@@ -11009,6 +11094,7 @@ const SkySound = (() => {
       : Math.abs(a - 14.8) < 1 ? T.fullMoon : Math.abs(a - 22.1) < 1 ? T.lastQuarter : T.moonAge(a.toFixed(0));
     hazeOut.textContent = T.hazes[state.haze < 0.5 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3 ? 2 : 3];
     if (document.activeElement !== altOut) altOut.value = altText(state.alt);
+    showFlight();
     cloudOut.textContent = T.clouds[state.cloud < 0.02 ? 0 : state.cloud < 0.35 ? 1 : state.cloud < 0.65 ? 2 : state.cloud < 0.9 ? 3 : 4];
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
     speedOut.textContent = state.speed.toFixed(0) + ' km/h';
@@ -11263,6 +11349,188 @@ const SkySound = (() => {
       toNow();
     }, () => { hereButton.title = TEXT[LANG].hereFailed; }, { timeout: 20000, maximumAge: 600000 });
   });
+  // ---------- Steering ----------
+  // The aircraft turns, climbs and banks; the eye looks out of it (state.yaw
+  // and state.pitch, turned with the aircraft) and the camera follows its
+  // attitude (cameraOf). A simple model, not a simulator: a banked aircraft
+  // turns as in a coordinated turn, at g tan(bank) / v; the climb is the
+  // angle of the flight path, the altitude changes at v sin(climb) and the
+  // way over the sea at v cos(climb); the rudder turns the heading at
+  // YAW_RATE. The controls give rates (keys, the stick: -1 to 1); let go,
+  // the attitude stays, and a steady turn needs nothing held. Level brings
+  // the bank and the climb back to 0 at the same rates. At speed 0 the
+  // aircraft stands: bank and climb only tilt the view, the rudder and the
+  // heading slider turn it where it is.
+  const G = 9.81e-3;                                           // km/s²
+  const ROLL_RATE = 30 * RAD, PITCH_RATE = 5 * RAD, YAW_RATE = 3 * RAD, TURN_MAX = 30 * RAD;   // a second
+  const headingIn = document.getElementById('heading'), bankIn = document.getElementById('bank'), climbIn = document.getElementById('climb');
+  const headingOut = document.getElementById('headingOut'), bankOut = document.getElementById('bankOut'), climbOut = document.getElementById('climbOut');
+  const levelButton = document.getElementById('level');
+  const BANK_MAX = +bankIn.max * RAD, CLIMB_MAX = +climbIn.max * RAD;
+  const clampTo = (x, m) => Math.min(m, Math.max(-m, x));
+  const toward = (x, to, by) => x > to ? Math.max(to, x - by) : Math.min(to, x + by);
+  // The keys held (by code: the same keys on every layout), the stick's
+  // deflection, and whether the aircraft is levelling.
+  const STEER_KEYS = { ArrowLeft: [0, -1], KeyA: [0, -1], ArrowRight: [0, 1], KeyD: [0, 1],
+    ArrowUp: [1, -1], KeyW: [1, -1], ArrowDown: [1, 1], KeyS: [1, 1], KeyQ: [2, -1], KeyE: [2, 1] };
+  const keysHeld = new Set(), stickAt = [0, 0];
+  let levelling = false;
+  // The compass bearing of a heading (0 north, 90 east): the heading is a
+  // yaw, 0 towards the south and 90 degrees towards the west.
+  const bearing = h => (((180 + h / RAD) % 360) + 360) % 360;
+  // The altitude, km, from a climb: state, slider, label and sound. (The
+  // slider rounds its value to its step; the state keeps it exact.)
+  let soundAlt = null;
+  function setAltitude(km) {
+    state.alt = km;
+    alt.value = km;
+    const heard = Math.round(km * 100);
+    if (heard !== soundAlt) {
+      soundAlt = heard;
+      sound.follow();
+    }
+  }
+  // Turns the aircraft by d radians, and the eye with it.
+  function turnBy(d) {
+    state.heading += d;
+    state.yaw += d;
+  }
+  function showFlight() {
+    const T = TEXT[LANG];
+    altOut.textContent = Math.round(state.alt * 100) * 10 + ' m';
+    const b = bearing(state.heading), deg = Math.round(b) % 360;
+    headingOut.textContent = String(deg).padStart(3, '0') + '° ' + T.compass[Math.round(b / 45) % 8];
+    const bank = Math.round(state.bank / RAD), climb = Math.round(state.climb / RAD * 2) / 2;
+    bankOut.textContent = T.bankText(bank);
+    climbOut.textContent = T.climbText(climb, Math.round(state.speed / 3.6 * Math.sin(state.climb)));
+    if (document.activeElement !== headingIn) headingIn.value = deg;
+    if (document.activeElement !== bankIn) bankIn.value = bank;
+    if (document.activeElement !== climbIn) climbIn.value = climb;
+  }
+  // One frame of flight, dt seconds: the controls, the turn, the climb and
+  // the way. Returns true while a control acts (the frames must go on).
+  let shownFlight = '';
+  function fly(dt) {
+    let roll = stickAt[0], pitch = stickAt[1], rudder = 0;
+    for (const code of keysHeld) {
+      const [axis, sign] = STEER_KEYS[code];
+      if (axis === 0) roll += sign;
+      else if (axis === 1) pitch += sign;
+      else rudder += sign;
+    }
+    roll = clampTo(roll, 1);
+    pitch = clampTo(pitch, 1);
+    rudder = clampTo(rudder, 1);
+    if (roll || pitch || rudder) levelling = false;
+    let bank = state.bank, climb = state.climb;
+    if (levelling) {
+      bank = toward(bank, 0, ROLL_RATE * dt);
+      climb = toward(climb, 0, PITCH_RATE * dt);
+      if (!bank && !climb) levelling = false;
+    }
+    if (roll) bank = clampTo(bank + roll * ROLL_RATE * dt, BANK_MAX);
+    if (pitch) climb = clampTo(climb + pitch * PITCH_RATE * dt, CLIMB_MAX);
+    const v = state.speed / 3600;                       // km/s
+    // At the top and the bottom of the altitude's range the aircraft levels off.
+    const limited = v > 0 && (climb > 0 && state.alt >= +alt.max || climb < 0 && state.alt <= +alt.min);
+    if (limited && !pitch) climb = toward(climb, 0, PITCH_RATE * dt);
+    state.bank = bank;
+    state.climb = climb;
+    const rate = clampTo((v > 0 && bank ? G * Math.tan(bank) / v : 0) + rudder * YAW_RATE, TURN_MAX);
+    const was = state.heading;
+    if (rate && dt) turnBy(rate * dt);
+    // The way: along the heading of the middle of the frame (the chord of
+    // the arc flown).
+    const step = state.speed / 3600 * dt, h = state.heading === was ? was : (was + state.heading) / 2;
+    const ahead = climb ? step * Math.cos(climb) : step;
+    state.drift[0] = wrap(state.drift[0] + ahead * Math.sin(h));
+    state.drift[1] = wrap(state.drift[1] + ahead * Math.cos(h));
+    if (climb && step) setAltitude(Math.min(+alt.max, Math.max(+alt.min, state.alt + step * Math.sin(climb))));
+    const shown = [state.heading, bank, climb, state.alt].join();
+    if (shown !== shownFlight) {
+      shownFlight = shown;
+      showFlight();
+    }
+    return !!(roll || pitch || rudder || levelling || limited);
+  }
+  // Keys steer, but not where the focus takes them: no key in a select or a
+  // text field, no arrow on a slider (a letter there steers). They do not
+  // bring the panel back (see wake below): it would cover the view.
+  const steers = e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || !(STEER_KEYS[e.code] || e.code === 'KeyL')) return false;
+    const el = e.target instanceof Element ? e.target : null;
+    if (!el) return true;
+    if (el.closest('select, textarea, [contenteditable]') || el.tagName === 'INPUT' && el.type !== 'range') return false;
+    return !(el.tagName === 'INPUT' && e.code.startsWith('Arrow'));
+  };
+  window.addEventListener('keydown', e => {
+    if (!steers(e)) return;
+    e.preventDefault();
+    if (e.code === 'KeyL') levelling = true;
+    else keysHeld.add(e.code);
+    kick();
+  });
+  window.addEventListener('keyup', e => { keysHeld.delete(e.code); });
+  window.addEventListener('blur', () => keysHeld.clear());
+  function levelOff() {
+    levelling = true;
+    kick();
+  }
+  levelButton.addEventListener('click', levelOff);
+  // The panel's sliders set the attitude at once; the heading turns the eye along.
+  headingIn.addEventListener('input', () => {
+    turnBy(((+headingIn.value - bearing(state.heading) + 540) % 360 - 180) * RAD);
+    update();
+  });
+  bankIn.addEventListener('input', () => {
+    state.bank = +bankIn.value * RAD;
+    levelling = false;
+    update();
+  });
+  climbIn.addEventListener('input', () => {
+    state.climb = +climbIn.value * RAD;
+    levelling = false;
+    update();
+  });
+  // The stick: on a touch screen, or with ?stick=1. Held, it hides the panel
+  // (as when nothing moves); its deflection, to its rim, is the rate: to the
+  // side it rolls, down it pulls the nose up, as a stick in an aircraft.
+  const stickPad = document.querySelector('.stick'), stickKnob = stickPad.querySelector('.knob');
+  let stickId = null;
+  const moveStick = e => {
+    const r = stickPad.getBoundingClientRect(), R = r.width / 2;
+    let x = (e.clientX - r.left - R) / R, y = (e.clientY - r.top - R) / R;
+    const n = Math.hypot(x, y);
+    if (n > 1) { x /= n; y /= n; }
+    stickAt[0] = x;
+    stickAt[1] = y;
+    stickKnob.style.setProperty('--x', (x * R * 0.6).toFixed(1) + 'px');
+    stickKnob.style.setProperty('--y', (y * R * 0.6).toFixed(1) + 'px');
+    kick();
+  };
+  stickPad.addEventListener('pointerdown', e => {
+    if (e.target.closest('.stick-level')) return;
+    stickId = e.pointerId;
+    stickPad.setPointerCapture(e.pointerId);
+    hero.classList.add('still');
+    moveStick(e);
+  });
+  stickPad.addEventListener('pointermove', e => { if (e.pointerId === stickId) moveStick(e); });
+  const letStickGo = e => {
+    if (e.pointerId !== stickId) return;
+    stickId = null;
+    stickAt[0] = stickAt[1] = 0;
+    stickKnob.style.removeProperty('--x');
+    stickKnob.style.removeProperty('--y');
+  };
+  stickPad.addEventListener('pointerup', letStickGo);
+  stickPad.addEventListener('pointercancel', letStickGo);
+  stickPad.querySelector('.stick-level').addEventListener('click', levelOff);
+  stickPad.hidden = !(params.get('stick') === '1' || matchMedia('(pointer: coarse)').matches);
+  // For the tools: the flight as it is now (degrees, km), and the camera.
+  window.__flight = () => ({ heading: state.heading / RAD, yaw: state.yaw / RAD, pitch: state.pitch / RAD,
+    bank: state.bank / RAD, climb: state.climb / RAD, alt: state.alt, at: [...state.drift], sun: [...state.sun],
+    cam: [...cameraOf(view())] });
 
   // Drag to look around.
   let drag = null;
@@ -11328,14 +11596,17 @@ const SkySound = (() => {
     sel.addEventListener('change', closed);
     sel.addEventListener('blur', closed);
   }
+  // (The stick steers: it leaves the panel as it is.)
+  const onStick = e => e.target instanceof Element && !!e.target.closest('.stick');
   window.addEventListener('pointermove', e => {
+    if (onStick(e)) return;
     if (opened && e.target !== opened) opened = null;
     // The release can be lost (in a select's list, outside the window).
     if (!e.buttons) pressed = false;
     wake();
   }, { passive: true });
-  window.addEventListener('pointerdown', () => { keyed = false; wake(); }, { passive: true });
-  window.addEventListener('keydown', () => { keyed = true; wake(); });
+  window.addEventListener('pointerdown', e => { if (!onStick(e)) { keyed = false; wake(); } }, { passive: true });
+  window.addEventListener('keydown', e => { if (!steers(e)) { keyed = true; wake(); } });
 
   // Background sound: its air follows the altitude and the speed, and it
   // never asks for a frame.
@@ -11397,6 +11668,9 @@ const SkySound = (() => {
   if (params.has('pitch')) state.pitch = params.get('pitch') * RAD;
   // The view starts out of a window ahead and to the right of the nose.
   state.heading = params.has('heading') ? (+params.get('heading') || 0) * RAD : state.yaw - 60 * RAD;
+  // The attitude, degrees: ?bank=20 (the right wing down), ?climb=5 (the nose up).
+  state.bank = clampTo(+params.get('bank') || 0, +bankIn.max) * RAD;
+  state.climb = clampTo(+params.get('climb') || 0, +climbIn.max) * RAD;
   // A place to start from, in km: ?at=120,40
   if (params.has('at')) {
     const [x, z] = params.get('at').split(',');
@@ -11853,7 +12127,8 @@ const SkySound = (() => {
 
   // What failed at each level tried, for the message.
   const tried = [];
-  const view = () => ({ yaw: state.yaw, pitch: state.pitch, fov: FOV, alt: state.alt, cloud: state.cloud, look: AIR_LOOK });
+  const view = () => ({ yaw: state.yaw, pitch: state.pitch, heading: state.heading, climb: state.climb, bank: state.bank,
+    fov: FOV, alt: state.alt, cloud: state.cloud, look: AIR_LOOK });
   // Makes the renderer at `level`, or the first level below it that starts.
   async function load() {
     for (;;) {

@@ -17,6 +17,73 @@ const reached = (x, z, kmh, heading, frames, ms) => {
   return [w(x + d * Math.sin(h)), w(z + d * Math.cos(h))];
 };
 const at = ([x, z]) => `at=${x.toFixed(6)},${z.toFixed(6)}`;
+
+// The flight of the page's `fly` (index.html, Steering), frame by frame, at a fixed bank and climb with no control
+// held but the rudder (-1 to 1): from (x, z) and heading (degrees), frames frames of ms each (the first does not
+// move). Returns the place and the heading reached. Written apart from the page, to test it.
+const G = 9.81e-3, TURN_MAX = 30, YAW_RATE = 3;
+const flownPath = ({ x, z, heading, bank = 0, climb = 0, rudder = 0, kmh, frames, ms }) => {
+  const R = Math.PI / 180, v = KMS(kmh), dt = ms / 1000, w = (u) => ((u % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
+  const rate = Math.max(-TURN_MAX * R, Math.min(TURN_MAX * R, (v > 0 && bank ? G * Math.tan(bank * R) / v : 0) + rudder * YAW_RATE * R));
+  let h = heading * R;
+  for (let k = 1; k < frames; k++) {
+    const was = h, step = v * dt * Math.cos(climb * R);
+    h += rate * dt;
+    x = w(x + step * Math.sin((was + h) / 2));
+    z = w(z + step * Math.cos((was + h) / 2));
+  }
+  return { at: [x, z], heading: h / R };
+};
+// The distance of two places on the map, km, across its wrap.
+const apart = (a, b) => Math.hypot(...[0, 1].map((i) => ((a[i] - b[i] + 1.5 * WEATHER_KM) % WEATHER_KM) - 0.5 * WEATHER_KM));
+// A view of the page's flight now (window.__flight()) as a query: a still there, at rest.
+const flightQuery = (fl) => `heading=${fl.heading}&yaw=${fl.yaw}&pitch=${fl.pitch}&bank=${fl.bank}&climb=${fl.climb}&at=${fl.at[0]},${fl.at[1]}`;
+// Where the camera cam (column-major: right, up, forward) puts the direction s on a picture w by h (pixels from
+// the top left; the page's vertical field of view is 62 degrees), or null behind the eye.
+const onScreen = (cam, s, w, h) => {
+  const d = (c) => cam[c] * s[0] + cam[c + 1] * s[1] + cam[c + 2] * s[2], t = Math.tan(31 * Math.PI / 180);
+  const f = d(6);
+  return f > 0 ? [(d(0) / f / t * h + w) / 2, h - (d(3) / f / t * h + h) / 2] : null;
+};
+// The middle of the sun's disc in a picture: the centroid of the white pixels within r of near.
+const sunIn = (img, near, r = 60) => {
+  let n = 0, sx = 0, sy = 0;
+  for (let y = Math.max(0, Math.round(near[1] - r)); y < Math.min(img.h, near[1] + r); y++) {
+    for (let x = Math.max(0, Math.round(near[0] - r)); x < Math.min(img.w, near[0] + r); x++) {
+      const i = 3 * (y * img.w + x);
+      if (Math.min(img.rgb[i], img.rgb[i + 1], img.rgb[i + 2]) >= 252) { n++; sx += x + 0.5; sy += y + 0.5; }
+    }
+  }
+  return n ? [sx / n, sy / n] : null;
+};
+// Detail: the mean difference of neighbouring pixels (grey levels) inside box, a measure of sharpness.
+const detailOf = (img, [x0, y0, bw, bh]) => {
+  let sum = 0, n = 0;
+  const g = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
+  for (let y = y0; y < y0 + bh - 1; y++) {
+    for (let x = x0; x < x0 + bw - 1; x++) { sum += Math.abs(g(x + 1, y) - g(x, y)) + Math.abs(g(x, y + 1) - g(x, y)); n++; }
+  }
+  return sum / n / 3;
+};
+// The angle of the horizon in a picture (degrees, counter-clockwise positive), from the row of the strongest step
+// of brightness in each column of the middle half, near the line expected (y = y0 + slope * x).
+const horizonIn = (img, y0, slope, r = 40) => {
+  const L = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
+  const xs = [], ys = [];
+  for (let x = Math.round(img.w / 4); x < img.w * 3 / 4; x += 4) {
+    const c = y0 + slope * x;
+    let best = -1, at = -1;
+    for (let y = Math.max(1, Math.round(c - r)); y < Math.min(img.h - 1, c + r); y++) {
+      const s = Math.abs(L(x, y + 1) - L(x, y - 1));
+      if (s > best) { best = s; at = y; }
+    }
+    if (at >= 0) { xs.push(x); ys.push(at); }
+  }
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0, sxx = 0;
+  for (let i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
+  return -Math.atan(sxy / sxx) * 180 / Math.PI;
+};
 const errorsOf = (pages) => pages.flatMap((p) => p.errors);
 // The exposure (log2) of the page's last frame, or null where the page has no `window.__exposure` (the base, which
 // has no meter) or has not set it yet; and the query that pins a page at it (`?expo=`; nothing where null).
@@ -285,6 +352,197 @@ export const CHECKS = {
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
   },
+
+  // Steering (index.html, Steering). (a) Flights along headings 0, 90, 180 and 270, a banked turn and a whole
+  // circle reach the place and the heading that the turn's own sum (flownPath) gives, and their last frame matches
+  // a still drawn directly there (heading, eye, bank) within the flight check's limit. (b) A banked flight on a
+  // diagonal across the wrap matches its still no worse than one elsewhere (as wrap). (c) In the banked turn the
+  // flown frame keeps the detail of a level flight (against their stills). (d) The sun stays put in the world: a
+  // turn of the heading by the panel, and a bank, move it on the screen where the camera says. (e) A bank tilts
+  // the sea's horizon by the bank, looking ahead; the stills at bank 0, 30 and 60 are for looking at.
+  async steer(ctx) {
+    const f = (n) => path.join(ctx.dir, n + '.png');
+    const lines = [], pages = [];
+    let ok = true;
+    const expect = (cond, text) => { if (!cond) { ok = false; lines.push('not so: ' + text); } };
+    const flightNow = (p) => p.eval('window.__flight()');
+    // Flies q for n frames of ms; shoots the last frame (and the one before, for looking at ghosts).
+    const fly = async (name, q, n, ms, two = false, before = '') => {
+      const p = await ctx.session.open(ctx.page, q, ctx.size);
+      try {
+        if (before) await p.eval(`${before}, 0`);
+        await p.step(n - (two ? 1 : 0), ms);
+        if (two) { await p.shot(f(`${name}-before`)); await p.step(1, ms); }
+        const fl = await flightNow(p), e = await exposureOf(p);
+        await p.shot(f(name));
+        pages.push(p);
+        return { fl, e };
+      } finally {
+        await p.close();
+      }
+    };
+    const stillThere = async (name, base, fl, e) => pages.push(await stillAt(ctx, ctx.page, `${base}&${flightQuery(fl)}${pinned(e)}`, f(`${name}-still`)));
+    const limit = LIMITS.flight[ctx.renderer].cruise;
+    const base = 'date=172&time=15&pitch=-12&cirrus=0.4';
+    const box = (img) => [Math.round(img.w * 0.1), Math.round(img.h * 0.55), Math.round(img.w * 0.8), Math.round(img.h * 0.4)];
+    // A settled still of q at rest: its exposure and the page's flight.
+    const settled = async (q) => {
+      const p = await ctx.session.open(ctx.page, run.stillQuery(q), ctx.size);
+      try {
+        await p.step(run.view('default').frames, 50);
+        const r = { e: await exposureOf(p), fl: await flightNow(p) };
+        pages.push(p);
+        return r;
+      } finally {
+        await p.close();
+      }
+    };
+    // The turns are flown at the exposure of their first view, held (`?expo=`), and so are their stills: while
+    // the view turns past the sun the meter moves (0.14 stops in the last 20 frames of the circle), and the mean
+    // over frames, which lags it, would count as a difference of the picture.
+    const turn = 'date=172&time=15&cirrus=0.4&heading=30&yaw=50&pitch=-12&bank=45&at=40,60';
+    const t0 = await settled(turn);
+    // The control of the turn: the same first view, level (the eye's direction of the banked camera, no roll),
+    // turned by the rudder at the same rate (700 km/h at 45 degrees: 2.9 degrees a second; the rudder's 3).
+    const fwd = t0.fl.cam.slice(6, 9), deg = 180 / Math.PI;
+    const level = `date=172&time=15&cirrus=0.4&heading=30&yaw=${Math.atan2(fwd[0], fwd[2]) * deg}&pitch=${Math.asin(fwd[1]) * deg}&at=40,60`;
+    const circle = 'date=172&time=15&cirrus=0.4&heading=0&yaw=20&pitch=-12&bank=60&at=40,60';
+    const c0 = await settled(circle);
+    // (a) and (c).
+    const flights = [
+      ...[0, 90, 180, 270].map((hd) => ({ name: `heading-${hd}`, q: `${base}&heading=${hd}&yaw=${hd + 20}&at=40,60`, hd, kmh: 900, frames: 61, ms: 16 })),
+      { name: 'turn-45', q: `${turn}&expo=${t0.e}`, hd: 30, bank: 45, kmh: 700, frames: 121, ms: 16, two: true, e: t0.e },
+      { name: 'rudder', q: `${level}&expo=${t0.e}`, hd: 30, rudder: 1, kmh: 700, frames: 121, ms: 16, e: t0.e,
+        before: "window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))" },
+      // A whole circle: 200 km/h at 60 degrees turns at 17.5 degrees a second.
+      { name: 'circle', q: `${circle}&expo=${c0.e}`, hd: 0, bank: 60, kmh: 200, ms: 32, e: c0.e,
+        frames: 1 + Math.round(2 * Math.PI / (G * Math.tan(Math.PI / 3) / KMS(200)) / 0.032) },
+    ];
+    const result = {};
+    for (const fl of flights) {
+      const { fl: got, e } = await fly(fl.name, `${fl.q}&speed=${fl.kmh}`, fl.frames, fl.ms, fl.two, fl.before);
+      const want = flownPath({ x: 40, z: 60, heading: fl.hd, bank: fl.bank, rudder: fl.rudder, kmh: fl.kmh, frames: fl.frames, ms: fl.ms });
+      await stillThere(fl.name, 'date=172&time=15&cirrus=0.4', got, fl.e ?? e);
+      const d = diffPng(f(`${fl.name}-still`), f(fl.name), { out: f(`${fl.name}-diff`) });
+      const sa = readPng(f(`${fl.name}-still`)), fa = readPng(f(fl.name));
+      const sharp = detailOf(fa, box(fa)) / detailOf(sa, box(sa));
+      result[fl.name] = { d, sharp };
+      const miss = apart(got.at, want.at) * 1e6, turned = got.heading - fl.hd;
+      lines.push(`${fl.name}: heading ${fl.hd} -> ${got.heading.toFixed(3)} (sum ${want.heading.toFixed(3)}), place off the sum by ${miss.toFixed(1)} mm` +
+        `${fl.name === 'circle' ? `, ${(apart(got.at, [40, 60]) * 1000).toFixed(1)} m from the start after turning ${turned.toFixed(2)} degrees` : ''}; ` +
+        `against the still ${fmtDiff(d)}; detail ${sharp.toFixed(3)} of the still's`);
+      expect(miss < 1 && Math.abs(got.heading - want.heading) < 1e-6, `${fl.name}: the place and heading of the sum`);
+      if (fl.name.startsWith('heading-') || fl.name === 'circle') expect(d.mean <= limit, `${fl.name}: within ${limit} of the still`);
+      if (fl.name === 'circle') expect(Math.abs(turned - 360) < 0.6 && apart(got.at, [40, 60]) < 0.01, 'the circle closes');
+    }
+    // The bank adds nothing to a turn's own cost: against the level turn over the same view, the banked one is
+    // as close to its still and as sharp. (Any turn, a drag of the view too, keeps less detail than a straight
+    // flight: about 0.90 of the still's, against 0.96 to 0.99.)
+    const tb = result['turn-45'], tr = result.rudder;
+    expect(tb.d.mean <= LIMITS.turn(tr.d.mean), `the banked turn within ${LIMITS.turn(tr.d.mean).toFixed(3)} of its still (the level turn's ${tr.d.mean}, times 1.15, plus 0.1)`);
+    expect(tb.sharp >= tr.sharp - 0.03, `the banked turn keeps the level turn's detail (${tr.sharp.toFixed(3)}, less 0.03)`);
+
+    // (b) Across the wrap on a diagonal, in a turn, against a flight elsewhere.
+    const wrapped = {};
+    for (const [n, z0] of [['wrap-across', 255.92], ['wrap-control', 100.92]]) {
+      const q = `date=172&time=14&cloud=0.6&yaw=85&pitch=-14&heading=45&bank=20&speed=900`;
+      const { fl: got, e } = await fly(n, `${q}&at=${z0},${z0}`, 61, 16);
+      await stillThere(n, 'date=172&time=14&cloud=0.6', got, e);
+      wrapped[n] = { d: diffPng(f(`${n}-still`), f(n)), at: got.at };
+    }
+    const wa = wrapped['wrap-across'], wc = wrapped['wrap-control'];
+    lines.push(`diagonal across the wrap (to ${wa.at.map((v) => v.toFixed(4)).join(',')}): worst tile ${wa.d.tile}, mean ${wa.d.mean}; elsewhere worst tile ${wc.d.tile}, mean ${wc.d.mean}`);
+    expect(wa.at[0] < 1 && wa.at[1] < 1, 'the diagonal flight crosses the wrap on both axes');
+    expect(wa.d.tile <= LIMITS.wrap(wc.d.tile), 'no seam across the wrap');
+
+    // (d) The sun, in a view towards it at a low sun: first where it is, then the panel turns the heading by 20
+    // degrees (the eye turns along), then a bank of 30 degrees.
+    {
+      const q0 = 'date=172&time=17.6&cloud=0.3&cirrus=0&speed=0&heading=0';
+      const p0 = await ctx.session.open(ctx.page, q0, ctx.size);
+      let sun;
+      try { await p0.step(2, 50); sun = (await flightNow(p0)).sun; pages.push(p0); } finally { await p0.close(); }
+      const syaw = Math.atan2(sun[0], sun[2]) * 180 / Math.PI, sel = Math.asin(sun[1]) * 180 / Math.PI;
+      const p = await ctx.session.open(ctx.page, `${q0}&yaw=${syaw - 15}&pitch=${sel}`, ctx.size);
+      const set = (id, v) => p.eval(`(() => { const s = document.getElementById('${id}'); s.value = ${v}; s.dispatchEvent(new Event('input')); return 0; })()`);
+      try {
+        const steps = [['sun-0', null], ['sun-turned', async () => set('heading', `(+document.getElementById('heading').value + 20) % 360`)],
+          ['sun-banked', async () => set('bank', 30)]];
+        for (const [n, act] of steps) {
+          if (act) await act();
+          await p.step(run.view('default').frames, 50);
+          await p.shot(f(n));
+          const fl = await flightNow(p), img = readPng(f(n));
+          const want = onScreen(fl.cam, fl.sun, img.w, img.h), got = want && sunIn(img, want);
+          const off = got ? Math.hypot(got[0] - want[0], got[1] - want[1]) : Infinity;
+          const moved = Math.hypot(...fl.sun.map((c, i) => c - sun[i]));
+          lines.push(`${n}: heading ${fl.heading.toFixed(2)}, bank ${fl.bank}: the sun expected at ${want ? want.map((v) => v.toFixed(1)).join(',') : 'behind'}, ` +
+            `found at ${got ? got.map((v) => v.toFixed(1)).join(',') : 'nowhere'} (${off.toFixed(2)} px); its direction moved by ${moved.toExponential(1)}`);
+          expect(off < 3 && moved < 1e-9, `${n}: the sun where the camera puts it, fixed in the world`);
+        }
+        pages.push(p);
+      } finally {
+        await p.close();
+      }
+    }
+
+    // (f) A climb of 5 degrees at 900 km/h from 3 km: the altitude reached is the sum's, and the last frame
+    // matches the picture there once the aircraft has stopped and the picture settled (the altitude cannot be
+    // given exactly in the address: its slider rounds it). Then a climb into the top of the range levels off.
+    {
+      const p = await ctx.session.open(ctx.page, 'date=172&time=14&alt=3&pitch=-5&yaw=60&heading=0&climb=5&speed=900&at=40,60', ctx.size);
+      const stop = "(() => { const s = document.getElementById('speed'); s.value = 0; s.dispatchEvent(new Event('input')); return 0; })()";
+      try {
+        await p.step(61, 16);
+        const fl = await flightNow(p);
+        await p.shot(f('climb'));
+        await p.eval(stop);
+        await p.step(run.view('default').frames, 50);
+        const rest = await flightNow(p);
+        await p.shot(f('climb-still'));
+        pages.push(p);
+        const want = 3 + 60 * KMS(900) * 0.016 * Math.sin(5 * Math.PI / 180);
+        const d = diffPng(f('climb-still'), f('climb'), { out: f('climb-diff') });
+        lines.push(`climb: altitude ${fl.alt.toFixed(6)} km (sum ${want.toFixed(6)}), at rest ${rest.alt.toFixed(6)} km, ${(apart(fl.at, rest.at) * 1e6).toFixed(1)} mm on; ` +
+          `against the settled picture ${fmtDiff(d)} (limit ${LIMITS.flight[ctx.renderer].low})`);
+        expect(Math.abs(fl.alt - want) < 1e-6 && rest.alt === fl.alt, 'climb: the altitude of the sum, kept at rest');
+        expect(d.mean <= LIMITS.flight[ctx.renderer].low, 'climb: within the flight limit of the settled picture');
+      } finally {
+        await p.close();
+      }
+      const q = await ctx.session.open(ctx.page, 'date=172&time=14&alt=12.9&heading=0&climb=10&speed=900&at=40,60', ctx.size);
+      try {
+        await q.step(300, 16);
+        const fl = await flightNow(q);
+        pages.push(q);
+        lines.push(`climb to the top: altitude ${fl.alt} km, climb ${fl.climb.toFixed(3)} degrees after 300 frames`);
+        expect(fl.alt === 13 && fl.climb === 0, 'the climb levels off at 13 km');
+      } finally {
+        await q.close();
+      }
+    }
+
+    // (e) The horizon at 0.3 km, clear, looking ahead: tilted by the bank (counter-clockwise for a bank to the
+    // right). And stills at bank 0, 30, 60 at a low sun at 11 km, for looking at; their exposures.
+    for (const b of [0, 30, 60]) {
+      const n = `horizon-${b}`;
+      const fl = { heading: 100, yaw: 100, pitch: 0, bank: b, climb: 0, at: [40, 60] };
+      pages.push(await stillAt(ctx, ctx.page, `date=172&time=11&alt=0.3&cloud=0&cirrus=0&${flightQuery(fl)}`, f(n)));
+      const img = readPng(f(n));
+      // The sea's horizon dips 0.56 degrees at 0.3 km: from the middle of the picture, rotated by the bank.
+      const t = Math.tan(31 * Math.PI / 180), dip = Math.tan(0.56 * Math.PI / 180) / t * img.h / 2, r = b * Math.PI / 180;
+      const slope = -Math.tan(r), y0 = img.h / 2 + dip / Math.cos(r) - slope * img.w / 2;
+      const angle = horizonIn(img, y0, slope);
+      lines.push(`${n}: the horizon at ${angle.toFixed(2)} degrees (expected ${b})`);
+      expect(Math.abs(angle - b) < 1, `${n}: the horizon tilted by the bank`);
+      const m = `banked-${b}`;
+      const fm = { heading: 0, yaw: 60, pitch: -6, bank: b, climb: 0, at: [40, 60] };
+      const pm = await stillAt(ctx, ctx.page, `date=172&time=17.4&cloud=0.5&${flightQuery(fm)}`, f(m));
+      pages.push(pm);
+    }
+    const errors = errorsOf(pages);
+    return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
+  },
 };
 
 // Limits, from the numbers measured on main and on broken copies (see tools/README.md), with room for noise.
@@ -302,6 +560,8 @@ const LIMITS = {
   // (the glow's, say) moves it by 0.05 stops and more.
   steady: { frames: 20, range: 0.01 },
   flightBase: (base) => base * 1.1 + 0.03,
+  // A banked turn against a level turn by the rudder over the same view, at the same rate (see steer).
+  turn: (level) => level * 1.15 + 0.1,
 };
 
 export async function runChecks(session, { names, page, base, size, gpu, dir, ignore }) {
