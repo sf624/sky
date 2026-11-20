@@ -2304,6 +2304,25 @@ vec4 weather(vec3 p, vec2 x, float lod, bool fine) {
 vec2 topsX;
 float topsH;
 #endif
+#if defined(TGRID) && !defined(TOPS_MAP)
+// (?grid=1) Towers grown as trees of lobes by a worker (see the script
+// "towers"), kept in three grids round the eye (see `grid` in the JS):
+// uGrid (R8) holds level l from its slice GRID_Z[l]: GRID_NZ[l] slices of
+// the distance under their surface over CB to CT (0.5 at it, +-GRID_R
+// km), then four of its columns (gridCol): the top (0: none; else a share
+// of CB to CT), the highest top within 0.8 km, the base, and how much of
+// it is shown. (One sampler, and none in the scene's own program, which
+// reads the low clouds from their pass: Direct3D 11 allows a program 16,
+// and that one reads 16.) uGridO[l]: the middle of level l's window on the map (km), and
+// its texel there. The present field's towers give way where the grid
+// holds the place (gridCut). The map of the tops (uTops) is made without
+// the grid; the worker raises it over the towers (see `grid` in the JS).
+uniform highp sampler3D uGrid;
+uniform vec4 uGridO[3];
+const float GRID_R = 0.25;
+float gridCut = 0.0;
+#define cloudShape cloudShape0
+#endif
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
   float h = topsH;
@@ -2367,6 +2386,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // than others: as the heap's height rose over the tower's width, its top
   // did, and towers were cones, like mountains.
   float towers = smoothstep(0.1, 0.5, uCloud) * (1.0 - 0.8 * level1);
+#if defined(TGRID) && !defined(TOPS_MAP)
+  towers *= 1.0 - gridCut;
+#endif
   float tg = clamp((w.g - TOWER.x) / TOWER.y, 0.0, 1.0), tw = tg * (2.0 - tg);
   float tower = tw * towers;
   // (With few clouds, the level stands 0.1 higher: the heaps of the map
@@ -2683,6 +2705,92 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   }
   return f;
 }
+#if defined(TGRID) && !defined(TOPS_MAP)
+#undef cloudShape
+// Level l's place of x (km on the map) in uGrid (x, y), and
+// whether its window holds x.
+bool gridAt(vec2 x, int l, out vec2 uv) {
+  float v = GRID_V0 * exp2(float(l));
+  vec2 dv = mod(x - uGridO[l].xy + 0.5 * WEATHER_KM, WEATHER_KM) - 0.5 * WEATHER_KM;
+  uv = (uGridO[l].zw + dv / v) / GRID_N;
+  return max(abs(dv.x), abs(dv.y)) < 0.5 * GRID_N * v;
+}
+// Level l's column c at uv (0 top, 1 the highest top within 0.8 km, 2 the
+// base, 3 how much it is shown).
+float gridCol(vec2 uv, int l, int c) {
+  return textureLod(uGrid, vec3(uv, (GRID_Z[l] + GRID_NZ[l] + float(c) + 0.5) / GRID_NZT), 0.0).r;
+}
+float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
+  float h = heightAt(p);
+  vec2 x = p.xz + uDrift;
+  // The levels, finest first, each with what the finer left (rest) times
+  // how much of its column is shown; a level finer than the read's
+  // smoothing (lod: level 0's voxels are texels of the noise at lod
+  // GRID_LV, -1 for 31 m) gives way to the next.
+  float yg = (h - CB) / (CT - CB), rest = 1.0, cover = 0.0, read = 0.0, dSum = 0.0;
+  vec2 colSum = vec2(0.0);
+  if (yg > 0.0 && yg < 1.0) {
+    float lv = lod - GRID_LV;
+    for (int l = 0; l < 3; l++) {
+      float k = l == 2 ? 1.0 : clamp(1.0 - (lv - float(l)), 0.0, 1.0);
+      vec2 uv;
+      if (rest * k < 1e-3 || !gridAt(x, l, uv)) continue;
+      float w = rest * k * gridCol(uv, l, 3);
+      if (w < 1e-3) continue;
+      float d = -GRID_R, top = gridCol(uv, l, 0);
+      if (top > 0.0 && h <= CB + top * (CT - CB) + 0.06) {
+        float nz = GRID_NZ[l];
+        d = (textureLod(uGrid, vec3(uv, (GRID_Z[l] + clamp(yg * nz, 0.5, nz - 0.5)) / GRID_NZT), 0.0).r * 2.0 - 1.0) * GRID_R;
+        read += w;
+        colSum += w * vec2(gridCol(uv, l, 1), gridCol(uv, l, 2));
+      }
+      dSum += w * d;
+      cover += w;
+      rest -= w;
+    }
+  }
+  gridCut = cover;
+  float f = cloudShape0(p, lod, fine, y, q, body, lump, base);
+  gridCut = 0.0;
+  if (read <= 0.0) return f;
+  // Where a tile fades in, its towers grow from within.
+  float d = mix(-GRID_R, dSum / cover, cover);
+  float heapTop = CB + colSum.x / read * (CT - CB), gBase = CB + colSum.y / read * (CT - CB);
+  // (From here as the prototype of #76: the grid's body joins the present
+  // field by a smooth maximum, and takes over its facts there.)
+  float hu = clamp((h - gBase) / max(heapTop - gBase, 0.05), 0.0, 1.0);
+  vec3 qg = vec3(x.x, h, x.y) / BASE_KM;
+#ifdef GRID_HW
+  // Heads of uBody (B: 500 m to 125 m, read GRID_HK times finer) carve the
+  // surface as on main's body: crowns where it stands (ERO_C of their
+  // weight out), seams in by up to GRID_HW km, fading SKIN deeper.
+  float hw = GRID_HW * smoothstep(0.03, 0.25, hu);
+  if (d > -(ERO_C * hw + 0.05) && d < hw + SKIN) {
+    vec4 t = textureLod(uBody, qg * GRID_HK, max(lod + BODY_LOD + log2(GRID_HK), 0.0));
+    float dd = d + ERO_C * hw;
+    d = dd - hw * t.z * (1.0 - smoothstep(0.0, SKIN, dd - hw));
+  }
+#endif
+  float fg = BODY_G * d;
+  float k = 0.1;
+  float s = clamp(0.5 + (fg - f) / (2.0 * k), 0.0, 1.0);
+  if (s <= 0.0) return f;
+  f = mix(f, fg, s) + k * s * (1.0 - s);
+  solidAt = mix(solidAt, 1.0, s);
+  carved = mix(carved, 1.0, s);
+  steep = mix(steep, BODY_D, s);
+  heapUp = mix(heapUp, hu, s);
+  overBase = mix(overBase, h - gBase, s);
+  body = mix(body, max(body, 2.0), s);
+  thin *= 1.0 - s;
+  relief *= 1.0 - s;
+  lump *= 1.0 - s;
+  base = mix(base, 9.0, s);
+  y = mix(y, (h - gBase) / (CT - CB), s);
+  q = vec4(qg, max(q.w, 0.9));
+  return f;
+}
+#endif
 
 // The fine noise at q (a place in the noise of the tile) on a cloud of
 // roughness rough, in units of the field: billows of 300 m down to 20 m,
@@ -6320,6 +6428,679 @@ void main() {
 }
 </script>
 
+<!-- The towers of ?grid=1: the worker that grows them and fills the grids
+(see `grid` in the script below, TGRID in fs). Made into a Worker from its
+text (a Blob): no file and no build. -->
+<script id="towers" type="text/x-worker">
+'use strict';
+// ---- The shape rule: a tower's seed -> its lobes (from the prototype of
+// #76). Kept apart from the plumbing below, which only calls lobesOf with
+// the seed { x, z, W, top, base, seed } (km, x and z the middle of its
+// foot), the knobs P and the lean. A lobe: { x, y, z, r, k } (km; k the
+// width of its smooth union). The grid holds lobes of at least 0.6 voxels.
+// (The rule of the shape prototype, round 2.) A body is a tree of lobes
+// (spheres): a broad cluster of turrets on a footprint as wide as the body
+// is tall or wider, rising out of a few big trunk lobes, with an apron of
+// low lobes and small heaps round the foot; on each lobe smaller lobes over
+// its surface (all round, a little out, spaced apart so that they meet in
+// creases), 0.3 to 0.55 of their parent, down to rmin. The lobes are joined by a smooth minimum,
+// wide for the big ones, narrow for the small ones (crisp clefts).
+const rngOf = seed => {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+
+// P: the generator's knobs.
+// A body is a broad cluster of turrets (thermals) on a footprint about
+// as wide as the body is tall or wider; the middle ones stand highest,
+// the others at heights spread from low to high, so that from above it
+// is a heap of domes at many levels (not a plateau). Each turret is a
+// column of lobes with jittered size and spacing (no bands), ending in a
+// full dome (a round cap, not cut flat). The lower part is one mass
+// (trunk lobes: no flutes between the columns). Round the foot, wide low lobes
+// and small heaps (an apron) melt the body into the deck. On every lobe,
+// generation by generation, smaller lobes all over its surface, down
+// the walls too (cauliflower, not smooth veils).
+const P = {
+  turrets: 3.5,      // turrets per km of width, plus 2
+  spread: 0.62,      // turret feet within this share of the half width
+  sep: 0.55,         // least distance between feet, of W / sqrt(turrets)
+  elong: 0.35,       // the footprint stretched by up to this much
+  tr0: 0.09, tr1: 0.08, // turret lobe radius: (tr0 + tr1 rnd) W
+  rCap: 0.85,        // a turret's radius at most this share of its height
+  vary: 0.4,         // the other turrets top at (1 - vary rnd^skew) of the height
+  skew: 1.0,         // at their place under the dome
+  dome: 0.55,        // the dome: 1 - dome rho^domeP of the height at rho of the
+  domeP: 2,          // feet's reach
+  jit: 0.4,          // turret lobes off the axis by up to this much of its radius,
+  jitR: 0.35,        // and smaller by up to this share (a lumpy column, no rings)
+  shoulder: 0.12,    // lobes widen by this much high on a turret
+  capR: 0.95,        // the cap: this share of the turret's radius
+  rj: 0.3,           // lobe radius jitter (+-half)
+  step: 0.4,         // lobe spacing up a turret, of its radius (jittered)
+  lean: 2.5,         // times the page's LEAN
+  wobble: 0.3,       // turret axis wanders by this much of its radius
+  kCore: 0.06,       // smooth union of turret lobes, of their radius
+  kKid: 0.04,        // of children, of their radius (sharp creases)
+  trunk: 4,          // big lobes filling the body's lower part (one mass, no
+  trunkR: 0.2,       // flutes between turret columns): radius trunkR W, their
+  trunkTop: 0.4,     // tops at most trunkTop of the height
+  feet: 1.6,         // apron lobes per km of width
+  footR0: 0.07, footR1: 0.09, // their radius (footR0 + footR1 rnd) W
+  footOut: 1.0,      // out to this share of the half width beyond the turrets
+  sats: 1.2,         // small heaps round the foot, per km of width
+  satR0: 0.035, satR1: 0.05,
+  cov: 10,           // children per lobe: cov 4 (parent / child radius)^2 0.8 candidates
+  overlap: -0.5,     // a candidate whose centre is this share of its radius inside another lobe is dropped;
+                     // negative: closer to one than this share of its radius outside it (siblings
+                     // spaced 1.5 radii apart: bulges that meet in deep creases; packed closer, their
+                     // union was a smooth ball)
+  ratio0: 0.3, ratio1: 0.2, // child radius (ratio0 + ratio1 rnd) of its parent
+  g1r0: 0.35, g1r1: 0.2, // first generation: bigger, so that they shape the outline
+  g1sink: 0.12, g1cov: 10,
+  sink: 0.18,        // child centre this share of its radius inside the parent's surface
+  up: 0,             // upward bias of children
+  out: 0.35,         // outward bias
+  minY: -0.7,        // lowest normal of a child (overhangs below -0)
+  flatLow: 0.08,     // in the lowest share of the height, children only on top
+  rmin: 0.030,       // smallest lobe, km (about the voxel: smaller ones are dropped)
+};
+
+function lobesOf(obj, P, LEAN) {
+  const rnd = rngOf(obj.seed), out = [];
+  const { x: cx, z: cz, W, top, base } = obj;
+  const H = top - base;
+  const nT = Math.max(1, Math.round(obj.turrets != null ? obj.turrets : 2 + P.turrets * W));
+  const lx = LEAN[0] * P.lean, lz = LEAN[1] * P.lean;
+  // The footprint: a disc stretched along a random axis.
+  const ea = rnd() * Math.PI, el = 1 + P.elong * rnd(), ca = Math.cos(ea), sa = Math.sin(ea);
+  const at = (u, v) => [cx + u * el * ca - v * sa, cz + u * el * sa + v * ca];
+  const R = 0.5 * W * P.spread, sep = P.sep * W / Math.sqrt(nT);
+  const feet = [[0.15 * R * (rnd() - 0.5), 0.15 * R * (rnd() - 0.5)]];
+  for (let t = 0; t < 40 * nT && feet.length < nT; t++) {
+    const a = rnd() * 2 * Math.PI, rr = Math.sqrt(rnd()) * R;
+    const u = rr * Math.cos(a), v = rr * Math.sin(a);
+    if (feet.every(f => Math.hypot(f[0] - u, f[1] - v) > sep)) feet.push([u, v]);
+  }
+  const core = [];
+  let reach = 0;
+  feet.forEach((f, i) => {
+    const rho = Math.min(Math.hypot(f[0], f[1]) / R, 1);
+    const hs = i === 0 ? 1 : (1 - P.dome * Math.pow(rho, P.domeP)) * (1 - P.vary * Math.pow(rnd(), P.skew));
+    const tTop = base + H * hs, hT = tTop - base;
+    const r0 = Math.min(W * (P.tr0 + P.tr1 * rnd()) * (0.75 + 0.25 * hs), P.rCap * hT);
+    const [fx, fz] = at(f[0], f[1]);
+    reach = Math.max(reach, Math.hypot(fx - cx, fz - cz) + r0);
+    const ph1 = rnd() * 6.28, ph2 = rnd() * 6.28, fr = 1.5 + 2 * rnd();
+    const axis = y => {
+      const fy = (y - base) / H, wob = P.wobble * r0;
+      return [fx + lx * (y - base) + wob * Math.sin(fr * fy * 3 + ph1), fz + lz * (y - base) + wob * Math.sin(fr * fy * 3 + ph2)];
+    };
+    // The cap: a full dome whose top is the turret's top.
+    const rc = r0 * P.capR * (1 + P.shoulder);
+    let y = base + 0.45 * r0;
+    for (let n = 0; n < 200 && y < tTop - 1.6 * rc; n++) {
+      const fy = Math.min((y - base) / H, 1);
+      const r = r0 * (1 + P.shoulder * smooth(0.1, 0.6, fy)) * (1 + P.rj * (rnd() - 0.5));
+      const [px, pz] = axis(y);
+      // Off the axis, on a side new each time; smaller the farther out.
+      const ja = rnd() * 2 * Math.PI, jr = P.jit * r0 * Math.sqrt(rnd()), rr = r * (1 - P.jitR * jr / (P.jit * r0 + 1e-9));
+      core.push({ x: px + jr * Math.cos(ja), y, z: pz + jr * Math.sin(ja), r: rr, k: P.kCore * rr, g: 0, ax: fx, az: fz });
+      y += P.step * r * (0.7 + 0.6 * rnd());
+    }
+    const yc = Math.max(tTop - rc, base + 0.3 * rc), [px, pz] = axis(yc);
+    core.push({ x: px, y: yc, z: pz, r: rc, k: P.kCore * rc, g: 0, ax: fx, az: fz });
+  });
+  // The trunk: the turrets rise out of one mass.
+  for (let i = 0; i < P.trunk; i++) {
+    const a = rnd() * 2 * Math.PI, rr = 0.35 * reach * Math.sqrt(rnd());
+    const r = Math.min(P.trunkR * W * (0.8 + 0.4 * rnd()), 0.5 * P.trunkTop * H + 0.2 * W);
+    const y = Math.max(base + P.trunkTop * H - r, base + 0.2 * r);
+    core.push({ x: cx + rr * Math.cos(a) + lx * (y - base), y, z: cz + rr * Math.sin(a) + lz * (y - base), r, k: P.kCore * r, g: 0, ax: cx, az: cz });
+  }
+  // The apron: wide low lobes and small heaps round the foot, at random
+  // (not a ring: from above, a ring drew the white of a fried egg).
+  const nF = Math.round(P.feet * W), nS = Math.round(P.sats * W);
+  for (let i = 0; i < nF + nS; i++) {
+    const sat = i >= nF;
+    const a = rnd() * 2 * Math.PI;
+    const rr = sat ? reach + W * (0.05 + 0.3 * rnd()) : reach * (0.5 + 0.5 * rnd()) + 0.5 * W * P.footOut * 0.3 * rnd();
+    const r = W * (sat ? P.satR0 + P.satR1 * rnd() : P.footR0 + P.footR1 * rnd());
+    const x = cx + rr * Math.cos(a), z = cz + rr * Math.sin(a);
+    core.push({ x, y: base + (sat ? 0.35 : 0.15) * r, z, r, k: P.kCore * r, g: 0, ax: cx, az: cz });
+  }
+  for (const l of core) out.push(l);
+  // Children, generation by generation (bigger first), with a test that
+  // skips a child buried deep inside a bigger lobe.
+  const cell = 0.25, hash = new Map();
+  const key = (i, j, k) => (i * 73856093) ^ (j * 19349663) ^ (k * 83492791);
+  // (A lobe is put in every cell within its radius, and with a spacing
+  // between siblings (overlap < 0) within that much more of its own.)
+  const pad = Math.max(-P.overlap, 0);
+  const put = (l, idx) => {
+    const e = l.r * (1 + pad / 0.8);
+    const i0 = Math.floor((l.x - e) / cell), i1 = Math.floor((l.x + e) / cell);
+    const j0 = Math.floor((l.y - e) / cell), j1 = Math.floor((l.y + e) / cell);
+    const k0 = Math.floor((l.z - e) / cell), k1 = Math.floor((l.z + e) / cell);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (let k = k0; k <= k1; k++) {
+      const h = key(i, j, k);
+      let a = hash.get(h);
+      if (!a) hash.set(h, a = []);
+      a.push(idx);
+    }
+  };
+  const buried = (x, y, z, rc, parent) => {
+    const a = hash.get(key(Math.floor(x / cell), Math.floor(y / cell), Math.floor(z / cell)));
+    if (!a) return false;
+    for (const i of a) {
+      const l = out[i];
+      if (l === parent || l.r < 0.8 * rc) continue;
+      const dx = x - l.x, dy = y - l.y, dz = z - l.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - l.r;
+      if (d < -P.overlap * rc) return true;
+    }
+    return false;
+  };
+  out.forEach(put);
+  let gen = core;
+  for (let g = 0; g < 12 && gen.length; g++) {
+    const rm = g === 0 ? P.g1r0 + 0.5 * P.g1r1 : P.ratio0 + 0.5 * P.ratio1, next = [], nk = Math.round((g === 0 ? P.g1cov : P.cov) * 4 / (rm * rm) * 0.8);
+    for (const p of gen) {
+      // Outward: away from the axis of its body.
+      let ox = p.x - (p.ax + lx * (p.y - base)), oz = p.z - (p.az + lz * (p.y - base));
+      const ol = Math.hypot(ox, oz) || 1;
+      ox /= ol; oz /= ol;
+      const low = (p.y - base) / H < P.flatLow;
+      for (let c = 0; c < nk; c++) {
+        const rc = p.r * (g === 0 ? P.g1r0 + P.g1r1 * rnd() : P.ratio0 + P.ratio1 * rnd());
+        let nx, ny, nz;
+        for (let t = 0; t < 8; t++) {
+          // A direction on the sphere, biased up and out.
+          const u = 2 * rnd() - 1, ph = 2 * Math.PI * rnd(), s = Math.sqrt(1 - u * u);
+          nx = s * Math.cos(ph) + P.out * ox; ny = u + P.up; nz = s * Math.sin(ph) + P.out * oz;
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          nx /= nl; ny /= nl; nz /= nl;
+          if (ny >= (low ? -0.15 : P.minY)) break;
+        }
+        if (rc < P.rmin) { rnd(); continue; }
+        if (ny < (low ? -0.15 : P.minY)) continue;
+        const dd = p.r - (g === 0 ? P.g1sink : P.sink) * rc;
+        const x = p.x + nx * dd + lx * ny * dd * 0.5, y = p.y + ny * dd, z = p.z + nz * dd + lz * ny * dd * 0.5;
+        if (y - rc < base - 0.02) continue;
+        if (buried(x, y, z, rc, p)) continue;
+        const l = { x, y, z, r: rc, k: P.kKid * rc, g: g + 1, ax: p.ax, az: p.az };
+        put(l, out.length);
+        out.push(l);
+        next.push(l);
+      }
+    }
+    gen = next;
+  }
+  return out;
+}
+
+// ---- The plumbing: towers from the weather map, bricks, tiles ----
+// The main thread sends: `start` (the levels), `map` (the warped weather
+// map for a cloud amount), `eye` (the place, for the order of work), `want`
+// (tiles a level shows now: the rest are dropped). It gets `tile`s back.
+const CB = 0.6, CT = 5.0, WEATHER_KM = 256, LEAN = [0.06, 0.03];
+const R = 0.25, S = 1000, FAR = Math.round(R * S);   // the distance kept, km; Int16 in m
+const CELL = 2;                                      // a world cell: at most one tower
+const BASE_UP = 0.08;                                // a tower's base over the level of the bases, km
+const NC = WEATHER_KM / CELL;
+let cfg = null;              // { T, levels: [{ V, nz }] }
+let towers = null, cells = null, mapGen = -1, maxReach = 0;
+const lobeCache = new Map(), brickCache = new Map();
+let lobeBytes = 0, brickBytes = 0;
+const LOBE_BUDGET = 48e6, BRICK_BUDGET = 96e6;
+let eye = [0, 0];
+let wanted = [];             // per level: Map key -> [tx, tz]
+const stats = { towers: 0, lobesMs: 0, lobes: 0, bricksMs: 0, bricks: 0, tiles: 0, tilesMs: 0, seedsMs: 0 };
+
+const wrapKm = x => ((x % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
+const near = d => d - WEATHER_KM * Math.round(d / WEATHER_KM);
+const sstep = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+const hash2 = (i, j, s) => {
+  let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j + 0x165667b1, 0x9e3779b1) ^ Math.imul(s, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return (h ^ (h >>> 15)) >>> 0;
+};
+
+// The towers of the whole map, from the warped weather map (RGBA8, n
+// texels a side) at the cloud amount c: per world cell, the place where the
+// present field's `tower` is strongest, if no place within 1.5 km has more.
+// Width, top and base follow the present field's formulas there.
+function towersOf(px, n, c) {
+  const t0 = performance.now();
+  const km = WEATHER_KM / n, g = new Float32Array(n * n), tv = new Float32Array(n * n);
+  // The cover over some 20 km (the shader's `region`, a mip of uWeather).
+  const B = 32, nb = n / B, reg = new Float32Array(nb * nb);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) reg[(j / B | 0) * nb + (i / B | 0)] += px[4 * (j * n + i)] / 255 / (B * B);
+  const regionAt = (i, j) => {
+    const u = (i + 0.5) / B - 0.5, v = (j + 0.5) / B - 0.5, i0 = Math.floor(u), j0 = Math.floor(v), fu = u - i0, fv = v - j0;
+    const at = (a, b) => reg[(((b % nb) + nb) % nb) * nb + (((a % nb) + nb) % nb)];
+    return (at(i0, j0) * (1 - fu) + at(i0 + 1, j0) * fu) * (1 - fv) + (at(i0, j0 + 1) * (1 - fu) + at(i0 + 1, j0 + 1) * fu) * fv;
+  };
+  const towersK = sstep(0.1, 0.5, c);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const o = j * n + i, G = px[4 * o + 1] / 255;
+    const tg = Math.min(Math.max((G - 0.34) / 0.4, 0), 1);
+    g[o] = tg;
+    if (tg > 0) tv[o] = tg * (2 - tg) * towersK * (1 - 0.8 * sstep(0.85, 1, c + 0.3 * (regionAt(i, j) - 0.5)));
+  }
+  const at = (a, b) => (((b % n) + n) % n) * n + (((a % n) + n) % n);
+  const cellT = CELL / km, nms = Math.round(1.5 / km), area = Math.round(2.5 / km);
+  const list = [], grid = new Array(NC * NC).fill(null);
+  for (let cj = 0; cj < NC; cj++) for (let ci = 0; ci < NC; ci++) {
+    let best = -1, bv = 0.2;
+    for (let j = cj * cellT; j < (cj + 1) * cellT; j++) for (let i = ci * cellT; i < (ci + 1) * cellT; i++) if (tv[j * n + i] > bv) { bv = tv[j * n + i]; best = j * n + i; }
+    if (best < 0) continue;
+    const bi = best % n, bj = (best / n) | 0;
+    let keep = true;
+    for (let dj = -nms; dj <= nms && keep; dj++) for (let di = -nms; di <= nms; di++) {
+      const v = tv[at(bi + di, bj + dj)];
+      // (Ties go to the lower index: two equal places make one tower.)
+      if (v > bv || (v === bv && (dj < 0 || (dj === 0 && di < 0)))) { keep = false; break; }
+    }
+    if (!keep) continue;
+    let cnt = 0;
+    for (let dj = -area; dj <= area; dj++) for (let di = -area; di <= area; di++) if (di * di + dj * dj <= area * area && g[at(bi + di, bj + dj)] > 0) cnt++;
+    const o = 4 * best, r = px[o] / 255, G = px[o + 1] / 255, b = px[o + 2] / 255;
+    const W = Math.min(Math.max(0.8 * 2 * Math.sqrt(cnt * km * km / Math.PI), 1.0), 3.5);
+    const level = CB + 0.15 + 0.15 * sstep(0.25, 0.75, b);
+    const region = regionAt(bi, bj), level1 = sstep(0.85, 1, c + 0.3 * (region - 0.5)), sheet = sstep(0.57, 0.82, c + 0.6 * (region - 0.5));
+    const tower = bv;
+    const e = 3 * (r - 0.936 + c * (1.181 - c * (2.197 - 2.102 * c)) - 0.1 * (1 - sstep(0.1, 0.35, c))) + 1.5 * tower;
+    const deck = sstep(2.6, 3.6, e - 1.5 * tower);
+    const topS = 0.12 + 0.32 * G * (1 - 0.6 * Math.max(deck, level1)) + 0.25 * tower * (0.7 + 0.3 * sstep(0.6, 0.9, G));
+    const thick = 1 - Math.exp(-e / 1.6), swell = 0.25 * Math.min(Math.max(e - 1, 0), 1 - 0.6 * sheet);
+    const top = Math.min(Math.max(level + (CT - CB) * topS * Math.cbrt(Math.max(thick + swell, 0.05)), level + 0.8), CT - 0.4);
+    const seed = hash2(ci, cj, 7);
+    const t = {
+      id: cj * NC + ci, x: wrapKm((bi + 0.5) * km + ((seed & 1023) / 1023 - 0.5) * 0.2), z: wrapKm((bj + 0.5) * km + (((seed >>> 10) & 1023) / 1023 - 0.5) * 0.2),
+      // (Its flat base a little over the level of the present field's bases:
+      // where the heap under it is drawn, that heap's base shows, not a disc.)
+      W, top, base: level + BASE_UP, seed,
+    };
+    // How far from its middle its lobes may reach: a bound, before they are
+    // made, for the tiles it may touch (lobesFor counts a tower whose lobes
+    // go past it, stats.over: the tiles would cut it).
+    t.reach = 1.5 * W + 0.2 * (top - level) + 0.3;
+    maxReach = Math.max(maxReach, t.reach);
+    grid[t.id] = t;
+    list.push(t);
+  }
+  stats.seedsMs = Math.round(performance.now() - t0);
+  return { list, grid };
+}
+
+// The map of the tops (RGBA8, nTops texels a side over the map: the
+// highest place where the march may meet cloud within 1, 2, 4 and 8
+// texels), as the main thread read it back: raised over each tower when its
+// lobes are made, before any tile shows it, and the part sent back.
+let tops = null, nTops = 0;
+function raiseTops(t, L) {
+  const n = nTops, km = WEATHER_KM / n, M = 8;
+  const i0 = Math.floor((t.x + L.box[0]) / km) - M, i1 = Math.ceil((t.x + L.box[1]) / km) + M;
+  const j0 = Math.floor((t.z + L.box[2]) / km) - M, j1 = Math.ceil((t.z + L.box[3]) / km) + M;
+  const w = i1 - i0, h = j1 - j0, g = new Uint8Array(w * h);
+  // The top of each lobe over the texels it covers (50 m more, as the
+  // present field's, and rounded up).
+  const f = L.lobes;
+  for (let q = 0; q < L.n; q++) {
+    const x = t.x + f[5 * q], z = t.z + f[5 * q + 2], r = f[5 * q + 3];
+    const v = Math.min(255, Math.ceil((f[5 * q + 1] + r + 0.07 - CB) / (CT - CB) * 255));
+    for (let j = Math.floor((z - r) / km); j <= Math.floor((z + r) / km); j++) for (let i = Math.floor((x - r) / km); i <= Math.floor((x + r) / km); i++) {
+      const o = (j - j0) * w + i - i0;
+      if (g[o] < v) g[o] = v;
+    }
+  }
+  // The highest within 1, 2, 4 and 8 texels (squares, as the shader's).
+  const out = new Uint8Array(w * h * 4), a = new Uint8Array(w * h), b = new Uint8Array(w * h);
+  let cur = g, r0 = 0;
+  [1, 2, 4, 8].forEach((k, c) => {
+    const d = k - r0;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      let m = 0;
+      for (let e = Math.max(0, i - d); e <= Math.min(w - 1, i + d); e++) if (cur[j * w + e] > m) m = cur[j * w + e];
+      a[j * w + i] = m;
+    }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      let m = 0;
+      for (let e = Math.max(0, j - d); e <= Math.min(h - 1, j + d); e++) if (a[e * w + i] > m) m = a[e * w + i];
+      b[j * w + i] = m;
+    }
+    for (let o = 0; o < w * h; o++) out[4 * o + c] = b[o];
+    cur = b.slice();
+    r0 = k;
+  });
+  // Into the copy, modulo the map, and sent back in parts that do not wrap.
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const o = 4 * ((((j0 + j) % n) + n) % n * n + (((i0 + i) % n) + n) % n);
+    for (let c = 0; c < 4; c++) if (tops[o + c] < out[4 * (j * w + i) + c]) tops[o + c] = out[4 * (j * w + i) + c];
+  }
+  const xs = [((i0 % n) + n) % n], ys = [((j0 % n) + n) % n];
+  const parts = [];
+  for (const [x, ww] of xs[0] + w > n ? [[xs[0], n - xs[0]], [0, w - (n - xs[0])]] : [[xs[0], w]])
+    for (const [y, hh] of ys[0] + h > n ? [[ys[0], n - ys[0]], [0, h - (n - ys[0])]] : [[ys[0], h]]) {
+      const px = new Uint8Array(ww * hh * 4);
+      for (let j = 0; j < hh; j++) px.set(tops.subarray(4 * ((y + j) * n + x), 4 * ((y + j) * n + x + ww)), 4 * j * ww);
+      parts.push({ x, y, w: ww, h: hh, px });
+    }
+  postMessage({ type: 'tops', gen: mapGen, parts }, parts.map(p => p.px.buffer));
+}
+
+// A tower's lobes (cached): Float32Array of x, y, z, r, k from its middle,
+// those of at least 0.6 of the finest voxel; and their box.
+function lobesFor(t) {
+  let e = lobeCache.get(t.id);
+  if (e) { lobeCache.delete(t.id); lobeCache.set(t.id, e); return e; }
+  const t0 = performance.now();
+  const V0 = cfg.levels[0].V;
+  const all = lobesOf({ x: 0, z: 0, W: t.W, top: t.top, base: t.base, seed: t.seed }, { ...P, rmin: Math.max(P.rmin, 0.6 * V0) }, LEAN);
+  const kept = all.filter(l => l.r >= 0.6 * V0).sort((a, b) => b.r - a.r);
+  const f = new Float32Array(5 * kept.length);
+  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, y1 = 0;
+  kept.forEach((l, i) => {
+    f.set([l.x, l.y, l.z, l.r, l.k], 5 * i);
+    x0 = Math.min(x0, l.x - l.r); x1 = Math.max(x1, l.x + l.r);
+    z0 = Math.min(z0, l.z - l.r); z1 = Math.max(z1, l.z + l.r);
+    y1 = Math.max(y1, l.y + l.r);
+  });
+  e = { lobes: f, n: kept.length, box: [x0, x1, z0, z1], top: Math.min(y1, CT), bytes: f.byteLength };
+  if (Math.max(-x0, x1, -z0, z1) > t.reach) stats.over = (stats.over || 0) + 1;
+  if (!t.raised) {
+    raiseTops(t, e);
+    t.raised = true;
+  }
+  lobeCache.set(t.id, e);
+  lobeBytes += e.bytes;
+  stats.lobesMs += performance.now() - t0;
+  stats.lobes++;
+  while (lobeBytes > LOBE_BUDGET && lobeCache.size > 1) {
+    const [k, v] = lobeCache.entries().next().value;
+    lobeCache.delete(k);
+    lobeBytes -= v.bytes;
+  }
+  return e;
+}
+
+// A tower's brick at a level: its box in the level's voxels on the map
+// (i0, j0, k0 may be off the map: tiles take them modulo its size), the
+// distance under its surface coded in 8 bits (0.5 at it, +-R), and each
+// column's top (0: none; else 1 + 255 of its share of CB to CT, rounded up).
+function brickFor(t, l) {
+  const key = t.id * 4 + l;
+  let b = brickCache.get(key);
+  if (b) { brickCache.delete(key); brickCache.set(key, b); return b; }
+  const L = lobesFor(t);
+  const t0 = performance.now();
+  const { V, nz } = cfg.levels[l], vz = (CT - CB) / nz;
+  const e = R + 1.5 * V;
+  const i0 = Math.floor((t.x + L.box[0] - e) / V), i1 = Math.ceil((t.x + L.box[1] + e) / V);
+  const j0 = Math.floor((t.z + L.box[2] - e) / V), j1 = Math.ceil((t.z + L.box[3] + e) / V);
+  const k1 = Math.min(nz, Math.ceil((L.top + e - CB) / vz));
+  const nx = i1 - i0, ny = j1 - j0, nk = k1;
+  const d = new Int16Array(nx * ny * nk).fill(FAR);
+  const band0 = 1.5 * Math.max(V, vz);
+  const f = L.lobes;
+  for (let q = 0; q < L.n; q++) {
+    const r = f[5 * q + 3];
+    if (r < 0.6 * V) break;   // (sorted by size)
+    const lx = t.x + f[5 * q], ly = f[5 * q + 1], lz = t.z + f[5 * q + 2], lk = f[5 * q + 4];
+    const band = Math.max(band0, lk), ee = r + band, k = lk * S, ik = k > 0 ? 1 / (4 * k) : 0;
+    const a0 = Math.max(0, Math.floor((lx - ee) / V) - i0), a1 = Math.min(nx - 1, Math.ceil((lx + ee) / V) - i0);
+    const b0 = Math.max(0, Math.floor((lz - ee) / V) - j0), b1 = Math.min(ny - 1, Math.ceil((lz + ee) / V) - j0);
+    const c0 = Math.max(0, Math.floor((ly - ee - CB) / vz)), c1 = Math.min(nk - 1, Math.ceil((ly + ee - CB) / vz));
+    for (let kk = c0; kk <= c1; kk++) {
+      const dy = CB + (kk + 0.5) * vz - ly, dy2 = dy * dy;
+      for (let j = b0; j <= b1; j++) {
+        const dz = (j0 + j + 0.5) * V - lz, dyz = dy2 + dz * dz;
+        if (dyz > ee * ee) continue;
+        let idx = (kk * ny + j) * nx + a0;
+        for (let i = a0; i <= a1; i++, idx++) {
+          const dx = (i0 + i + 0.5) * V - lx;
+          const r2 = dyz + dx * dx;
+          if (r2 > ee * ee) continue;
+          const bb = (Math.sqrt(r2) - r) * S, aa = d[idx];
+          let m = aa < bb ? aa : bb;
+          const h = k - Math.abs(aa - bb);
+          if (h > 0) m -= h * h * ik;
+          d[idx] = m < -FAR ? -FAR : m;
+        }
+      }
+    }
+  }
+  // A flat base.
+  for (let kk = 0; kk < nk; kk++) {
+    const cut = Math.round((t.base - (CB + (kk + 0.5) * vz)) * S);
+    if (cut <= -FAR) break;
+    const o = kk * nx * ny;
+    for (let i = 0; i < nx * ny; i++) if (d[o + i] < cut) d[o + i] = cut;
+  }
+  // Outside, each lobe wrote its distance only near itself: farther, a voxel
+  // kept its distance to the bigger lobes, more than to the heads on them,
+  // and the march stepped into those. The distance to the nearest voxel
+  // inside (an exact Euclidean transform, in voxels), less half a voxel,
+  // bounds it.
+  edt(d, nx, ny, nk, V, vz);
+  const data = new Uint8Array(d.length), col = new Uint8Array(nx * ny);
+  for (let i = 0; i < d.length; i++) data[i] = Math.max(0, Math.min(255, Math.round((0.5 - 0.5 * d[i] / FAR) * 255)));
+  for (let i = 0; i < nx * ny; i++) {
+    for (let kk = nk - 1; kk >= 0; kk--) if (d[kk * nx * ny + i] < 0) { col[i] = Math.min(255, Math.ceil((kk + 1) * vz / (CT - CB) * 255) + 1); break; }
+  }
+  b = { i0, j0, nx, ny, nk, data, col, bytes: data.byteLength + col.byteLength };
+  brickCache.set(key, b);
+  brickBytes += b.bytes;
+  stats.bricksMs += performance.now() - t0;
+  stats.bricks++;
+  while (brickBytes > BRICK_BUDGET && brickCache.size > 1) {
+    const [k, v] = brickCache.entries().next().value;
+    brickCache.delete(k);
+    brickBytes -= v.bytes;
+  }
+  return b;
+}
+
+// Felzenszwalb and Huttenlocher's transform of squared distances, along x, z
+// and the height, over voxels of V by V by vz km.
+function edt(d, nx, ny, nk, V, vz) {
+  const N = nx * ny * nk, g = new Float32Array(N), INF = 1e20;
+  for (let i = 0; i < N; i++) g[i] = d[i] <= 0 ? 0 : INF;
+  const n = Math.max(nx, ny, nk), f = new Float64Array(n), z = new Float64Array(n + 1), v = new Int32Array(n), o = new Float64Array(n);
+  const pass = (len, stride, count, startOf, w2) => {
+    for (let s = 0; s < count; s++) {
+      const s0 = startOf(s);
+      let any = false;
+      for (let q = 0; q < len; q++) { f[q] = g[s0 + q * stride]; if (f[q] < INF) any = true; }
+      if (!any) continue;
+      let k = -1;
+      for (let q = 0; q < len; q++) {
+        if (f[q] >= INF) continue;
+        let sv = -INF;
+        while (k >= 0) {
+          const p = v[k];
+          sv = ((f[q] + w2 * q * q) - (f[p] + w2 * p * p)) / (2 * w2 * (q - p));
+          if (sv <= z[k]) k--; else break;
+        }
+        k++;
+        v[k] = q; z[k] = k === 0 ? -INF : sv; z[k + 1] = INF;
+      }
+      k = 0;
+      for (let q = 0; q < len; q++) {
+        while (z[k + 1] < q) k++;
+        const p = v[k];
+        o[q] = w2 * (q - p) * (q - p) + f[p];
+      }
+      for (let q = 0; q < len; q++) g[s0 + q * stride] = o[q];
+    }
+  };
+  pass(nx, 1, ny * nk, s => s * nx, V * V);
+  pass(ny, nx, nx * nk, s => (s / nx | 0) * nx * ny + s % nx, V * V);
+  pass(nk, nx * ny, nx * ny, s => s, vz * vz);
+  const h = 0.5 * Math.max(V, vz) * S;
+  for (let i = 0; i < N; i++) if (d[i] > 0) {
+    const e = Math.sqrt(g[i]) * S - h;
+    if (e < d[i]) d[i] = Math.max(e, 1);
+  }
+}
+
+// The towers whose bound reaches within m km of the box [x0, x1) x [z0, z1)
+// (km on the map, x0 may be off it).
+function towersNear(x0, x1, z0, z1, m) {
+  const out = [];
+  const c0 = Math.floor((x0 - m - maxReach) / CELL), c1 = Math.floor((x1 + m + maxReach) / CELL);
+  const r0 = Math.floor((z0 - m - maxReach) / CELL), r1 = Math.floor((z1 + m + maxReach) / CELL);
+  for (let cj = r0; cj <= r1; cj++) for (let ci = c0; ci <= c1; ci++) {
+    const t = cells[(((cj % NC) + NC) % NC) * NC + (((ci % NC) + NC) % NC)];
+    if (!t) continue;
+    const cx = x0 + near(t.x - x0), cz = z0 + near(t.z - z0);
+    const ex = Math.max(x0 - cx, 0, cx - x1), ez = Math.max(z0 - cz, 0, cz - z1);
+    if (Math.hypot(ex, ez) < t.reach + m) out.push(t);
+  }
+  return out;
+}
+
+// The columns (RGBA: top, the highest top within 0.8 km, base) as shares
+// of CB to CT in 8 bits.
+const share = h => Math.min(255, Math.max(0, Math.ceil((h - CB) / (CT - CB) * 255)));
+const HEAP = 0.8;
+
+// Tile (tx, tz) of level l, modulo the map. Returns null while it waits
+// for lobes (made one tower at a time, so that the worker can hear).
+function* tileGen(l, tx, tz) {
+  const { V, nz } = cfg.levels[l], T = cfg.T, WV = Math.round(WEATHER_KM / V);
+  const x0 = tx * T * V, z0 = tz * T * V, x1 = x0 + T * V, z1 = z0 + T * V;
+  // Lobes first, one tower at a time: a tower within HEAP km of the tile
+  // gives its columns their heap's top and base.
+  const near0 = towersNear(x0, x1, z0, z1, HEAP);
+  for (const t of near0) if (!lobeCache.has(t.id)) {
+    lobesFor(t);
+    yield 0;
+  }
+  const t0 = performance.now();
+  const data = new Uint8Array(T * T * nz), cols = new Uint8Array(T * T * 4);
+  const top = new Uint8Array(T * T), heap = new Uint8Array(T * T);
+  const base = new Float32Array(T * T).fill(CB + 0.25);
+  const ti = tx * T, tj = tz * T;
+  for (const t of near0) {
+    // (Made just before, or kept: lobesFor again if the cache let it go.)
+    const L = lobesFor(t), box = L.box;
+    const cx = x0 + near(t.x - x0), cz = z0 + near(t.z - z0);
+    for (let j = 0; j < T; j++) {
+      const zc = z0 + (j + 0.5) * V - cz;
+      const ez = Math.max(box[2] - zc, 0, zc - box[3]);
+      for (let i = 0; i < T; i++) {
+        const xc = x0 + (i + 0.5) * V - cx;
+        const ex = Math.max(box[0] - xc, 0, xc - box[1]), e = Math.hypot(ex, ez), o = j * T + i;
+        if (e < HEAP) { heap[o] = Math.max(heap[o], share(L.top)); base[o] = Math.min(base[o] === CB + 0.25 ? 9 : base[o], t.base); }
+      }
+    }
+    const b = brickFor(t, l);
+    // The brick's place against the tile's, modulo the map.
+    const oi = b.i0 - ti - WV * Math.round((b.i0 + b.nx / 2 - ti - T / 2) / WV);
+    const oj = b.j0 - tj - WV * Math.round((b.j0 + b.ny / 2 - tj - T / 2) / WV);
+    const a0 = Math.max(0, oi), a1 = Math.min(T, oi + b.nx), c0 = Math.max(0, oj), c1 = Math.min(T, oj + b.ny);
+    if (a0 >= a1 || c0 >= c1) continue;
+    for (let kk = 0; kk < b.nk; kk++) for (let j = c0; j < c1; j++) {
+      let s = (kk * b.ny + j - oj) * b.nx + a0 - oi, o = (kk * T + j) * T + a0;
+      for (let i = a0; i < a1; i++, s++, o++) if (b.data[s] > data[o]) data[o] = b.data[s];
+    }
+    for (let j = c0; j < c1; j++) for (let i = a0; i < a1; i++) {
+      const v = b.col[(j - oj) * b.nx + i - oi];
+      if (v > top[j * T + i]) top[j * T + i] = v;
+    }
+  }
+  for (let o = 0; o < T * T; o++) {
+    cols[4 * o] = top[o];
+    cols[4 * o + 1] = Math.max(heap[o], top[o] ? top[o] - 1 : 0);
+    cols[4 * o + 2] = Math.round((base[o] - CB) / (CT - CB) * 255);
+    cols[4 * o + 3] = 0;   // (the main thread sets how much is shown)
+  }
+  stats.tiles++;
+  stats.tilesMs += performance.now() - t0;
+  return { data, cols };
+}
+
+let busy = false, current = null;
+const pump = new MessageChannel();
+pump.port1.onmessage = () => step();
+const later = () => pump.port2.postMessage(0);
+
+// The next tile to make: the nearest to the eye, a finer level first.
+function pick() {
+  let best = null, bd = Infinity;
+  wanted.forEach((m, l) => {
+    const { V } = cfg.levels[l], T = cfg.T, s = T * V;
+    for (const [k, [tx, tz]] of m) {
+      const dx = near((tx + 0.5) * s - eye[0]), dz = near((tz + 0.5) * s - eye[1]);
+      const dd = Math.max(Math.hypot(dx, dz) - 0.7 * s, 0) + 0.01 * l;
+      if (dd < bd) { bd = dd; best = [l, k, tx, tz]; }
+    }
+  });
+  return best;
+}
+
+function step() {
+  busy = false;
+  if (!towers || !cfg) return;
+  if (current && !wanted[current.l].has(current.k)) current = null;
+  if (!current) {
+    const p = pick();
+    if (!p) return;
+    const [l, k, tx, tz] = p;
+    current = { l, k, tx, tz, it: tileGen(l, ((tx % cfg.wt[l]) + cfg.wt[l]) % cfg.wt[l], ((tz % cfg.wt[l]) + cfg.wt[l]) % cfg.wt[l]) };
+  }
+  const r = current.it.next();
+  if (r.done) {
+    const { l, k, tx, tz } = current;
+    wanted[l].delete(k);
+    current = null;
+    postMessage({ type: 'tile', gen: mapGen, l, tx, tz, data: r.value.data, cols: r.value.cols,
+      stats: { ...stats, lobeMB: +(lobeBytes / 1e6).toFixed(1), brickMB: +(brickBytes / 1e6).toFixed(1), queue: wanted.reduce((a, m) => a + m.size, 0) } },
+      [r.value.data.buffer, r.value.cols.buffer]);
+  }
+  kickWork();
+}
+function kickWork() {
+  if (busy) return;
+  busy = true;
+  later();
+}
+
+onmessage = ({ data: m }) => {
+  if (m.type === 'start') {
+    cfg = m.cfg;
+    cfg.wt = cfg.levels.map(v => Math.round(WEATHER_KM / (cfg.T * v.V)));
+    wanted = cfg.levels.map(() => new Map());
+  } else if (m.type === 'map') {
+    lobeCache.clear(); brickCache.clear(); lobeBytes = brickBytes = 0; maxReach = 0;
+    const r = towersOf(m.px, m.n, m.cloud);
+    towers = r.list; cells = r.grid; mapGen = m.gen; current = null;
+    stats.towers = towers.length;
+    tops = m.tops;
+    nTops = m.nTops;
+    postMessage({ type: 'towers', gen: mapGen, count: towers.length, ms: stats.seedsMs, list: towers.map(t => [t.x, t.z, t.W, t.top, t.base].map(v => +v.toFixed(2))) });
+  } else if (m.type === 'eye') {
+    eye = m.at;
+  } else if (m.type === 'want') {
+    // The tiles a level wants now (the rest of its list is dropped).
+    const w = new Map();
+    for (const [tx, tz] of m.tiles) w.set(tx + ',' + tz, [tx, tz]);
+    wanted[m.l] = w;
+  }
+  kickWork();
+};
+</script>
+
 <script>
 // Background sound, made in the browser with the Web Audio API: no files, no
 // samples. Every part is noise or a tone, shaped by filters to stand for one
@@ -6793,7 +7574,8 @@ const SkySound = (() => {
   // before there were levels; the lower ones draw fewer pixels (pixels: at
   // most this many; dpr: at most this many per CSS pixel), bake smaller
   // textures (body: the heaps' body, texels a side; ice: the cirrus's ice;
-  // shadow, column: the clouds' depth maps; warped: the moved weather map)
+  // shadow, column: the clouds' depth maps; warped: the moved weather map;
+  // grid: the towers' grids of ?grid=1, texels a side, none: no grids)
   // and take fewer samples in fs (fs: its defines, Q_ at its top). cost:
   // the GPU time of a frame of as many pixels, relative to low's (measured,
   // see docs/development.md), for the automatic choice.
@@ -6802,9 +7584,9 @@ const SkySound = (() => {
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The canvas's size in pixels for a place of cw by ch CSS pixels at the
@@ -7606,7 +8388,7 @@ const SkySound = (() => {
   // tell it (EXT_disjoint_timer_query_webgl2); asked only if given.
   // memory: an object whose `bytes` this renderer keeps up to date (its
   // textures, and the canvas's own buffers as 12 bytes a pixel), for ?stats.
-  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts, marks }) {
+  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts, marks, wake }) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
     if (memory) countMemory(gl, memory);
@@ -7671,6 +8453,27 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
+    // ?grid=1 (off by default): towers grown as trees of lobes by a worker
+    // and kept in grids that move with the eye (see `grid` below, TGRID in
+    // fs, the script "towers"). Only at levels with `grid` texels a side.
+    // `,hK:W` after it: the heads of uBody carve them (GRID_HK, GRID_HW).
+    const TOWER_GRID = (() => {
+      const v = (new URLSearchParams(location.search).get('grid') || '').split(',');
+      if (v[0] !== '1' || !Q.grid) return null;
+      const N = Q.grid, T = 32, CB = 0.6, CT = 5.0;   // (CB, CT: as in fs)
+      // (`,vM`: the finest voxel M m, a power of 2 times 31.25 m.)
+      const vm = /v([0-9.]+)/.exec(v.slice(1).join(',')), V0 = vm ? 0.03125 * 2 ** Math.round(Math.log2(vm[1] / 31.25)) : 0.03125;
+      const levels = [V0, 2 * V0, 4 * V0].map(V => ({ V, nz: Math.ceil((CT - CB) / V - 1e-6) }));
+      // (Each level's slices, then four of its columns: see uGrid in fs.)
+      const z = levels.map((l, i) => levels.slice(0, i).reduce((a, m) => a + m.nz + 4, 0));
+      const nzt = levels.reduce((a, m) => a + m.nz + 4, 0);
+      const hm = /h([0-9.]+):([0-9.]+)/.exec(v.slice(1).join(','));
+      // (GRID_V0: the finest voxel, km; GRID_LV: its level as a mip level of the noise's texels.)
+      const f = x => x.toFixed(1);
+      return { N, T, levels, z, nzt,
+        defs: `#define TGRID 1\n#define GRID_V0 ${V0.toFixed(6)}\n#define GRID_LV ${Math.log2(V0 / 0.0625).toFixed(1)}\n#define GRID_N ${f(N)}\n#define GRID_NZ vec3(${levels.map(l => f(l.nz))})\n#define GRID_Z vec3(${z.map(f)})\n#define GRID_NZT ${f(nzt)}\n`
+          + (hm ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
+    })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
@@ -7679,6 +8482,10 @@ const SkySound = (() => {
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
       if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1 } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      // (Not in the scene's own program: it reads the low clouds from their
+      // pass, and with one more texture it would read 17, where Direct3D 11
+      // allows 16.)
+      if (id === 'fs' && TOWER_GRID && names.get(prog) !== 'fs') defs = TOWER_GRID.defs + defs;
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
@@ -8259,6 +9066,7 @@ const SkySound = (() => {
         ['uniform1f', 'uLightI', state.lightI],
         ['uniform1f', 'uLightShare', state.lightShare],
         ['uniform1f', 'uStage', stage],
+        ...(grid ? [['uniform4fv', 'uGridO', grid.o]] : []),
         ...each,
       ];
       // The depth test lets the shaders' depth be written (Th, Tc, the distance).
@@ -8496,7 +9304,7 @@ const SkySound = (() => {
     const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = Q.stale || 0.5;
     const S = {};
     gl.useProgram(shadowProg);
-    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
+    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud', ...(TOWER_GRID ? ['uGridO'] : [])]) S[n] = gl.getUniformLocation(shadowProg, n);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uSlope'), 21);
@@ -8637,6 +9445,287 @@ const SkySound = (() => {
     gl.useProgram(prog);
     C('uniform1i', 'uWarped', 25);
     C('uniform1i', 'uSlopeW', 26);
+    // The towers' grids (?grid=1, see TOWER_GRID): three levels of N x N
+    // columns round the eye, of 31, 62 and 125 m voxels, in one R8 3D
+    // texture on unit 30: each level's slices of the distance, then four of
+    // its columns (from TOWER_GRID.z; see uGrid in fs). Each level is cut
+    // into tiles of T x T columns. The tile t of the way flown (unwrapped, so
+    // that the wrap of the map moves nothing) lies at the texel tile t mod n:
+    // the window, n x n tiles round a middle, moves by whole tiles when the
+    // eye is 1.5 tiles off its middle, and only the tiles that enter are made
+    // again. A worker (the script "towers") makes them from the warped
+    // weather map, nearest first; they are uploaded GRID_BUDGET bytes a frame
+    // at most (one tile at least) and fade in over GRID_FADE ms. A column is
+    // shown as much as its tile, and less towards a tile that is not (over
+    // half a tile); the window's edge is such a tile. Where a tile has not
+    // come, its texels may still hold an old one: not shown.
+    const GRID_FADE = 600, GRID_BUDGET = 1.2e6;
+    const grid = TOWER_GRID && (() => {
+      const { N, T, levels } = TOWER_GRID, n = N / T, TT = T * T;
+      const tex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE30);
+      gl.bindTexture(gl.TEXTURE_3D, tex);
+      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, N, N, TOWER_GRID.nzt);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.REPEAT],
+        [gl.TEXTURE_WRAP_T, gl.REPEAT], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, k, v);
+      gl.activeTexture(gl.TEXTURE0);
+      // CPU copies of each level's four column slices (lay: one after
+      // another, N x N each), uploaded by whole rows of tiles where they
+      // changed, once a frame: rows[l][0] where the tiles came (all four),
+      // rows[l][1] where only how much is shown changed.
+      const lay = levels.map(() => new Uint8Array(N * N * 4)), rows = levels.map(() => [new Set(), new Set()]);
+      const flush = () => lay.forEach((b, l) => {
+        const [all, shown] = rows[l];
+        for (const [r, c0] of [[all, 0], [shown, 3]]) {
+          if (!r.size) continue;
+          const y0 = Math.min(...r), y1 = Math.max(...r);
+          gl.activeTexture(gl.TEXTURE30);
+          for (let c = c0; c < 4; c++) {
+            gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, y0 * T, TOWER_GRID.z[l] + levels[l].nz + c, N, (y1 - y0 + 1) * T, 1, gl.RED, gl.UNSIGNED_BYTE,
+              b.subarray((c * N + y0 * T) * N, (c * N + (y1 + 1) * T) * N));
+          }
+          gl.activeTexture(gl.TEXTURE0);
+        }
+        all.clear();
+        shown.clear();
+      });
+      // Tile a's T x T columns (RGBA) into a copy (four slices).
+      const put = (b, a, px) => {
+        const x0 = (a % n) * T, y0 = ((a / n) | 0) * T;
+        for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) for (let c = 0; c < 4; c++) b[(c * N + y0 + j) * N + x0 + i] = px[4 * (j * T + i) + c];
+      };
+      // Nothing shown.
+      const blank = () => {
+        lay.forEach(b => b.fill(0));
+        rows.forEach(r => { for (let y = 0; y < n; y++) r[0].add(y); });
+        flush();
+      };
+      blank();
+      C('uniform1i', 'uGrid', 30);
+      gl.useProgram(shadowProg);
+      gl.uniform1i(gl.getUniformLocation(shadowProg, 'uGrid'), 30);
+      gl.useProgram(prog);
+      const mod = (a, b) => ((a % b) + b) % b;
+      const near = x => x - 256 * Math.round(x / 256);
+      const slot = (tx, tz) => mod(tz, n) * n + mod(tx, n), j0 = a => (a / n) | 0;
+      const L = levels.map((lv, l) => ({ l, ...lv, mid: null, held: new Array(n * n).fill(null), shown: new Float32Array(n * n),
+        since: new Float64Array(n * n).fill(-1), dirty: new Set() }));
+      const inWin = (lv, tx, tz) => lv.mid && Math.abs(tx - lv.mid[0] + 0.5) < n / 2 && Math.abs(tz - lv.mid[1] + 0.5) < n / 2;
+      const shownAt = (lv, tx, tz) => {
+        if (!inWin(lv, tx, tz)) return 0;
+        const a = slot(tx, tz), h = lv.held[a];
+        return h && h[0] === tx && h[1] === tz ? lv.shown[a] : 0;
+      };
+      const touch = (lv, tx, tz) => {
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (inWin(lv, tx + i, tz + j)) lv.dirty.add(slot(tx + i, tz + j));
+      };
+      // A, per column of the tile at texel tile a: the least, over it and its
+      // eight neighbours, of the neighbour's share shown or the ramp of the
+      // distance to it (a table for each of the eight, 0 to 255).
+      const ramps = [];
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const t = new Uint8Array(TT);
+        for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
+          const dx = di < 0 ? i + 0.5 : di > 0 ? T - i - 0.5 : 0, dz = dj < 0 ? j + 0.5 : dj > 0 ? T - j - 0.5 : 0;
+          const u = Math.min(Math.hypot(dx, dz) / (T / 2), 1);
+          t[j * T + i] = Math.round(255 * u * u * (3 - 2 * u));
+        }
+        ramps.push(t);
+      }
+      const paint = (lv, a) => {
+        const h = lv.held[a];
+        if (!h) return;
+        const v = Math.round(255 * lv.shown[a]), nb = [], b = lay[lv.l];
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (i || j) {
+          const s = Math.round(255 * shownAt(lv, h[0] + i, h[1] + j));
+          if (s < v) nb.push([ramps[(j + 1) * 3 + i + 1], s]);
+        }
+        const x0 = (a % n) * T, y0 = ((a / n) | 0) * T;
+        for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
+          let m = v;
+          for (const [t, s] of nb) {
+            const r = t[j * T + i];
+            const q = r > s ? r : s;
+            if (q < m) m = q;
+          }
+          b[(3 * N + y0 + j) * N + x0 + i] = m;
+        }
+        rows[lv.l][1].add(j0(a));
+      };
+      // The window round the eye; true if it moved.
+      const place = (lv, way) => {
+        const s = T * lv.V, e = [way[0] / s, way[1] / s];
+        if (lv.mid && Math.abs(e[0] - lv.mid[0]) <= 1.5 && Math.abs(e[1] - lv.mid[1]) <= 1.5) return false;
+        const old = lv.mid;
+        lv.mid = [Math.round(e[0]), Math.round(e[1])];
+        for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+          const tx = lv.mid[0] - n / 2 + i, tz = lv.mid[1] - n / 2 + j, a = slot(tx, tz), h = lv.held[a];
+          // (The tiles on the window's edge, old and new, see other neighbours.)
+          if (!i || !j || i === n - 1 || j === n - 1) lv.dirty.add(a);
+          if (old && (Math.abs(tx - old[0] + 0.5) > n / 2 - 1.5 || Math.abs(tz - old[1] + 0.5) > n / 2 - 1.5)) lv.dirty.add(a);
+          if (h && h[0] === tx && h[1] === tz) continue;
+          lv.held[a] = [tx, tz];
+          lv.shown[a] = 0;
+          lv.since[a] = -1;
+          touch(lv, tx, tz);
+        }
+        return true;
+      };
+      let gen = 0, way = null, last = null, sent = null, reading = null, version = 0;
+      const whole = [], log = { at: performance.now(), n: 0, ms: 0, max: 0 };
+      const inbox = [], o = new Float32Array(12), info = { towers: 0, tiles: 0, uploads: 0, worker: null, msFrame: 0, msMax: 0 };
+      window.__grid = info;
+      // (Made at the first frame, after the loading: the request of its
+      // script, a Blob's, then does not count in the loading.)
+      let worker = null;
+      const hire = () => {
+        worker = new Worker(URL.createObjectURL(new Blob([document.getElementById('towers').textContent], { type: 'text/javascript' })));
+        worker.postMessage({ type: 'start', cfg: { T, levels: levels.map(({ V, nz }) => ({ V, nz })) } });
+        worker.onmessage = onTile;
+        // (A level given up loses its context: its worker goes with it.)
+        canvas.addEventListener('webglcontextlost', () => worker.terminate(), { once: true });
+        for (const m of early.splice(0)) worker.postMessage(m, m.px ? [m.px.buffer, m.tops.buffer] : []);
+      };
+      const early = [], post = (m, tr) => worker ? worker.postMessage(m, tr || []) : early.push(m);
+      const onTile = ({ data: m }) => {
+        if (m.type === 'towers') {
+          info.towers = m.count;
+          info.list = m.list;
+          if (timing) console.info(`Sky: grid: ${m.count} towers on the map (${m.ms} ms), ${(performance.now() / 1000).toFixed(2)} s`);
+        } else if (m.type === 'tops' && m.gen === gen) {
+          // (Before the tiles that show the tower: the messages keep their order.)
+          gl.activeTexture(gl.TEXTURE23);
+          for (const p of m.parts) gl.texSubImage2D(gl.TEXTURE_2D, 0, p.x, p.y, p.w, p.h, gl.RGBA, gl.UNSIGNED_BYTE, p.px);
+          gl.activeTexture(gl.TEXTURE0);
+        } else if (m.type === 'tile') {
+          inbox.push(m);
+          info.worker = m.stats;
+          wake();
+        }
+      };
+      const want = lv => {
+        const tiles = [];
+        lv.held.forEach((h, a) => { if (h && lv.since[a] < 0) tiles.push(h); });
+        post({ type: 'want', l: lv.l, tiles });
+      };
+      // The warped map at 250 m (its mip level of 1024 texels), read back
+      // without waiting (a pixel buffer and a fence) after each map of the
+      // tops: the towers stand where the present field's do.
+      const MAP = 1024, mapLevel = Math.round(Math.log2(WARPED / MAP));
+      // And the map of the tops (TOPS texels), which the worker raises over
+      // its towers (their lobes may stand higher than the present field's
+      // tops, and the march's strides would cut them).
+      const readFb = gl.createFramebuffer(), pbo = gl.createBuffer(), pboTops = gl.createBuffer();
+      for (const [b, size] of [[pbo, MAP], [pboTops, TOPS]]) {
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, size * size * 4, gl.STREAM_READ);
+      }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      const mapFor = cloud => {
+        gen++;
+        for (const lv of L) {
+          lv.held.fill(null);
+          lv.shown.fill(0);
+          lv.since.fill(-1);
+          lv.mid = null;
+          lv.dirty.clear();
+        }
+        inbox.length = 0;
+        blank();
+        version++;
+        const was = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFb);
+        for (const [t, level, b, size] of [[warped[0].texture, mapLevel, pbo, MAP], [tops[1].texture, 0, pboTops, TOPS]]) {
+          gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, level);
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b);
+          gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+        }
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, was);
+        if (reading) gl.deleteSync(reading.sync);
+        reading = { sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0), cloud, gen, at: performance.now() };
+      };
+      // Each frame, before its draws: the map read back, the windows, the
+      // tiles that came, the fades. Returns whether the clouds changed.
+      const frame = now => {
+        const t0 = performance.now(), d = state.drift;
+        let changed = false;
+        if (!worker) hire();
+        if (!way) way = [d[0], d[1]];
+        else {
+          way[0] += near(d[0] - last[0]);
+          way[1] += near(d[1] - last[1]);
+        }
+        last = [d[0], d[1]];
+        if (reading && gl.getSyncParameter(reading.sync, gl.SYNC_STATUS) === gl.SIGNALED) {
+          gl.deleteSync(reading.sync);
+          const px = new Uint8Array(MAP * MAP * 4), tp = new Uint8Array(TOPS * TOPS * 4);
+          for (const [b, a] of [[pbo, px], [pboTops, tp]]) {
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b);
+            gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, a);
+          }
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+          post({ type: 'map', px, n: MAP, tops: tp, nTops: TOPS, cloud: reading.cloud, gen: reading.gen }, [px.buffer, tp.buffer]);
+          if (timing) console.info(`Sky: grid: the map read back in ${(performance.now() - reading.at).toFixed(0)} ms, ${(performance.now() / 1000).toFixed(2)} s`);
+          reading = null;
+        }
+        if (gen) {
+          if (!sent || Math.hypot(way[0] - sent[0], way[1] - sent[1]) > 0.25) {
+            sent = [way[0], way[1]];
+            post({ type: 'eye', at: [mod(way[0], 256), mod(way[1], 256)] });
+          }
+          for (const lv of L) if (place(lv, way)) want(lv);
+          for (let bytes = 0; bytes < GRID_BUDGET && inbox.length;) {
+            const m = inbox.shift(), lv = L[m.l], a = slot(m.tx, m.tz), h = lv.held[a];
+            if (m.gen !== gen || !h || h[0] !== m.tx || h[1] !== m.tz || lv.since[a] >= 0) continue;
+            bytes += m.data.length;
+            gl.activeTexture(gl.TEXTURE30);
+            gl.texSubImage3D(gl.TEXTURE_3D, 0, (a % n) * T, ((a / n) | 0) * T, TOWER_GRID.z[m.l], T, T, lv.nz, gl.RED, gl.UNSIGNED_BYTE, m.data);
+            gl.activeTexture(gl.TEXTURE0);
+            put(lay[m.l], a, m.cols);
+            rows[m.l][0].add(j0(a));
+            lv.since[a] = now;
+            info.uploads++;
+          }
+          for (const lv of L) {
+            // (In eighths: a tile and its neighbours are painted again eight times.)
+            for (let a = 0; a < n * n; a++) if (lv.since[a] >= 0 && lv.shown[a] < 1) {
+              const v = Math.min(1, Math.ceil(Math.max(now - lv.since[a], 1) / GRID_FADE * 8) / 8);
+              if (v === lv.shown[a]) continue;
+              lv.shown[a] = v;
+              touch(lv, lv.held[a][0], lv.held[a][1]);
+              changed = true;
+            }
+            for (const a of lv.dirty) paint(lv, a);
+            lv.dirty.clear();
+            if (lv.mid) o.set([mod(lv.mid[0] * T * lv.V, 256), mod(lv.mid[1] * T * lv.V, 256), mod(lv.mid[0], n) * T, mod(lv.mid[1], n) * T], 4 * lv.l);
+          }
+        }
+        flush();
+        if (changed) version++;
+        info.tiles = L.map(lv => lv.shown.reduce((s, v) => s + (v >= 1), 0));
+        info.msFrame = performance.now() - t0;
+        info.msMax = Math.max(info.msMax, info.msFrame);
+        // (?timing: when each level is first shown whole, and every 10 s the
+        // main thread's time in this and what the worker did.)
+        if (timing) {
+          info.tiles.forEach((c, l) => {
+            if (c === n * n && !whole[l]) console.info(`Sky: grid: level ${l} shown whole, ${(performance.now() / 1000).toFixed(2)} s`);
+            whole[l] = whole[l] || c === n * n;
+          });
+          log.n++;
+          log.ms += info.msFrame;
+          log.max = Math.max(log.max, info.msFrame);
+          if (t0 - log.at > 10000) {
+            const w = info.worker || {};
+            console.info(`Sky: grid: ${(t0 / 1000).toFixed(1)} s: main ${(log.ms / log.n).toFixed(2)} ms a frame (most ${log.max.toFixed(2)}), shown ${info.tiles}, worker ${w.lobes} towers ${Math.round(w.lobesMs)} ms, bricks ${Math.round(w.bricksMs)} ms, tiles ${w.tiles} ${Math.round(w.tilesMs)} ms, ${w.lobeMB} + ${w.brickMB} MB, queue ${w.queue}`);
+            Object.assign(log, { at: t0, n: 0, ms: 0, max: 0 });
+          }
+        }
+        return changed || inbox.length > 0 || !!reading;
+      };
+      return { o, frame, mapFor, get version() { return version; } };
+    })();
     const drawTops = cloud => {
       gl.useProgram(topsProg);
       gl.uniform1f(uCloudTops, cloud);
@@ -8670,6 +9759,7 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(prog);
       topsFor = cloud;
+      if (grid) grid.mapFor(cloud);
     };
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
@@ -8800,13 +9890,16 @@ const SkySound = (() => {
         adapting = Math.abs(d) > (state.speed > 0 ? ADAPT_TRACK : adapting ? ADAPT_STOP : ADAPT_START);
         if (adapting) logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
       }
+      // (The towers' grids: before the test for a settled picture, which a
+      // tile that came unsettles.)
+      if (grid && grid.frame(now)) wake();
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
       // Start again without a past: at first, when the canvas has changed,
       // and if the place ever jumps (today it cannot: the aircraft stands
       // still while nothing is drawn).
       const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
       restart = false;
-      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud].join();
+      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
       const flying = state.speed > 0;
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
@@ -8911,6 +10004,7 @@ const SkySound = (() => {
         gl.uniform1f(S.uLayer, layer);
         gl.uniform2fv(S.uDrift, state.drift);
         gl.uniform1f(S.uCloud, v.cloud);
+        if (grid) gl.uniform4fv(S.uGridO, grid.o);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.useProgram(prog);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
@@ -10002,7 +11096,7 @@ const SkySound = (() => {
       try {
         await freshContext();
         const made = await makeSky(heroCanvas, view, {
-          done, timed,
+          done, timed, wake: kick,
           // (The GPU's times only where they are used: the tools' pages
           // name a level, and their GL traces stay those of before.)
           gpuTimed: choice === 'auto' || stats ? gpuTimed : null,

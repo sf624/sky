@@ -140,7 +140,12 @@ class Page {
       }
       if (m.sessionId !== sessionId) return;
       const p = m.params;
-      if (m.method === 'Network.requestWillBeSent') { this.requests.add(p.requestId); this.lastRequest = Date.now(); return; }
+      // (A Blob's or a data: URL's request, as of a worker made from a script's text, is never seen to
+      // finish: it is not counted.)
+      if (m.method === 'Network.requestWillBeSent') {
+        if (!/^(blob|data):/.test(p.request?.url || '')) { this.requests.add(p.requestId); this.lastRequest = Date.now(); }
+        return;
+      }
       if (m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') {
         this.requests.delete(p.requestId);
         this.lastRequest = Date.now();
