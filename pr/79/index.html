@@ -1707,7 +1707,7 @@ uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
 // Cloud noise, repeating. R: Perlin-Worley; G, B, A: Worley at rising frequencies.
 uniform sampler3D uNoise;
 // Weather map, repeating. R: cloud cover, G: towers, B: gusts on the sea, A:
-// bands along the wind (where a sheet forms rows).
+// bands along the wind (where the cells of a deck stand higher).
 uniform sampler2D uWeather;
 // Its slope (see cloudShape): R and G along x and z, per km, from 0 to 1
 // for -uSlopeMax to uSlopeMax.
@@ -2170,11 +2170,10 @@ const float BODY_B = -0.06;          // the body's surface, km out of its envelo
 const float BODY_D = 1.3;           // the fine noise's weight on it, against a dome's top
 const vec3 SHEET_H = vec3(0.8, 0.8, 0.4); // the sheet's heads (2 km, 1 km; of its depth) and their seams (km)
 const float TOP_K = 0.04;           // how far the sheet's top and the heaps on it melt into one, in units of the shell's depth
-const vec3 TOP_W = vec3(0.3, 0.2, 0.12); // the cells of one top: how far the noise's 2 km, 1 km and 500 m cells raise it, km
-const float TOP_E = 1.5;            // and how deep its heads carve it, against a sheet's own
+const float TOP_F = 0.38;           // how deep the heads of uBody carve the cells of one top (see deckCells), km
 const float TOP_S = 0.5;            // how much of a heap's rise over the sheet one top keeps
 const float TOP_O = 0.06;           // how far its cells raise it on the whole, km
-const float TOP_R = 0.74;           // the most that its cells and heads raise it over the heaps, km (for the ways out; 0.08 more for the 2 km cells of up to 1.6 times TOP_W.x)
+const float TOP_R = 0.42;           // the most that its cells and heads raise it over the heaps, km (for the ways out): 1.3 DECK_MAX (0.14), TOP_O, ERO_C TOP_F and 0.06 to spare
 const float ERO_C = 0.4;            // how far out the body's surface stands for the heads that carve it, of their weight (their mean)
 const float SKIN = 0.15;            // deeper than their weight, they fade out over this depth (km): none in the core
 const float ERO_F = 0.55 * GEO_S;  // how far out the body's surface stands for the billows, of their weight (their mean is 0.43), see cloudField
@@ -2308,24 +2307,137 @@ float topsH;
 // km), and how much of it is one sheet (a deck) at the clouds' amount; a
 // sheet is whole from WHOLE.x to WHOLE.y of it.
 const vec2 WHOLE = vec2(0.2, 0.6);
-// The angle of a pixel for the rolls on a sheet (see cloudShape): about
-// that of a WQHD picture at the page's field of view. (A constant, so
-// that every program sees the same field.)
-const float ROLL_PIX = 0.0007;
 float cloudRegion(vec2 x) {
   return textureLod(uWeather, x / WEATHER_KM, 6.5).r;
 }
 float cloudSheet(float region) {
   return smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
 }
+// An integer hash: Wellons' lowbias32, as in the noise shader.
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+// The cells on the top of a whole sheet (see cloudShape). Photographs of
+// an overcast stratocumulus deck from above show one sheet of flattish
+// cells, wider than tall, packed edge to edge and parted by narrow dark
+// seams; many are drawn out one way and join into short wavy crests of
+// two to five. So: a jittered lattice of n cells across the map (a whole
+// number: it repeats with the map); each place belongs to the nearest
+// middle, measured with the offsets drawn in by e along the crests (ax),
+// so that the cells are longer that way. A cell is a cushion: as high as
+// 0.8 to 1 at random, falling by DECK_D from its middle to 0.6 cells out,
+// and rounding down (1 - s^3) over the last DECK_W cells before its seam,
+// where it meets the next cell; cells narrower than that stand lower. The
+// distance to the seam is half the difference of the distances to the
+// nearest and the second nearest middle (F2 - F1), which rounds the
+// corners a little. Two cells side by side along the crests are joined at
+// random (join, 0 to 1): their seam is shallow (DECK_J). (The smooth
+// least of the distances to each border rounded the corners more, but
+// its second pass over the neighbours cost 5 % more at cloud=0.75.) Returns the height (0 to 1) and
+// how deep the place lies in a seam (0 to 1, over its last DECK_SW
+// cells); DECK_MEAN: their means.
+// (Until #77 the deck's top was rolls, sums of sines, and Worley cells of
+// the noise: from 11 km, rows of ridges with pointed heads on them, like
+// dunes of snow. In its first rounds, domes of one size that stood apart
+// on a smooth floor, like bubble wrap; then flat Voronoi cushions with
+// straight seams, like paving.)
+const float DECK_W = 0.5, DECK_SW = 0.2, DECK_J = 0.63, DECK_D = 0.5;
+const vec2 DECK_MEAN = vec2(0.39, 0.25);
+vec2 deckPlates(vec2 u, float n, uint seed, vec2 ax, float e, float join) {
+  vec2 i = floor(u), f = u - i;
+  i -= n * floor(i / n);
+  // The three nearest middles: squared distances, offsets, hashes.
+  vec3 d = vec3(1e9);
+  vec2 c1 = vec2(0.0), c2 = vec2(0.0);
+  uint h1 = 0u, h2 = 0u;
+  for (int k = 0; k < 9; k++) {
+    vec2 g = vec2(k % 3 - 1, k / 3 - 1), cc = i + g;
+    cc += n * (vec2(lessThan(cc, vec2(0.0))) - vec2(greaterThanEqual(cc, vec2(n))));
+    uint h = ihash(uint(cc.x) + uint(cc.y) * 4096u + seed);
+    vec2 o = g + 0.075 + 0.85 * vec2(uvec2(h, h >> 8u) & 255u) / 255.0 - f;
+    o = vec2(dot(o, ax) / e, dot(o, vec2(-ax.y, ax.x)));
+    float dd = dot(o, o);
+    if (dd < d.x) {
+      d = vec3(dd, d.xy);
+      c2 = c1;
+      h2 = h1;
+      c1 = o;
+      h1 = h;
+    } else if (dd < d.y) {
+      d = vec3(d.x, dd, d.y);
+      c2 = o;
+      h2 = h;
+    } else if (dd < d.z) {
+      d.z = dd;
+    }
+  }
+  vec3 r = sqrt(d);
+  // The distance to the seam: half of F2 - F1, which rounds the corners.
+  // A joined pair's seam is shallow, but not near a corner, where the
+  // second nearest changes (else the height would step there).
+  vec2 ed = c2 - c1;
+  bool joined = abs(ed.x) > 0.75 * length(ed) && float(((h1 ^ h2) * 0x9e3779b1u) >> 24u) < join * 255.0;
+  float border = joined ? DECK_J * smoothstep(0.0, 0.15, r.z - r.y) : 0.0;
+  float b = 0.5 * (r.y - r.x), s = 1.0 - min(b / DECK_W, 1.0), sd = 1.0 - min(b / DECK_SW, 1.0);
+  float a = (0.8 + 0.2 * float(h1 >> 24u) / 255.0) * (1.0 - DECK_D * min(d.x / 0.36, 1.0));
+  return vec2(mix(border, a, 1.0 - s * s * s), sd * sd * (1.0 - border));
+}
+// Smooth value noise of the deck's large stretches at u (n cells across
+// the map, a whole number: it repeats with the map), 0 to 1.
+float deckNoise(vec2 u, float n, uint seed) {
+  vec2 i = floor(u), f = u - i;
+  f = f * f * f * (f * (6.0 * f - 15.0) + 10.0);
+  vec4 v;
+  for (int k = 0; k < 4; k++) {
+    vec2 c = mod(i + vec2(k & 1, k >> 1), n);
+    v[k] = float(((uint(c.x) * 0x27d4eb2du ^ uint(c.y) * 0x165667b1u ^ seed) * 0x2c1b3c6du) >> 22u) / 1023.0;
+  }
+  return mix(mix(v.x, v.y, f.x), mix(v.z, v.w, f.x), f.y);
+}
+// The deck's cells at x (km on the map), in km over their mean, and how
+// deep x lies in a seam (deckSeam, 0 to 1): cells DECK_KM across (DECK_N
+// across the map: a whole number, so that they repeat with it), as high
+// as DECK_H at most (amp: how high they stand here, from smooth stretches,
+// as stratus, to well-raised cells). warp moves the place: by the map's
+// gusts smoothed over 5 km, by up to some 1.5 km, so that no lattice shows
+// far off, and by the body's turrets, by up to some 0.2 km, so that the
+// seams wind. ax, e, join: see deckPlates. fp: the size of a pixel on the
+// deck (km); where it spans a good part of a cell, the cells fade to
+// their mean, as a picture would blur them (else they would alias into
+// rows far off).
+const float DECK_N = 853.0, DECK_KM = WEATHER_KM / DECK_N, DECK_H = 0.13;
+// How much less light, scattered many times, comes out of the bottom of a
+// seam, and out of the lanes of thinner deck (see the light of the
+// clouds: deckSeam, as dark as that, takes the place of the crease
+// there).
+const float DECK_DARK = 0.6, DECK_THIN = 0.35;
+// (The most it stands over its mean, for the ways out: see TOP_R.)
+const float DECK_MAX = 1.38 * (1.0 - DECK_MEAN.x) * DECK_H;
+float deckSeam;
+float deckCells(vec2 x, vec2 warp, float amp, vec2 ax, float e, float join, float fp) {
+  float fade = exp(-4.0 * (fp / DECK_KM) * (fp / DECK_KM));
+  vec2 v = DECK_MEAN;
+  if (fade > 0.01) v = mix(v, deckPlates((x + warp) / DECK_KM, DECK_N, 0x1d3a5b7cu, ax, e, join), fade);
+  deckSeam = v.y;
+  return amp * DECK_H * (v.x - DECK_MEAN.x);
+}
+// The angle of a pixel for the cells of the deck: about that of a WQHD
+// picture at the page's field of view. (A constant, so that every program
+// sees the same field.)
+const float DECK_PIX = 0.0007;
 #if defined(TGRID) && !defined(TOPS_MAP)
 // (?grid=1) Towers grown as trees of lobes by a worker (see the script
 // "towers"), kept in three grids round the eye (see `grid` in the JS):
 // uGrid (R8) holds level l from its slice GRID_Z[l]: GRID_NZ[l] slices of
 // the distance under their surface over CB to CT (0.5 at it, +-GRID_R
-// km), then four of its columns (gridCol): the top (0: none; else a share
-// of CB to CT), the highest top within 0.8 km, the base, and how much of
-// it is shown. (One sampler, and none in the scene's own program, which
+// km), then four of its columns (gridCol): how much the present field's
+// heap gives way round a tower (own), the highest top within 0.8 km and the
+// base (shares of CB to CT), and how much of it is shown. (One sampler, and none in the scene's own program, which
 // reads the low clouds from their pass: Direct3D 11 allows a program 16,
 // and that one reads 16.) uGridO[l]: the middle of level l's window on the map (km), and
 // its texel there. The present field's towers give way where the grid
@@ -2334,7 +2446,32 @@ float cloudSheet(float region) {
 uniform highp sampler3D uGrid;
 uniform vec4 uGridO[3];
 const float GRID_R = 0.25;
-float gridCut = 0.0;
+// The detail on the towers (see cloudShape below): the heads' scale and
+// depth, the creases', the billows', and how much of it low on a body.
+#ifndef GRID_HK
+#define GRID_HK 2.0
+#endif
+#ifndef GRID_HW
+#define GRID_HW 0.12
+#endif
+#ifndef GRID_CR
+#define GRID_CR 1.5
+#endif
+#ifndef GRID_BW
+#define GRID_BW 0.12
+#endif
+#ifndef GRID_LOW
+#define GRID_LOW 0.4
+#endif
+#ifndef GRID_OWN
+#define GRID_OWN 0.7
+#endif
+const float GRID_BK = 2.33;
+const float GRID_OUT = 0.06 + ERO_C * GRID_HW + 0.45 * GRID_BW;   // how far the detail may stand over the towers' surface
+#ifndef GRID_AO
+#define GRID_AO 0.6
+#endif
+float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 #define cloudShape cloudShape0
 #endif
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
@@ -2348,6 +2485,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   lump = 0.0;
   base = -9.0;
   relief = 0.0;
+  deckSeam = 0.0;
   thin = 0.0;
   upshear = 0.5;
   solidAt = 0.0;
@@ -2389,8 +2527,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // others), so that a field of cloud is a field of domes even where the
   // cover is whole. The tallest heaps are towers, unless the clouds are few.
   // With much cloud, the heaps stand on a sheet (stratocumulus): from
-  // below a closed deck, from above cells some 1 to 2 km across with thin
-  // creases between them, or rows of rolls where the air waves. Where the
+  // below a closed deck, from above cells of 0.2 to 0.6 km with narrow
+  // seams between them (deckCells). Where the
   // sheet lies follows the cover over some 20 km (the map's mip), so that
   // it breaks up first where the cover is less.
   // Near the top of the slider the heaps on it flatten, and few towers
@@ -2419,6 +2557,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float deck = smoothstep(2.6, 3.6, e - 1.5 * tower);
   float sheetTop = (0.25 + 0.35 * sheet) * (0.8 + 0.4 * smoothstep(0.3, 0.7, w.r)) / (CT - CB);
   float top = 0.12 + 0.32 * w.g * (1.0 - 0.6 * max(deck, level1)) + 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, w.g));
+#if defined(TGRID) && !defined(TOPS_MAP)
+  top *= 1.0 - GRID_OWN * gridOwn;
+#endif
   float thick = 1.0 - exp(-e / 1.6);
   float cube = top * top * top;
   float swell = 0.25 * clamp(e - 1.0, 0.0, 1.0 - 0.6 * sheet);
@@ -2481,10 +2622,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   thin = 1.0 - smoothstep(0.05, 0.4, thick + swell);
   // (On a sheet, the heaps without a body are part of its top, and its
   // cells stand on them: see below.)
-  // (topR: what the cells, heads and rolls may add over the heaps, in
-  // units of y; the heaps' bound as a height, with their field rising 0.7
-  // to 6 times as fast as over a dome's top, mixed with the body's.)
-  float topR = (TOP_R + 0.2) / (CT - CB) + 1.2 * sheetTop * smoothstep(0.3, 0.6, far.a) * sheet, fUp = f + 3.6 * lumps;
+  // (topR: what the cells and heads of a whole sheet may add over the
+  // heaps, in units of y: none where it is not whole, less where its
+  // cells stand lower (deckAmp); the heaps' bound as a height, with their
+  // field rising 0.7 to 6 times as fast as over a dome's top, mixed with
+  // the body's. With TOP_R everywhere, the clouds at cloud=0.75 cost 28 %
+  // more.)
+  float whole = smoothstep(WHOLE.x, WHOLE.y, sheet), deckAmp = mix(0.25, 1.2, smoothstep(0.2, 0.7, far.a));
+  float topR = (whole * (TOP_R - 1.3 * DECK_MAX * (1.0 - deckAmp / 1.2)) + 0.2) / (CT - CB), fUp = f + 3.6 * lumps;
   bool clear = sheet <= 0.0 || mix(fUp > 0.0 ? fUp * top / 3.36 : fUp * top / 28.8, bodyMax / (BODY_G * (CT - CB)), solid) + topR < 0.0;
   if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) return max(mix(f, bodyMax, solid), fs);
   // How steep this field is where its surface over this place stands (yt),
@@ -2627,49 +2772,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   }
   if (fs > -fsMax || (sheet > 0.0 && hUp > 0.0)) {
     // The cells: domes of the noise's 1 and 2 km Worley cells, which meet
-    // in creases; rows of rolls 1.2 km apart across the wind (whole
-    // numbers of them across the map), bent over tens of km, where the
-    // slow map says, over more than half of a sheet. Each roll swells and
-    // thins along its length by the noise's 1 and 2 km cells (cells), so
-    // that its heads are of many sizes, as photographs of stratocumulus
-    // from above show them (with rolls only in a few places, the sheet was
-    // lumps without order). (Until #77 each roll swelled every 2 km, half
-    // a step on from the roll beside it, and all rolls were 1.2 km apart:
-    // from 11 km an overcast deck was a regular lattice of mounds of one
-    // size, like an egg carton.)
-    // No one period anywhere: a second set of rolls 1.4 km apart, turned
-    // by 23 degrees, takes over by patches of 10 to 20 km (where both
-    // stand, they cross into cells), and the phase of each wanders by a
-    // field of the weather map read at 1 to 2 km (the gusts, the cover).
-    // The map is read at fixed levels, so the far deck has the same rolls
-    // as the near one. (With the phase
-    // moved only by the noise, which is read smoother with the distance,
-    // the rolls far off were all 1.2 km apart: from 11 km, fine rows of
-    // equal spacing ran across the band below the horizon.) The rolls
-    // stand higher in some patches than in others, and some are smooth.
-    // Where a pixel spans a good part of a roll along the line of sight
-    // (ROLL_PIX at the distance, over the slope of the view onto the
-    // deck), they fade to their mean, as a picture of them would blur:
-    // beyond some 60 km at 11 km they would only alias into rows.
+    // in creases (where the sheet is whole, the deck's own: see below).
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
-    float rows = smoothstep(0.3, 0.6, far.a) * sheet;
-    vec2 wx = x / WEATHER_KM;
-    // (Two reads, at 1 to 2 km and at 10 to 20 km, moved off this place:
-    // the gusts (b) and the cover (r) for the two phases; the gusts, the
-    // cover and the bands (a) for the patches.)
-    vec4 wn = textureLod(uWeather, wx + vec2(0.53, 0.19), 2.5), wf = textureLod(uWeather, wx + vec2(0.71, 0.43), 4.5);
-    float wr = wn.b, wr2 = wn.r, wm = wf.b, wa = wf.r;
-    float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 20.0 * (wr - 0.5) + 6.0 * (n.r - 0.571);
-    float ph2 = 2.0 * PI * dot(x, vec2(120.0, 140.0)) / WEATHER_KM + 7.0 * far.g + 20.0 * (wr2 - 0.5) + 6.0 * (n.g - 0.712);
-    float roll = mix(sin(ph), sin(ph2), smoothstep(0.3, 0.7, wm));
-#ifndef TOPS_MAP
-    float fpRoll = ROLL_PIX * dot(p, p) / max(abs(p.y), 0.03 * length(p));
-    roll *= exp(-2.5 * fpRoll * fpRoll);
-#endif
-    // (Each roll swells more in some places than in others, by the noise's
-    // 2 km cells: rolls of one depth over tens of km were straight stripes
-    // from above, as no photograph shows them.)
-    float rank = rows * (0.6 * (roll - 0.25) + 0.35 * max(roll + 0.3, 0.0) * clamp(cells, -1.0, 1.0)) * mix(0.35, 1.0, smoothstep(0.5, 0.85, n.g)) * mix(0.15, 1.0, smoothstep(0.3, 0.65, wa));
     if (solid <= 0.0 && deck <= 0.0) t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
     // Packed heads: the turrets of 2 km and 1 km raise the sheet, and meet
     // in seams that go down to 40 % of its depth (deeper, they cut it
@@ -2678,14 +2782,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // the body, to SKIN deep.
     // (Only where the sheet is whole: at its first edges the crowns alone
     // stood out of it, a speckle of small dots that shimmered in flight.)
-    float whole = smoothstep(WHOLE.x, WHOLE.y, sheet);
     float heads = whole * max(SHEET_H.x * (t.x - BODY_C) + SHEET_H.y * (t.y - BODY_C), -0.4);
-    float raise = mix(heads, 0.12 * cells, rows) + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS;
-    // The heaps on the sheet stand in its ranks too, with smaller billows.
-    f += 0.8 * rank - 0.5 * rows * billows;
+    float raise = heads + 0.5 * lumps * lumpOld / LUMPS;
     fs += 13.0 * sheetTop * raise;
     float carve = SHEET_H.z * (ERO_C - t.z * (1.0 - smoothstep(0.0, 2.95 * SKIN, fs - 2.95 * SHEET_H.z)));
-    fs += 2.95 * carve * (1.0 - rows) * whole;
+    fs += 2.95 * carve * whole;
     relief = clamp(raise, -0.6, 0.9) * sheet;
     body = max(body, sheet * sheetTop * max(1.0 + 0.5 * cells, 0.2) / 0.28);
     // The heaps and the sheet merge without a crease (a smooth max).
@@ -2693,7 +2794,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     thin *= 1.0 - k;
     // The fine turrets carve the sheet's heads too, as much as on the body
     // in km (the sheet's field is steeper).
-    float kc = k * (1.0 - rows) * whole;
+    float kc = k * whole;
     steep = mix(steep, 1.9, kc);
     carved = max(carved, kc);
     q.w = mix(q.w, max(q.w, 0.9), kc);
@@ -2705,23 +2806,21 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // the heaps' smooth domes as plateaus with cliffs, and the domes lay
     // between them as flat floors, like frozen lakes: from 4 to 5 km the
     // tops were a snowy mountain range. Each heap keeps half its rise over
-    // the sheet (TOP_S), and its cells are as much larger as it rises
-    // higher, up to twice (a heap 300 m over the sheet): with the whole
-    // rise, heaps were smooth hills with long shadows. The cells are the
-    // noise's Worley domes (2 km, 1 km, 500 m), which fill the plane and
-    // meet in creases; the turrets of uBody stand apart, and between them
-    // the sheet was flat. The heads of uBody carve them, TOP_E as deep as
-    // on the sheet above, so that the top is heads on cells, as
-    // photographs of stratocumulus and of cumulus from above show it.
-    // They raise it by TOP_O on the whole: the two fields' higher surface
-    // stood higher than one top, and without it a deck let more light
-    // through (0.1 stops brighter from under it at 0.3 km).
-    // (Not in the rows of rolls, which keep the sheet above.)
+    // the sheet (TOP_S), and its cells stand as much higher as it rises,
+    // up to 1.3 times (a heap 300 m over the sheet): with the whole rise, heaps
+    // were smooth hills with long shadows. The cells are the deck's
+    // (deckCells), which fill the plane and meet in seams; the heads of
+    // uBody (500 m to 125 m) carve them by up to TOP_F, so that each cell
+    // is billows on a dome, as photographs of stratocumulus from above
+    // show it. (Carved 0.6 km deep, the cells were rubble with pointed
+    // heads.) They raise it by TOP_O on the whole: the two fields' higher
+    // surface stood higher than one top, and without it a deck let more
+    // light through (0.1 stops brighter from under it at 0.3 km).
     if (whole > 0.0) {
       // The heaps as heights: their field over its rise at their top, and
       // the body's over its own (BODY_G per km), mixed as main mixes the
       // fields (solid).
-      float hN = (fField + 0.8 * rank - 0.5 * rows * billows) / gF;
+      float hN = fField / gF;
       float hH = mix(hN, fBody / (BODY_G * (CT - CB)), solid);
       float hs = (13.0 * (sheetTop - y) - 3.0 * (1.0 - sheet)) / 13.0;
       float sN = clamp(0.5 + (hH - hs) / (2.0 * TOP_K), 0.0, 1.0);
@@ -2731,19 +2830,56 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       float free = 1.0 - smoothstep(0.3, 0.8, solid);
       float up = free * clamp((hTop - hs) * (CT - CB) / 0.3, 0.0, 1.0);
       hTop = hs + (1.0 - TOP_S * free) * (hTop - hs);
-      float wc = whole * (1.0 - rows) * (1.0 - (1.0 - free) * sN);
-      // (The share of each size of cell changes by patches of 10 to 20 km:
-      // larger cells in some, finer in others. With one share everywhere,
-      // the heads from 10 to 30 km were all of one size.)
-      float wz = smoothstep(0.3, 0.7, wf.a);
-      vec3 tw = TOP_W * vec3(mix(0.4, 1.6, wz), 1.0, mix(1.6, 0.5, wz));
-      float rk = (1.0 + up) * (tw.x * (n.g - 0.712) + tw.y * (n.b - 0.715) + tw.z * (n.a - 0.715));
-      float raiseN = rows * 0.12 * cells + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
+      float wc = whole * (1.0 - (1.0 - free) * sN);
+      // The deck's cells, read where the place has been moved by the gusts
+      // (see deckCells). The slow map says how large they are (wf.a, by
+      // stretches of 10 to 20 km) and how high they stand (far.a: smooth
+      // stretches in some places, as stratus, well-raised cells in others).
+      float rk = 0.0, fp = 0.0;
+#ifndef TOPS_MAP
+      // (Also where the read is coarse: the light's longer steps, which
+      // have no use for the seams' light, need not read the cells.)
+      fp = DECK_PIX * dot(p, p) / max(abs(p.y), 0.03 * length(p));
+      if (!fine) fp = max(fp, TEXEL_KM * exp2(lod));
+      // Nor where the place lies more than 0.22 km over the top without
+      // them or 0.12 km under it, where they cannot change the cloud's
+      // outline: over it, the field steps by less than its distance to
+      // them (a third of it, and they stand 0.14 km over their mean at
+      // most); under it, no seam goes so deep. (Read everywhere, they cost
+      // some 5 % more at cloud=0.75.)
+      bool band = abs(hTop * (CT - CB) + 0.05) <= 0.17;
+      if (!band) fp = 1.0;
+#else
+      bool band = true;
+#endif
+      // (The view's steps far off read the large stretches all the same,
+      // for the light of the seams and lanes.)
+      if (wc > 0.0 && (fp < 0.7 * DECK_KM || (fine && band))) {
+        vec4 wf = textureLod(uWeather, x / WEATHER_KM + vec2(0.71, 0.43), 4.5);
+        float psi = 2.03 + 2.0 * (wf.b - far.b);
+        // Lanes of thinner, darker deck some 20 km long and 3 km wide: the
+        // map read through a shear (whole numbers: it still repeats).
+        vec2 xm = x / WEATHER_KM;
+        float thin = smoothstep(0.6, 0.85, deckNoise(mat2(2.0, 1.0, 1.0, 1.0) * xm * 16.0, 16.0, 0x9e3779b9u));
+        // Stretches of 10 to 30 km where the cells stand lower, down to
+        // smooth stratus, or higher.
+        float big = 0.65 * deckNoise(xm * 8.0, 8.0, 0x85ebca6bu) + 0.35 * deckNoise(xm * 20.0, 20.0, 0xc2b2ae35u);
+        float amp = deckAmp * mix(0.35, 1.15, smoothstep(0.2, 0.45, big)) * (1.0 - 0.4 * thin);
+        rk = (1.0 + 0.3 * up) * deckCells(x, 3.0 * (vec2(wf.b, far.b) - 0.5) + 0.45 * (t.xy - BODY_C), amp, vec2(cos(psi), sin(psi)),
+                                         mix(1.0, 1.5, smoothstep(0.4, 0.7, wf.r)), mix(0.3, 0.75, smoothstep(0.3, 0.7, wf.a)), fp);
+        // (Darker in some places along a seam than in others, by the fine
+        // heads: a seam of one depth all round each cell was a net of dark
+        // cracks, like dried mud.)
+        deckSeam = wc * (DECK_DARK * min(amp, 1.0) * clamp(2.0 * t.z, 0.2, 1.3) * deckSeam + DECK_THIN * thin);
+      }
+      float raiseN = 0.5 * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
       hTop += sheetTop * raiseN + wc * (rk + TOP_O) / (CT - CB);
-      hTop += TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
+      hTop += wc * TOP_F / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - TOP_F)));
       f = mix(f, hTop * mix(13.0, BODY_G * (CT - CB), solid * sN), whole);
       relief = mix(relief, clamp(raiseN + wc * rk / (sheetTop * (CT - CB)), -0.6, 0.9) * sheet, whole);
-      steep = mix(steep, 1.9, wc);
+      // (Softer than the sheet's 1.9: at 1.9 the cells were hard-edged,
+      // like stones.)
+      steep = mix(steep, 1.3, wc);
       carved = max(carved, wc);
       q.w = mix(q.w, max(q.w, 0.9), wc);
       thin *= 1.0 - whole * (1.0 - solid * sN);
@@ -2761,10 +2897,16 @@ bool gridAt(vec2 x, int l, out vec2 uv) {
   uv = (uGridO[l].zw + dv / v) / GRID_N;
   return max(abs(dv.x), abs(dv.y)) < 0.5 * GRID_N * v;
 }
-// Level l's column c at uv (0 top, 1 the highest top within 0.8 km, 2 the
+// Level l's column c at uv (0 own, 1 the highest top within 0.8 km, 2 the
 // base, 3 how much it is shown).
 float gridCol(vec2 uv, int l, int c) {
   return textureLod(uGrid, vec3(uv, (GRID_Z[l] + GRID_NZ[l] + float(c) + 0.5) / GRID_NZT), 0.0).r;
+}
+// Level l's distance under the towers' surface at uv and the height yg
+// (a share of CB to CT), km.
+float gridD(vec2 uv, int l, float yg) {
+  float nz = GRID_NZ[l];
+  return (textureLod(uGrid, vec3(uv, (GRID_Z[l] + clamp(yg * nz, 0.5, nz - 0.5)) / GRID_NZT), 0.0).r * 2.0 - 1.0) * GRID_R;
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
   float h = heightAt(p);
@@ -2772,23 +2914,34 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // The levels, finest first, each with what the finer left (rest) times
   // how much of its column is shown; a level finer than the read's
   // smoothing (lod: level 0's voxels are texels of the noise at lod
-  // GRID_LV, -1 for 31 m) gives way to the next.
-  float yg = (h - CB) / (CT - CB), rest = 1.0, cover = 0.0, read = 0.0, dSum = 0.0;
+  // GRID_LV, -1 for 31 m) gives way to the next. A level is read up to the
+  // highest top within 0.8 km (and the detail's reach over it, GRID_OUT):
+  // by the column's own top, the crowns that the detail below pushes out
+  // of a wall were cut off over the columns beside it, as upright curtains.
+  // The present field's heap gives way round a tower (own: from the
+  // coarsest level, whose window holds the others; it is smooth).
+  float yg = (h - CB) / (CT - CB), rest = 1.0, cover = 0.0, read = 0.0, dSum = 0.0, own = 0.0;
   vec2 colSum = vec2(0.0);
+  int lC = -1;
   if (yg > 0.0 && yg < 1.0) {
     float lv = lod - GRID_LV;
     for (int l = 0; l < 3; l++) {
       float k = l == 2 ? 1.0 : clamp(1.0 - (lv - float(l)), 0.0, 1.0);
       vec2 uv;
-      if (rest * k < 1e-3 || !gridAt(x, l, uv)) continue;
-      float w = rest * k * gridCol(uv, l, 3);
+      if (!gridAt(x, l, uv)) continue;
+      float shown = gridCol(uv, l, 3);
+      if (l == 2) own = shown * gridCol(uv, l, 0);
+      if (rest * k < 1e-3) continue;
+      float w = rest * k * shown;
       if (w < 1e-3) continue;
-      float d = -GRID_R, top = gridCol(uv, l, 0);
-      if (top > 0.0 && h <= CB + top * (CT - CB) + 0.06) {
-        float nz = GRID_NZ[l];
-        d = (textureLod(uGrid, vec3(uv, (GRID_Z[l] + clamp(yg * nz, 0.5, nz - 0.5)) / GRID_NZT), 0.0).r * 2.0 - 1.0) * GRID_R;
+      float d = -GRID_R, heap = gridCol(uv, l, 1);
+      if (heap > 0.0 && h <= CB + heap * (CT - CB) + GRID_OUT) {
+        d = gridD(uv, l, yg);
         read += w;
-        colSum += w * vec2(gridCol(uv, l, 1), gridCol(uv, l, 2));
+        colSum += w * vec2(heap, gridCol(uv, l, 2));
+        // (The first level read that has a coarser one, for the creases
+        // below.)
+        if (lC < 0 && l < 2) lC = l;
       }
       dSum += w * d;
       cover += w;
@@ -2796,8 +2949,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     }
   }
   gridCut = cover;
+  gridOwn = own;
+  gridCrease = 0.0;
   float f = cloudShape0(p, lod, fine, y, q, body, lump, base);
   gridCut = 0.0;
+  gridOwn = 0.0;
   if (read <= 0.0) return f;
   // Where a tile fades in, its towers grow from within.
   float d = mix(-GRID_R, dSum / cover, cover);
@@ -2806,20 +2962,44 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // field by a smooth maximum, and takes over its facts there.)
   float hu = clamp((h - gBase) / max(heapTop - gBase, 0.05), 0.0, 1.0);
   vec3 qg = vec3(x.x, h, x.y) / BASE_KM;
-#ifdef GRID_HW
+  // Detail at render time (the prototype's round 2). Less of it low on a
+  // body (GRID_LOW of it below a fifth of its height: flat, softer bases),
+  // none at its foot.
+  float low = smoothstep(0.03, 0.25, hu) * mix(GRID_LOW, 1.0, smoothstep(0.2, 0.6, hu));
   // Heads of uBody (B: 500 m to 125 m, read GRID_HK times finer) carve the
   // surface as on main's body: crowns where it stands (ERO_C of their
-  // weight out), seams in by up to GRID_HW km, fading SKIN deeper.
-  float hw = GRID_HW * smoothstep(0.03, 0.25, hu);
-  if (d > -(ERO_C * hw + 0.05) && d < hw + SKIN) {
+  // weight out), seams in by up to GRID_HW km, fading SKIN deeper. The
+  // grid's own creases are cut in too (GRID_CR of cav: the distance two
+  // levels coarser, or the coarsest, less its own: positive
+  // between lobes, negative on their crowns): the valleys between bulges
+  // sharp and deep, the bulges kept.
+  float hw = GRID_HW * low;
+  if (d > -(ERO_C * hw + GRID_CR * 0.06 + 0.05) && d < hw + SKIN) {
     vec4 t = textureLod(uBody, qg * GRID_HK, max(lod + BODY_LOD + log2(GRID_HK), 0.0));
+    float cav = 0.0;
+    vec2 uv2;
+    if (lC >= 0 && gridAt(x, lC + 2 > 2 ? 2 : lC + 2, uv2)) cav = gridD(uv2, lC + 2 > 2 ? 2 : lC + 2, yg) - d;
     float dd = d + ERO_C * hw;
-    d = dd - hw * t.z * (1.0 - smoothstep(0.0, SKIN, dd - hw));
+    float sk = 1.0 - smoothstep(0.0, SKIN, dd - hw);
+    d = dd - hw * t.z * sk - GRID_CR * max(cav, 0.0) * sk;
+    // (How deep in a crease, for the light: see GRID_AO.)
+    gridCrease = smoothstep(0.0, 0.08, cav + hw * (t.z - 0.4));
   }
-#endif
+  // Packed billows on that (A of uBody, GRID_BK times finer than the tile:
+  // 16 to 64 cells across it, 214 m down to 54 m), every place on a billow
+  // and billows meeting in sharp seams; the same carving (crowns out by
+  // 0.45 of their weight, their mean), GRID_BW km deep at most, read at the
+  // pixel's level (smooth where they are smaller than a pixel).
+  float bw = GRID_BW * low;
+  if (d > -(0.45 * bw + 0.03) && d < bw + SKIN_F) {
+    float tb = textureLod(uBody, qg * GRID_BK, max(lod + BODY_LOD + log2(GRID_BK / DETAIL) + 1.7, 0.0)).w;
+    float db = d + 0.45 * bw;
+    d = db - bw * tb * (1.0 - smoothstep(0.0, SKIN_F, db - bw));
+  }
   float fg = BODY_G * d;
   float k = 0.1;
   float s = clamp(0.5 + (fg - f) / (2.0 * k), 0.0, 1.0);
+  gridCrease *= s;
   if (s <= 0.0) return f;
   f = mix(f, fg, s) + k * s * (1.0 - s);
   solidAt = mix(solidAt, 1.0, s);
@@ -3322,7 +3502,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   int i = 0;
   for (int pass = 0; pass < LONG_N(CLOUD_STEPS); pass++) {
     bool need = false;
-    float y, bump, body, edge, lump, fb, lod, f, stp, solidHere, next, a;
+    float y, bump, body, edge, lump, fb, lod, f, stp, seamAt, solidHere, next, a;
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
@@ -3340,6 +3520,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       p = d * t;
       f = cloudField(p, lod, true, y, bump, body, edge, lump, q, fb);
       stp = steep;
+      seamAt = deckSeam;
       solidHere = solidAt * smoothstep(0.15, 0.4, overBase);
       if (f > 0.0 && came > 1.5 * ds) {
         // Strode into a cloud: go back and walk, though not to before the
@@ -3798,9 +3979,19 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // the troughs in the shadow of the rolls were flat blue-grey floors
       // with dark rims, and from 11 km an overcast deck was a lattice of
       // plates; with it near the place, each head of the deck still had a
-      // thin dark rim.) Heaps with a body keep their creases.
+      // thin dark rim.) Heaps with a body keep their creases. In its place,
+      // the seams between the deck's cells and its lanes of thinner cloud
+      // are darker (deckSeam, from cloudShape at the last step): light
+      // that goes in there comes out less, and photographs show the seams
+      // of a deck from above as narrow dark lines between white cells.
+      // (Without it, from 11 km under a high sun the cells hardly showed.)
       float deckTop = smoothstep(WHOLE.x, WHOLE.y, cloudSheet(cloudRegion(ps.xz + uDrift))) * (1.0 - smoothstep(0.3, 0.8, solidHere));
-      crease = mix(crease, 1.0, deckTop);
+      crease = mix(crease, 1.0 - seamAt, deckTop);
+#if defined(TGRID) && !defined(TOPS_MAP)
+      // (?grid=1: deep in a crease of the towers less of it, and of the
+      // sky's, by up to GRID_AO, however the light falls.)
+      crease *= 1.0 - GRID_AO * gridCrease;
+#endif
       ms *= crease;
       diffuse *= crease;
       // Seen from below, a cloud under more of itself shows the light that
@@ -3847,6 +4038,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // of this by the white surface's light, unit.)
       float unitHere = below > 0.0 ? uSkyEnc * textureLod(uSkyLight, vec2(clamp((heightAt(ps) - CB) / (CT - CB), 0.0, 1.0) * 15.0 / 16.0 + 0.5 / 16.0, 0.5), 0.0).y : 1.0;
       amb = mix(SKYV.x * sky * skyDark, cells * deck.y / unitHere, below);
+#if defined(TGRID) && !defined(TOPS_MAP)
+      amb *= 1.0 - GRID_AO * gridCrease;
+#endif
       // With the sun low, the sky's light comes more from the sun's side
       // (the glow) than from the other: what sees the sky on that side gets
       // more of it, warm, and what sees it on the other side less, the blue
@@ -4363,15 +4557,7 @@ uniform sampler2D uCiMap;
 // cannot unroll one whose bound it cannot know (see the GLSL rules).
 #define CI_N(n) ((n) + int(min(uCirrus, 0.0)))
 
-// An integer hash: Wellons' lowbias32, as in the noise shader.
-uint ihash(uint x) {
-  x ^= x >> 16u;
-  x *= 0x7feb352du;
-  x ^= x >> 15u;
-  x *= 0x846ca68bu;
-  x ^= x >> 16u;
-  return x;
-}
+// (The integer hash ihash: before cloudShape.)
 
 // Gradient noise in 2D (within about -0.7 to 0.7), repeating every `per`
 // cells (whole numbers); the lattice wraps by hand (see the GLSL rules).
@@ -6258,6 +6444,19 @@ float nearness(float code) {
   return code > 0.995 ? 0.0 : exp2((0.5 - code) * 20.0);
 }
 
+#ifdef KEYS
+// Keys' six-point cubic convolution kernel (R. G. Keys, "Cubic convolution
+// interpolation for digital image processing", 1981): it passes a cubic
+// through unchanged, and at any offset it lets no wave through stronger than
+// it came, so read frame after frame it neither rings nor grows.
+float keys6(float x) {
+  x = abs(x);
+  return x < 1.0 ? (4.0 / 3.0 * x - 7.0 / 3.0) * x * x + 1.0
+       : x < 2.0 ? ((-7.0 / 12.0 * x + 3.0) * x - 59.0 / 12.0) * x + 2.5
+       : x < 3.0 ? ((x / 12.0 - 2.0 / 3.0) * x + 1.75) * x - 1.5 : 0.0;
+}
+#endif
+
 // Where in the picture so far (0 to 1; outside: nowhere) was what this pixel
 // shows, if that is at one over inv km from the eye (0: infinitely far)?
 // Clouds and sea have come nearer by the eye's way since, at the same height
@@ -6325,6 +6524,33 @@ void main() {
     vec2 size = vec2(textureSize(uPast, 0));
     vec2 pos = st * size - 0.5;
     vec2 i = floor(pos), f = pos - i;
+#ifdef KEYS
+    // (KEYS, the levels that draw the frame at the picture's size: Keys'
+    // six-point cubic over 6 by 6 texels, in 25 bilinear reads, the two
+    // middle texels of each row and column in one. In flight each pixel's
+    // past is read again every frame, and what one read loses, the next
+    // loses again: through Catmull-Rom, a picture of 2560 by 1440 kept 62 %
+    // of the detail 3.5 to 5 pixels across that a still at the place reached
+    // has, and through this, 75 %. Sharper kernels, Lanczos's of three lobes
+    // among them, let some waves grow at some offsets, and in flight they
+    // grew into a fine hatch.)
+    float wx[5], wy[5], px[5], py[5];
+    for (int k = 0; k < 2; k++) {
+      float g = k == 0 ? f.x : f.y, c = k == 0 ? i.x : i.y, s = k == 0 ? size.x : size.y;
+      float wc = keys6(g), wd = keys6(1.0 - g);
+      float w[5] = float[5](keys6(g + 2.0), keys6(g + 1.0), wc + wd, keys6(2.0 - g), keys6(3.0 - g));
+      float p[5] = float[5](c - 1.5, c - 0.5, c + 0.5 + wd / (wc + wd), c + 2.5, c + 3.5);
+      for (int j = 0; j < 5; j++) {
+        if (k == 0) { wx[j] = w[j]; px[j] = p[j] / s; } else { wy[j] = w[j]; py[j] = p[j] / s; }
+      }
+    }
+    vec4 was = vec4(0.0);
+    for (int b = 0; b < 5; b++) {
+      vec4 row = vec4(0.0);
+      for (int a = 0; a < 5; a++) row += textureLod(uPast, vec2(px[a], py[b]), 0.0) * wx[a];
+      was += row * wy[b];
+    }
+#else
     vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
     vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
     vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
@@ -6340,6 +6566,7 @@ void main() {
              + (textureLod(uPast, vec2(c0.x, c3.y), 0.0) * w0.x
               + textureLod(uPast, vec2(c12.x, c3.y), 0.0) * w12.x
               + textureLod(uPast, vec2(c3.x, c3.y), 0.0) * w3.x) * w3.y;
+#endif
     // The filter overshoots at edges: stay within the four texels around.
     // They also tell how many frames the mean has, and how far away the
     // pixel's past was.
@@ -6567,7 +6794,8 @@ const P = {
   out: 0.35,         // outward bias
   minY: -0.7,        // lowest normal of a child (overhangs below -0)
   flatLow: 0.08,     // in the lowest share of the height, children only on top
-  rmin: 0.030,       // smallest lobe, km (about the voxel: smaller ones are dropped)
+  rmin: 0.040,       // smallest lobe, km (1.3 of the finest voxel: 30 m lobes doubled the worker's time, and the
+                     // billows at render time are as fine)
 };
 
 function lobesOf(obj, P, LEAN) {
@@ -6715,6 +6943,18 @@ const R = 0.25, S = 1000, FAR = Math.round(R * S);   // the distance kept, km; I
 const CELL = 2;                                      // a world cell: at most one tower
 const BASE_UP = 0.08;                                // a tower's base over the level of the bases, km
 const NC = WEATHER_KM / CELL;
+const SIZE_P = 2.0, H_LAW = [0.6, 4.0], W_RATIO = 1.25, H_W = 0.45, WH_K = 0.4, W_MIN = 1.3, W_MAX = 5.0;  // the law of sizes (see towersOf)
+const H_MIN = 0.8, TOWER_H = 1.5;                    // the least height of the field's heap that makes a tower, km; a tower's
+const GROUP_KM = 12.8;                               // the groups of big towers: a field of this lattice
+const OWN_IN = 0.3, OWN_OUT = 0.55, OWN_PAD = 0.3;  // the field's heap gives way within OWN_IN W of a middle, less out to OWN_OUT W + OWN_PAD km
+// A smooth random field over the map, 0 to 1 (value noise on a lattice of
+// GROUP_KM, which divides the map).
+const groupAt = (x, z) => {
+  const n = Math.round(WEATHER_KM / GROUP_KM), u = wrapKm(x) / GROUP_KM, v = wrapKm(z) / GROUP_KM;
+  const i = Math.floor(u), j = Math.floor(v), fu = sstep(0, 1, u - i), fv = sstep(0, 1, v - j);
+  const h = (a, b) => hash2(((a % n) + n) % n, ((b % n) + n) % n, 101) / 4294967296;
+  return (h(i, j) * (1 - fu) + h(i + 1, j) * fu) * (1 - fv) + (h(i, j + 1) * (1 - fu) + h(i + 1, j + 1) * fu) * fv;
+};
 let cfg = null;              // { T, levels: [{ V, nz }] }
 let towers = null, cells = null, mapGen = -1, maxReach = 0;
 const lobeCache = new Map(), brickCache = new Map();
@@ -6741,11 +6981,15 @@ const hash2 = (i, j, s) => {
 
 // The towers of the whole map, from the warped weather map (RGBA8, n
 // texels a side) at the cloud amount c: per world cell, the place where the
-// present field's `tower` is strongest, if no place within 1.5 km has more.
-// Width, top and base follow the present field's formulas there.
+// present field's heap stands highest (at least H_MIN over the level of
+// the bases, and over the sheet; or its tower is strong, TOWER_H per unit),
+// if no place within 1.5 km stands higher.
+// (Seeded at the field's towers only, the grids held a few of the big heaps,
+// and the field's own heaps, as high round them, hid them.) The base
+// follows the field's level there; width and top a law of sizes (below).
 function towersOf(px, n, c) {
   const t0 = performance.now();
-  const km = WEATHER_KM / n, g = new Float32Array(n * n), tv = new Float32Array(n * n);
+  const km = WEATHER_KM / n, hv = new Float32Array(n * n), tv = new Float32Array(n * n);
   // The cover over some 20 km (the shader's `region`, a mip of uWeather).
   const B = 32, nb = n / B, reg = new Float32Array(nb * nb);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) reg[(j / B | 0) * nb + (i / B | 0)] += px[4 * (j * n + i)] / 255 / (B * B);
@@ -6754,41 +6998,70 @@ function towersOf(px, n, c) {
     const at = (a, b) => reg[(((b % nb) + nb) % nb) * nb + (((a % nb) + nb) % nb)];
     return (at(i0, j0) * (1 - fu) + at(i0 + 1, j0) * fu) * (1 - fv) + (at(i0, j0 + 1) * (1 - fu) + at(i0 + 1, j0 + 1) * fu) * fv;
   };
+  // Per texel, as the shader's cloudShape: the height of the field's heap
+  // over its level (km) without its tower (the grids take that), less the
+  // sheet's top; and the strength of the field's tower (tv).
   const towersK = sstep(0.1, 0.5, c);
+  const poly = c * (1.181 - c * (2.197 - 2.102 * c)) - 0.1 * (1 - sstep(0.1, 0.35, c));
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const o = j * n + i, G = px[4 * o + 1] / 255;
+    const o = j * n + i, r = px[4 * o] / 255, G = px[4 * o + 1] / 255;
+    const region = regionAt(i, j), level1 = sstep(0.85, 1, c + 0.3 * (region - 0.5));
     const tg = Math.min(Math.max((G - 0.34) / 0.4, 0), 1);
-    g[o] = tg;
-    if (tg > 0) tv[o] = tg * (2 - tg) * towersK * (1 - 0.8 * sstep(0.85, 1, c + 0.3 * (regionAt(i, j) - 0.5)));
+    if (tg > 0) tv[o] = tg * (2 - tg) * towersK * (1 - 0.8 * level1);
+    const e = 3 * (r - 0.936 + poly);
+    if (e <= 0) continue;
+    const sheet = sstep(0.57, 0.82, c + 0.6 * (region - 0.5));
+    const topS = 0.12 + 0.32 * G * (1 - 0.6 * Math.max(sstep(2.6, 3.6, e), level1));
+    const thick = 1 - Math.exp(-e / 1.6), swell = 0.25 * Math.min(Math.max(e - 1, 0), 1 - 0.6 * sheet);
+    const sheetTop = sheet > 0 ? (0.25 + 0.35 * sheet) * (0.8 + 0.4 * sstep(0.3, 0.7, r)) : 0;
+    hv[o] = Math.max((CT - CB) * topS * Math.cbrt(thick + swell) - sheetTop, 0);
   }
+  // Where the field draws a tower, as high as its tower is strong (on a
+  // deck its heaps hardly stand over the sheet); none where the heap is
+  // lower than H_MIN and no tower (bodies in all the low heaps cost 5 ms of
+  // the frame under them, at 0.3 km).
+  for (let o = 0; o < n * n; o++) hv[o] = hv[o] >= H_MIN || tv[o] > 0.2 ? Math.max(hv[o], TOWER_H * tv[o]) : 0;
   const at = (a, b) => (((b % n) + n) % n) * n + (((a % n) + n) % n);
-  const cellT = CELL / km, nms = Math.round(1.5 / km), area = Math.round(2.5 / km);
+  const cellT = CELL / km, nms = Math.round(1.5 / km), foot = Math.round(2.5 / km);
   const list = [], grid = new Array(NC * NC).fill(null);
   for (let cj = 0; cj < NC; cj++) for (let ci = 0; ci < NC; ci++) {
-    let best = -1, bv = 0.2;
-    for (let j = cj * cellT; j < (cj + 1) * cellT; j++) for (let i = ci * cellT; i < (ci + 1) * cellT; i++) if (tv[j * n + i] > bv) { bv = tv[j * n + i]; best = j * n + i; }
+    let best = -1, bv = 0;
+    for (let j = cj * cellT; j < (cj + 1) * cellT; j++) for (let i = ci * cellT; i < (ci + 1) * cellT; i++) if (hv[j * n + i] > bv) { bv = hv[j * n + i]; best = j * n + i; }
     if (best < 0) continue;
     const bi = best % n, bj = (best / n) | 0;
     let keep = true;
     for (let dj = -nms; dj <= nms && keep; dj++) for (let di = -nms; di <= nms; di++) {
-      const v = tv[at(bi + di, bj + dj)];
+      const v = hv[at(bi + di, bj + dj)];
       // (Ties go to the lower index: two equal places make one tower.)
       if (v > bv || (v === bv && (dj < 0 || (dj === 0 && di < 0)))) { keep = false; break; }
     }
     if (!keep) continue;
-    let cnt = 0;
-    for (let dj = -area; dj <= area; dj++) for (let di = -area; di <= area; di++) if (di * di + dj * dj <= area * area && g[at(bi + di, bj + dj)] > 0) cnt++;
-    const o = 4 * best, r = px[o] / 255, G = px[o + 1] / 255, b = px[o + 2] / 255;
-    const W = Math.min(Math.max(0.8 * 2 * Math.sqrt(cnt * km * km / Math.PI), 1.0), 3.5);
+    const b = px[4 * best + 2] / 255;
     const level = CB + 0.15 + 0.15 * sstep(0.25, 0.75, b);
-    const region = regionAt(bi, bj), level1 = sstep(0.85, 1, c + 0.3 * (region - 0.5)), sheet = sstep(0.57, 0.82, c + 0.6 * (region - 0.5));
-    const tower = bv;
-    const e = 3 * (r - 0.936 + c * (1.181 - c * (2.197 - 2.102 * c)) - 0.1 * (1 - sstep(0.1, 0.35, c))) + 1.5 * tower;
-    const deck = sstep(2.6, 3.6, e - 1.5 * tower);
-    const topS = 0.12 + 0.32 * G * (1 - 0.6 * Math.max(deck, level1)) + 0.25 * tower * (0.7 + 0.3 * sstep(0.6, 0.9, G));
-    const thick = 1 - Math.exp(-e / 1.6), swell = 0.25 * Math.min(Math.max(e - 1, 0), 1 - 0.6 * sheet);
-    const top = Math.min(Math.max(level + (CT - CB) * topS * Math.cbrt(Math.max(thick + swell, 0.05)), level + 0.8), CT - 0.4);
     const seed = hash2(ci, cj, 7);
+    // At least as wide as the field's heap there (the place within 2.5 km
+    // where it stands over WH_K as high as here), and as high: the heap
+    // gives way to it (own, below). (Narrower, a tower stood in a crater, or
+    // the heap round it hid it.)
+    let cnt = 0;
+    for (let dj = -foot; dj <= foot; dj++) for (let di = -foot; di <= foot; di++) if (di * di + dj * dj <= foot * foot && hv[at(bi + di, bj + dj)] > WH_K * bv) cnt++;
+    const Wh = 2 * Math.sqrt(cnt * km * km / Math.PI);
+    // Its height: at least the heap's, more by a law of sizes (most small,
+    // some middle, few big: u = rnd^SIZE_P), the big ones in groups
+    // (GROUP_KM, a smooth random field) and where the field's tower is
+    // strong. As wide as tall or wider (W_RATIO): sized from the area of the
+    // field's tower round the place, 1 to 3.5 km, with the field's top, they
+    // were as tall as wide, and their turrets were posts with round heads.
+    let tmax = 0;
+    for (let dj = -nms; dj <= nms; dj++) for (let di = -nms; di <= nms; di++) tmax = Math.max(tmax, tv[at(bi + di, bj + dj)]);
+    const rr = (seed >>> 20) / 4096, str = Math.min(Math.max(tmax / 0.8, 0), 1);
+    const u = Math.pow(rr, SIZE_P) * (0.35 + 0.65 * sstep(0.25, 0.75, groupAt(bi * km, bj * km))) * (0.3 + 0.7 * str);
+    const Hl = H_LAW[0] + (H_LAW[1] - H_LAW[0]) * u;
+    const W = Math.min(Math.max(Wh, W_RATIO * Hl, W_MIN), W_MAX);
+    // (No lower than H_W of its width: flat wide bodies were a sheet of
+    // stratocumulus from below.)
+    const H = Math.min(Math.max(hv[best], Hl, H_W * W), CT - 0.35 - level - BASE_UP);
+    const top = level + BASE_UP + H;
     const t = {
       id: cj * NC + ci, x: wrapKm((bi + 0.5) * km + ((seed & 1023) / 1023 - 0.5) * 0.2), z: wrapKm((bj + 0.5) * km + (((seed >>> 10) & 1023) / 1023 - 0.5) * 0.2),
       // (Its flat base a little over the level of the present field's bases:
@@ -6799,12 +7072,19 @@ function towersOf(px, n, c) {
     // made, for the tiles it may touch (lobesFor counts a tower whose lobes
     // go past it, stats.over: the tiles would cut it).
     t.reach = 1.5 * W + 0.2 * (top - level) + 0.3;
-    maxReach = Math.max(maxReach, t.reach);
-    grid[t.id] = t;
     list.push(t);
   }
+  // A small tower within the foot of a bigger one gives way (biggest first).
+  list.sort((a, b) => b.W - a.W);
+  const kept = [];
+  for (const t of list) {
+    if (kept.some(k => Math.hypot(near(t.x - k.x), near(t.z - k.z)) < OWN_IN * k.W + 0.25 * t.W)) continue;
+    kept.push(t);
+    maxReach = Math.max(maxReach, t.reach);
+    grid[t.id] = t;
+  }
   stats.seedsMs = Math.round(performance.now() - t0);
-  return { list, grid };
+  return { list: kept, grid };
 }
 
 // The map of the tops (RGBA8, nTops texels a side over the map: the
@@ -6812,17 +7092,18 @@ function towersOf(px, n, c) {
 // texels), as the main thread read it back: raised over each tower when its
 // lobes are made, before any tile shows it, and the part sent back.
 let tops = null, nTops = 0;
+const TOPS_OUT = 0.17;
 function raiseTops(t, L) {
   const n = nTops, km = WEATHER_KM / n, M = 8;
   const i0 = Math.floor((t.x + L.box[0]) / km) - M, i1 = Math.ceil((t.x + L.box[1]) / km) + M;
   const j0 = Math.floor((t.z + L.box[2]) / km) - M, j1 = Math.ceil((t.z + L.box[3]) / km) + M;
   const w = i1 - i0, h = j1 - j0, g = new Uint8Array(w * h);
-  // The top of each lobe over the texels it covers (50 m more, as the
-  // present field's, and rounded up).
+  // The top of each lobe over the texels it covers (TOPS_OUT more: the
+  // reach of the detail over the surface, GRID_OUT in fs; rounded up).
   const f = L.lobes;
   for (let q = 0; q < L.n; q++) {
     const x = t.x + f[5 * q], z = t.z + f[5 * q + 2], r = f[5 * q + 3];
-    const v = Math.min(255, Math.ceil((f[5 * q + 1] + r + 0.07 - CB) / (CT - CB) * 255));
+    const v = Math.min(255, Math.ceil((f[5 * q + 1] + r + TOPS_OUT - CB) / (CT - CB) * 255));
     for (let j = Math.floor((z - r) / km); j <= Math.floor((z + r) / km); j++) for (let i = Math.floor((x - r) / km); i <= Math.floor((x + r) / km); i++) {
       const o = (j - j0) * w + i - i0;
       if (g[o] < v) g[o] = v;
@@ -7034,8 +7315,9 @@ function towersNear(x0, x1, z0, z1, m) {
   return out;
 }
 
-// The columns (RGBA: top, the highest top within 0.8 km, base) as shares
-// of CB to CT in 8 bits.
+// The columns (RGBA): how much the present field's heap gives way round a
+// tower (own, 0 to 255); the highest top within 0.8 km and the base, as
+// shares of CB to CT in 8 bits; how much is shown (set by the main thread).
 const share = h => Math.min(255, Math.max(0, Math.ceil((h - CB) / (CT - CB) * 255)));
 const HEAP = 0.8;
 
@@ -7053,7 +7335,7 @@ function* tileGen(l, tx, tz) {
   }
   const t0 = performance.now();
   const data = new Uint8Array(T * T * nz), cols = new Uint8Array(T * T * 4);
-  const top = new Uint8Array(T * T), heap = new Uint8Array(T * T);
+  const top = new Uint8Array(T * T), heap = new Uint8Array(T * T), own = new Float32Array(T * T);
   const base = new Float32Array(T * T).fill(CB + 0.25);
   const ti = tx * T, tj = tz * T;
   for (const t of near0) {
@@ -7067,6 +7349,9 @@ function* tileGen(l, tx, tz) {
         const xc = x0 + (i + 0.5) * V - cx;
         const ex = Math.max(box[0] - xc, 0, xc - box[1]), e = Math.hypot(ex, ez), o = j * T + i;
         if (e < HEAP) { heap[o] = Math.max(heap[o], share(L.top)); base[o] = Math.min(base[o] === CB + 0.25 ? 9 : base[o], t.base); }
+        // (The field's heap gives way round the tower's middle.)
+        const rr = Math.hypot(xc, zc);
+        if (rr < OWN_OUT * t.W + OWN_PAD) own[o] = Math.max(own[o], 1 - sstep(OWN_IN * t.W, OWN_OUT * t.W + OWN_PAD, rr));
       }
     }
     const b = brickFor(t, l);
@@ -7085,7 +7370,7 @@ function* tileGen(l, tx, tz) {
     }
   }
   for (let o = 0; o < T * T; o++) {
-    cols[4 * o] = top[o];
+    cols[4 * o] = Math.round(own[o] * 255);
     cols[4 * o + 1] = Math.max(heap[o], top[o] ? top[o] - 1 : 0);
     cols[4 * o + 2] = Math.round((base[o] - CB) / (CT - CB) * 255);
     cols[4 * o + 3] = 0;   // (the main thread sets how much is shown)
@@ -7646,15 +7931,18 @@ const SkySound = (() => {
   // grid: the towers' grids of ?grid=1, texels a side, none: no grids)
   // and take fewer samples in fs (fs: its defines, Q_ at its top). cost:
   // the GPU time of a frame of as many pixels, relative to low's (measured,
-  // see docs/development.md), for the automatic choice.
+  // see docs/development.md), for the automatic choice. minScale: the
+  // smallest drawing scale while the view moves (MIN_SCALE if not given;
+  // 1: always the canvas's size). keys: the past is read through Keys'
+  // six-point cubic, sharper in flight (see "mean").
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The canvas's size in pixels for a place of cw by ch CSS pixels at the
@@ -7679,6 +7967,8 @@ const SkySound = (() => {
   // SETTLE frames after that, a still picture is clean and the drawing stops.
   const SETTLE = 32, IN_MOTION = 10, RELIGHT = 6;
   const MIN_SCALE = 0.35;  // the smallest picture a slow GPU may draw, relative to the canvas
+  // Frames slower than this many ms shrink the picture by sqrt(SCALE_AIM / ms).
+  const SCALE_AIM = 30;
   // The exposure follows the picture (see exposureFor and the shader
   // "meter"). Levels are log2 of the luminance before exposure.
   const METER = [64, 36];        // blocks of the picture the meter reads
@@ -8524,7 +8814,9 @@ const SkySound = (() => {
     // ?grid=1 (off by default): towers grown as trees of lobes by a worker
     // and kept in grids that move with the eye (see `grid` below, TGRID in
     // fs, the script "towers"). Only at levels with `grid` texels a side.
-    // `,hK:W` after it: the heads of uBody carve them (GRID_HK, GRID_HW).
+    // `,hK:W` after it: the heads of uBody that carve them (GRID_HK, GRID_HW;
+    // 2 and 0.12 without it); `,KEY=value` sets GRID_KEY of fs for a test
+    // (the detail's and the light's knobs: CR, BW, LOW, OWN, AO).
     const TOWER_GRID = (() => {
       const v = (new URLSearchParams(location.search).get('grid') || '').split(',');
       if (v[0] !== '1' || !Q.grid) return null;
@@ -8542,7 +8834,8 @@ const SkySound = (() => {
       const f = x => x.toFixed(1);
       return { N, T, levels, z, nzt,
         defs: `#define TGRID 1\n#define GRID_V0 ${V0.toFixed(6)}\n#define GRID_LV ${Math.log2(V0 / 0.0625).toFixed(1)}\n#define GRID_N ${f(N)}\n#define GRID_NZ vec3(${levels.map(l => f(l.nz))})\n#define GRID_Z vec3(${z.map(f)})\n#define GRID_NZT ${f(nzt)}\n`
-          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
+          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '')
+          + v.slice(1).filter(t => /^[A-Z]+=[0-9.]+$/.test(t)).map(t => `#define GRID_${t.split('=')[0]} ${(+t.split('=')[1]).toFixed(4)}\n`).join('') };
     })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
@@ -8590,7 +8883,7 @@ const SkySound = (() => {
     const cloudProg = link('fs', '#define CLOUD_PASS');
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const noiseProgram = link('noise'), wavesProgram = link('waves'), slopeProgram = link('slope');
-    const mean = link('mean', Q.frame < 1 ? '#define UPSCALE' : ''), show = link('show'), meter = link('meter');
+    const mean = link('mean', [Q.frame < 1 ? '#define UPSCALE' : '', Q.keys ? '#define KEYS' : ''].filter(Boolean).join('\n')), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
     const shadowProg = link('fs', '#define SHADOW_MAP');
     // And as the map of the tops (see uTops), and as the sky's light on the
@@ -9947,8 +10240,12 @@ const SkySound = (() => {
     // time (then, ms); restart: the next frame begins the picture again.
     let adapting = false, then = null, restart = false, meteredAt = -1e9;
     // While the view moves or changes, the picture is drawn smaller than
-    // the canvas if frames take long (scale); at rest it is drawn in full.
+    // the canvas if frames take long (scale, down to the level's minScale:
+    // at max never, the picture comes first); at rest it is drawn in full.
     // The wall clock tells how long frames take, while one follows another.
+    // (At max it shrank, as at the other levels: a few slow frames, while a
+    // slider moved, took it down, and in flight at 30 frames a second, too
+    // slow to grow back, it stayed down, stretched to the screen and soft.)
     let scale = fixedScale || 1, clock = 0, span = 0, count = 0, slow = 0, chained = false, pinnedScale = 0;
     // A frame smaller than the picture gives each of its pixels less (see
     // UPSCALE in "mean"): a still takes more frames to settle, by the ratio
@@ -10234,7 +10531,7 @@ const SkySound = (() => {
       if (!fixedScale && !pinnedScale && count >= 4 && span >= 400) {
         const ms = span / count;
         slow = ms > 40 ? slow + 1 : 0;
-        if (slow >= 2) scale = Math.max(MIN_SCALE, scale * Math.sqrt(30 / ms));
+        if (slow >= 2) scale = Math.max(Q.minScale || MIN_SCALE, scale * Math.sqrt(SCALE_AIM / ms));
         else if (ms < 24) scale = Math.min(1, scale * 1.12);
         span = count = 0;
       }
@@ -11134,7 +11431,10 @@ const SkySound = (() => {
     // a frame, scaled to the full size, at least AUTO_FAST. Frames slowed by
     // something else, a busy CPU or a throttled window, are no reason to
     // draw less; a level stepped down from is never tried again.)
-    const scale = m.small / m.n, busy = m.gn < 20 || m.gpu / m.gn / (scale * scale) >= AUTO_FAST;
+    // (At a level that keeps its size, minScale 1, the size the frames' time
+    // would have shrunk it to: under AUTO_SMALL, frames over 83 ms.)
+    const drawn = m.small / m.n, busy = m.gn < 20 || m.gpu / m.gn / (drawn * drawn) >= AUTO_FAST;
+    const scale = QUALITY[level].minScale >= 1 ? Math.min(1, Math.sqrt(SCALE_AIM * m.n / m.ms)) : drawn;
     if (scale < AUTO_SMALL && i > 0 && busy) {
       to = LEVELS[i - 1];
       steppedDown(to);
