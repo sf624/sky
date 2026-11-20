@@ -19,7 +19,7 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   img-diff    A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]
               differences of two pictures
   check       [NAME...] [--base DIR|REV] [--size WxH] [--out DIR] [--ignore CLASSES]
-              runs the checks (all of: trace stills wrap loop res flight); one line each
+              runs the checks (all of: trace stills wrap loop res flight steer); one line each
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw

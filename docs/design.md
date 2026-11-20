@@ -43,6 +43,8 @@ time (see the next section).
   a larger `yaw` turns the view to the right (clockwise seen from above),
   and a drag to the right lowers it. `pitch` is positive upwards.
   `camera(yaw, pitch)` gives the column-major `uCam`: right, up, forward.
+  With the aircraft banked or climbing, `cameraOf(view)` turns it by the
+  aircraft's attitude (see [Steering](#steering)).
   `uTan` is the tangent of half the vertical field of view (`FOV` = 62
   degrees for the hero).
 - **Spectra** are twelve wavelengths, 405 to 680 nm in steps of 25 (`WL`),
@@ -83,8 +85,8 @@ The JS then runs once, at load, and does little:
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
-   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,
-   `at`, `pixels` and `res` are read directly (see
+   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`, `bank`,
+   `climb`, `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -200,12 +202,14 @@ which asks for one `requestAnimationFrame(frame)`.
   once, with `finish`; it takes about a quarter of a second: while the haze
   slider moves, it is built `HAZE_WAIT` = 250 ms after the last move), runs
   `celestial()` and sets the panel's labels;
-- moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
-  `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
+- flies the aircraft (`fly`, see [Steering](#steering)): the controls,
+  the turn, the climb, and `state.drift` grows by `speed / 3600 * dt`
+  along `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
 - calls the renderer, which draws the clouds' depth maps first when they
   are out of date (see [The clouds' shadow](#the-clouds-shadow));
-- asks for another frame only if the renderer returned true.
+- asks for another frame only if the renderer returned true, or a
+  control of the steering is held.
 
 The renderer returns true while the aircraft flies, while its picture is
 still settling, or while the exposure moves. So the page draws nothing at rest once the picture is
@@ -259,6 +263,52 @@ heights in km end below 300, those in metres start there), or as `m` or
 `km` after it says. The state keeps the height itself, not the slider's
 place: `?alt=11` draws at 11 km exactly, as before; a height set by the
 slider is rounded to 10 m.
+
+## Steering
+
+The aircraft is steered (`fly`, in the wiring of the script, once a frame
+before the renderer). A simple model, not a simulator:
+
+- **State.** `state.heading` (radians, the `yaw` convention), `state.climb`
+  (the angle of the flight path, nose up positive) and `state.bank` (right
+  wing down positive). The eye's `state.yaw` and `state.pitch` stay in the
+  world as before; when the aircraft turns by d (`turnBy`), the eye turns
+  by d too, so one keeps looking out of the same window. The sun, the moon
+  and the stars do not move.
+- **The camera.** Level (`bank` and `climb` both 0), `cameraOf` is
+  `camera(yaw, pitch)`, to the last bit: a view without steering draws as
+  before. Otherwise it is the aircraft's frame (`basis(heading, climb)`,
+  rolled by the bank about the nose) times the eye's direction within it
+  (`basis(yaw - heading, pitch)`). Looking ahead the horizon tilts by the
+  bank; out of the side window the bank also raises or lowers the view.
+  Every reader of `uCam` (the frame, the light pass, the meter's weights
+  near the sun, the lens glare, `whence`) takes any rotation; the glare
+  lies along the picture's axes, as in a photograph.
+- **The turn.** A coordinated turn: the heading changes at g tan(bank) / v
+  (`G`, v the speed in km/s), plus the rudder's `YAW_RATE` (3 degrees a
+  second), at most `TURN_MAX` (30 degrees a second). The way of a frame
+  follows the heading of its middle (the chord of the arc flown), at
+  `v cos(climb)`; the altitude changes at `v sin(climb)`, through
+  `setAltitude` (the state, the slider, which rounds it, and the sound),
+  within the slider's range. At the top or the bottom of the range the
+  climb eases back to 0 at `PITCH_RATE`.
+- **The controls** give rates from -1 to 1: the keys (by `code`, so WASD
+  sits in the same place on every layout; not while the focus is in a
+  control, and they do not wake the panel) and the stick (its deflection
+  to the rim). Roll at `ROLL_RATE` (30 degrees a second) up to the bank
+  slider's limit (60), pitch at `PITCH_RATE` (5) up to the climb slider's
+  (15). Let go, the attitude stays. Level (`L`, the panel's button, the
+  stick's) moves both back to 0 at those rates. The panel's sliders set
+  the heading (a compass bearing: 180 degrees more than the heading in
+  degrees), the bank and the climb at once, and follow the flight.
+- **Speed 0.** The aircraft stands: bank and climb only tilt the view, the
+  rudder and the heading slider turn it on the spot. `fly` returns true
+  while a control acts, and `frame` then asks for the next frame even when
+  the renderer has settled.
+- **What follows the place, not the heading:** the clouds, the sea, the
+  cirrus (read at `p.xz + uDrift`), the towers' grids (`state.drift`), the
+  clouds' depth maps. The sea's wind is fixed in the world. The sound
+  follows the speed and the altitude only.
 
 ## Sun, moon and sky in the JS
 
@@ -3131,7 +3181,7 @@ count, capped by `uTrust`, which the JS sets per frame:
 | Situation | `uTrust` | New frame weighs |
 |---|---|---|
 | First frame, canvas resized, or a jump of more than 1 km | 0 | 1 |
-| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames | 1 | 1/2 |
+| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames. A climb in flight, less than `CLIMB_STEP` = 50 m a frame, is motion, not a change: the past is moved along (`uWay.y`) | 1 | 1/2 |
 | The view moves, the aircraft flies, or the exposure moves | `IN_MOTION - 1` = 9 | 1/10 |
 | At rest | 63 | 1/(n + 1): the plain mean |
 
