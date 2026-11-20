@@ -1106,6 +1106,16 @@ of a stride further for each pixel and frame); and where none of them met
 any cloud, nor does this ray (a cloud that all of them miss is under 2
 pixels wide; a few specks of a pixel or two go, from 11 km). Together
 these took a third off the second stage among the heaps and under a deck.
+At `low` (`Q_GAP`), where one of those rays met no cloud, the ray also
+ends once it is clear of the farthest cloud that the others met, by a
+fifth of that distance and 2 km: what lies beyond, the ray that met none
+has found clear a pixel or two away. Rays that slipped past the edge of
+a near cloud marched on towards the horizon, up to `CLOUD_STEPS` steps,
+and the GPU runs a pixel with its neighbours: a block of 8 by 8 pixels
+took as long as its slowest. Counted at `low` on a phone's screen (411 x
+781 CSS pixels, November 2026), the most reads of the field in each such
+block fell by 18 % in the cruise view and 14 % at 4 km, and next to
+nothing under a deck, where every ray meets cloud.
 The depth away from the light (`tauB`, below) is not among them: stage 1
 works it out at its own point. Taken from the first stage, where the ray
 entered the cloud at half the size, the shaded sides of near towers were
@@ -1416,7 +1426,13 @@ touch it (the most of their bytes) and its columns. Lobes (48 MB) and
 bricks (96 MB) are kept, the least recently used dropped. The worker
 makes the tiles the main thread wants, nearest to the eye first, and
 transfers them; the main thread uploads at most `GRID_BUDGET` = 1.2 MB a
-frame (`texSubImage3D`; a tile of level 0 is 144 kB).
+frame (`texSubImage3D`; a tile of level 0 is 144 kB). Each map, its
+wanted tiles and its tiles carry the number of the cloud amount they were
+made for (`gen`): a new amount asks for its tiles at once, the worker
+holds that list until the map read back for it comes, and the main thread
+drops a tile of an older amount. If the worker fails (its `error` event),
+the page logs it and turns the grids off for good: nothing is shown in
+them, and the clouds are the present field's.
 
 **The march's strides.** The map of the tops (`uTops`) is made from the
 present field, and a tower's lobes may stand higher than its tops: the
@@ -3105,7 +3121,15 @@ asks which level it is.
   `readPixels` makes the browser wait until the GPU has done all that it
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
   idle while the next frame is made, every 100 ms. (`max` and `high` keep
-  the plain read: their frames stay as they were.)
+  the plain read: their frames stay as they were.) Taking the buffer
+  still waits for the GPU process: Chrome 156 keeps no copy of it ahead
+  of the read (it warns that it dropped one), and on the test machine
+  each read held the script 4 to 5 ms, up to 110 ms, with the fence
+  passed and even with a new buffer each time. On a phone those reads
+  were most of the script's time (8 ms a frame), and a frame that waited
+  missed its turn. So at these levels the meter waits between reads 20
+  times as long as the last read took (`METER_SHARE`, 5 %), at least
+  `meterMs` and at most `METER_SLOW` (1 s).
 - `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
   and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
   the aircraft flies before a layer of a depth map is drawn again (see
@@ -3155,7 +3179,9 @@ asks which level it is.
   number each frame; IGN shifted along the diagonal, as at `max`, runs
   through its values unevenly at each pixel, and with `low`'s long steps
   the light's point stayed in the mean at rest as a fine diagonal hatch
-  over the bases of clouds overhead). The programs of `low` are smaller
+  over the bases of clouds overhead), and `Q_GAP` (1: the second stage of
+  the low clouds ends a ray past the clouds that the first stage's rays
+  round it met, where one of them met none; see [Low clouds](#low-clouds)). The programs of `low` are smaller
   for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
   at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
   Cuts tried with `?stats=bench3` on a phone and left out, as they saved
@@ -3269,16 +3295,19 @@ over the last `STATS_SPAN` (3 s) and the longest gap between two of them
 (the same queries as the automatic choice), the time the page's own
 script takes in the renderer a frame, its mean and its longest (a long one
 there is the CPU waiting for the GPU, as the meter's read does) and by
-part of the frame (`lap` in the renderer: `start` up to the textures,
-`maps` the tops, the sky's light and the depth maps, `frame` the passes
-and the scene, `mean`, `meter`, `show`; a mean over the last few dozen
-frames), the draws of the last frame and the pixels they shaded
+part of the frame (`lap` in the renderer: `start` the canvas's size and
+the view, `read` the meter's read, `targets` up to the textures, `maps`
+the tops, the sky's light and the depth maps, `frame` the passes and the
+scene, `mean`, `meter`, `show`; a mean over the last few dozen frames), the draws of the last frame and the pixels they shaded
 (`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
 canvas's size, the CSS size it fills and the device pixel ratio, the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
-page to the first picture, the GPU memory of the level (its textures,
+page to the first picture and when each part of the start ended
+(`START_PARTS`, from `mark`: the context, the tables, the last program
+compiled, the noise and the weather map, the cirrus, the waves, the first
+frame), the GPU memory of the level (its textures,
 counted as `makeSky` makes them, by wrapping the calls that allocate and
 free them on its context, `countMemory`; and the canvas's own buffers as 12
 bytes a pixel), the contexts lost and the levels that failed, and the GPU's

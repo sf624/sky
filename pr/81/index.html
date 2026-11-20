@@ -1614,6 +1614,9 @@ precision highp int;
 #ifndef Q_AIR_LUT
 #define Q_AIR_LUT 0       // 1: the scene reads the air's light from a table made ahead (AIR_LUT), not by a march
 #endif
+#ifndef Q_GAP
+#define Q_GAP 0           // 1: the low clouds' second stage ends its ray past the clouds near rays met, where one of them met none (see clouds)
+#endif
 #ifndef Q_GOLD
 #define Q_GOLD 0          // 1: the jitters of the low clouds' march and of the shafts step by the golden ratio each frame (see CLOUD_PASS's main)
 #endif
@@ -3215,7 +3218,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // grey polygons with straight edges. The mean over the frames is smooth.
   shake = vec3(hash(gl_FragCoord.xy + 1.37 * uPass + 13.1), hash(gl_FragCoord.yx + 2.11 * uPass + 15.3),
                hash(gl_FragCoord.xy + 3.07 * uPass + 19.7)) - 0.5;
-  float t = ta + jitter * COARSE * dsAir, wsum = 0.0, tsum = 0.0;
+  float t = ta + jitter * COARSE * dsAir, wsum = 0.0, tsum = 0.0, beyond = 1e9;
   // The first stage's rays round this pixel (3 by 3 of them, 6 pixels
   // across) met no cloud before the nearest that one of them met: the
   // clear air before it is not marched again, and the ray starts a little
@@ -3225,13 +3228,24 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   if (uStage > 0.5) {
     // (The light map drawn: its texture may be larger, see `full` in the JS.)
     ivec2 c = ivec2(gl_FragCoord.xy * 0.5), last = ivec2(ceil(uRes / (2.0 * Q_PASS))) - 1;
-    float near = 1e9, hit = -1.0;
+    float near = 1e9, hit = -1.0, missed = 1e9;
     for (int k = 0; k < 9; k++) {
       float a = unpackHalf2x16(texelFetch(uLightMap, clamp(c + ivec2(k % 3, k / 3) - 1, ivec2(0), last), 0).x).x;
       if (a >= 0.0) near = min(near, a);
+      else if (a > -1.5) missed = 0.0;
       hit = max(hit, a);
     }
     if (hit < 0.0) t = tb;
+#if Q_GAP
+    // Where one of them met none all the way to the end of its ray, this
+    // ray ends once it is clear of the farthest cloud that the others met,
+    // by a fifth of that distance and 2 km more: beyond it, the ray that
+    // met none has found the air clear a pixel or two away. (Rays that
+    // slipped past the edge of a near cloud marched on to the horizon, up
+    // to CLOUD_STEPS steps, and the pixels that the GPU runs with them
+    // waited for them.)
+    beyond = missed + 1.2 * hit + 2.0;
+#endif
     float s = 0.95 * near - 0.03;
     if (s > t) t = s + jitter * COARSE * max(DS_MIN, s * min(DS_REL * (1.0 + s / L), rel));
   }
@@ -3266,7 +3280,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
-      if (t >= tb || Tc < 0.01) {
+      if (t >= tb || Tc < 0.01 || (Q_GAP == 1 && t > beyond && fPrev < 0.0 && !waiting)) {
         // (A cloud still waiting for its point takes the light of the last
         // sample.)
         need = waiting;
@@ -3802,8 +3816,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   }
   if (Tc < 0.01) Tc = 0.0;
   if (wsum > 0.0) tBar = tsum / wsum;
-  // (Only the first stage, which returns above, keeps a light.)
-  mapA = vec4(-1.0);
+  // (Only the first stage, which returns above, keeps a light. -2: its
+  // march ran out of steps before the end of the ray, so it did not see
+  // that the rest is clear: see Q_GAP.)
+  mapA = vec4(Q_GAP == 1 && t < tb ? -2.0 : -1.0);
   mapB = vec4(0.0);
 }
 
@@ -6429,6 +6445,8 @@ text (a Blob): no file and no build. -->
 // its surface (all round, a little out, spaced apart so that they meet in
 // creases), 0.3 to 0.55 of their parent, down to rmin. The lobes are joined by a smooth minimum,
 // wide for the big ones, narrow for the small ones (crisp clefts).
+// rngOf: Mulberry32, by Tommy Ettinger (2017, public domain under CC0), in
+// JavaScript: see THIRD_PARTY_NOTICES.md.
 const rngOf = seed => {
   let a = seed >>> 0;
   return () => {
@@ -6564,6 +6582,9 @@ function lobesOf(obj, P, LEAN) {
   // Children, generation by generation (bigger first), with a test that
   // skips a child buried deep inside a bigger lobe.
   const cell = 0.25, hash = new Map();
+  // (The primes of the hash of a cell: Teschner, Heidelberger, Mueller,
+  // Pomeranets and Gross, "Optimized Spatial Hashing for Collision Detection
+  // of Deformable Objects", VMV 2003.)
   const key = (i, j, k) => (i * 73856093) ^ (j * 19349663) ^ (k * 83492791);
   // (A lobe is put in every cell within its radius, and with a spacing
   // between siblings (overlap < 0) within that much more of its own.)
@@ -6646,6 +6667,11 @@ let lobeBytes = 0, brickBytes = 0;
 const LOBE_BUDGET = 48e6, BRICK_BUDGET = 96e6;
 let eye = [0, 0];
 let wanted = [];             // per level: Map key -> [tx, tz]
+// The map each level's list was made for (the page's gen of it). A list made
+// for a newer map waits until that map comes: the page asks for the tiles of
+// a new map at once, but the map comes only when its read-back ends; tiles
+// made meanwhile from the old towers would be dropped, and not asked again.
+let wantGen = [];
 const stats = { towers: 0, lobesMs: 0, lobes: 0, bricksMs: 0, bricks: 0, tiles: 0, tilesMs: 0, seedsMs: 0 };
 
 const wrapKm = x => ((x % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
@@ -7023,6 +7049,7 @@ const later = () => pump.port2.postMessage(0);
 function pick() {
   let best = null, bd = Infinity;
   wanted.forEach((m, l) => {
+    if (wantGen[l] !== mapGen) return;
     const { V } = cfg.levels[l], T = cfg.T, s = T * V;
     for (const [k, [tx, tz]] of m) {
       const dx = near((tx + 0.5) * s - eye[0]), dz = near((tz + 0.5) * s - eye[1]);
@@ -7036,7 +7063,7 @@ function pick() {
 function step() {
   busy = false;
   if (!towers || !cfg) return;
-  if (current && !wanted[current.l].has(current.k)) current = null;
+  if (current && (wantGen[current.l] !== mapGen || !wanted[current.l].has(current.k))) current = null;
   if (!current) {
     const p = pick();
     if (!p) return;
@@ -7065,6 +7092,7 @@ onmessage = ({ data: m }) => {
     cfg = m.cfg;
     cfg.wt = cfg.levels.map(v => Math.round(WEATHER_KM / (cfg.T * v.V)));
     wanted = cfg.levels.map(() => new Map());
+    wantGen = cfg.levels.map(() => -1);
   } else if (m.type === 'map') {
     lobeCache.clear(); brickCache.clear(); lobeBytes = brickBytes = 0; maxReach = 0;
     const r = towersOf(m.px, m.n, m.cloud);
@@ -7080,6 +7108,7 @@ onmessage = ({ data: m }) => {
     const w = new Map();
     for (const [tx, tz] of m.tiles) w.set(tx + ',' + tz, [tx, tz]);
     wanted[m.l] = w;
+    wantGen[m.l] = m.gen;
   }
   kickWork();
 };
@@ -7565,7 +7594,7 @@ const SkySound = (() => {
   // see docs/development.md), for the automatic choice.
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
-      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1 } },
+      fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
@@ -8372,7 +8401,7 @@ const SkySound = (() => {
   // tell it (EXT_disjoint_timer_query_webgl2); asked only if given.
   // memory: an object whose `bytes` this renderer keeps up to date (its
   // textures, and the canvas's own buffers as 12 bytes a pixel), for ?stats.
-  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts, wake }) {
+  async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts, marks, wake }) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
     if (memory) countMemory(gl, memory);
@@ -8393,8 +8422,10 @@ const SkySound = (() => {
     // 5 s what it still waits for: where the time goes on a stack that
     // compiles slowly (ANGLE on Direct3D 11, the usual one on Windows).
     const timing = new URLSearchParams(location.search).has('timing');
+    // (With ?stats, the parts are kept for its overlay too: marks.)
     const mark = what => {
       if (timing) console.info(`Sky: ${what}, ${(performance.now() / 1000).toFixed(2)} s`);
+      if (marks) marks.push([what, performance.now() / 1000]);
     };
     mark('WebGL2 context made');
     // The extensions first: asking for one waits for the GPU process, which
@@ -8443,18 +8474,20 @@ const SkySound = (() => {
       const v = (new URLSearchParams(location.search).get('grid') || '').split(',');
       if (v[0] !== '1' || !Q.grid) return null;
       const N = Q.grid, T = 32, CB = 0.6, CT = 5.0;   // (CB, CT: as in fs)
-      // (`,vM`: the finest voxel M m, a power of 2 times 31.25 m.)
-      const vm = /v([0-9.]+)/.exec(v.slice(1).join(',')), V0 = vm ? 0.03125 * 2 ** Math.round(Math.log2(vm[1] / 31.25)) : 0.03125;
+      // (`,v62.5` or `,v62`: the finest voxel 62.5 m, not 31.25 m. Any other
+      // M of `,vM` keeps 31.25 m.)
+      const vm = /v([0-9.]+)/.exec(v.slice(1).join(',')), V0 = vm && Math.abs(vm[1] - 62.5) < 1 ? 0.0625 : 0.03125;
       const levels = [V0, 2 * V0, 4 * V0].map(V => ({ V, nz: Math.ceil((CT - CB) / V - 1e-6) }));
       // (Each level's slices, then four of its columns: see uGrid in fs.)
       const z = levels.map((l, i) => levels.slice(0, i).reduce((a, m) => a + m.nz + 4, 0));
       const nzt = levels.reduce((a, m) => a + m.nz + 4, 0);
-      const hm = /h([0-9.]+):([0-9.]+)/.exec(v.slice(1).join(','));
+      // (K must be over 0: the heads are read at a mip level log2(K) finer.)
+      const hm = /h([0-9.]+):([0-9.]+)/.exec(v.slice(1).join(',')), hk = hm && +hm[1] > 0;
       // (GRID_V0: the finest voxel, km; GRID_LV: its level as a mip level of the noise's texels.)
       const f = x => x.toFixed(1);
       return { N, T, levels, z, nzt,
         defs: `#define TGRID 1\n#define GRID_V0 ${V0.toFixed(6)}\n#define GRID_LV ${Math.log2(V0 / 0.0625).toFixed(1)}\n#define GRID_N ${f(N)}\n#define GRID_NZ vec3(${levels.map(l => f(l.nz))})\n#define GRID_Z vec3(${z.map(f)})\n#define GRID_NZT ${f(nzt)}\n`
-          + (hm ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
+          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
     })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
@@ -9221,7 +9254,22 @@ const SkySound = (() => {
     // fence says it is there: a plain read makes the browser wait until the
     // GPU has done everything asked of it so far, and a phone's GPU, busy
     // for tens of ms a frame, then stood idle while the next frame was made.
+    // Taking it still waits for the GPU process: Chrome 156 keeps no copy
+    // ahead of the read (it warns that it dropped one), and the read held
+    // the script 4 to 5 ms here, up to 110 ms, even with the fence passed
+    // and with a new buffer for each read (measured November 2026). On a
+    // phone those waits were most of the script's time ("start" in ?stats,
+    // 8 ms a frame with a read every 200 ms), and a frame that waited
+    // missed its turn. So the meter is read less often where its reads are
+    // slow: they may hold the script for METER_SHARE of the time at most,
+    // up to a read every METER_SLOW ms (readMs: how long the last one took).
     const pack = Q.meterAsync ? { buffer: gl.createBuffer(), fence: null, frames: 0 } : null, METER_WAIT = 12;
+    const METER_SHARE = 0.05, METER_SLOW = 1000;
+    let readMs = 0;
+    const meterEvery = () => {
+      const ms = Q.meterMs || METER_MS;
+      return pack ? Math.min(Math.max(ms, readMs / METER_SHARE), Math.max(ms, METER_SLOW)) : ms;
+    };
     if (pack) {
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
       gl.bufferData(gl.PIXEL_PACK_BUFFER, meterBytes.length, gl.STREAM_READ);
@@ -9236,7 +9284,9 @@ const SkySound = (() => {
         gl.deleteSync(pack.fence);
         pack.fence = null;
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
+        const t0 = performance.now();
         gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, meterBytes);
+        readMs = performance.now() - t0;
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
         levelsOf();
         waiting = null;
@@ -9542,17 +9592,30 @@ const SkySound = (() => {
       window.__grid = info;
       // (Made at the first frame, after the loading: the request of its
       // script, a Blob's, then does not count in the loading.)
-      let worker = null;
+      // (Its Blob URL is revoked at its first message or error: the worker
+      // has fetched its script by then.)
+      let worker = null, url = null, dead = false;
       const hire = () => {
-        worker = new Worker(URL.createObjectURL(new Blob([document.getElementById('towers').textContent], { type: 'text/javascript' })));
+        url = URL.createObjectURL(new Blob([document.getElementById('towers').textContent], { type: 'text/javascript' }));
+        worker = new Worker(url);
         worker.postMessage({ type: 'start', cfg: { T, levels: levels.map(({ V, nz }) => ({ V, nz })) } });
         worker.onmessage = onTile;
+        worker.onerror = e => {
+          console.error(`Sky: grid: the worker failed (${e.message || 'no message'}${e.lineno ? ', line ' + e.lineno : ''}): the grids are off`);
+          quit();
+        };
         // (A level given up loses its context: its worker goes with it.)
         canvas.addEventListener('webglcontextlost', () => worker.terminate(), { once: true });
         for (const m of early.splice(0)) worker.postMessage(m, m.px ? [m.px.buffer, m.tops.buffer] : []);
       };
       const early = [], post = (m, tr) => worker ? worker.postMessage(m, tr || []) : early.push(m);
+      const freeUrl = () => {
+        if (url) URL.revokeObjectURL(url);
+        url = null;
+      };
       const onTile = ({ data: m }) => {
+        freeUrl();
+        if (dead) return;
         if (m.type === 'towers') {
           info.towers = m.count;
           info.list = m.list;
@@ -9571,7 +9634,7 @@ const SkySound = (() => {
       const want = lv => {
         const tiles = [];
         lv.held.forEach((h, a) => { if (h && lv.since[a] < 0) tiles.push(h); });
-        post({ type: 'want', l: lv.l, tiles });
+        post({ type: 'want', gen, l: lv.l, tiles });
       };
       // The warped map at 250 m (its mip level of 1024 texels), read back
       // without waiting (a pixel buffer and a fence) after each map of the
@@ -9586,8 +9649,8 @@ const SkySound = (() => {
         gl.bufferData(gl.PIXEL_PACK_BUFFER, size * size * 4, gl.STREAM_READ);
       }
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      const mapFor = cloud => {
-        gen++;
+      // No tile held or shown.
+      const clear = () => {
         for (const lv of L) {
           lv.held.fill(null);
           lv.shown.fill(0);
@@ -9598,6 +9661,26 @@ const SkySound = (() => {
         inbox.length = 0;
         blank();
         version++;
+      };
+      // The worker failed: the grids are off for good, and the clouds are
+      // the present field's (the shaders still read the empty grids: within
+      // a few levels of the picture with the switch off).
+      const quit = () => {
+        freeUrl();
+        if (dead) return;
+        dead = true;
+        worker.terminate();
+        if (reading) gl.deleteSync(reading.sync);
+        reading = null;
+        clear();
+        info.tiles = L.map(() => 0);
+        info.failed = true;
+        wake();
+      };
+      const mapFor = cloud => {
+        gen++;
+        clear();
+        if (dead) return;
         const was = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFb);
         for (const [t, level, b, size] of [[warped[0].texture, mapLevel, pbo, MAP], [tops[1].texture, 0, pboTops, TOPS]]) {
@@ -9616,6 +9699,7 @@ const SkySound = (() => {
         const t0 = performance.now(), d = state.drift;
         let changed = false;
         if (!worker) hire();
+        if (dead) return false;
         if (!way) way = [d[0], d[1]];
         else {
           way[0] += near(d[0] - last[0]);
@@ -9837,7 +9921,9 @@ const SkySound = (() => {
       const fitted = fit();
       if (!fitted) return false;
       const v = view(), cam = camera(v.yaw, v.pitch);
+      lap('start');
       poll();
+      lap('read');
       const dt = then === null ? 0 : Math.min(Math.max(now - then, 0), 100) / 1000;
       then = now;
       if (target !== null && logE !== null && pin === null) {
@@ -9907,7 +9993,7 @@ const SkySound = (() => {
       const steps = fine ? 2048 : 255;                 // every half float up to 1 is a multiple of 1/2048
       const pass = drawn % 64;
 
-      lap('start');
+      lap('targets');
       if (state.cirrus > 0) buildIce();
       // The frame. New noise for each: where the ray crosses the pixel, and
       // where its samples lie.
@@ -10054,7 +10140,7 @@ const SkySound = (() => {
         return true;
       }
       lap('mean');
-      if (waiting === null && now - meteredAt >= (Q.meterMs || METER_MS)) {
+      if (waiting === null && now - meteredAt >= meterEvery()) {
         meterPicture(cur, 'later');
         meteredAt = now;
       }
@@ -10708,11 +10794,21 @@ const SkySound = (() => {
       z ? `picture ${wh(z.picture)}, frame ${wh(z.frame)}, scale ${z.scale.toFixed(2)}` : 'picture -',
       z ? `clouds ${state.cloud > 0 ? wh(z.passes) : '-'}, light ${state.cloud > 0 ? wh(z.light) : '-'}, cirrus ${state.cirrus > 0 ? wh(z.frame.map(x => Math.ceil(x / (Q.ciPass || Q.pass)))) : '-'}` : '',
       `first picture ${stats.first === null ? '-' : (stats.first / 1000).toFixed(1) + ' s'}`,
+      stats.marks && stats.marks.length ? 'start ' + startParts(stats.marks) : '',
       `GPU memory ${(stats.memory.bytes / 1e6).toFixed(0)} MB`,
       `context lost ${stats.lost}, failed ${tried.length}`,
       stats.name || '',
     ].filter(Boolean).join('\n');
   }
+  // The parts of the start, for the overlay: when each ended (s since the
+  // page was opened), by the names of `mark` in makeSky; the programs as
+  // one, when the last was done.
+  const START_PARTS = [['WebGL2 context made', 'context'], ['tables built', 'tables'], ['program', 'programs'], ['noise and weather built', 'noise'],
+    ['cirrus built', 'cirrus'], ['waves built', 'waves'], ['first frame drawn', 'frame']];
+  const startParts = marks => START_PARTS.map(([what, name]) => {
+    const at = marks.filter(([m]) => m === what || (what === 'program' && m.startsWith('program '))).map(([, s]) => s);
+    return at.length ? `${name} ${Math.max(...at).toFixed(1)}` : '';
+  }).filter(Boolean).join(', ') + ' s';
   if (stats) setInterval(showStats, 500);
   // ?stats=bench: from 3 s after the first picture, the drawing scale is
   // held at each of BENCH_SCALES for BENCH_MS in turn, and the frames a
@@ -11063,6 +11159,7 @@ const SkySound = (() => {
             if (now - stats.shownAt > 1000) showStats();
           }),
           parts: stats && stats.parts,
+          marks: stats && (stats.marks = []),
           shown: () => {
             hero.classList.add('shown');
             shownAt = performance.now();
