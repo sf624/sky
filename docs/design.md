@@ -264,10 +264,29 @@ slider is rounded to 10 m.
 `celestial()` places the sun, the moon and the stars for `state.day` and
 `state.time`:
 
-- The observer is at `LATITUDE` = 35 degrees north. The time is local solar
-  time: the sun is due south at 12:00.
-- The sun moves along the ecliptic (`OBLIQUITY` = 23.44 degrees), at
-  longitude 0 on day 80.
+- The observer is at `state.lat` (35 degrees north at first, `?lat=`), at
+  any latitude from pole to pole: `onSky` turns a declination and an hour
+  angle into the local sky there, and the star map, the Milky Way and the
+  zodiacal light follow through `uSky`. Nothing else depends on the
+  latitude: the air's tables take only the sun's elevation, so a new
+  latitude costs what a new time does.
+- `state.clock` says what the date and the time are. On the solar clock (at
+  first) the time is local solar time: the sun is highest at 12:00 (due
+  south north of the tropics), and the sun moves evenly along the ecliptic
+  (`OBLIQUITY` = 23.44 degrees), at longitude 0 on day 80 (up to 1.5
+  degrees from the real sun). The longitude does not matter there: at the
+  same solar time the sky is the same at every longitude.
+- On the UTC clock (`?clock=utc`) the date and the time are a moment in
+  UTC, and the observer stands at `state.lon` (135 degrees east at first).
+  `sunAndSidereal` gives the sun's longitude and the local sidereal time
+  from the Astronomical Almanac's low-precision formulas (the sun within
+  0.01 degree of NOAA's solar calculator). The stars keep their J2000
+  places (precession is left out: up to 0.3 degree in 2026). The panel's
+  clock keeps the moment when it changes (`setClock`); the sun then moves by
+  the solar clock's error, at most 1.5 degrees.
+- The place button asks the browser for the place (only when it is
+  pressed; the browser asks the reader first), rounds it to 0.1 degree, and
+  sets the UTC clock and now. The place stays in the page.
 - The moon runs ahead of the sun along the ecliptic by its age
   (`state.moonAge / 29.53` of a turn). Its orbit's tilt is left out.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
