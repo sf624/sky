@@ -3264,7 +3264,6 @@ asks which level it is.
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `minScale` | 0.35 | 0.35 | 0.35 | 1 |
 | `keys` | no | no | yes | yes |
-| `meterAsync` | yes | yes | no | no |
 | `airLut` | yes | no | no | no |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
@@ -3305,21 +3304,30 @@ asks which level it is.
 - `keys`: `mean` reads the past through Keys' six-point cubic (`KEYS`)
   instead of Catmull-Rom: sharper in flight, for 25 bilinear reads a pixel
   instead of nine (see [the mean over frames](#the-heros-mean-over-frames)).
-- `meterAsync`: the exposure meter's read in flight (see
+- (At every level, the exposure meter's read in flight (see
   [Exposure](#exposure-and-the-tone-curve)) goes into a buffer of the GPU's
   (`PIXEL_PACK_BUFFER`), taken once a fence says it has arrived. A plain
   `readPixels` makes the browser wait until the GPU has done all that it
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
-  idle while the next frame is made, every 100 ms. (`max` and `high` keep
-  the plain read: their frames stay as they were.) Taking the buffer
+  idle while the next frame is made, every 100 ms. Taking the buffer
   still waits for the GPU process: Chrome 156 keeps no copy of it ahead
   of the read (it warns that it dropped one), and on the test machine
   each read held the script 4 to 5 ms, up to 110 ms, with the fence
   passed and even with a new buffer each time. On a phone those reads
   were most of the script's time (8 ms a frame), and a frame that waited
-  missed its turn. So at these levels the meter waits between reads 20
-  times as long as the last read took (`METER_SHARE`, 5 %), at least
-  `meterMs` and at most `METER_SLOW` (1 s).
+  missed its turn. So the meter waits between reads 20 times as long as
+  the last read took (`METER_SHARE`, 5 %), at least `meterMs` and at most
+  `METER_SLOW` (1 s). `high` and `max` kept the plain read until issue
+  #80: on Direct3D 11 (Windows Chrome, headless, RTX 3090) with the
+  overcast deck at 2654 x 1280, flying, three runs each, it held the
+  script 12 to 20 ms a frame on average (`read` in `?stats`), and the
+  page drew 36.3 to 39.1 frames a second, with a tenth of the gaps
+  between frames 50 to 67 ms long; read through the buffer, 1 to 2 ms,
+  39.3 to 40.2 frames a second, and 33 to 50 ms. Each read still waits
+  there while the GPU is busy (23 to 29 ms), so the meter is read about
+  every 0.4 s at that size; the exposure in flight stays as steady (the
+  `flight` check: 0.0002 stops over the last 20 frames at cruise). At
+  1898 x 982, under 16.7 ms a frame, the frame rate did not change.)
 - `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
   and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
   the aircraft flies before a layer of a depth map is drawn again (see

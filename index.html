@@ -7952,9 +7952,9 @@ const SkySound = (() => {
   // 1: always the canvas's size). keys: the past is read through Keys'
   // six-point cubic, sharper in flight (see "mean").
   const QUALITY = {
-    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
+    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
-    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
+    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
     high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
@@ -9733,11 +9733,13 @@ const SkySound = (() => {
       if (when === 'now') readMeter();
       else if (when === 'later') waiting = 0;
     };
-    // At the levels with `meterAsync` (a phone's), the read in flight goes
-    // into a buffer of the GPU's (PIXEL_PACK_BUFFER) and is taken once a
-    // fence says it is there: a plain read makes the browser wait until the
-    // GPU has done everything asked of it so far, and a phone's GPU, busy
-    // for tens of ms a frame, then stood idle while the next frame was made.
+    // The read in flight goes into a buffer of the GPU's (PIXEL_PACK_BUFFER)
+    // and is taken once a fence says it is there: a plain read makes the
+    // browser wait until the GPU has done everything asked of it so far,
+    // and the GPU then stands idle while the next frame is made (a phone's,
+    // busy for tens of ms a frame; and at max on Direct3D 11, where the plain
+    // read cost some 6 % of the frames: see "The quality levels" in
+    // docs/design.md).
     // Taking it still waits for the GPU process: Chrome 156 keeps no copy
     // ahead of the read (it warns that it dropped one), and the read held
     // the script 4 to 5 ms here, up to 110 ms, even with the fence passed
@@ -9747,20 +9749,18 @@ const SkySound = (() => {
     // missed its turn. So the meter is read less often where its reads are
     // slow: they may hold the script for METER_SHARE of the time at most,
     // up to a read every METER_SLOW ms (readMs: how long the last one took).
-    const pack = Q.meterAsync ? { buffer: gl.createBuffer(), fence: null, frames: 0 } : null, METER_WAIT = 12;
+    const pack = { buffer: gl.createBuffer(), fence: null, frames: 0 }, METER_WAIT = 12;
     const METER_SHARE = 0.05, METER_SLOW = 1000;
     let readMs = 0;
     const meterEvery = () => {
       const ms = Q.meterMs || METER_MS;
-      return pack ? Math.min(Math.max(ms, readMs / METER_SHARE), Math.max(ms, METER_SLOW)) : ms;
+      return Math.min(Math.max(ms, readMs / METER_SHARE), Math.max(ms, METER_SLOW));
     };
-    if (pack) {
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
-      gl.bufferData(gl.PIXEL_PACK_BUFFER, meterBytes.length, gl.STREAM_READ);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, meterBytes.length, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     const poll = () => {
-      if (pack && pack.fence) {
+      if (pack.fence) {
         // (After METER_WAIT frames it is taken anyway: some browsers tell
         // a fence has passed only on a later task, which a page stepped
         // frame by frame, as the tools step it, may not give.)
@@ -9777,18 +9777,13 @@ const SkySound = (() => {
         return;
       }
       if (waiting === null || ++waiting < METER_LAG) return;
-      if (pack) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
-        gl.readPixels(0, 0, METER[0], METER[1], gl.RGBA, gl.UNSIGNED_BYTE, 0);
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-        pack.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        pack.frames = 0;
-        gl.flush();
-        return;
-      }
-      waiting = null;
-      readMeter();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.buffer);
+      gl.readPixels(0, 0, METER[0], METER[1], gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      pack.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      pack.frames = 0;
+      gl.flush();
     };
 
     // The clouds' depth maps (see cloudShadow and columnDepth in fs): along
