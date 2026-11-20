@@ -129,8 +129,8 @@
   .panel .time select { width: auto; flex: none; margin: 0; }
   .panel .level button { display: block; margin: 2px 0 0; width: 30px; height: 30px; }
   /* The stick, for steering on a touch screen (see Steering in the script):
-     bottom left, over the panel, which goes while it is held. It stays when
-     the panel fades, fainter. */
+     bottom left. It stays when the panel fades, fainter; held, it keeps the
+     panel away. */
   .stick {
     position: absolute; z-index: 2;
     left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom));
@@ -152,6 +152,14 @@
   }
   .stick-level svg { width: 16px; height: 16px; }
   .hero.still .stick { opacity: .45; }
+  .hero .stick.held { opacity: .9; }
+  /* Where the panel would lie over it (narrower than the panel and the
+     stick side by side), the stick waits while the panel is shown: the
+     panel fades a few seconds after the last touch, and holding the stick
+     keeps it away. */
+  @media (max-width: 1111px) {
+    .hero:not(.still) .stick { opacity: 0; visibility: hidden; transition: opacity .6s, visibility .6s; }
+  }
   .hero:not(.shown) .stick { visibility: hidden; }
   .title .hint {
     margin: 10px 0 0;
@@ -11439,6 +11447,7 @@ const SkySound = (() => {
     if (e.target.closest('.stick-level')) return;
     stickId = e.pointerId;
     stickPad.setPointerCapture(e.pointerId);
+    stickPad.classList.add('held');
     hero.classList.add('still');
     moveStick(e);
   });
@@ -11446,6 +11455,7 @@ const SkySound = (() => {
   const letStickGo = e => {
     if (e.pointerId !== stickId) return;
     stickId = null;
+    stickPad.classList.remove('held');
     stickAt[0] = stickAt[1] = 0;
     stickKnob.style.removeProperty('--x');
     stickKnob.style.removeProperty('--y');
