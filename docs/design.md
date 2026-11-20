@@ -1086,7 +1086,7 @@ depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
 sky's lean towards the sun's side, the depth towards the light over its
 first two steps, and over its own steps past those without the map of the
-clouds' shadow, `tauN`), taken where the ray entered the cloud (marching on to the point
+clouds' shadow, `tauN`, and over those of them within 175 m, `tauNn`), taken where the ray entered the cloud (marching on to the point
 where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
@@ -1164,9 +1164,16 @@ each cloud, not on its surface; no normal of the field enters it.
   cost did not change measurably. With the fine noise in the later steps
   too the depth came out at 7, but the shaded sides of towers turned
   mottled), and beyond that the
-  map of the clouds' shadow (`cloudShadow`, read where the steps ended: it
-  holds the depth along the line of light from that height up), so that
-  heaps shade one another out to tens of km, as with the sun low; `tauB`,
+  map of the clouds' shadow (`cloudShadowOwn`, read where the steps ended:
+  it holds the depth along the line of light from that height up), so that
+  heaps shade one another out to tens of km, as with the sun low. With the
+  light under 15 degrees it reads the map's height above the place alone,
+  and between the two by degrees up to 27 degrees: read between two
+  heights, which lie kilometres apart along a low light, the depth from
+  the one below took in the cloud itself behind the place and drew a band
+  across the lit walls of towers for each height of the map (#63; a few
+  short dashes remain where the place lies just under a height of the
+  map, whose line of light still starts inside the same heap); `tauB`,
   away from the light, out to 1.58 km (three steps of 25 m growing by 2,
   out to 175 m, with the fine noise and a sideways stray that grows; the
   rest, with the light more than 27 degrees high, from the map of the
@@ -1202,11 +1209,13 @@ each cloud, not on its surface; no normal of the field enters it.
 - *In a crease on the lit side* both are less (`crease`; not from the
   Monte Carlo, whose spheres have no creases): by up to `CREASE.x` = 0.8
   as `1 - e^(-tauLoc / CREASE.y)`, `CREASE.y` = 4, where `tauLoc` is the
-  depth towards the light over the light's own steps (`tauF` and `tauN`:
-  out to 27.8 first steps, some 0.4 to 1.4 km), and only on the side of a
-  mass that the light falls on: by `smoothstep(0.5, 0.9, tauB / (tauB +
-  tauLoc))` (`CREASE.zw`), much more cloud behind the place than towards
-  the light. On a sphere, a place with much cloud behind it and some depth
+  depth towards the light near the place, out to `CREASE_KM` = 175 m
+  (`tauF`, and `tauNn`: the light's own steps past the first two that end
+  within 175 m), and only on the side of a mass that the light falls on:
+  by `smoothstep(0.5, 0.9, tauBn / (tauBn + tauLoc))` (`CREASE.zw`), with
+  `tauBn` the first three steps of `tauB` (out to 175 m): much more cloud
+  behind the place than towards the light.
+  On a sphere, a place with much cloud behind it and some depth
   towards the light lies near the edge of the lit face, where light goes
   in right beside it, and the fit keeps it bright (`K` = 0.0074: a depth of
   20 takes 13 % off); in a crease the heads round it take that light. With
@@ -1215,12 +1224,21 @@ each cloud, not on its surface; no normal of the field enters it.
   the brightest within 25 pixels at 1280x720), the heaps smooth white
   mounds like snow; photographs of heaps from above and of towers from the
   side show 0.57 to 0.79 (0.84 to 0.89 with the sun behind the eye: then
-  the creases are lit too). Now 0.72 to 0.81, and still 0.86 to 0.88 with
-  the sun behind the eye or looking straight down.
+  the creases are lit too). Then 0.72 to 0.81, and still 0.86 to 0.88 with
+  the sun behind the eye or looking straight down (measured before the
+  crease read its depths within 175 m; not measured again since).
+  A crease is shaded by the heads beside it: read over all the light's
+  steps, out to 1.4 km, and with `tauB` out to 1.58 km, with the sun high
+  every wall of a tower had the deck and the tower under it behind and the
+  tower's top towards the light, and was darkened as a crease: grey walls
+  under white ledges, like snow on rocks. With the sun behind the eye
+  `tauF` counts less, by `smoothstep(-0.95, -0.6, mu)`: the eye then sees
+  what the sun sees, and the depth over the first steps found only the
+  shadows of small heads just beside the place, grey blotches on the lit
+  walls.
   The map of the clouds' shadow is left out of `tauLoc`: its heights lie
   hundreds of metres apart, and with the sun low it drew bands across the
-  towers (`tauCM` itself, and with it the light scattered once, still
-  shows them faintly there). The shaded side keeps its light (more cloud towards the light
+  towers. The shaded side keeps its light (more cloud towards the light
   than behind), and so do small heaps and thin cloud (little behind).
 - *The sky's light*: how much of the sky the place sees (`sky`): the light
   that comes through the cloud along directions drawn over the sky's

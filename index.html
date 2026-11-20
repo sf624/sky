@@ -1783,7 +1783,7 @@ uint halfPair(vec2 v) {
   return halfBits(v.x) | (halfBits(v.y) << 16);
 }
 // The first stage's values at a texel: tIn, tauCM, above, sky (a), and
-// skyLean, tauF, tauN (b; the rest is free).
+// skyLean, tauF, tauN, tauNn (b).
 void lightMapAt(ivec2 ij, out vec4 a, out vec4 b) {
   uvec4 u = texelFetch(uLightMap, ij, 0);
   a = vec4(unpackHalf2x16(u.x), unpackHalf2x16(u.y));
@@ -2211,6 +2211,8 @@ const float MS_UP = 0.704;
 const vec3 MSD = vec3(5.0, 0.0074, 0.039);
 const float DARK = 0.589, DARK_KM = 0.07;
 const vec4 CREASE = vec4(0.8, 4.0, 0.5, 0.9);
+// (The crease reads its depths near the place: out to CREASE_KM.)
+const float CREASE_KM = 0.175;
 const vec3 SKYV = vec3(2.205, 0.0382, 0.317);
 // The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
 // what a white matt surface facing up under the sky as drawn sends out, of
@@ -2910,10 +2912,11 @@ vec3 mapAt(vec3 p, vec3 ax, vec3 ay, vec2 shift, int layer) {
 }
 
 // The optical depth from p up to the tops along the lines of a map (map,
-// its axes ax and ay, and its layers' shifts), between its heights. (The
-// map as an argument: a program reads only the maps it names, and Direct3D
-// 11 gives a program 16 textures.)
-float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p) {
+// its axes ax and ay, and its layers' shifts), between its heights, or by
+// up (0 to 1) from the height above p alone. (The map as an argument: a
+// program reads only the maps it names, and Direct3D 11 gives a program 16
+// textures.)
+float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p, float up) {
   if (uCloud <= 0.0) return 0.0;
   float z = clamp((length(p) - RG - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N);
   int k = min(int(z), SHADOW_N - 1), l = k / 4, c = k % 4;
@@ -2923,12 +2926,20 @@ float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p
   if (c == 3) e1 = k == SHADOW_N - 1 ? 0.0 : textureLod(map, mapAt(p, ax, ay, shift[l + 1], l + 1), 0.0).x;
   vec2 e = vec2(u[c], e1);
   vec2 tau = SHADOW_ENC * e / max(1.0 - e, 1e-4);
-  return mix(tau.x, tau.y, z - float(k));
+  return mix(tau.x, tau.y, mix(z - float(k), 1.0, up));
 }
 
 // The optical depth of the clouds from p towards the light.
 float cloudShadow(vec3 p) {
-  return mapDepth(uShadow, shX, shY, uShadowShift, p);
+  return mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0);
+}
+// The same, for a cloud's own light: with the light low, from the height
+// above p alone. (Read between two heights, which lie kilometres apart
+// along a low light, the depth from the one below took in the cloud
+// itself behind p, and drew bands across the lit walls of towers, one for
+// each height of the map.)
+float cloudShadowOwn(vec3 p) {
+  return mapDepth(uShadow, shX, shY, uShadowShift, p, 1.0 - smoothstep(0.25, 0.45, uLight.y));
 }
 
 // The optical depth of the clouds straight up from p, times the sheet's
@@ -2936,7 +2947,7 @@ float cloudShadow(vec3 p) {
 float columnDepth(vec3 p) {
   vec3 ax, ay;
   mapAxes(vec3(0.0, 1.0, 0.0), ax, ay);
-  return mapDepth(uColumn, ax, ay, uColumnShift, p);
+  return mapDepth(uColumn, ax, ay, uColumnShift, p, 0.0);
 }
 
 // The same on the sea, with soft edges. The sun is a disc, and the light
@@ -3299,7 +3310,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // thin fringe: only for the first, the outlines of billows seen
       // against those behind them were worked out in full, 4 ms of the
       // frame among the tops.)
-      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, tauN = 0.0;
+      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, tauN = 0.0, tauNn = 0.0, tauBn = 0.0;
       // (For the sky's directions, below.)
       bool under0 = true;
       vec3 sunSide = vec3(0.0);
@@ -3351,6 +3362,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           skyLean = B.x / ws;
           if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
           tauN = B.z / ws;
+          tauNn = B.w / ws;
         }
       }
       if (!mapped) {
@@ -3501,10 +3513,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           }
         } else if (n < 16) {
           tauB += dt;
+          if (j < 3) tauBn += dt;
           sb += db;
           db *= 2.0;
         } else {
           if (j < 2) crisp += dt; else tauL += dt;
+          if (j >= 2 && sl + dl <= CREASE_KM) tauNn += dt;
           if (moved) offL = -0.5 * offL + 0.866 * cross(uLight, offL);
           sl += dl;
           dl *= 1.6;
@@ -3526,7 +3540,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           // tens of km, so that with the sun low they shade one another.
           // It holds the depth along the line of light through this place
           // from a height upwards, so read where the steps ended.
-          tauCM = tauL + cloudShadow(ps + eye() + uLight * (27.8 * max(step, 0.015)));
+          tauCM = tauL + cloudShadowOwn(ps + eye() + uLight * (27.8 * max(step, 0.015)));
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
         }
       }
@@ -3540,11 +3554,14 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // The depth towards the light over the light's own steps past the
       // first two, without the map of the clouds' shadow (tauN: the crease
       // below).
-      if (!mapped) tauN = tauL * (1.0 - slabbed);
+      if (!mapped) {
+        tauN = tauL * (1.0 - slabbed);
+        tauNn *= 1.0 - slabbed;
+      }
       if (uStage == 0.0) {
         // The first stage keeps these, and its ray ends here.
         mapA = vec4(tIn, tauCM, above, sky);
-        mapB = vec4(skyLean, tauF, tauN, 0.0);
+        mapB = vec4(skyLean, tauF, tauN, tauNn);
         return;
       }
       // How deep the point lies under the cloud's surface (P: 0 there, 1 at
@@ -3593,8 +3610,19 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // CREASE.y; only where the place lies on the side of its mass that the
       // light falls on (much more cloud behind it than towards the light,
       // tauB against tauLoc): the shaded side keeps its light.
-      float tauLoc = tauF + tauN;
-      float crease = 1.0 - CREASE.x * smoothstep(CREASE.z, CREASE.w, tauB / (tauB + tauLoc + 1e-3)) * (1.0 - exp(-tauLoc / CREASE.y));
+      // Both depths are read near the place (CREASE_KM): a crease is shaded
+      // by the heads beside it. (Over the light's own steps and tauB out to
+      // 1.5 km, with the sun high every wall had the deck and the tower
+      // under it behind and the tower's top towards the light, and was
+      // darkened as a crease: grey walls under white ledges, like snow on
+      // rocks.)
+      // (With the sun behind the eye the eye sees what the sun sees, and the
+      // depth over the first steps, tauF, finds only the shadows of small
+      // heads just beside the place: on the lit walls of towers they were
+      // grey blotches. Photographs show creases nearly as bright as the
+      // heads then.)
+      float tauLoc = tauF * smoothstep(-0.95, -0.6, mu) + tauNn;
+      float crease = 1.0 - CREASE.x * smoothstep(CREASE.z, CREASE.w, tauBn / (tauBn + tauLoc + 1e-3)) * (1.0 - exp(-tauLoc / CREASE.y));
       ms *= crease;
       diffuse *= crease;
       // Seen from below, a cloud under more of itself shows the light that
