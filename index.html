@@ -101,6 +101,7 @@
     cursor: pointer;
   }
   .panel button:hover { background: rgba(255, 255, 255, .25); }
+  .panel label:has(:disabled) { opacity: .5; }
   .panel button svg { display: block; width: 18px; height: 18px; margin: auto; }
   .panel .row { display: flex; justify-content: space-between; }
   .panel output { font-variant-numeric: tabular-nums; opacity: .9; }
@@ -274,6 +275,9 @@
       <button id="now" type="button" aria-label="いまの日時" title="いまの日時" data-t-label="now" data-t-title="now">
         <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M9 4.8V9l2.8 1.8"/></svg>
       </button>
+      <button id="here" type="button" aria-label="現在地のいまの空" title="現在地のいまの空" data-t-label="here" data-t-title="here">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 16.5s-5.2-5.3-5.2-9a5.2 5.2 0 0 1 10.4 0c0 3.7-5.2 9-5.2 9z"/><circle cx="9" cy="7.4" r="1.9"/></svg>
+      </button>
       <select id="rate" aria-label="時間の進む速さ" title="時間の進む速さ" data-t-label="rate" data-t-title="rate">
         <option value="1" data-t="rate1">実時間</option>
         <option value="60" data-t="rate60">1分/秒</option>
@@ -299,6 +303,21 @@
     <label>
       <span class="row"><span data-t="moon">月</span><output id="moonOut"></output></span>
       <input id="moon" type="range" min="0" max="29.5" step="0.5">
+    </label>
+    <label>
+      <span class="row"><span data-t="lat">緯度</span><output id="latOut"></output></span>
+      <input id="lat" type="range" min="-90" max="90" step="0.1" value="35">
+    </label>
+    <label>
+      <span class="row"><span data-t="lon">経度</span><output id="lonOut"></output></span>
+      <input id="lon" type="range" min="-180" max="180" step="0.1" value="135">
+    </label>
+    <label>
+      <span class="row"><span data-t="clock">時計</span></span>
+      <select id="clock">
+        <option value="solar" data-t="clockSolar">太陽時</option>
+        <option value="utc" data-t="clockUTC">協定世界時 (UTC)</option>
+      </select>
     </label>
     <label>
       <span class="row"><span data-t="haze">大気の霞</span><output id="hazeOut"></output></span>
@@ -376,9 +395,13 @@ const TEXT = {
     lostAgain: 'GPU が描くのをやめました。やり直します…',
     fullScreen: '全画面表示',
     exitFullScreen: '全画面を終了',
-    play: '時間を進める', now: 'いまの日時',
+    play: '時間を進める', now: 'いまの日時', here: '現在地のいまの空', hereFailed: '現在地がわかりませんでした',
     rate: '時間の進む速さ', rate1: '実時間', rate60: '1分/秒', rate600: '10分/秒', rate960: '16分/秒', rate3600: '1時間/秒',
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
+    lat: '緯度', lon: '経度', clock: '時計', clockSolar: '太陽時', clockUTC: '協定世界時 (UTC)',
+    lonSolar: '時計が UTC のときに使う',
+    latText: l => (l < 0 ? '南緯 ' : l > 0 ? '北緯 ' : '') + Math.abs(l).toFixed(1) + '°',
+    lonText: l => (Math.abs(l) >= 180 || l === 0 ? '' : l < 0 ? '西経 ' : '東経 ') + Math.abs(l).toFixed(1) + '°',
     alt: '高度', altField: '高度（m または km）', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     quality: '画質', qualityAuto: '自動', qualityLow: '低', qualityMid: '中', qualityHigh: '高', qualityMax: '最高',
     qualityAutoAt: level => '自動（' + level + '）',
@@ -407,9 +430,13 @@ const TEXT = {
     lostAgain: 'The GPU stopped drawing. Starting again…',
     fullScreen: 'Full screen',
     exitFullScreen: 'Exit full screen',
-    play: 'Play time-lapse', now: 'Now',
+    play: 'Play time-lapse', now: 'Now', here: 'The sky here and now', hereFailed: 'The place could not be found',
     rate: 'Speed of time', rate1: 'real time', rate60: '1 min/s', rate600: '10 min/s', rate960: '16 min/s', rate3600: '1 h/s',
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
+    lat: 'Latitude', lon: 'Longitude', clock: 'Clock', clockSolar: 'Solar time', clockUTC: 'UTC',
+    lonSolar: 'Used when the clock is UTC',
+    latText: l => Math.abs(l).toFixed(1) + '°' + (l < 0 ? ' S' : l > 0 ? ' N' : ''),
+    lonText: l => Math.abs(l).toFixed(1) + '°' + (Math.abs(l) >= 180 || l === 0 ? '' : l < 0 ? ' W' : ' E'),
     alt: 'Altitude', altField: 'Altitude (m or km)', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     quality: 'Quality', qualityAuto: 'Auto', qualityLow: 'Low', qualityMid: 'Medium', qualityHigh: 'High', qualityMax: 'Max',
     qualityAutoAt: level => 'Auto (' + level + ')',
@@ -7765,7 +7792,6 @@ const SkySound = (() => {
 (() => {
   'use strict';
   const RAD = Math.PI / 180;
-  const LATITUDE = 35 * RAD;         // of the observer
   const OBLIQUITY = 23.44 * RAD;     // tilt of the earth's axis
   const LIGHT_SWAP = [-3, -4.5, -6]; // sun's elevation: the clouds' light from the sun to the moon (see celestial)
   const MOON_AIR = [-14, -11];       // stops of the moonlit air below the sunlit: the moon's light in the air fades in (moonAirFor)
@@ -8148,26 +8174,63 @@ const SkySound = (() => {
     // tick): playing past midnight then turns the sky on smoothly. 0 once the
     // date or the time is set.
     dayShift: 0,
+    // The place, in degrees (north and east), and the clock the date and the
+    // time are read on: 'solar' (local solar time; the longitude does not
+    // matter) or 'utc' (see celestial).
+    lat: 35, lon: 135, clock: 'solar',
   };
   let builtHaze = null;
 
-  // Local direction of a point at declination dec and hour angle H.
-  const onSky = (dec, H) => [
+  // Local direction of a point at declination dec and hour angle H, seen
+  // from latitude lat (radians).
+  const onSky = (dec, H, lat) => [
     Math.cos(dec) * Math.sin(H),
-    Math.sin(LATITUDE) * Math.sin(dec) + Math.cos(LATITUDE) * Math.cos(dec) * Math.cos(H),
-    Math.sin(LATITUDE) * Math.cos(dec) * Math.cos(H) - Math.cos(LATITUDE) * Math.sin(dec)];
+    Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(H),
+    Math.sin(lat) * Math.cos(dec) * Math.cos(H) - Math.cos(lat) * Math.sin(dec)];
   // Right ascension and declination of a point on the ecliptic.
   const fromEcliptic = lon => [
     Math.atan2(Math.cos(OBLIQUITY) * Math.sin(lon), Math.cos(lon)),
     Math.asin(Math.sin(OBLIQUITY) * Math.sin(lon))];
-  // Where the sun, the moon and the stars are on state.day (and dayShift) at state.time.
-  // The time is local solar time: the sun is due south at 12:00.
+  // The sun's ecliptic longitude and the local sidereal time (radians) at a
+  // moment in UTC: day (of the year, from 1) and hours, at longitude lonDeg.
+  // The low-precision formulas of the Astronomical Almanac (section C, "Sun":
+  // good to 0.01 degree; the sidereal time from Greenwich mean sidereal time),
+  // n days from J2000.0. 69 s between TT and UTC are left out.
+  function sunAndSidereal(year, day, hours, lonDeg) {
+    const n = (Date.UTC(year, 0, day) - Date.UTC(2000, 0, 1, 12)) / 864e5 + hours / 24;
+    const g = (357.528 + 0.9856003 * n) * RAD;            // mean anomaly
+    const L = 280.460 + 0.9856474 * n;                    // mean longitude, degrees
+    const sunLon = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * RAD;
+    const sidereal = (280.46061837 + 360.98564736629 * n + lonDeg) * RAD;
+    return [sunLon, sidereal];
+  }
+  // The local apparent solar time (hours, 0 to 24) at that moment and place.
+  function solarHours(year, day, hours, lonDeg) {
+    const [sunLon, sidereal] = sunAndSidereal(year, day, hours, lonDeg);
+    const H = sidereal - fromEcliptic(sunLon)[0];
+    return ((H / (15 * RAD) + 12) % 24 + 24) % 24;
+  }
+  // Where the sun, the moon and the stars are on state.day (and dayShift) at
+  // state.time, seen from state.lat. On the solar clock (at first) the time
+  // is local solar time, the sun due north or south at 12:00, and the sun
+  // runs evenly along the ecliptic, at longitude 0 on day 80: the longitude
+  // does not matter. On the UTC clock the date and the time are UTC (of
+  // YEAR, the date slider's): the sun and the sidereal time come from the
+  // moment (sunAndSidereal), and state.lon places the observer.
   function celestial() {
-    const lon = (state.day + state.dayShift - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
-    const [sunRA, sunDec] = fromEcliptic(lon);
-    const H = (state.time - 12) * 15 * RAD;                // hour angle of the sun
-    const siderealTime = H + sunRA;
-    state.sun = onSky(sunDec, H);
+    const lat = state.lat * RAD;
+    let lon, H, siderealTime, sunRA, sunDec;
+    if (state.clock === 'utc') {
+      [lon, siderealTime] = sunAndSidereal(YEAR, state.day, state.time, state.lon);
+      [sunRA, sunDec] = fromEcliptic(lon);
+      H = siderealTime - sunRA;
+    } else {
+      lon = (state.day + state.dayShift - 80) / 365.25 * 2 * Math.PI;   // the sun on the ecliptic; 0 in March
+      [sunRA, sunDec] = fromEcliptic(lon);
+      H = (state.time - 12) * 15 * RAD;                // hour angle of the sun
+      siderealTime = H + sunRA;
+    }
+    state.sun = onSky(sunDec, H, lat);
     state.elev = Math.asin(state.sun[1]) / RAD;
     // A light below the horizon still lights the air above until it is
     // some 18 degrees down. Its light fades out between 18 and 21 degrees
@@ -8178,7 +8241,7 @@ const SkySound = (() => {
     // The moon runs ahead of the sun along the ecliptic by its age.
     const elong = state.moonAge / 29.53 * 360;
     const [moonRA, moonDec] = fromEcliptic(lon + elong * RAD);
-    state.moon = onSky(moonDec, siderealTime - moonRA);
+    state.moon = onSky(moonDec, siderealTime - moonRA, lat);
     // Moonlight: 2.5e-6 of sunlight at full moon, falling off steeply with the phase
     // (the phase law in Krisciunas and Schaefer, 1991).
     const alpha = Math.abs(180 - elong);
@@ -8203,9 +8266,9 @@ const SkySound = (() => {
     state.lightI = state.lightShare * (swap ? 1 : state.moonI);
     // Equatorial (J2000) to local axes, column-major: where the three
     // equatorial axes point now.
-    state.sky.set(onSky(0, siderealTime), 0);
-    state.sky.set(onSky(0, siderealTime - Math.PI / 2), 3);
-    state.sky.set([0, Math.sin(LATITUDE), -Math.cos(LATITUDE)], 6);
+    state.sky.set(onSky(0, siderealTime, lat), 0);
+    state.sky.set(onSky(0, siderealTime - Math.PI / 2, lat), 3);
+    state.sky.set([0, Math.sin(lat), -Math.cos(lat)], 6);
   }
 
   // The star catalogue as a texture: a GRID x GRID map of the sphere, with
@@ -10156,7 +10219,7 @@ const SkySound = (() => {
       // still while nothing is drawn).
       const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
       restart = false;
-      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
       const flying = state.speed > 0;
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
@@ -10605,13 +10668,22 @@ const SkySound = (() => {
   const wind = document.getElementById('wind'), windOut = document.getElementById('windOut');
   const speed = document.getElementById('speed'), speedOut = document.getElementById('speedOut');
   const cirrus = document.getElementById('cirrus'), cirrusOut = document.getElementById('cirrusOut');
+  const lat = document.getElementById('lat'), latOut = document.getElementById('latOut');
+  const lon = document.getElementById('lon'), lonOut = document.getElementById('lonOut');
+  const clockSelect = document.getElementById('clock');
   function showLabels() {
     const T = TEXT[LANG];
     // Hours and minutes, as a clock shows them (the minute that has begun).
     const e = state.elev, t = state.time % 24, m = Math.floor(t * 60 + 1e-6);
     const clock = String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-    timeOut.textContent = clock + ' ' + (e < -18 ? T.night : e < -12 ? T.astronomical : e < -6 ? T.nautical
-      : e < -0.4 ? T.civil : e < 6 ? (t < 12 ? T.morning : T.evening) : T.day);
+    // (Morning: the sun in the east, before it is highest.)
+    timeOut.textContent = clock + (state.clock === 'utc' ? ' UTC ' : ' ') + (e < -18 ? T.night : e < -12 ? T.astronomical
+      : e < -6 ? T.nautical : e < -0.4 ? T.civil : e < 6 ? (state.sun[0] < 0 ? T.morning : T.evening) : T.day);
+    latOut.textContent = T.latText(state.lat);
+    lonOut.textContent = T.lonText(state.lon);
+    // On the solar clock the longitude changes nothing: it waits for the UTC clock.
+    lon.disabled = state.clock !== 'utc';
+    lon.parentNode.title = lon.disabled ? T.lonSolar : '';
     const cal = new Date(YEAR, 0, state.day);
     dateOut.textContent = T.dateText(cal.getMonth() + 1, cal.getDate());
     const a = state.moonAge;
@@ -10643,7 +10715,7 @@ const SkySound = (() => {
   // Each slider sets its own part of the state: moving one does not round
   // the others (while playing, the time and the moon's age run unrounded).
   const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze',
-    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus' };
+    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus', lat: 'lat', lon: 'lon' };
   const read = id => {
     state[sliders[id]] = +document.getElementById(id).value;
     if (id === 'time' || id === 'date') state.dayShift = 0;
@@ -10813,9 +10885,13 @@ const SkySound = (() => {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && playing && pace === 1) tick(); });
   // Now: today's date, the time of the clock, the moon's age of the date (as
   // moving the date sets it), and real time, playing.
+  // On the UTC clock: the date and the time in UTC.
   function toNow() {
-    const d = new Date(), day = dayOf(d);
-    clock = d.getHours() + d.getMinutes() / 60 + (d.getSeconds() + d.getMilliseconds() / 1000) / 3600;
+    const d = new Date(), utc = state.clock === 'utc';
+    const day = utc ? Math.min(+date.max, Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+      - Date.UTC(d.getUTCFullYear(), 0, 0)) / 864e5)) : dayOf(d);
+    clock = utc ? d.getUTCHours() + d.getUTCMinutes() / 60 + (d.getUTCSeconds() + d.getUTCMilliseconds() / 1000) / 3600
+      : d.getHours() + d.getMinutes() / 60 + (d.getSeconds() + d.getMilliseconds() / 1000) / 3600;
     moonClock = moonAgeOn(day);
     shiftClock = 0;
     setTime(atStep(clock), day, moonClock, 0);
@@ -10825,6 +10901,50 @@ const SkySound = (() => {
     else setPlaying(true);
   }
   nowButton.addEventListener('click', toNow);
+
+  // The clock: ?clock=utc, else local solar time. A new clock keeps the
+  // moment: the time and the date are read again on it, and the sun stays
+  // where it is (but for the solar clock's even sun, a degree or two).
+  const wrap12 = h => h - 24 * Math.round(h / 24);
+  const onDay = (day, hours) => {
+    const k = Math.floor(hours / 24), n = +date.max;
+    return [((day - 1 + k) % n + n) % n + 1, hours - 24 * k];
+  };
+  function setClock(to) {
+    if (to === state.clock) return;
+    let [t, day] = [state.time, state.day];
+    if (to === 'utc') {
+      // The UTC of this solar time on this day: the mean time, then the
+      // equation of time, twice over.
+      let h = t - state.lon / 15;
+      for (let i = 0; i < 2; i++) h += wrap12(t - solarHours(YEAR, day, h, state.lon));
+      [day, t] = onDay(day, h);
+    } else {
+      const mean = t + state.lon / 15;
+      [day, t] = onDay(day, mean + wrap12(solarHours(YEAR, day, t, state.lon) - mean));
+    }
+    state.clock = clockSelect.value = to;
+    setTime(t, day, state.moonAge, 0);
+  }
+  clockSelect.addEventListener('change', () => setClock(clockSelect.value));
+  if (params.get('clock') === 'utc') { clockSelect.value = 'utc'; state.clock = 'utc'; }
+  else clockSelect.value = 'solar';
+
+  // The sky here and now: the place from the browser, asked for only by
+  // this button (the browser asks the reader first) and kept in the page
+  // alone, to a tenth of a degree; then the UTC clock and now.
+  const hereButton = document.getElementById('here');
+  hereButton.hidden = !navigator.geolocation;
+  hereButton.addEventListener('click', () => {
+    navigator.geolocation.getCurrentPosition(p => {
+      const round = x => Math.round(x * 10) / 10;
+      lat.value = state.lat = round(p.coords.latitude);
+      lon.value = state.lon = round(p.coords.longitude);
+      clockSelect.value = state.clock = 'utc';
+      hereButton.title = TEXT[LANG].here;
+      toNow();
+    }, () => { hereButton.title = TEXT[LANG].hereFailed; }, { timeout: 20000, maximumAge: 600000 });
+  });
 
   // Drag to look around.
   let drag = null;
