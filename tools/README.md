@@ -51,7 +51,8 @@ Every page the tools load gets `quality=max` in its query, unless the query name
 | `sea-low-sun`, `gale`, `clear` | sun glitter at 0.3 km; wind of 15 m/s; no cloud at all |
 | `near-clouds-3km` | low clouds seen from near |
 | `at-the-wrap` | a still at 255.999 km, where the way flown wraps |
-| `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies (3 frames) |
+| `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies, and the page enlarges the picture of 1920x1080 to the canvas of 2560x1440 (3 frames) |
+| `dpr1.5-fhd` | a still of the overcast deck under cirrus at a ratio of 1.5 at 1792x1008 with `pixels=fhd`: the picture of 1920x1080 enlarged 1.4 times to 2688x1512, as on a WQHD-limited 4K screen at 150 % |
 | `flight` | 40 frames of 16 ms at 900 km/h |
 | `time-lapse` | the play button, pressed after 2 frames |
 | `drag` | a mouse drag across the hero after 2 frames |
@@ -179,8 +180,8 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   the page was opened), then the GPU time of `--frames` frames (default 60,
   `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080).
   With `--shot S`, instead of the GPU time: the canvas as a PNG, S s (real
-  time) after the first picture, at the page's own drawing size (no
-  `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
+  time) after the first picture, at the canvas's size (the page's own
+  drawing size at this window's device pixel ratio of 1; no `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
   picture of S s flown on Direct3D 11.
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
   with their defines), alone: the time to compile and link it, and of its

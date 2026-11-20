@@ -6536,6 +6536,144 @@ void main() {
 }
 </script>
 
+<script id="enlarge" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+// Shows the picture of the aircraft's view where the canvas has more pixels
+// than the picture (a screen finer than the drawing limit, or a picture
+// drawn smaller while the view moves), in two passes at the canvas's size:
+// an edge-adaptive enlargement into a texture, then (SHARPEN) a sharpening
+// with the dither, to the canvas. Both after AMD's FidelityFX Super
+// Resolution 1 (EASU and RCAS, MIT): see THIRD_PARTY_NOTICES.md. The
+// picture is as shown (after the exposure and the tone curve), as both
+// expect.
+uniform sampler2D uPicture;   // the picture; with SHARPEN, the enlarged one
+uniform vec2 uSize;           // of the canvas
+#ifdef SHARPEN
+uniform float uSharp;   // how much: 1 the most, each halving a stop less
+uniform float uDither;  // 0 when the picture is rounded to 8 bits already
+#endif
+out vec4 outColor;
+
+vec3 at(ivec2 p) {
+  return texelFetch(uPicture, clamp(p, ivec2(0), textureSize(uPicture, 0) - 1), 0).rgb;
+}
+// (Twice a luma, cheaply: all the enlargement needs.)
+float luma(vec3 c) {
+  return 0.5 * (c.r + c.b) + c.g;
+}
+
+#ifdef SHARPEN
+// hash12 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+// Contrast-adaptive sharpening: each pixel moves away from the mean of its
+// four neighbours, by as much as keeps it within 0 and 1 where they are
+// near either (so it never clips and rings little), and by less where it
+// stands alone against them (noise, a star: those are not edges).
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 b = at(p + ivec2(0, 1)), d = at(p - ivec2(1, 0)), e = at(p), f = at(p + ivec2(1, 0)), h = at(p - ivec2(0, 1));
+  vec3 lo = min(min(b, d), min(f, h)), hi = max(max(b, d), max(f, h));
+  vec3 hitLo = min(lo, e) / max(4.0 * hi, 1e-6);
+  vec3 hitHi = (1.0 - max(hi, e)) / min(4.0 * lo - 4.0, -1e-6);
+  vec3 l3 = max(-hitLo, hitHi);
+  float lobe = max(-0.1875, min(max(l3.r, max(l3.g, l3.b)), 0.0)) * uSharp;
+  float bL = luma(b), dL = luma(d), eL = luma(e), fL = luma(f), hL = luma(h);
+  float range = max(max(max(bL, dL), max(eL, fL)), hL) - min(min(min(bL, dL), min(eL, fL)), hL);
+  float alone = clamp(abs(0.25 * (bL + dL + fL + hL) - eL) / max(range, 1e-6), 0.0, 1.0);
+  lobe *= 1.0 - 0.5 * alone;
+  vec3 col = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
+  // Triangular dither of one 8-bit step removes the banding.
+  float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
+  outColor = vec4(col + uDither * n / 255.0, 1.0);
+}
+#else
+// The lengths along x and y of the edge at a texel (its luma lC, and its
+// neighbours' above lA, left lB, right lD, below lE: 1 where the luma runs
+// through it as a ramp or a step, 0 where it stands alone), and its
+// gradient, added to dir and len with the weight w.
+void edge(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE) {
+  float dx = lD - lB, dy = lE - lA;
+  float mx = max(abs(lD - lC), abs(lC - lB)), my = max(abs(lE - lC), abs(lC - lA));
+  float lx = mx > 0.0 ? clamp(abs(dx) / mx, 0.0, 1.0) : 0.0, ly = my > 0.0 ? clamp(abs(dy) / my, 0.0, 1.0) : 0.0;
+  dir += vec2(dx, dy) * w;
+  len += (lx * lx + ly * ly) * w;
+}
+
+// A tap of the kernel: a window of Lanczos 2 (approximated by polynomials),
+// in the frame of the edge (along the gradient, x, and along the edge, y,
+// scaled by len2), narrowed by lob, and cut at its first zero (clip).
+void tap(inout vec3 sum, inout float weight, vec2 off, vec2 dir, vec2 len2, float lob, float clip, vec3 c) {
+  vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;
+  float d2 = min(dot(v, v), clip);
+  float wB = 0.4 * d2 - 1.0, wA = lob * d2 - 1.0;
+  float w = (25.0 / 16.0 * wB * wB - 9.0 / 16.0) * wA * wA;
+  sum += c * w;
+  weight += w;
+}
+
+void main() {
+  vec2 inSize = vec2(textureSize(uPicture, 0));
+  vec2 pp = gl_FragCoord.xy * inSize / uSize - 0.5, fp = floor(pp);
+  ivec2 o = ivec2(fp);
+  pp -= fp;
+  // Twelve texels round the point (f, g, j, k the four nearest; rows of
+  // the texture, going up):
+  //     b c
+  //   e f g h
+  //   i j k l
+  //     n q
+  vec3 b = at(o + ivec2(0, -1)), c = at(o + ivec2(1, -1));
+  vec3 e = at(o + ivec2(-1, 0)), f = at(o), g = at(o + ivec2(1, 0)), h = at(o + ivec2(2, 0));
+  vec3 i = at(o + ivec2(-1, 1)), j = at(o + ivec2(0, 1)), k = at(o + ivec2(1, 1)), l = at(o + ivec2(2, 1));
+  vec3 n = at(o + ivec2(0, 2)), q = at(o + ivec2(1, 2));
+  float bL = luma(b), cL = luma(c), eL = luma(e), fL = luma(f), gL = luma(g), hL = luma(h);
+  float iL = luma(i), jL = luma(j), kL = luma(k), lL = luma(l), nL = luma(n), qL = luma(q);
+  // The edge's direction and how much it is one, from the four nearest
+  // texels, weighted as a bilinear read would weigh them.
+  vec2 dir = vec2(0.0);
+  float len = 0.0;
+  edge(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);
+  edge(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
+  edge(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
+  edge(dir, len, pp.x * pp.y, gL, jL, kL, lL, qL);
+  float d2 = dot(dir, dir);
+  dir = d2 < 1.0 / 32768.0 ? vec2(1.0, 0.0) : dir * inversesqrt(d2);
+  len = 0.25 * len * len;
+  // Along a diagonal the texels lie sqrt(2) apart: the kernel stretches
+  // so, across the edge, and grows along it; at an edge its negative lobe
+  // is weaker (lob), so that it rings less.
+  float stretch = 1.0 / max(abs(dir.x), abs(dir.y));
+  vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+  float lob = 0.5 - 0.29 * len, clip = 1.0 / lob;
+  vec3 sum = vec3(0.0);
+  float weight = 0.0;
+  tap(sum, weight, vec2(0.0, -1.0) - pp, dir, len2, lob, clip, b);
+  tap(sum, weight, vec2(1.0, -1.0) - pp, dir, len2, lob, clip, c);
+  tap(sum, weight, vec2(-1.0, 0.0) - pp, dir, len2, lob, clip, e);
+  tap(sum, weight, vec2(0.0, 0.0) - pp, dir, len2, lob, clip, f);
+  tap(sum, weight, vec2(1.0, 0.0) - pp, dir, len2, lob, clip, g);
+  tap(sum, weight, vec2(2.0, 0.0) - pp, dir, len2, lob, clip, h);
+  tap(sum, weight, vec2(-1.0, 1.0) - pp, dir, len2, lob, clip, i);
+  tap(sum, weight, vec2(0.0, 1.0) - pp, dir, len2, lob, clip, j);
+  tap(sum, weight, vec2(1.0, 1.0) - pp, dir, len2, lob, clip, k);
+  tap(sum, weight, vec2(2.0, 1.0) - pp, dir, len2, lob, clip, l);
+  tap(sum, weight, vec2(0.0, 2.0) - pp, dir, len2, lob, clip, n);
+  tap(sum, weight, vec2(1.0, 2.0) - pp, dir, len2, lob, clip, q);
+  // No overshoot beyond the four nearest: no ringing.
+  outColor = vec4(clamp(sum / weight, min(min(f, g), min(j, k)), max(max(f, g), max(j, k))), 1.0);
+}
+#endif
+</script>
+
 <script id="meter" type="x-shader/x-fragment">
 #version 300 es
 precision highp float;
@@ -7792,18 +7930,52 @@ const SkySound = (() => {
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, enlarge: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
-  // The canvas's size in pixels for a place of cw by ch CSS pixels at the
-  // level Q: its device pixels, but at most Q.dpr per CSS pixel, and no more
-  // than the drawing limit (heroPixels) or the level's (Q.pixels) allow.
-  const canvasSize = (cw, ch, Q) => {
+  // The size in pixels the picture is drawn at, for a place of cw by ch CSS
+  // pixels at the level Q: its device pixels, but at most Q.dpr per CSS
+  // pixel, and no more than the drawing limit (heroPixels) or the level's
+  // (Q.pixels) allow.
+  const drawnSize = (cw, ch, Q) => {
     let scale = Math.min(window.devicePixelRatio || 1, Q.dpr);
     scale = Math.min(scale, Math.sqrt(Math.min(heroPixels, Q.pixels) / (cw * ch)));
     return [Math.max(1, Math.round(cw * scale)), Math.max(1, Math.round(ch * scale))];
+  };
+  // The canvas's own size for that place, where the level enlarges the
+  // picture itself (`enlarge`, see the shader "enlarge"): the device pixels
+  // it covers (device: as the browser counts them, else its CSS size times
+  // the ratio), at most SHOWN_MAX of them, and never fewer than the
+  // picture's (drawn). Elsewhere the picture's: the browser stretches the
+  // canvas to the screen, with its plain filter.
+  const SHOWN_MAX = 5120 * 2880;
+  // The device pixels a canvas covers, as the browser last counted them
+  // (size; null until it has, or where it does not count them): one
+  // observer for each canvas, however many renderers it has.
+  const observed = new WeakMap();
+  const devicePixels = canvas => {
+    if (observed.has(canvas)) return observed.get(canvas);
+    const d = { size: null };
+    observed.set(canvas, d);
+    try {
+      new ResizeObserver(es => {
+        const s = es[es.length - 1].devicePixelContentBoxSize;
+        if (s && s[0]) d.size = [s[0].inlineSize, s[0].blockSize];
+      }).observe(canvas, { box: 'device-pixel-content-box' });
+    } catch (err) {}   // (a browser without that box: the ratio serves)
+    return d;
+  };
+  const shownSize = (cw, ch, Q, drawn, device) => {
+    const r = window.devicePixelRatio || 1;
+    let [w, h] = device && Math.abs(device[0] - cw * r) <= 2 && Math.abs(device[1] - ch * r) <= 2 ? device : [Math.round(cw * r), Math.round(ch * r)];
+    if (!Q.enlarge || w * h <= drawn[0] * drawn[1]) return drawn;
+    if (w * h > SHOWN_MAX) {
+      const s = Math.sqrt(SHOWN_MAX / (w * h));
+      [w, h] = [Math.round(w * s), Math.round(h * s)];
+    }
+    return [Math.max(w, drawn[0]), Math.max(h, drawn[1])];
   };
   const CRUISE = 11;       // km: 36,000 ft
   // The altitude's range, km. The slider is even in km in steps of ALT_STEP
@@ -8504,6 +8676,10 @@ const SkySound = (() => {
   // ?res=0.5 in the address fixes the size of the aircraft's picture while it
   // moves, relative to the canvas (for tests). Without it, the frame time sets it.
   const fixedScale = Math.min(1, Math.max(0, +new URLSearchParams(location.search).get('res') || 0));
+  // ?enlarge=0: the canvas stays as large as the picture at every level, and
+  // the browser stretches it to the screen, as before the shader "enlarge"
+  // (to compare).
+  const NO_ENLARGE = new URLSearchParams(location.search).get('enlarge') === '0';
 
   // Counts the bytes of the textures that gl makes, into memory.bytes (for
   // ?stats, which shows them): it wraps the calls that allocate and free
@@ -8748,6 +8924,9 @@ const SkySound = (() => {
     // And as the table of the air's light (see Q_AIR_LUT), where the level
     // reads it (`airLut`) and the GPU can draw half floats.
     const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT') : null;
+    // The two passes of the enlargement, where the level has it (see the
+    // shader "enlarge" and shownSize).
+    const enlarge = Q.enlarge && !NO_ENLARGE ? [link('enlarge'), link('enlarge', '#define SHARPEN')] : null;
     gl.flush();
 
     // Waits, a frame at a time, until the GPU has done all that it was
@@ -9354,15 +9533,20 @@ const SkySound = (() => {
       });
       return c;
     };
-    // Fits the canvas to its place on the page. Returns 0 when it has no
-    // place, 2 when its size has changed, else 1.
+    // Fits the canvas and the picture (drawSize) to their place on the
+    // page. Returns 0 when it has no place, 2 when a size has changed, else 1.
+    let drawSize = [0, 0];
+    const device = Q.enlarge && !NO_ENLARGE ? devicePixels(canvas) : null;
     const fit = () => {
       const cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (!cw || !ch) return 0;
-      const [w, h] = canvasSize(cw, ch, Q);
-      if (canvas.width === w && canvas.height === h) return 1;
-      canvas.width = w;
-      canvas.height = h;
+      const d = drawnSize(cw, ch, Q), [w, h] = NO_ENLARGE ? d : shownSize(cw, ch, Q, d, device && device.size);
+      if (canvas.width === w && canvas.height === h && drawSize[0] === d[0] && drawSize[1] === d[1]) return 1;
+      drawSize = d;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
       return 2;
     };
 
@@ -9383,6 +9567,39 @@ const SkySound = (() => {
     gl.useProgram(show);
     gl.uniform1i(gl.getUniformLocation(show, 'uPicture'), 6);
     const uSize = gl.getUniformLocation(show, 'uSize'), uDither = gl.getUniformLocation(show, 'uDither');
+    // The enlargement's: its programs' uniforms, and the texture of the
+    // canvas's size its first pass draws into (made when first needed).
+    const E = enlarge && { size: enlarge.map(p => gl.getUniformLocation(p, 'uSize')), sharp: gl.getUniformLocation(enlarge[1], 'uSharp'),
+      dither: gl.getUniformLocation(enlarge[1], 'uDither'), big: null };
+    if (E) for (const p of enlarge) {
+      gl.useProgram(p);
+      gl.uniform1i(gl.getUniformLocation(p, 'uPicture'), 6);
+    }
+    // How much it sharpens a still picture: half a stop less than the most
+    // (uSharp). While the view moves it does not, and after it stops it
+    // comes in as the picture settles, over settleFrames (still: frames
+    // since the view moved): the noise of a picture in flight, sharpened,
+    // crossed it in fine hatching that moved from frame to frame. (A change
+    // of the light alone keeps it: the picture stays as sharp.)
+    const SHARP = 2 ** -0.5;
+    const enlarged = (w, h) => {
+      if (E.big && E.big.w === w && E.big.h === h) return E.big;
+      if (E.big) {
+        gl.deleteFramebuffer(E.big.target);
+        gl.deleteTexture(E.big.texture);
+      }
+      const b = E.big = { w, h, target: gl.createFramebuffer(), texture: gl.createTexture() };
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, b.texture);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, fine ? gl.RGBA16F : gl.RGBA8, w, h);
+      for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, b.target);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, b.texture, 0);
+      complete('the enlarged picture');
+      return b;
+    };
     gl.useProgram(prog);
     // The meter: METER blocks of the picture, drawn into a small target, and
     // read back METER_LAG frames later, by which time the GPU has long drawn
@@ -10091,7 +10308,7 @@ const SkySound = (() => {
     // What the last frame showed, to tell what has changed since.
     let camPast = null, driftPast = [0, 0], altPast = 0, lookPast = '';
     // Frames drawn since anything moved or changed, and since the light changed.
-    let calm = 0, relit = RELIGHT + 1, lastStir = -1e9;
+    let calm = 0, relit = RELIGHT + 1, lastStir = -1e9, still = 0;
     // The exposure moves towards the meter's target (adapting) in the page's
     // time (then, ms); restart: the next frame begins the picture again.
     let adapting = false, then = null, restart = false, meteredAt = -1e9;
@@ -10166,22 +10383,24 @@ const SkySound = (() => {
       // The picture (pw by ph), and the frame (w by h): smaller by the
       // level's `frame` (see UPSCALE in the shader "mean").
       // (A frame smaller than the picture: the picture stays at the
-      // canvas's size, and only the frame shrinks with the scale; drawn
+      // drawn size, and only the frame shrinks with the scale; drawn
       // smaller, the picture was stretched to the screen, and blurred.)
-      const pw = Q.frame < 1 ? canvas.width : Math.max(1, Math.round(canvas.width * small)), ph = Q.frame < 1 ? canvas.height : Math.max(1, Math.round(canvas.height * small));
-      const w = Q.frame < 1 ? Math.max(1, Math.round(canvas.width * small * Q.frame)) : pw, h = Q.frame < 1 ? Math.max(1, Math.round(canvas.height * small * Q.frame)) : ph;
+      const [dw, dh] = drawSize;
+      const pw = Q.frame < 1 ? dw : Math.max(1, Math.round(dw * small)), ph = Q.frame < 1 ? dh : Math.max(1, Math.round(dh * small));
+      const w = Q.frame < 1 ? Math.max(1, Math.round(dw * small * Q.frame)) : pw, h = Q.frame < 1 ? Math.max(1, Math.round(dh * small * Q.frame)) : ph;
       // (A frame smaller than the picture is drawn into the lower left of
       // targets as large as at full scale, `full`: a change of the scale
       // then makes no new targets. Made anew at each step, as before, their
       // checks of the framebuffers waited for the GPU, some 100 ms on a
       // phone.)
-      full = Q.frame < 1 ? [Math.max(1, Math.round(canvas.width * Q.frame)), Math.max(1, Math.round(canvas.height * Q.frame))] : [w, h];
+      full = Q.frame < 1 ? [Math.max(1, Math.round(dw * Q.frame)), Math.max(1, Math.round(dh * Q.frame))] : [w, h];
       shot = picture(shot, full[0], full[1], true);
       drew = true;
       const cur = pictures[turn] = picture(pictures[turn], pw, ph);
       const past = pictures[1 - turn] || (pictures[1 - turn] = picture(null, pw, ph));
       // A sharper picture than the past one, at rest: the past counts as one frame.
       const grown = !reset && !moved && cur.w > past.w;
+      still = reset || moved ? 0 : still + 1;
       if (reset) {
         calm = 0;
         relit = RELIGHT + 1;
@@ -10354,15 +10573,41 @@ const SkySound = (() => {
       }
 
       lap('meter');
-      // To the canvas.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.useProgram(show);
-      bind(6, cur.colour);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.uniform2f(uSize, canvas.width, canvas.height);
-      gl.uniform1f(uDither, fine ? 1 : 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // To the canvas: enlarged where it has more pixels than the drawn
+      // size (see the shader "enlarge"), else copied (and a picture drawn
+      // smaller while the view moves stretched).
+      const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      if (E && (W > dw || H > dh)) {
+        const b = enlarged(W, H);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, b.target);
+        gl.viewport(0, 0, W, H);
+        gl.useProgram(enlarge[0]);
+        bind(6, cur.colour);
+        gl.uniform2f(E.size[0], W, H);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.useProgram(enlarge[1]);
+        bind(6, b.texture);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(E.size[1], W, H);
+        gl.uniform1f(E.sharp, SHARP * Math.min(1, still / settleFrames));
+        gl.uniform1f(E.dither, fine ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      } else {
+        if (E && E.big) {     // (a canvas no larger than the picture any more)
+          gl.deleteFramebuffer(E.big.target);
+          gl.deleteTexture(E.big.texture);
+          E.big = null;
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(show);
+        bind(6, cur.colour);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(uSize, canvas.width, canvas.height);
+        gl.uniform1f(uDither, fine ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
       gl.useProgram(prog);
       turn = 1 - turn;
       if (pictured) pictured(now);
@@ -10392,7 +10637,7 @@ const SkySound = (() => {
         span = count = 0;
       }
       chained = flying || adapting || calm < settleFrames + RELIGHT;
-      sizes = { picture: [pw, ph], frame: [w, h], passes: [Math.ceil(w / Q.pass), Math.ceil(h / Q.pass)], light: [Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass))],
+      sizes = { shown: [W, H], picture: [pw, ph], frame: [w, h], passes: [Math.ceil(w / Q.pass), Math.ceil(h / Q.pass)], light: [Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass))],
         scale: small, level: levelName };
       return chained;
     };
@@ -10489,11 +10734,16 @@ const SkySound = (() => {
       meterPicture(pictures[turn], null);
       // And show, which only the second frame draws: into the meter's
       // blocks (8 bits, as the canvas), without a pixel (the scissor).
+      // (And the enlargement's two passes, where the level has them.)
       gl.bindFramebuffer(gl.FRAMEBUFFER, blocks.target);
       gl.useProgram(show);
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(0, 0, 0, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      for (const p of enlarge || []) {
+        gl.useProgram(p);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
       gl.disable(gl.SCISSOR_TEST);
       gl.useProgram(prog);
       await settle();
@@ -11047,6 +11297,13 @@ const SkySound = (() => {
     const z = render && render.sizes && render.sizes();
     const Q = z && QUALITY[z.level];
     const wh = a => a ? a.join('x') : '-';
+    // How the picture reaches the screen's pixels: enlarged by the page (the
+    // shader "enlarge"), and stretched by the browser past the canvas.
+    const shownLine = z => {
+      const by = z.shown[0] / z.picture[0], browser = heroCanvas.clientWidth * (window.devicePixelRatio || 1) / z.shown[0];
+      return `shown ${wh(z.shown)}: ${by > 1.005 ? `enlarged ${by.toFixed(2)}x by the page` : 'as drawn'}` +
+        (Math.abs(browser - 1) > 0.005 ? `, ${browser > 1 ? 'stretched' : 'shrunk'} ${browser.toFixed(2)}x by the browser` : ', 1:1 on the screen');
+    };
     if (stats.memory.update) stats.memory.update();
     stats.element.textContent = [
       `${fps ? fps.toFixed(1) + ' fps, worst ' + worst.toFixed(0) + ' ms' : 'not drawing'}${gpu !== null ? `, GPU ${gpu.toFixed(1)} ms` : ''}`,
@@ -11057,6 +11314,7 @@ const SkySound = (() => {
       ...(stats.bench3 ? stats.bench3.lines : []),
       `quality ${level || '-'}${choice === 'auto' ? ' (auto)' : ''}`,
       `canvas ${heroCanvas.width}x${heroCanvas.height}, CSS ${heroCanvas.clientWidth}x${heroCanvas.clientHeight}, DPR ${(window.devicePixelRatio || 1).toFixed(2)}`,
+      z ? shownLine(z) : '',
       z ? `picture ${wh(z.picture)}, frame ${wh(z.frame)}, scale ${z.scale.toFixed(2)}` : 'picture -',
       z ? `clouds ${state.cloud > 0 ? wh(z.passes) : '-'}, light ${state.cloud > 0 ? wh(z.light) : '-'}, cirrus ${state.cirrus > 0 ? wh(z.frame.map(x => Math.ceil(x / (Q.ciPass || Q.pass)))) : '-'}` : '',
       `first picture ${stats.first === null ? '-' : (stats.first / 1000).toFixed(1) + ' s'}`,
@@ -11316,7 +11574,7 @@ const SkySound = (() => {
   let shownAt = 0, measure = null, autoSteps = 0, restarting = false;
   // The GPU's work for a frame at level l on this canvas: its cost per pixel times its pixels.
   const work = l => {
-    const [w, h] = canvasSize(heroCanvas.clientWidth || 1, heroCanvas.clientHeight || 1, QUALITY[l]);
+    const [w, h] = drawnSize(heroCanvas.clientWidth || 1, heroCanvas.clientHeight || 1, QUALITY[l]);
     return QUALITY[l].cost * w * h;
   };
   // The GPU's time of a frame, into the window being measured.
