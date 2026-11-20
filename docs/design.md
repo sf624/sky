@@ -1483,19 +1483,22 @@ within 1, 2, 4 and 8 texels as the map's channels) and sends the part
 back, before any tile that shows the tower; the main thread uploads it
 into `uTops`.
 
-**First seconds and cost** (measured 2026-11-20, flying at 900 km/h).
+**First seconds and cost** (measured 2026-11-21, flying at 900 km/h).
 On GL (the RTX 3090, 1280 x 720): the first picture comes as without the
 grid, and the map is read back with it; the three levels are shown whole
-2 to 4 s later (the worker's first fill is about 2.6 s of one thread):
+3.3 to 4.2 s later (the worker's first fill is about 5 s of one thread):
 the towers fade in from the eye outwards over the present look. Then the
-worker spends about 55 ms of a thread per km flown, and keeps up (its
+worker spends 45 to 65 ms of a thread per km flown, and keeps up (its
 queue stays empty but for a moment when a window moves). The main thread
-spends 0.1 to 0.3 ms a frame (about 2 ms, and once 26 to 36 ms, while the
-levels fill). The GPU's frame is 1.5 to 1.8 ms longer at 4 and 11 km and
-3.4 ms at 0.3 km under the clouds. On Direct3D 11 (the same GPU, 1898 x
-982, two runs): the first picture 1.0 to 1.5 s later than without the
-grid, the levels whole 2.5 s after it, and the GPU's frame 20.2 ms
-against 17.0 ms.
+spends 0.1 to 0.3 ms a frame (about 2 ms, and once up to 150 ms, while
+the levels fill). The GPU's frame (all draws) is 17.0 ms at 0.3 km under
+the clouds (11.6 without the grid), 11.3 ms at 4 km (8.3 to 8.7) and 11.7
+to 12.7 ms at 11 km (10.0); the rule of round 2 of the plumbing, with its
+fewer and smaller towers and no detail, took 14.7, 10.3 and 10.5 to 11.8
+ms. On Direct3D 11 (the same GPU, 1898 x 982, 4 km): the first picture as
+without the grid, the levels whole 2.6 to 3.7 s after it, and the GPU's
+frame 25.2 ms against 18.9 ms without the grid (22.9 ms with the earlier
+rule).
 
 ## The clouds' shadow
 
