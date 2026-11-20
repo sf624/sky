@@ -897,10 +897,24 @@ map, bent over tens of km), each swelling and thinning along its length by
 the noise's 1 and 2 km Worley cells, so that its heads are of many sizes,
 as photographs of stratocumulus from above show them. Their phase wanders
 with the noise's large cells (`n.r`), so that their spacing changes from
-place to place, and they fade in and out with the same cells. (Until #77
+place to place. (Until #77
 each roll swelled every 2 km, half a step on from the roll beside it, all
 1.2 km apart: from 11 km an overcast deck was a regular lattice of mounds
-of one size, like an egg carton.) Each roll swells more
+of one size, like an egg carton.) No one period holds anywhere: a second
+set of rolls 1.4 km apart, turned by 23 degrees, takes over by patches of
+10 to 20 km (where both stand, they cross into cells); the phase of both
+wanders by a field of the weather map read at 1 to 2 km (the gusts,
+the cover); and their depth goes from
+0.15 to 1 by other patches of 10 to 20 km, so that some stretches are
+smooth. These fields of the weather map are read at fixed levels, so the
+far deck has the same rolls as the near one: with the phase moved only by
+the noise, which is read smoother with the distance, the rolls far off
+were all 1.2 km apart, and from 11 km fine rows of equal spacing ran
+across the band below the horizon. Where a pixel spans a good part of a
+roll along the line of sight (`ROLL_PIX`, 0.7 mrad, times the distance
+squared over the height under or over the eye), the rolls fade to their
+mean (by `exp(-2.5 fp^2)`, `fp` in km), as a picture of them would blur;
+beyond some 60 km from 11 km they would only alias into rows. Each roll swells more
 in some places than in others (0.35 to 1 of its depth, by the noise's 2
 km cells): rolls of one depth over tens of km were straight, regular
 stripes from 13 km. The heaps on the sheet
@@ -923,7 +937,10 @@ rises over their top (`gF`, by `steep`), mixed with the body's (over
 `BODY_G`) by `solid`. A smooth max joins them (`TOP_K` = 0.04, some 180
 m). A heap with no body keeps half its rise over the sheet (`TOP_S`), and
 on the whole top stand the noise's Worley domes of 2 km, 1 km and 500 m
-(`TOP_W` = 0.3, 0.2 and 0.12 km), up to twice as high on a heap that
+(`TOP_W` = 0.3, 0.2 and 0.12 km; the 2 km cells 0.4 to 1.6 times and
+the 500 m cells 1.6 to 0.5 times that, by patches of 10 to 20 km, so that
+the cells are larger in some and finer in others: with one share
+everywhere, the heads from 10 to 30 km were all of one size), up to twice as high on a heap that
 rises 300 m or more over the sheet, and 60 m higher on the whole
 (`TOP_O`: one top stood lower than the higher of two fields, and from
 under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve them
@@ -939,7 +956,7 @@ The turrets of `uBody` stand apart, and between them the sheet was flat;
 the Worley domes fill the plane and meet in creases. With the whole rise
 kept, the heaps were smooth hills with long shadows. The early ways out
 and the map of the tops allow for what the cells, heads and rolls add
-over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+over the heaps (`topR`: `TOP_R` = 0.74 km, and the rolls).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -1111,6 +1128,16 @@ of a stride further for each pixel and frame); and where none of them met
 any cloud, nor does this ray (a cloud that all of them miss is under 2
 pixels wide; a few specks of a pixel or two go, from 11 km). Together
 these took a third off the second stage among the heaps and under a deck.
+At `low` (`Q_GAP`), where one of those rays met no cloud, the ray also
+ends once it is clear of the farthest cloud that the others met, by a
+fifth of that distance and 2 km: what lies beyond, the ray that met none
+has found clear a pixel or two away. Rays that slipped past the edge of
+a near cloud marched on towards the horizon, up to `CLOUD_STEPS` steps,
+and the GPU runs a pixel with its neighbours: a block of 8 by 8 pixels
+took as long as its slowest. Counted at `low` on a phone's screen (411 x
+781 CSS pixels, November 2026), the most reads of the field in each such
+block fell by 18 % in the cruise view and 14 % at 4 km, and next to
+nothing under a deck, where every ray meets cloud.
 The depth away from the light (`tauB`, below) is not among them: stage 1
 works it out at its own point. Taken from the first stage, where the ray
 entered the cloud at half the size, the shaded sides of near towers were
@@ -1358,6 +1385,106 @@ table of the sky's light on the clouds (`cloudSky`, see
 The clouds' own light is worked out inside them, as above; past its own
 steps it reads their shadow from the same map as everything outside them
 (the air, the sea, the glare): the next section.
+
+## Towers in grids that move with the eye
+
+A test switch, `?grid=1`, off by default (step 1 of issue #76): the
+towers of the low clouds are grown as trees of lobes and kept in
+distance grids round the eye, mixed with the present field. Off, nothing
+of it is compiled, made or uploaded. Only at the levels with a `grid`
+size in `QUALITY` (`max` 512, `high` 384 texels a side).
+
+**The levels.** Three, of 31.25, 62.5 and 125 m voxels (`,v62` after the
+switch: 62.5, 125 and 250 m), each N x N columns from `CB` to `CT` (141,
+71 and 36 slices): windows of 16, 32 and 64 km at N = 512. One R8 3D
+texture of N x N x 260 holds them one over another (unit 30, `uGrid`):
+each level's slices of the distance under the towers' surface,
++-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: the top,
+the highest top within 0.8 km, the base, and how much of it is shown. One
+sampler only, and only in the programs that draw the low clouds (their
+pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
+a program, and the scene's own `fs` reads 16. That program reads the low
+clouds from their pass. No mipmaps: a coarser read takes the next level. 68 MB of
+the GPU at `max`, 38 MB at `high` (36 MB at `max` with `,v62`).
+
+**Addressing.** Each level is cut into tiles of 32 x 32 columns (1, 2
+and 4 km). The tile t of the way flown (counted unwrapped, so that the
+wrap of the map at 256 km moves nothing) lies at the texel tile t mod
+N / 32: toroidal. The window, N / 32 tiles a side, moves by whole tiles
+when the eye is 1.5 tiles off its middle; only the tiles that enter are
+made again. The shader gets the middle of each window on the map and its
+texel (`uGridO`) and reads a point at `(texel + wrap(x - middle) / V) /
+N`; a point outside a window does not read that level.
+
+**What is shown.** The main thread fades a tile in, in eighths, over
+`GRID_FADE` = 600 ms when it comes. A column is shown as much as its
+tile, and less towards a neighbour that is not shown, over half a tile;
+the window's edge counts as such a neighbour. So a tile that has entered
+but not yet come (its texels still hold an old tile) is never read, and
+the levels meet without a seam. The main thread keeps a copy of the
+columns and uploads the rows of tiles that changed, once a frame.
+`cloudShape` reads the levels front to back, finest first, each with the
+weight left times how much it is shown; a level finer than the read's smoothing (`lod`:
+level 0's voxels are texels of the noise at lod `GRID_LV`, -1 for 31 m)
+gives way to the next, so the light's long steps and the depth maps read
+the coarse levels. The present field's towers fade out by the weight the
+grid has there (`gridCut`); what no level covers keeps the present look.
+Then, as in the prototype, the grid's distance joins the present field by
+a smooth maximum and takes over its facts there (solid, heap, base).
+
+**Where the towers stand.** After each map of the tops (each cloud
+amount), the warped weather map at 250 m (its mip level of 1024 texels)
+and the map of the tops are read back without a stall (pixel buffers and
+a fence) and sent to a worker. The worker (the script `towers`, made into
+a Worker from its text through a Blob: no file, no build; made at the
+first frame) finds the towers of the whole map: per world cell of 2 km,
+the place where the present field's `tower` is strongest, if no place
+within 1.5 km has more. Width (1 to 3.5 km), top and base (80 m over the
+level of the bases) follow the present field's formulas there; the seed
+of its lobes comes from the cell. So a cell gives the same tower whenever
+it comes into a window. At cloud 0.5 there are about 700 on the map.
+
+**The shape rule.** `lobesOf(seed, P, LEAN)` grows a tower as a tree of
+lobes (the rule of the shape prototype, round 2, kept apart from the plumbing:
+the plumbing only passes the seed, the knobs `P` with `rmin` at least 0.6 of
+the finest voxel, and the lean). Its lobes are made once, for all levels
+(with fewer of them for a coarse level, its random numbers would change).
+Each level's brick of a tower holds the lobes of at least 0.6 of its
+voxels, joined by a smooth minimum, cut flat at the base, with an exact
+distance transform within 250 m. A tile is the union of the bricks that
+touch it (the most of their bytes) and its columns. Lobes (48 MB) and
+bricks (96 MB) are kept, the least recently used dropped. The worker
+makes the tiles the main thread wants, nearest to the eye first, and
+transfers them; the main thread uploads at most `GRID_BUDGET` = 1.2 MB a
+frame (`texSubImage3D`; a tile of level 0 is 144 kB). Each map, its
+wanted tiles and its tiles carry the number of the cloud amount they were
+made for (`gen`): a new amount asks for its tiles at once, the worker
+holds that list until the map read back for it comes, and the main thread
+drops a tile of an older amount. If the worker fails (its `error` event),
+the page logs it and turns the grids off for good: nothing is shown in
+them, and the clouds are the present field's.
+
+**The march's strides.** The map of the tops (`uTops`) is made from the
+present field, and a tower's lobes may stand higher than its tops: the
+strides over the tops would cut them. When a tower's lobes are made, the
+worker raises its copy of the map over them (each lobe's top and 70 m,
+within 1, 2, 4 and 8 texels as the map's channels) and sends the part
+back, before any tile that shows the tower; the main thread uploads it
+into `uTops`.
+
+**First seconds and cost** (measured 2026-11-20, flying at 900 km/h).
+On GL (the RTX 3090, 1280 x 720): the first picture comes as without the
+grid, and the map is read back with it; the three levels are shown whole
+2 to 4 s later (the worker's first fill is about 2.6 s of one thread):
+the towers fade in from the eye outwards over the present look. Then the
+worker spends about 55 ms of a thread per km flown, and keeps up (its
+queue stays empty but for a moment when a window moves). The main thread
+spends 0.1 to 0.3 ms a frame (about 2 ms, and once 26 to 36 ms, while the
+levels fill). The GPU's frame is 1.5 to 1.8 ms longer at 4 and 11 km and
+3.4 ms at 0.3 km under the clouds. On Direct3D 11 (the same GPU, 1898 x
+982, two runs): the first picture 1.0 to 1.5 s later than without the
+grid, the levels whole 2.5 s after it, and the GPU's frame 20.2 ms
+against 17.0 ms.
 
 ## The clouds' shadow
 
@@ -3024,7 +3151,15 @@ asks which level it is.
   `readPixels` makes the browser wait until the GPU has done all that it
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
   idle while the next frame is made, every 100 ms. (`max` and `high` keep
-  the plain read: their frames stay as they were.)
+  the plain read: their frames stay as they were.) Taking the buffer
+  still waits for the GPU process: Chrome 156 keeps no copy of it ahead
+  of the read (it warns that it dropped one), and on the test machine
+  each read held the script 4 to 5 ms, up to 110 ms, with the fence
+  passed and even with a new buffer each time. On a phone those reads
+  were most of the script's time (8 ms a frame), and a frame that waited
+  missed its turn. So at these levels the meter waits between reads 20
+  times as long as the last read took (`METER_SHARE`, 5 %), at least
+  `meterMs` and at most `METER_SLOW` (1 s).
 - `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
   and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
   the aircraft flies before a layer of a depth map is drawn again (see
@@ -3074,7 +3209,9 @@ asks which level it is.
   number each frame; IGN shifted along the diagonal, as at `max`, runs
   through its values unevenly at each pixel, and with `low`'s long steps
   the light's point stayed in the mean at rest as a fine diagonal hatch
-  over the bases of clouds overhead). The programs of `low` are smaller
+  over the bases of clouds overhead), and `Q_GAP` (1: the second stage of
+  the low clouds ends a ray past the clouds that the first stage's rays
+  round it met, where one of them met none; see [Low clouds](#low-clouds)). The programs of `low` are smaller
   for them: 299 kB of translated GLSL for the six of `fs` against 360 kB
   at `max` (the scene 112 against 152 kB, the cirrus's pass 48 against 64).
   Cuts tried with `?stats=bench3` on a phone and left out, as they saved
@@ -3188,16 +3325,19 @@ over the last `STATS_SPAN` (3 s) and the longest gap between two of them
 (the same queries as the automatic choice), the time the page's own
 script takes in the renderer a frame, its mean and its longest (a long one
 there is the CPU waiting for the GPU, as the meter's read does) and by
-part of the frame (`lap` in the renderer: `start` up to the textures,
-`maps` the tops, the sky's light and the depth maps, `frame` the passes
-and the scene, `mean`, `meter`, `show`; a mean over the last few dozen
-frames), the draws of the last frame and the pixels they shaded
+part of the frame (`lap` in the renderer: `start` the canvas's size and
+the view, `read` the meter's read, `targets` up to the textures, `maps`
+the tops, the sky's light and the depth maps, `frame` the passes and the
+scene, `mean`, `meter`, `show`; a mean over the last few dozen frames), the draws of the last frame and the pixels they shaded
 (`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
 canvas's size, the CSS size it fills and the device pixel ratio, the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
-page to the first picture, the GPU memory of the level (its textures,
+page to the first picture and when each part of the start ended
+(`START_PARTS`, from `mark`: the context, the tables, the last program
+compiled, the noise and the weather map, the cirrus, the waves, the first
+frame), the GPU memory of the level (its textures,
 counted as `makeSky` makes them, by wrapping the calls that allocate and
 free them on its context, `countMemory`; and the canvas's own buffers as 12
 bytes a pixel), the contexts lost and the levels that failed, and the GPU's
@@ -3288,6 +3428,8 @@ floats), drawn while the page runs (see [The clouds' shadow](#the-clouds-shadow)
 RGBA8 at a quarter, linear), drawn by `fs` (`SKY_LIGHT`) before a frame
 whose sun or haze has changed (see Low clouds); it too is off its unit
 while the draw writes it.
+With `?grid=1`, unit 30 holds the towers' grids (`uGrid`; see
+[Towers in grids that move with the eye](#towers-in-grids-that-move-with-the-eye)).
 
 The weather map draws, on 256 km: systems of some 80 km, open cells of
 30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
