@@ -1369,8 +1369,9 @@ switch: 62.5, 125 and 250 m), each N x N columns from `CB` to `CT` (141,
 71 and 36 slices): windows of 16, 32 and 64 km at N = 512. One R8 3D
 texture of N x N x 260 holds them one over another (unit 30, `uGrid`):
 each level's slices of the distance under the towers' surface,
-+-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: the top,
-the highest top within 0.8 km, the base, and how much of it is shown. One
++-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: how much
+the present field's heap gives way there (`own`), the highest top within
+0.8 km, the base, and how much of it is shown. One
 sampler only, and only in the programs that draw the low clouds (their
 pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
 a program, and the scene's own `fs` reads 16. That program reads the low
@@ -1397,22 +1398,61 @@ columns and uploads the rows of tiles that changed, once a frame.
 weight left times how much it is shown; a level finer than the read's smoothing (`lod`:
 level 0's voxels are texels of the noise at lod `GRID_LV`, -1 for 31 m)
 gives way to the next, so the light's long steps and the depth maps read
-the coarse levels. The present field's towers fade out by the weight the
-grid has there (`gridCut`); what no level covers keeps the present look.
-Then, as in the prototype, the grid's distance joins the present field by
-a smooth maximum and takes over its facts there (solid, heap, base).
+the coarse levels. A level is read up to the highest top within 0.8 km
+of the column and `GRID_OUT` over it (the reach of the detail below): by
+the column's own top, the crowns that the detail pushes out of a wall
+were cut off over the columns beside it, as upright curtains. The present
+field's towers fade out by the weight the grid has there (`gridCut`), and
+its heaps lose up to `GRID_OWN` = 0.7 of their height round a tower
+(`gridOwn`, read from the coarsest level, whose window holds the others);
+what no level covers keeps the present look. Then, as in the prototype,
+the grid's distance joins the present field by a smooth maximum and takes
+over its facts there (solid, heap, base).
+
+**The detail at render time** (from the prototype's round 2), on the
+distance, less of it low on a body (`GRID_LOW` = 0.4 of it below a fifth
+of its height, none at its foot): the heads of `uBody` (500 m to 125 m,
+read `GRID_HK` = 2 times finer, `GRID_HW` = 120 m deep at most) carve it as
+on main's body; the grid's own creases are cut in, `GRID_CR` = 1.5 times
+`cav`, the distance two levels coarser (smoothed over four voxels) less
+its own: positive between lobes, so the valleys between bulges are sharp
+and deep; packed billows (the A of `uBody`, `GRID_BK` = 2.33 times finer:
+214 m down to 54 m, `GRID_BW` = 120 m deep at most) on that, read at the
+pixel's level. In a crease (`gridCrease`, from `cav` and the heads), the
+light scattered many times and the sky's light are less by up to `GRID_AO`
+= 0.6, however the light falls: with the sun behind the eye the walls were
+flat cream, and from straight above at noon a tower was one white blob.
+After the switch, `,KEY=value` sets any of these for a test
+(`?grid=1,AO=0,BW=0`).
 
 **Where the towers stand.** After each map of the tops (each cloud
 amount), the warped weather map at 250 m (its mip level of 1024 texels)
 and the map of the tops are read back without a stall (pixel buffers and
 a fence) and sent to a worker. The worker (the script `towers`, made into
 a Worker from its text through a Blob: no file, no build; made at the
-first frame) finds the towers of the whole map: per world cell of 2 km,
-the place where the present field's `tower` is strongest, if no place
-within 1.5 km has more. Width (1 to 3.5 km), top and base (80 m over the
-level of the bases) follow the present field's formulas there; the seed
-of its lobes comes from the cell. So a cell gives the same tower whenever
-it comes into a window. At cloud 0.5 there are about 700 on the map.
+first frame) finds the towers of the whole map, with the present field's
+formulas: per world cell of 2 km, the place where the field's heap stands
+highest over the sheet, if no place within 1.5 km stands higher; only
+where the heap stands `H_MIN` = 0.8 km high or more, or the field draws a
+tower (where its tower is strong, it counts `TOWER_H` = 1.5 km per unit).
+(Seeded at the field's towers only and sized as them, the towers were no
+higher than the field's heaps round them, which hid them: posts with round
+heads standing out of those heaps. With a body in every heap from 0.5 km
+up, 1900 on the map at cloud 0.5, the frame under them at 0.3 km took 5 ms
+more than main's grid.) Its base is 80 m over
+the level of the bases there. Its height is the heap's or more, by a law
+of sizes: `u = rnd^2`, times a smooth random field of 12.8 km (the big
+ones in groups) and the strength of the field's tower round it; `H = 0.6 +
+3.4 u` km. It is at least as wide as the heap (the place within 2.5 km
+where the heap stands over 0.4 of its height here) and 1.25 times its
+height, 1.3 to 5 km, and at least 0.45 of its width high (flat bodies
+were a sheet of stratocumulus from below). A smaller tower within the foot
+of a bigger one gives way. The seed of its lobes comes from the cell: a
+cell gives the same tower whenever it comes into a window. About 800 on
+the map at cloud 0.5 (width 1.3 to 2.8 km, height 0.8 to 1.8 km, 10th to
+90th percentile; the highest 4.6 km), 700 at 0.8. Round its middle, the
+field's heap gives way
+(`own`: 1 within 0.3 of its width, none beyond 0.55 of it and 300 m).
 
 **The shape rule.** `lobesOf(seed, P, LEAN)` grows a tower as a tree of
 lobes (the rule of the shape prototype, round 2, kept apart from the plumbing:
@@ -1437,7 +1477,8 @@ them, and the clouds are the present field's.
 **The march's strides.** The map of the tops (`uTops`) is made from the
 present field, and a tower's lobes may stand higher than its tops: the
 strides over the tops would cut them. When a tower's lobes are made, the
-worker raises its copy of the map over them (each lobe's top and 70 m,
+worker raises its copy of the map over them (each lobe's top and 170 m,
+the reach of the detail,
 within 1, 2, 4 and 8 texels as the map's channels) and sends the part
 back, before any tile that shows the tower; the main thread uploads it
 into `uTops`.
