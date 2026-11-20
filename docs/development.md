@@ -24,7 +24,10 @@ A view can be given in the address, for example
 
 These set the slider with the same id. The browser clamps the value to the
 slider's range and rounds it to its step. A value that is not a number
-becomes the middle of the range (`time=abc` gives 12).
+becomes the middle of the range (`time=abc` gives 12). `alt` is the
+exception: its slider is not even in km (see below), so the page reads it
+itself, clamps it to the range and keeps it as given (to the metre); a
+value that is not a number gives the default.
 
 | Parameter | Range, step | Default | Meaning |
 |---|---|---|---|
@@ -33,7 +36,7 @@ becomes the middle of the range (`time=abc` gives 12).
 | `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
 | `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.09 at 550 nm at 1, a clear day; see [The air](design.md#the-air)) |
 | `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
-| `alt` | 0.3 to 13, 0.1 | 11 | Altitude of the aircraft, km |
+| `alt` | 0.3 to 40, any | 11 | Altitude of the eye, km. The slider is even in log(1 + h / 2 km); the value beside it takes a number typed in m or km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
 | `cloud` | 0 to 1, 0.01 | 0.5 | Amount of low cloud |
 | `cirrus` | 0 to 1, 0.01 | 0.4 | Amount of high, thin cloud |

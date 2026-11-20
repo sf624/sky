@@ -104,6 +104,11 @@
   .panel button svg { display: block; width: 18px; height: 18px; margin: auto; }
   .panel .row { display: flex; justify-content: space-between; }
   .panel output { font-variant-numeric: tabular-nums; opacity: .9; }
+  /* The altitude's value is a field: it reads as the other values until
+     it is touched, then takes a number in m or km (see setAltitude). */
+  .panel .row input { width: 8ch; min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 3px; background: none;
+    color: inherit; font: inherit; letter-spacing: inherit; text-align: right; font-variant-numeric: tabular-nums; opacity: .9; }
+  .panel .row input:focus { outline: 1px solid rgba(255, 255, 255, .6); outline-offset: 1px; background: rgba(0, 0, 0, .2); opacity: 1; }
   .panel input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #fff; }
   .panel select {
     width: 100%; margin: 4px 0 0; padding: 4px 8px;
@@ -292,8 +297,9 @@
       <input id="wind" type="range" min="1" max="15" step="0.5" value="6">
     </label>
     <label>
-      <span class="row"><span data-t="alt">高度</span><output id="altOut"></output></span>
-      <input id="alt" type="range" min="0.3" max="13" step="0.1" value="11">
+      <span class="row"><span data-t="alt">高度</span><input id="altOut" type="text" inputmode="decimal" enterkeyhint="done"
+        autocomplete="off" spellcheck="false" aria-label="高度（m または km）" title="高度（m または km）" data-t-label="altField" data-t-title="altField"></span>
+      <input id="alt" type="range" min="0" max="1000" step="1" aria-label="高度" data-t-label="alt">
     </label>
     <label>
       <span class="row"><span data-t="speed">速度</span><output id="speedOut"></output></span>
@@ -366,7 +372,7 @@ const TEXT = {
     play: '時間を進める', now: 'いまの日時',
     rate: '時間の進む速さ', rate1: '実時間', rate60: '1分/秒', rate600: '10分/秒', rate960: '16分/秒', rate3600: '1時間/秒',
     time: '時刻', date: '日付', moon: '月', haze: '大気の霞', wind: '海上の風',
-    alt: '高度', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
+    alt: '高度', altField: '高度（m または km）', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     quality: '画質', qualityAuto: '自動', qualityLow: '低', qualityMid: '中', qualityHigh: '高', qualityMax: '最高',
     qualityAutoAt: level => '自動（' + level + '）',
     noWebGL: 'このブラウザでは WebGL2 が使えません',
@@ -397,7 +403,7 @@ const TEXT = {
     play: 'Play time-lapse', now: 'Now',
     rate: 'Speed of time', rate1: 'real time', rate60: '1 min/s', rate600: '10 min/s', rate960: '16 min/s', rate3600: '1 h/s',
     time: 'Time', date: 'Date', moon: 'Moon', haze: 'Haze', wind: 'Wind at sea',
-    alt: 'Altitude', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
+    alt: 'Altitude', altField: 'Altitude (m or km)', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     quality: 'Quality', qualityAuto: 'Auto', qualityLow: 'Low', qualityMid: 'Medium', qualityHigh: 'High', qualityMax: 'Max',
     qualityAutoAt: level => 'Auto (' + level + ')',
     noWebGL: 'This browser has no WebGL2',
@@ -7793,6 +7799,9 @@ const SkySound = (() => {
     return [Math.max(1, Math.round(cw * scale)), Math.max(1, Math.round(ch * scale))];
   };
   const CRUISE = 11;       // km: 36,000 ft
+  // The altitude's range, km. The slider is even in log(1 + h / ALT_H0): fine
+  // low down, coarse high up (see the altitude's control, below).
+  const ALT_MIN = 0.3, ALT_MAX = 40, ALT_H0 = 2;
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
   const SLOPE_MAX = 2;                 // the steepest slope of the weather map kept, per km (see cloudShape)
   // The cirrus's ice: texels a side (on a GPU, and on a software renderer),
@@ -10601,7 +10610,7 @@ const SkySound = (() => {
     moonOut.textContent = a < 1.5 || a > 28 ? T.newMoon : Math.abs(a - 7.4) < 1 ? T.firstQuarter
       : Math.abs(a - 14.8) < 1 ? T.fullMoon : Math.abs(a - 22.1) < 1 ? T.lastQuarter : T.moonAge(a.toFixed(0));
     hazeOut.textContent = T.hazes[state.haze < 0.5 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3 ? 2 : 3];
-    altOut.textContent = Math.round(state.alt * 100) * 10 + ' m';
+    if (document.activeElement !== altOut) altOut.value = altText(state.alt);
     cloudOut.textContent = T.clouds[state.cloud < 0.02 ? 0 : state.cloud < 0.35 ? 1 : state.cloud < 0.65 ? 2 : state.cloud < 0.9 ? 3 : 4];
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
     speedOut.textContent = state.speed.toFixed(0) + ' km/h';
@@ -10625,7 +10634,7 @@ const SkySound = (() => {
   date.addEventListener('input', () => { moon.value = moonAgeOn(+date.value); });
   // Each slider sets its own part of the state: moving one does not round
   // the others (while playing, the time and the moon's age run unrounded).
-  const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze', alt: 'alt',
+  const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze',
     cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus' };
   const read = id => {
     state[sliders[id]] = +document.getElementById(id).value;
@@ -10659,6 +10668,50 @@ const SkySound = (() => {
     update();
   });
   if (params.has('date') && !params.has('moon')) moon.value = moonAgeOn(+date.value);
+
+  // The altitude: a slider even in log(1 + h / ALT_H0), so that a pixel of it
+  // is some 40 m at 0.3 km and 230 m at cruise, and a step of the arrow keys
+  // (a thousandth of the slider) 7 m and 38 m. Beside it, the value is a
+  // field: a number typed there is read in km below 300 and in metres from
+  // 300 on (the heights in km end below 300, those in metres start there);
+  // "m" or "km" after it says so. The state holds the height itself, not the
+  // slider's place: ?alt=11 (km, as before) draws at 11 km exactly.
+  const altSpan = Math.log((ALT_H0 + ALT_MAX) / (ALT_H0 + ALT_MIN));
+  const altPlace = h => Math.round(1000 * Math.log((ALT_H0 + h) / (ALT_H0 + ALT_MIN)) / altSpan);
+  const altAt = u => Math.round(1000 * ((ALT_H0 + ALT_MIN) * Math.exp(u / 1000 * altSpan) - ALT_H0)) / 1000;
+  const altText = h => h < 20 ? Math.round(h * 100) * 10 + ' m' : h.toFixed(1) + ' km';
+  function setAltitude(h) {
+    state.alt = Math.min(ALT_MAX, Math.max(ALT_MIN, h));
+    alt.value = altPlace(state.alt);
+    altOut.value = altText(state.alt);
+    update();
+  }
+  alt.addEventListener('input', () => {
+    state.alt = Math.min(ALT_MAX, Math.max(ALT_MIN, altAt(+alt.value)));
+    update();
+  });
+  // A number typed in the field, in km (see above).
+  const altTyped = text => {
+    const m = /^\s*(\d+(?:[.,]\d*)?|[.,]\d+)\s*(k?m)?\s*$/i.exec(text);
+    if (!m) return NaN;
+    const x = +m[1].replace(',', '.'), unit = (m[2] || '').toLowerCase();
+    return unit === 'km' ? x : unit === 'm' || x >= 300 ? x / 1000 : x;
+  };
+  altOut.addEventListener('focus', () => altOut.select());
+  altOut.addEventListener('change', () => {
+    const h = altTyped(altOut.value);
+    if (Number.isFinite(h) && h > 0) setAltitude(h);
+    else altOut.value = altText(state.alt);
+  });
+  altOut.addEventListener('keydown', e => {
+    if (e.key === 'Enter') altOut.blur();
+    if (e.key === 'Escape') { altOut.value = altText(state.alt); altOut.blur(); }
+  });
+  {
+    const a = +params.get('alt');
+    state.alt = params.has('alt') && Number.isFinite(a) ? Math.min(ALT_MAX, Math.max(ALT_MIN, a)) : CRUISE;
+    alt.value = altPlace(state.alt);
+  }
 
   // Play: the time runs at a rate, a factor of real time (960, the first
   // choice: a day in a minute and a half). It moves by the time elapsed
