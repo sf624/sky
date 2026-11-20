@@ -49,7 +49,10 @@ These are read directly.
 |---|---|---|
 | `yaw` | the sun's direction as a `yaw`, + 65 | Direction of view, degrees: 0 south, 90 west, -90 east. A larger `yaw` turns the view to the right (clockwise seen from above) |
 | `pitch` | -8 | Elevation of the view, degrees, up positive. Not clamped (a drag clamps to 89) |
-| `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
+| `heading` | `yaw` - 60 | Direction flown at the start, degrees, as `yaw` (0 south, 90 west; the panel shows it as a compass bearing, 180 more). The aircraft can turn from it (see [design.md](design.md#steering)) |
+| `bank` | 0 | The aircraft's bank, degrees, right wing down positive, clamped to ±60. In flight it turns; at speed 0 it only tilts the view |
+| `climb` | 0 | The aircraft's climb, degrees, nose up positive, clamped to ±15. In flight the altitude changes; at speed 0 it only tilts the view |
+| `stick` | none | `1`: shows the steering stick, which otherwise shows only on a touch screen (`pointer: coarse`) |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
 | `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
@@ -82,7 +85,10 @@ the page works and forgets.
 
 The page does not check `yaw` and `pitch`: a value that is not a number
 makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
-`heading` and the parts of `at` fall back to 0.
+`heading`, `bank`, `climb` and the parts of `at` fall back to 0.
+`window.__flight()` returns the flight as it is (heading, eye, bank and
+climb in degrees, altitude and place in km, the sun's direction and the
+camera), for the tools.
 
 ## Judging a change
 
@@ -127,7 +133,9 @@ is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
 resolution changes (`?res=` fixes it, to compare). A pattern read at
 `p.xz + uDrift` must not show a seam when the way flown wraps at 256 km:
-fly across it, for example `?at=255.5,0&heading=90&speed=3000`.
+fly across it, for example `?at=255.5,0&heading=90&speed=3000`. Fly a
+turn too (`?bank=45&speed=300`), and a climb (`?climb=10&alt=3`): the
+camera then rolls, and the eye moves up or down between frames.
 
 **More than one GPU.** GLSL compilers differ. Check that the shaders
 compile and draw the same on a software renderer as well (Chrome's
