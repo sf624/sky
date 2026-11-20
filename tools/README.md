@@ -51,6 +51,7 @@ Every page the tools load gets `quality=max` in its query, unless the query name
 | `sea-low-sun`, `gale`, `clear` | sun glitter at 0.3 km; wind of 15 m/s; no cloud at all |
 | `near-clouds-3km` | low clouds seen from near |
 | `overcast-above-11km` | an overcast deck from 11 km, looking down at its rolls with the sun to the side |
+| `overcast-far-11km` | the same deck towards the horizon: its rolls from near to 150 km, where they must not turn into rows of equal spacing |
 | `at-the-wrap` | a still at 255.999 km, where the way flown wraps |
 | `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies (3 frames) |
 | `flight` | 40 frames of 16 ms at 900 km/h |
