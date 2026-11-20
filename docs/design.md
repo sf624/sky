@@ -1426,7 +1426,13 @@ touch it (the most of their bytes) and its columns. Lobes (48 MB) and
 bricks (96 MB) are kept, the least recently used dropped. The worker
 makes the tiles the main thread wants, nearest to the eye first, and
 transfers them; the main thread uploads at most `GRID_BUDGET` = 1.2 MB a
-frame (`texSubImage3D`; a tile of level 0 is 144 kB).
+frame (`texSubImage3D`; a tile of level 0 is 144 kB). Each map, its
+wanted tiles and its tiles carry the number of the cloud amount they were
+made for (`gen`): a new amount asks for its tiles at once, the worker
+holds that list until the map read back for it comes, and the main thread
+drops a tile of an older amount. If the worker fails (its `error` event),
+the page logs it and turns the grids off for good: nothing is shown in
+them, and the clouds are the present field's.
 
 **The march's strides.** The map of the tops (`uTops`) is made from the
 present field, and a tower's lobes may stand higher than its tops: the
