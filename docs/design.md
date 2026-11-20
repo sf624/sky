@@ -897,10 +897,24 @@ map, bent over tens of km), each swelling and thinning along its length by
 the noise's 1 and 2 km Worley cells, so that its heads are of many sizes,
 as photographs of stratocumulus from above show them. Their phase wanders
 with the noise's large cells (`n.r`), so that their spacing changes from
-place to place, and they fade in and out with the same cells. (Until #77
+place to place. (Until #77
 each roll swelled every 2 km, half a step on from the roll beside it, all
 1.2 km apart: from 11 km an overcast deck was a regular lattice of mounds
-of one size, like an egg carton.) Each roll swells more
+of one size, like an egg carton.) No one period holds anywhere: a second
+set of rolls 1.4 km apart, turned by 23 degrees, takes over by patches of
+10 to 20 km (where both stand, they cross into cells); the phase of both
+wanders by a field of the weather map read at 1 to 2 km (the gusts,
+the cover); and their depth goes from
+0.15 to 1 by other patches of 10 to 20 km, so that some stretches are
+smooth. These fields of the weather map are read at fixed levels, so the
+far deck has the same rolls as the near one: with the phase moved only by
+the noise, which is read smoother with the distance, the rolls far off
+were all 1.2 km apart, and from 11 km fine rows of equal spacing ran
+across the band below the horizon. Where a pixel spans a good part of a
+roll along the line of sight (`ROLL_PIX`, 0.7 mrad, times the distance
+squared over the height under or over the eye), the rolls fade to their
+mean (by `exp(-2.5 fp^2)`, `fp` in km), as a picture of them would blur;
+beyond some 60 km from 11 km they would only alias into rows. Each roll swells more
 in some places than in others (0.35 to 1 of its depth, by the noise's 2
 km cells): rolls of one depth over tens of km were straight, regular
 stripes from 13 km. The heaps on the sheet
@@ -923,7 +937,10 @@ rises over their top (`gF`, by `steep`), mixed with the body's (over
 `BODY_G`) by `solid`. A smooth max joins them (`TOP_K` = 0.04, some 180
 m). A heap with no body keeps half its rise over the sheet (`TOP_S`), and
 on the whole top stand the noise's Worley domes of 2 km, 1 km and 500 m
-(`TOP_W` = 0.3, 0.2 and 0.12 km), up to twice as high on a heap that
+(`TOP_W` = 0.3, 0.2 and 0.12 km; the 2 km cells 0.4 to 1.6 times and
+the 500 m cells 1.6 to 0.5 times that, by patches of 10 to 20 km, so that
+the cells are larger in some and finer in others: with one share
+everywhere, the heads from 10 to 30 km were all of one size), up to twice as high on a heap that
 rises 300 m or more over the sheet, and 60 m higher on the whole
 (`TOP_O`: one top stood lower than the higher of two fields, and from
 under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve them
@@ -939,7 +956,7 @@ The turrets of `uBody` stand apart, and between them the sheet was flat;
 the Worley domes fill the plane and meet in creases. With the whole rise
 kept, the heaps were smooth hills with long shadows. The early ways out
 and the map of the tops allow for what the cells, heads and rolls add
-over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+over the heaps (`topR`: `TOP_R` = 0.74 km, and the rolls).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
