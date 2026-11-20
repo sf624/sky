@@ -6445,6 +6445,8 @@ text (a Blob): no file and no build. -->
 // its surface (all round, a little out, spaced apart so that they meet in
 // creases), 0.3 to 0.55 of their parent, down to rmin. The lobes are joined by a smooth minimum,
 // wide for the big ones, narrow for the small ones (crisp clefts).
+// rngOf: Mulberry32, by Tommy Ettinger (2017, public domain under CC0), in
+// JavaScript: see THIRD_PARTY_NOTICES.md.
 const rngOf = seed => {
   let a = seed >>> 0;
   return () => {
@@ -6580,6 +6582,9 @@ function lobesOf(obj, P, LEAN) {
   // Children, generation by generation (bigger first), with a test that
   // skips a child buried deep inside a bigger lobe.
   const cell = 0.25, hash = new Map();
+  // (The primes of the hash of a cell: Teschner, Heidelberger, Mueller,
+  // Pomeranets and Gross, "Optimized Spatial Hashing for Collision Detection
+  // of Deformable Objects", VMV 2003.)
   const key = (i, j, k) => (i * 73856093) ^ (j * 19349663) ^ (k * 83492791);
   // (A lobe is put in every cell within its radius, and with a spacing
   // between siblings (overlap < 0) within that much more of its own.)
@@ -6662,6 +6667,11 @@ let lobeBytes = 0, brickBytes = 0;
 const LOBE_BUDGET = 48e6, BRICK_BUDGET = 96e6;
 let eye = [0, 0];
 let wanted = [];             // per level: Map key -> [tx, tz]
+// The map each level's list was made for (the page's gen of it). A list made
+// for a newer map waits until that map comes: the page asks for the tiles of
+// a new map at once, but the map comes only when its read-back ends; tiles
+// made meanwhile from the old towers would be dropped, and not asked again.
+let wantGen = [];
 const stats = { towers: 0, lobesMs: 0, lobes: 0, bricksMs: 0, bricks: 0, tiles: 0, tilesMs: 0, seedsMs: 0 };
 
 const wrapKm = x => ((x % WEATHER_KM) + WEATHER_KM) % WEATHER_KM;
@@ -7039,6 +7049,7 @@ const later = () => pump.port2.postMessage(0);
 function pick() {
   let best = null, bd = Infinity;
   wanted.forEach((m, l) => {
+    if (wantGen[l] !== mapGen) return;
     const { V } = cfg.levels[l], T = cfg.T, s = T * V;
     for (const [k, [tx, tz]] of m) {
       const dx = near((tx + 0.5) * s - eye[0]), dz = near((tz + 0.5) * s - eye[1]);
@@ -7052,7 +7063,7 @@ function pick() {
 function step() {
   busy = false;
   if (!towers || !cfg) return;
-  if (current && !wanted[current.l].has(current.k)) current = null;
+  if (current && (wantGen[current.l] !== mapGen || !wanted[current.l].has(current.k))) current = null;
   if (!current) {
     const p = pick();
     if (!p) return;
@@ -7081,6 +7092,7 @@ onmessage = ({ data: m }) => {
     cfg = m.cfg;
     cfg.wt = cfg.levels.map(v => Math.round(WEATHER_KM / (cfg.T * v.V)));
     wanted = cfg.levels.map(() => new Map());
+    wantGen = cfg.levels.map(() => -1);
   } else if (m.type === 'map') {
     lobeCache.clear(); brickCache.clear(); lobeBytes = brickBytes = 0; maxReach = 0;
     const r = towersOf(m.px, m.n, m.cloud);
@@ -7096,6 +7108,7 @@ onmessage = ({ data: m }) => {
     const w = new Map();
     for (const [tx, tz] of m.tiles) w.set(tx + ',' + tz, [tx, tz]);
     wanted[m.l] = w;
+    wantGen[m.l] = m.gen;
   }
   kickWork();
 };
@@ -8461,18 +8474,20 @@ const SkySound = (() => {
       const v = (new URLSearchParams(location.search).get('grid') || '').split(',');
       if (v[0] !== '1' || !Q.grid) return null;
       const N = Q.grid, T = 32, CB = 0.6, CT = 5.0;   // (CB, CT: as in fs)
-      // (`,vM`: the finest voxel M m, a power of 2 times 31.25 m.)
-      const vm = /v([0-9.]+)/.exec(v.slice(1).join(',')), V0 = vm ? 0.03125 * 2 ** Math.round(Math.log2(vm[1] / 31.25)) : 0.03125;
+      // (`,v62.5` or `,v62`: the finest voxel 62.5 m, not 31.25 m. Any other
+      // M of `,vM` keeps 31.25 m.)
+      const vm = /v([0-9.]+)/.exec(v.slice(1).join(',')), V0 = vm && Math.abs(vm[1] - 62.5) < 1 ? 0.0625 : 0.03125;
       const levels = [V0, 2 * V0, 4 * V0].map(V => ({ V, nz: Math.ceil((CT - CB) / V - 1e-6) }));
       // (Each level's slices, then four of its columns: see uGrid in fs.)
       const z = levels.map((l, i) => levels.slice(0, i).reduce((a, m) => a + m.nz + 4, 0));
       const nzt = levels.reduce((a, m) => a + m.nz + 4, 0);
-      const hm = /h([0-9.]+):([0-9.]+)/.exec(v.slice(1).join(','));
+      // (K must be over 0: the heads are read at a mip level log2(K) finer.)
+      const hm = /h([0-9.]+):([0-9.]+)/.exec(v.slice(1).join(',')), hk = hm && +hm[1] > 0;
       // (GRID_V0: the finest voxel, km; GRID_LV: its level as a mip level of the noise's texels.)
       const f = x => x.toFixed(1);
       return { N, T, levels, z, nzt,
         defs: `#define TGRID 1\n#define GRID_V0 ${V0.toFixed(6)}\n#define GRID_LV ${Math.log2(V0 / 0.0625).toFixed(1)}\n#define GRID_N ${f(N)}\n#define GRID_NZ vec3(${levels.map(l => f(l.nz))})\n#define GRID_Z vec3(${z.map(f)})\n#define GRID_NZT ${f(nzt)}\n`
-          + (hm ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
+          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
     })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
@@ -9577,17 +9592,30 @@ const SkySound = (() => {
       window.__grid = info;
       // (Made at the first frame, after the loading: the request of its
       // script, a Blob's, then does not count in the loading.)
-      let worker = null;
+      // (Its Blob URL is revoked at its first message or error: the worker
+      // has fetched its script by then.)
+      let worker = null, url = null, dead = false;
       const hire = () => {
-        worker = new Worker(URL.createObjectURL(new Blob([document.getElementById('towers').textContent], { type: 'text/javascript' })));
+        url = URL.createObjectURL(new Blob([document.getElementById('towers').textContent], { type: 'text/javascript' }));
+        worker = new Worker(url);
         worker.postMessage({ type: 'start', cfg: { T, levels: levels.map(({ V, nz }) => ({ V, nz })) } });
         worker.onmessage = onTile;
+        worker.onerror = e => {
+          console.error(`Sky: grid: the worker failed (${e.message || 'no message'}${e.lineno ? ', line ' + e.lineno : ''}): the grids are off`);
+          quit();
+        };
         // (A level given up loses its context: its worker goes with it.)
         canvas.addEventListener('webglcontextlost', () => worker.terminate(), { once: true });
         for (const m of early.splice(0)) worker.postMessage(m, m.px ? [m.px.buffer, m.tops.buffer] : []);
       };
       const early = [], post = (m, tr) => worker ? worker.postMessage(m, tr || []) : early.push(m);
+      const freeUrl = () => {
+        if (url) URL.revokeObjectURL(url);
+        url = null;
+      };
       const onTile = ({ data: m }) => {
+        freeUrl();
+        if (dead) return;
         if (m.type === 'towers') {
           info.towers = m.count;
           info.list = m.list;
@@ -9606,7 +9634,7 @@ const SkySound = (() => {
       const want = lv => {
         const tiles = [];
         lv.held.forEach((h, a) => { if (h && lv.since[a] < 0) tiles.push(h); });
-        post({ type: 'want', l: lv.l, tiles });
+        post({ type: 'want', gen, l: lv.l, tiles });
       };
       // The warped map at 250 m (its mip level of 1024 texels), read back
       // without waiting (a pixel buffer and a fence) after each map of the
@@ -9621,8 +9649,8 @@ const SkySound = (() => {
         gl.bufferData(gl.PIXEL_PACK_BUFFER, size * size * 4, gl.STREAM_READ);
       }
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      const mapFor = cloud => {
-        gen++;
+      // No tile held or shown.
+      const clear = () => {
         for (const lv of L) {
           lv.held.fill(null);
           lv.shown.fill(0);
@@ -9633,6 +9661,26 @@ const SkySound = (() => {
         inbox.length = 0;
         blank();
         version++;
+      };
+      // The worker failed: the grids are off for good, and the clouds are
+      // the present field's (the shaders still read the empty grids: within
+      // a few levels of the picture with the switch off).
+      const quit = () => {
+        freeUrl();
+        if (dead) return;
+        dead = true;
+        worker.terminate();
+        if (reading) gl.deleteSync(reading.sync);
+        reading = null;
+        clear();
+        info.tiles = L.map(() => 0);
+        info.failed = true;
+        wake();
+      };
+      const mapFor = cloud => {
+        gen++;
+        clear();
+        if (dead) return;
         const was = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFb);
         for (const [t, level, b, size] of [[warped[0].texture, mapLevel, pbo, MAP], [tops[1].texture, 0, pboTops, TOPS]]) {
@@ -9651,6 +9699,7 @@ const SkySound = (() => {
         const t0 = performance.now(), d = state.drift;
         let changed = false;
         if (!worker) hire();
+        if (dead) return false;
         if (!way) way = [d[0], d[1]];
         else {
           way[0] += near(d[0] - last[0]);
