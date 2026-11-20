@@ -891,16 +891,8 @@ heads of `cloudDetail` carve it too (`carved`). All of this only where the sheet
 of it, a speckle of small dots that shimmered in flight. The heaps that flatten into a deck (`deck`) have the
 same heads and seams. (Until round 17 the top was domes of the noise's
 1 and 2 km Worley cells: from above, a smooth cream with the heaps poking
-through it.) Over more than half of it (`far.a`) rows of
-rolls 1.2 km apart across the wind (whole numbers of them across the map,
-bent over tens of km), each swelling and thinning every 2 km along its
-length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. Each roll swells more
-in some places than in others (0.35 to 1 of its depth, by the noise's 2
-km cells): rolls of one depth over tens of km were straight, regular
-stripes from 13 km. The heaps on the sheet
-stand in the same ranks, with smaller billows (`rank`); with rolls in a
-few places only, the sheet from above was lumps without order. The
+through it.) (The rows of rolls that stood on the sheet until #77 are gone: see
+the deck's cells below.) The
 billows of the tile lie on top. Sheet and
 heaps merge by a smooth max. Near the top of the slider (`level1`, 0.85
 to 1) the heaps on the sheet flatten to 40 % and few towers rise out of
@@ -917,24 +909,95 @@ depth: the sheet's level, and the heaps' field over the rate at which it
 rises over their top (`gF`, by `steep`), mixed with the body's (over
 `BODY_G`) by `solid`. A smooth max joins them (`TOP_K` = 0.04, some 180
 m). A heap with no body keeps half its rise over the sheet (`TOP_S`), and
-on the whole top stand the noise's Worley domes of 2 km, 1 km and 500 m
-(`TOP_W` = 0.3, 0.2 and 0.12 km), up to twice as high on a heap that
-rises 300 m or more over the sheet, and 60 m higher on the whole
-(`TOP_O`: one top stood lower than the higher of two fields, and from
-under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve them
-`TOP_E` = 1.5 times as deep as on the sheet's first edges, and the fine
-noise carves them as on the sheet. A heap with a body keeps its form
-(`free`: none from `solid` 0.8 on); the sheet round it has the cells.
-The rows of rolls keep the sheet above. Until #64 B2 the sheet and the
+on the whole top stand the deck's cells (below), up to 1.3 times as
+high on a heap that rises 300 m or more over the sheet, and 60 m higher on
+the whole (`TOP_O`: one top stood lower than the higher of two fields, and
+from under a deck at 0.3 km it was 0.1 stops brighter). The heads of
+`uBody` (500 m to 125 m) carve them by up to `TOP_F` = 0.38 km, so that
+each cell is billows on a cushion, and the fine noise carves them as on the
+sheet. A heap with a body keeps its form (`free`: none from `solid` 0.8
+on); the sheet round it has the cells. Until #64 B2 the sheet and the
 heaps were two fields that crossed: from 4 to 5 km the turrets of the
 sheet stood out of the heaps' smooth domes as plateaus with cliffs, the
 domes lay between them as flat grey floors, like frozen lakes, their
 shadows drew long winding valleys, and the tops read as snowy mountains.
-The turrets of `uBody` stand apart, and between them the sheet was flat;
-the Worley domes fill the plane and meet in creases. With the whole rise
-kept, the heaps were smooth hills with long shadows. The early ways out
-and the map of the tops allow for what the cells, heads and rolls add
-over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+With the whole rise kept, the heaps were smooth hills with long shadows.
+
+**The deck's cells** (`deckCells`, `deckPlates`). Photographs of an
+overcast stratocumulus deck from above (from cruise height and from a few
+km over it) show one sheet of cells: flattish lumps, wider than tall, some
+0.2 to 1 km, packed edge to edge and parted by narrow dark seams, each
+lump made of smaller billows; many are drawn out one way and join into
+short wavy crests of two to five; over 5 to 50 km the deck has stretches
+of well-raised cells and of smooth stratus, and lanes of thinner, darker
+cloud. There is no lattice and no one spacing. The top is built so:
+
+- Cells of a jittered lattice, 853 across the map (`DECK_KM` = 0.3 km; a
+  whole number, so that they repeat with the map), each place belonging
+  to the nearest middle (a Voronoi diagram, from the 3 x 3 cells round
+  the place). Distances are measured with the offsets drawn in by up to
+  1.5 along a way (`ax`, from `psi`: across the wind, turned by the map),
+  more in some stretches (`wf.r`) than in others: the cells are longer
+  that way.
+- Each cell is a cushion: 0.8 to 1 high at random, falling by `DECK_D`
+  = 0.5 from its middle to 0.6 cells out, and rounding down (`1 - s^3`)
+  over the last `DECK_W` = 0.5 cells before its seam; cells narrower than
+  that stand lower. The distance to the seam is half the difference of
+  the distances to the nearest and the second nearest middle (F2 - F1),
+  in one pass over the 3 x 3 cells. Two cells side by side along the way are
+  joined at random (30 to 75 % by the map, `wf.a`): their seam is shallow
+  (`DECK_J`), and they make a crest.
+- The cells stand `DECK_H` = 0.13 km high at most, measured from their
+  mean (`DECK_MEAN`), times the map's bands (`far.a`, `deckAmp`, 0.25 to
+  1.2) and a value noise of the deck's own (`deckNoise`, 32 and 13 km):
+  smooth stretches, as stratus, and well-raised ones. The heads of
+  `uBody` carve them by up to `TOP_F` = 0.38 km, so that each is billows
+  on a cushion, and the field is softer there than on the sheet (`steep`
+  1.3, not 1.9: at 1.9 the cells were hard-edged, like stones).
+- Lanes of thinner deck, some 40 km long and 6 km wide (`thin`: the value
+  noise read through a shear of whole numbers, so that it still repeats),
+  where the cells stand lower and the deck is darker.
+- The place is moved by up to some 1.5 km by the map's gusts (`wf.b`,
+  `far.b`), smoothed over 5 km, so that no row of the lattice shows far
+  off, and by up to some 0.2 km by the body's turrets, so that the seams
+  wind.
+- Where a pixel spans a good part of a cell along the line of sight
+  (`DECK_PIX`, 0.7 mrad, times the distance squared over the height under
+  or over the eye), the cells fade to their mean, as a picture would blur
+  them (`exp(-4 (fp / DECK_KM)^2)`); they are not computed at all where
+  they have faded, nor where the place lies more than 0.22 km over the
+  top without them or 0.12 km under it (the march steps by a third of
+  the field there, and no seam goes so deep), nor on the light's longer
+  steps (their read's size, `TEXEL_KM` times `2^lod`, counts as the
+  pixel's). Read everywhere, they cost some 5 % more at `cloud=0.75`.
+- The light: seams and lanes are darker. `deckSeam` (how deep the last
+  step lay in the last `DECK_SW` = 0.2 cells of a seam, squared, times
+  `DECK_DARK` = 0.6, how high the cells stand there and 0.2 to 1.3 by the
+  fine heads, plus `DECK_THIN` = 0.35 in a lane) takes the place of the
+  crease (which a whole sheet does not have) on the light scattered many
+  times. Without it, from 11 km under a high sun the cells hardly showed;
+  with the whole width of the seam and no change along it (0.85), they
+  were a net of dark cracks, like dried mud.
+
+Until #77 the top was rows of rolls 1.2 km apart (sums of sines, from
+round 22 of #33; in its first commit a second set 1.4 km apart turned by
+23 degrees) with heads of the noise's 2 km, 1 km and 500 m Worley cells on
+them, carved 0.6 km deep by the heads of `uBody`: from 11 km a regular
+lattice of mounds of one size, like an egg carton, and after the first
+attempt rows of wavy ridges with pointed peaks, like dunes of snow. Any
+sum of sines stays periodic to the eye, and the height of a Worley cell
+is a cone. Then it was domes, `(1 - r^2)^2`, on two jittered lattices
+(0.44 and 0.75 km), the highest winning: round lumps of one size standing
+apart on a smooth floor, like bubble wrap; and flat Voronoi cushions with
+straight seams, like paving. The regularity of the top, measured on
+pictures from straight above (the strongest isolated peak of the power
+spectrum over its surroundings), is given in #79.
+
+The early ways out and the map of the tops allow for what the cells and
+heads add over the heaps (`topR`): `TOP_R` = 0.42 km (1.3 times the most
+the cells stand over their mean, `DECK_MAX`, `TOP_O`, `ERO_C` `TOP_F` and
+0.06 km to spare), only where the sheet is whole and less where its cells
+stand lower (`deckAmp`).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -1224,7 +1287,15 @@ each cloud, not on its surface; no normal of the field enters it.
   within 175 m), and only on the side of a mass that the light falls on:
   by `smoothstep(0.5, 0.9, tauBn / (tauBn + tauLoc))` (`CREASE.zw`), with
   `tauBn` the first three steps of `tauB` (out to 175 m): much more cloud
-  behind the place than towards the light.
+  behind the place than towards the light. Not on the top of a whole sheet (`WHOLE`, as for its heads)
+  where the heaps have no 3D body (`solidHere` under 0.3 to 0.8, as `free`
+  in the one top; heaps with a body keep their creases): a deck is one
+  mass, and the light that went into its lit heads spreads through it
+  under the troughs and seams beside them. (With the crease over the
+  light's own steps, the troughs in the shadow of the rolls were flat
+  blue-grey floors with dark rims, and from 11 km an overcast deck was a
+  lattice of plates; with it near the place, each head of the deck still
+  had a thin dark rim: #77.)
   On a sphere, a place with much cloud behind it and some depth
   towards the light lies near the edge of the lit face, where light goes
   in right beside it, and the fit keeps it bright (`K` = 0.0074: a depth of
@@ -1319,13 +1390,13 @@ each cloud, not on its surface; no normal of the field enters it.
   overcast sky of the CIE). The sun's part has a gain of `BELOW` = 0.5, set
   against photographs; the sky's part none, plus the 6 % the sea sends
   back up. So a base follows the depth over each place: dark under thick
-  cells and rolls, light under thin parts. `above`, the depth straight up:
+  cells, light under thin parts. `above`, the depth straight up:
   the map of the columns (`columnDepth`, see [The clouds'
   shadow](#the-clouds-shadow)), the mean of two columns up to `SPREAD` =
   150 m to either side at angles new each frame (light spreads sideways on
   its way down through a deck); each step of a column counts `(1 +
-  relief)^2` of its depth, where `relief` is how far the sheet's cells and
-  rolls raise it (the water grows with the height over the base). (Until
+  relief)^2` of its depth, where `relief` is how far the sheet's cells
+  raise it (the water grows with the height over the base). (Until
   round 20 of #33 each point marched its columns, seven steps each, and
   took the relief's mean 60 to 500 m over it for the whole column.) From below, a deck also shows its cells: Worley cells of
   the noise read at 3.5 and 10 times the tile's frequency (some 600 m and
@@ -1534,7 +1605,7 @@ above). They read the warped map (`uWarped`, `uSlopeW`) as the march does.
   the shell over some 240 km; its steps are then 2.5 km long, and the
   shadows as smooth along the light. In the column, each step counts
   `(1 + relief)^2` of its depth: a deck's water is not spread evenly, there
-  is more of it where its cells and rolls stand higher (in a cloud that
+  is more of it where its cells stand higher (in a cloud that
   rises as one, the water grows with the height over the base). (As one
   mean for the whole column, at one height, the creases of its cells,
   straight lines between Worley cells, showed from below as tiles with

@@ -50,6 +50,10 @@ Every page the tools load gets `quality=max` in its query, unless the query name
 | `cirrus1`, `up-cirrus-11.5km` | thick cirrus; cirrus overhead from near its base |
 | `sea-low-sun`, `gale`, `clear` | sun glitter at 0.3 km; wind of 15 m/s; no cloud at all |
 | `near-clouds-3km` | low clouds seen from near |
+| `overcast-above-11km` | an overcast deck from 11 km, looking down at its cells with the sun to the side |
+| `overcast-near-11km` | the owner's view of #77: the deck from 11 km at 40 degrees down, where the near cells once stood as rows of ridges with pointed peaks |
+| `overcast-far-11km` | the same deck towards the horizon: its cells from near to 150 km, where they must not turn into rows of equal spacing |
+| `overcast-down-11km` | the deck straight down from 11 km under a high sun: its cells must show as cells (dark seams), not as a flat white field or as round rims |
 | `at-the-wrap` | a still at 255.999 km, where the way flown wraps |
 | `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies (3 frames) |
 | `flight` | 40 frames of 16 ms at 900 km/h |
