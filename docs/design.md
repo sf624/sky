@@ -295,7 +295,9 @@ before the renderer). A simple model, not a simulator:
 - **The controls** give rates from -1 to 1: the keys (by `code`, so WASD
   sits in the same place on every layout; not while the focus is in a
   control, and they do not wake the panel) and the stick (its deflection
-  to the rim). Roll at `ROLL_RATE` (30 degrees a second) up to the bank
+  to the rim; shown on a touch screen or with `?stick=1`, and where the
+  panel would cover it, only while the panel has faded; held, it keeps
+  the panel away). Roll at `ROLL_RATE` (30 degrees a second) up to the bank
   slider's limit (60), pitch at `PITCH_RATE` (5) up to the climb slider's
   (15). Let go, the attitude stays. Level (`L`, the panel's button, the
   stick's) moves both back to 0 at those rates. The panel's sliders set
