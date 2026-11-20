@@ -57,6 +57,7 @@ Every page the tools load gets `quality=max` in its query, unless the query name
 | `time-lapse` | the play button, pressed after 2 frames |
 | `drag` | a mouse drag across the hero after 2 frames |
 | `south-night`, `midnight-sun-69.6` | other places: the Southern Cross high at 33.9 S on the UTC clock; the midnight sun at 69.6 N |
+| `weather-overcast`, `weather-random` | a weather of the panel's list, and one drawn from a seed (`weather=random&seed=42`), at 4 km |
 | `ui-en`, `ui-ja` | the text and the controls in English and in Japanese. `ui-ja` is skipped, with a line saying so, on a machine without a Japanese font |
 
 ## The checks

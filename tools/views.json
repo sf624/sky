@@ -28,6 +28,8 @@
     { "name": "drag", "q": "date=172&time=15", "drag": [0.6, 0.5, 0.35, 0.4], "frames": 24 },
     { "name": "south-night", "q": "lat=-33.9&lon=151.2&clock=utc&date=172&time=11&moon=0&yaw=15&pitch=45&cloud=0.3" },
     { "name": "midnight-sun-69.6", "q": "lat=69.6&date=172&time=0&yaw=180&pitch=4" },
+    { "name": "weather-overcast", "q": "date=172&time=13&weather=overcast&alt=4&pitch=-6" },
+    { "name": "weather-random", "q": "date=172&time=13&weather=random&seed=42&alt=4&pitch=-6" },
     { "name": "ui-en", "q": "date=172&time=15&lang=en", "ui": true },
     { "name": "ui-ja", "q": "date=172&time=15&lang=ja", "ui": true, "font": "ja" }
   ]
