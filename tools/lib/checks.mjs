@@ -168,7 +168,7 @@ export const CHECKS = {
 
   // No jump when the drawing size changes. (1) ?res=0.5: fly at half size, stop: the picture grows to full size,
   // and neither the stop nor the growth shifts it against a still at that place. (2) Without res: slow frames
-  // make the picture smaller in flight, fast frames let it grow back.
+  // make the picture smaller in flight, fast frames let it grow back (at high; at max it keeps its size).
   async res(ctx) {
     const v = 'date=172&time=14&cloud=0.6&yaw=40&pitch=-14&heading=0';
     const f = (n) => path.join(ctx.dir, n + '.png');
@@ -207,20 +207,24 @@ export const CHECKS = {
     expect(diffPng(still, f('settled')).mean <= LIMITS.settled[ctx.renderer], `the settled picture is within ${LIMITS.settled[ctx.renderer]} of the still`);
 
     // (2) Frames of 60 ms are too slow for 25 per second: the picture shrinks; frames of 16 ms let it grow back.
-    const q = await ctx.session.open(ctx.page, `${v}&speed=900&at=10,60`, ctx.size);
-    pages.push(q);
-    try {
-      await q.step(30, 16);
-      const a = (await q.draws()).sky.size;
-      await q.step(16, 60);
-      const b = (await q.draws()).sky.size;
-      await q.step(110, 16);
-      const c = (await q.draws()).sky.size;
-      lines.push(`frame time sets the size: ${a} at 16 ms, ${b} after slow frames, ${c} after fast ones again`);
-      const px = (s) => s.split('x').reduce((x, y) => x * y);
-      expect(px(b) < px(a) && c === a, 'slow frames shrink the picture and fast ones restore it');
-    } finally {
-      await q.close();
+    // So at high; at max the picture keeps the canvas's size whatever the frame time.
+    const px = (s) => s.split('x').reduce((x, y) => x * y);
+    for (const level of ['high', 'max']) {
+      const q = await ctx.session.open(ctx.page, `${v}&speed=900&at=10,60&quality=${level}`, ctx.size);
+      pages.push(q);
+      try {
+        await q.step(30, 16);
+        const a = (await q.draws()).sky.size;
+        await q.step(16, 60);
+        const b = (await q.draws()).sky.size;
+        await q.step(110, 16);
+        const c = (await q.draws()).sky.size;
+        lines.push(`${level}: frame time sets the size: ${a} at 16 ms, ${b} after slow frames, ${c} after fast ones again`);
+        if (level === 'max') expect(b === a && c === a, 'max keeps the canvas\'s size whatever the frame time');
+        else expect(px(b) < px(a) && c === a, 'slow frames shrink the picture and fast ones restore it');
+      } finally {
+        await q.close();
+      }
     }
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
