@@ -6203,6 +6203,19 @@ float nearness(float code) {
   return code > 0.995 ? 0.0 : exp2((0.5 - code) * 20.0);
 }
 
+#ifdef KEYS
+// Keys' six-point cubic convolution kernel (R. G. Keys, "Cubic convolution
+// interpolation for digital image processing", 1981): it passes a cubic
+// through unchanged, and at any offset it lets no wave through stronger than
+// it came, so read frame after frame it neither rings nor grows.
+float keys6(float x) {
+  x = abs(x);
+  return x < 1.0 ? (4.0 / 3.0 * x - 7.0 / 3.0) * x * x + 1.0
+       : x < 2.0 ? ((-7.0 / 12.0 * x + 3.0) * x - 59.0 / 12.0) * x + 2.5
+       : x < 3.0 ? ((x / 12.0 - 2.0 / 3.0) * x + 1.75) * x - 1.5 : 0.0;
+}
+#endif
+
 // Where in the picture so far (0 to 1; outside: nowhere) was what this pixel
 // shows, if that is at one over inv km from the eye (0: infinitely far)?
 // Clouds and sea have come nearer by the eye's way since, at the same height
@@ -6270,6 +6283,33 @@ void main() {
     vec2 size = vec2(textureSize(uPast, 0));
     vec2 pos = st * size - 0.5;
     vec2 i = floor(pos), f = pos - i;
+#ifdef KEYS
+    // (KEYS, the levels that draw the frame at the picture's size: Keys'
+    // six-point cubic over 6 by 6 texels, in 25 bilinear reads, the two
+    // middle texels of each row and column in one. In flight each pixel's
+    // past is read again every frame, and what one read loses, the next
+    // loses again: through Catmull-Rom, a picture of 2560 by 1440 kept 62 %
+    // of the detail 3.5 to 5 pixels across that a still at the place reached
+    // has, and through this, 75 %. Sharper kernels, Lanczos's of three lobes
+    // among them, let some waves grow at some offsets, and in flight they
+    // grew into a fine hatch.)
+    float wx[5], wy[5], px[5], py[5];
+    for (int k = 0; k < 2; k++) {
+      float g = k == 0 ? f.x : f.y, c = k == 0 ? i.x : i.y, s = k == 0 ? size.x : size.y;
+      float wc = keys6(g), wd = keys6(1.0 - g);
+      float w[5] = float[5](keys6(g + 2.0), keys6(g + 1.0), wc + wd, keys6(2.0 - g), keys6(3.0 - g));
+      float p[5] = float[5](c - 1.5, c - 0.5, c + 0.5 + wd / (wc + wd), c + 2.5, c + 3.5);
+      for (int j = 0; j < 5; j++) {
+        if (k == 0) { wx[j] = w[j]; px[j] = p[j] / s; } else { wy[j] = w[j]; py[j] = p[j] / s; }
+      }
+    }
+    vec4 was = vec4(0.0);
+    for (int b = 0; b < 5; b++) {
+      vec4 row = vec4(0.0);
+      for (int a = 0; a < 5; a++) row += textureLod(uPast, vec2(px[a], py[b]), 0.0) * wx[a];
+      was += row * wy[b];
+    }
+#else
     vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
     vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
     vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
@@ -6285,6 +6325,7 @@ void main() {
              + (textureLod(uPast, vec2(c0.x, c3.y), 0.0) * w0.x
               + textureLod(uPast, vec2(c12.x, c3.y), 0.0) * w12.x
               + textureLod(uPast, vec2(c3.x, c3.y), 0.0) * w3.x) * w3.y;
+#endif
     // The filter overshoots at edges: stay within the four texels around.
     // They also tell how many frames the mean has, and how far away the
     // pixel's past was.
@@ -7591,15 +7632,18 @@ const SkySound = (() => {
   // grid: the towers' grids of ?grid=1, texels a side, none: no grids)
   // and take fewer samples in fs (fs: its defines, Q_ at its top). cost:
   // the GPU time of a frame of as many pixels, relative to low's (measured,
-  // see docs/development.md), for the automatic choice.
+  // see docs/development.md), for the automatic choice. minScale: the
+  // smallest drawing scale while the view moves (MIN_SCALE if not given;
+  // 1: always the canvas's size). keys: the past is read through Keys'
+  // six-point cubic, sharper in flight (see "mean").
   const QUALITY = {
     low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The canvas's size in pixels for a place of cw by ch CSS pixels at the
@@ -7624,6 +7668,8 @@ const SkySound = (() => {
   // SETTLE frames after that, a still picture is clean and the drawing stops.
   const SETTLE = 32, IN_MOTION = 10, RELIGHT = 6;
   const MIN_SCALE = 0.35;  // the smallest picture a slow GPU may draw, relative to the canvas
+  // Frames slower than this many ms shrink the picture by sqrt(SCALE_AIM / ms).
+  const SCALE_AIM = 30;
   // The exposure follows the picture (see exposureFor and the shader
   // "meter"). Levels are log2 of the luminance before exposure.
   const METER = [64, 36];        // blocks of the picture the meter reads
@@ -8535,7 +8581,7 @@ const SkySound = (() => {
     const cloudProg = link('fs', '#define CLOUD_PASS');
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const noiseProgram = link('noise'), wavesProgram = link('waves'), slopeProgram = link('slope');
-    const mean = link('mean', Q.frame < 1 ? '#define UPSCALE' : ''), show = link('show'), meter = link('meter');
+    const mean = link('mean', [Q.frame < 1 ? '#define UPSCALE' : '', Q.keys ? '#define KEYS' : ''].filter(Boolean).join('\n')), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
     const shadowProg = link('fs', '#define SHADOW_MAP');
     // And as the map of the tops (see uTops), and as the sky's light on the
@@ -9892,8 +9938,12 @@ const SkySound = (() => {
     // time (then, ms); restart: the next frame begins the picture again.
     let adapting = false, then = null, restart = false, meteredAt = -1e9;
     // While the view moves or changes, the picture is drawn smaller than
-    // the canvas if frames take long (scale); at rest it is drawn in full.
+    // the canvas if frames take long (scale, down to the level's minScale:
+    // at max never, the picture comes first); at rest it is drawn in full.
     // The wall clock tells how long frames take, while one follows another.
+    // (At max it shrank, as at the other levels: a few slow frames, while a
+    // slider moved, took it down, and in flight at 30 frames a second, too
+    // slow to grow back, it stayed down, stretched to the screen and soft.)
     let scale = fixedScale || 1, clock = 0, span = 0, count = 0, slow = 0, chained = false, pinnedScale = 0;
     // A frame smaller than the picture gives each of its pixels less (see
     // UPSCALE in "mean"): a still takes more frames to settle, by the ratio
@@ -10179,7 +10229,7 @@ const SkySound = (() => {
       if (!fixedScale && !pinnedScale && count >= 4 && span >= 400) {
         const ms = span / count;
         slow = ms > 40 ? slow + 1 : 0;
-        if (slow >= 2) scale = Math.max(MIN_SCALE, scale * Math.sqrt(30 / ms));
+        if (slow >= 2) scale = Math.max(Q.minScale || MIN_SCALE, scale * Math.sqrt(SCALE_AIM / ms));
         else if (ms < 24) scale = Math.min(1, scale * 1.12);
         span = count = 0;
       }
@@ -11079,7 +11129,10 @@ const SkySound = (() => {
     // a frame, scaled to the full size, at least AUTO_FAST. Frames slowed by
     // something else, a busy CPU or a throttled window, are no reason to
     // draw less; a level stepped down from is never tried again.)
-    const scale = m.small / m.n, busy = m.gn < 20 || m.gpu / m.gn / (scale * scale) >= AUTO_FAST;
+    // (At a level that keeps its size, minScale 1, the size the frames' time
+    // would have shrunk it to: under AUTO_SMALL, frames over 83 ms.)
+    const drawn = m.small / m.n, busy = m.gn < 20 || m.gpu / m.gn / (drawn * drawn) >= AUTO_FAST;
+    const scale = QUALITY[level].minScale >= 1 ? Math.min(1, Math.sqrt(SCALE_AIM * m.n / m.ms)) : drawn;
     if (scale < AUTO_SMALL && i > 0 && busy) {
       to = LEVELS[i - 1];
       steppedDown(to);

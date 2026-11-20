@@ -2964,6 +2964,28 @@ frame ago.
 **The read** of the past is a Catmull-Rom filter in nine bilinear reads
 (Jimenez, 2016), clamped to the four texels around, which also give the
 number of frames in the mean (B of `aux`, over 64) and the past distance.
+At the levels with `keys` (`high`, `max`; `KEYS` in `mean`) it is Keys'
+six-point cubic instead (Keys, 1981), over 6 by 6 texels in 25 bilinear
+reads (the two middle texels of each row and column in one), clamped the
+same way. In flight every pixel's past is read again each frame, at
+another fraction of a pixel, and what one read loses the next loses
+again: the mean holds about ten frames, so the finest detail goes through
+the filter many times. Measured at 2560 x 1440 over the overcast deck at
+6.4 km (61 frames of 33 ms flown, against a still at the place reached,
+the part of the still's detail the flight keeps): Catmull-Rom 0.35 for
+detail 2.5 to 3.5 pixels across, 0.62 for 3.5 to 5, 0.87 for 5 to 8;
+Keys' cubic 0.45, 0.75, 0.92. Both kernels let no wave through stronger
+than it came, at any fraction of a pixel. Sharper ones do at some
+fractions (Lanczos's of three lobes, by up to 3 %, and Keys' four-point
+cubic with -0.75): read frame after frame, those waves grew, and a fine
+diagonal hatch covered the clouds in flight.
+
+What is left between a flight and a still at the place reached is noise:
+the march's jitter (interleaved gradient noise, shifted each frame) gives
+each frame a fine diagonal hatch, which the mean over many frames at rest
+removes, and the mean over about ten in flight only partly. A sharper read
+shows more of it; a longer mean in flight (`IN_MOTION`) blurs the detail
+more (Catmull-Rom with 25 frames: 0.38 for 3.5 to 5 pixels).
 
 **The neighbourhood check.** If the past was nearer or further by enough to
 slip a fraction of a pixel (`doubt`, from the parallax), it counts only as
@@ -3062,10 +3084,24 @@ no new ones: made anew at each step, their framebuffer checks waited for
 the GPU, up to some 100 ms on a phone. The mean reads the part drawn,
 `uFrameRes`.)
 The wall clock measures frames that follow one another: two measures in a
-row slower than 40 ms shrink `scale` (by `sqrt(30 / ms)`, down to
-`MIN_SCALE` = 0.35); faster than 24 ms grows it by 1.12, up to 1. At rest
+row slower than 40 ms shrink `scale` (by `sqrt(SCALE_AIM / ms)`, with
+`SCALE_AIM` = 30, down to the level's `minScale`, else `MIN_SCALE` =
+0.35); faster than 24 ms grows it by 1.12, up to 1. At rest
 the picture is drawn at full size; the smaller past then counts as one
 frame. `?res=` fixes `scale` for tests.
+
+At `max` (`minScale` 1) the picture is never drawn smaller: the picture
+comes first there. Until issue #80 it shrank there too, and in flight it
+could stay small: frames between 24 and 40 ms neither shrink nor grow
+it, so a second of slow frames (a slider moved, the depth maps drawn
+again) took it down, and at 30 frames a second it never grew back. On
+Direct3D 11 at 2560 x 1440 a frame of the overcast deck takes about 28 ms
+by the wall clock (headless), in that band. Measured on the fake clock:
+16 frames of 60 ms in flight, then 61 of 33 ms, left the picture at 1547 x
+870 of 2560 x 1440, stretched to the canvas: of the still's detail 3.5 to
+5 pixels across it kept 0.03, of 5 to 8 pixels 0.21 (at full size, 0.75
+and 0.92). The levels below still shrink, and still stay small after slow
+frames while frames take 24 to 40 ms.
 
 ## Quality levels
 
@@ -3080,6 +3116,8 @@ asks which level it is.
 | `pixels` | 300,000 | 900,000 | 1920 x 1080 | no limit |
 | `dpr` | 1 | 1.5 | 2 | 2 |
 | `frame` | 0.5 | 0.5 | 1 | 1 |
+| `minScale` | 0.35 | 0.35 | 0.35 | 1 |
+| `keys` | no | no | yes | yes |
 | `meterAsync` | yes | yes | no | no |
 | `airLut` | yes | no | no | no |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
@@ -3115,6 +3153,12 @@ asks which level it is.
   frame's (`Q_FRAME` in `fs`, the size of a pixel times it): read for the
   frame's larger pixels, through coarser levels of the textures, the
   clouds stayed as soft at rest as a picture of the frame's size.
+- `minScale`: the smallest drawing scale while the view moves (see
+  [The drawing size](#the-drawing-size)); `MIN_SCALE` where not given. At
+  `max`, 1: the picture keeps the canvas's size in flight.
+- `keys`: `mean` reads the past through Keys' six-point cubic (`KEYS`)
+  instead of Catmull-Rom: sharper in flight, for 25 bilinear reads a pixel
+  instead of nine (see [the mean over frames](#the-heros-mean-over-frames)).
 - `meterAsync`: the exposure meter's read in flight (see
   [Exposure](#exposure-and-the-tone-curve)) goes into a buffer of the GPU's
   (`PIXEL_PACK_BUFFER`), taken once a fence says it has arrived. A plain
@@ -3244,6 +3288,9 @@ picture, `AUTO_WAIT` (2 s) is let go by; then windows of at least
   Frames slowed by something else (a busy CPU, a throttled window) are no
   reason to draw less, and a level stepped down from is not tried again. The level stepped down from
   becomes the ceiling, and no step up follows in this visit.
+  At `max`, which keeps its size, the size its frames would have shrunk
+  it to counts instead (`sqrt(SCALE_AIM / ms)`): under `AUTO_SMALL`,
+  frames over 83 ms on the mean.
 - A window drawn at full size throughout steps up if the level above
   would have time to spare, by its `work` (its `cost` times its canvas's
   pixels) over this level's: with the GPU's times (20 of them or more in
