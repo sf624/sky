@@ -108,6 +108,12 @@
      it is touched, then takes a number in m or km (see setAltitude). */
   .panel .row input { width: 8ch; min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 3px; background: none;
     color: inherit; font: inherit; letter-spacing: inherit; text-align: right; font-variant-numeric: tabular-nums; opacity: .9; }
+  /* The altitude has a row of its own: a long track, even in km up to
+     ALT_LINEAR, with the heights of ALT_TICKS written under it. */
+  .panel .alt { grid-column: 1 / -1; }
+  .panel .alt .ticks { position: relative; display: block; height: 12px; margin: 1px 8px 0; font-size: 10px;
+    line-height: 12px; letter-spacing: 0; opacity: .7; font-variant-numeric: tabular-nums; }
+  .panel .alt .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
   .panel .row input:focus { outline: 1px solid rgba(255, 255, 255, .6); outline-offset: 1px; background: rgba(0, 0, 0, .2); opacity: 1; }
   .panel input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #fff; }
   .panel select {
@@ -280,6 +286,12 @@
         <input id="time" type="range" min="0" max="24" step="0.05" value="15">
       </label>
     </div>
+    <label class="alt">
+      <span class="row"><span data-t="alt">高度</span><input id="altOut" type="text" inputmode="decimal" enterkeyhint="done"
+        autocomplete="off" spellcheck="false" aria-label="高度（m または km）" title="高度（m または km）" data-t-label="altField" data-t-title="altField"></span>
+      <input id="alt" type="range" min="0" max="1035" step="1" aria-label="高度" data-t-label="alt">
+      <span class="ticks" aria-hidden="true"></span>
+    </label>
     <label>
       <span class="row"><span data-t="date">日付</span><output id="dateOut"></output></span>
       <input id="date" type="range" min="1" max="365" step="1">
@@ -295,11 +307,6 @@
     <label>
       <span class="row"><span data-t="wind">海上の風</span><output id="windOut"></output></span>
       <input id="wind" type="range" min="1" max="15" step="0.5" value="6">
-    </label>
-    <label>
-      <span class="row"><span data-t="alt">高度</span><input id="altOut" type="text" inputmode="decimal" enterkeyhint="done"
-        autocomplete="off" spellcheck="false" aria-label="高度（m または km）" title="高度（m または km）" data-t-label="altField" data-t-title="altField"></span>
-      <input id="alt" type="range" min="0" max="1000" step="1" aria-label="高度" data-t-label="alt">
     </label>
     <label>
       <span class="row"><span data-t="speed">速度</span><output id="speedOut"></output></span>
@@ -7799,9 +7806,10 @@ const SkySound = (() => {
     return [Math.max(1, Math.round(cw * scale)), Math.max(1, Math.round(ch * scale))];
   };
   const CRUISE = 11;       // km: 36,000 ft
-  // The altitude's range, km. The slider is even in log(1 + h / ALT_H0): fine
-  // low down, coarse high up (see the altitude's control, below).
-  const ALT_MIN = 0.3, ALT_MAX = 40, ALT_H0 = 2;
+  // The altitude's range, km. The slider is even in km in steps of ALT_STEP
+  // up to ALT_LINEAR, then even in log(h) in ALT_LOG_STEPS steps up to
+  // ALT_MAX (see the altitude's control, below).
+  const ALT_MIN = 0.3, ALT_LINEAR = 13, ALT_MAX = 40, ALT_STEP = 0.02, ALT_LOG_STEPS = 400;
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
   const SLOPE_MAX = 2;                 // the steepest slope of the weather map kept, per km (see cloudShape)
   // The cirrus's ice: texels a side (on a GPU, and on a software renderer),
@@ -10669,17 +10677,31 @@ const SkySound = (() => {
   });
   if (params.has('date') && !params.has('moon')) moon.value = moonAgeOn(+date.value);
 
-  // The altitude: a slider even in log(1 + h / ALT_H0), so that a pixel of it
-  // is some 40 m at 0.3 km and 230 m at cruise, and a step of the arrow keys
-  // (a thousandth of the slider) 7 m and 38 m. Beside it, the value is a
-  // field: a number typed there is read in km below 300 and in metres from
-  // 300 on (the heights in km end below 300, those in metres start there);
-  // "m" or "km" after it says so. The state holds the height itself, not the
-  // slider's place: ?alt=11 (km, as before) draws at 11 km exactly.
-  const altSpan = Math.log((ALT_H0 + ALT_MAX) / (ALT_H0 + ALT_MIN));
-  const altPlace = h => Math.round(1000 * Math.log((ALT_H0 + h) / (ALT_H0 + ALT_MIN)) / altSpan);
-  const altAt = u => Math.round(1000 * ((ALT_H0 + ALT_MIN) * Math.exp(u / 1000 * altSpan) - ALT_H0)) / 1000;
+  // The altitude: a slider on a row of its own, as long as the panel. Up to
+  // ALT_LINEAR it is even in km, a step (of the arrow keys too) ALT_STEP, 20 m:
+  // a pixel of it is some 27 m on the desktop's panel and 63 m on a phone
+  // 411 px wide (before, even from 0.3 to 13 km over a quarter of the panel:
+  // 77 m and 86 m). Above, even in log(h), 37 to 112 m a step. The heights of
+  // ALT_TICKS are written under it. altPlace and altAt turn a height (km)
+  // into the slider's place and back; the state holds the height itself, so
+  // that ?alt=11 (km, as before) draws at 11 km exactly. Beside it, the value
+  // is a field: a number typed there is read in km below 300 and in metres
+  // from 300 on (the heights in km end below 300, those in metres start
+  // there); "m" or "km" after it says so.
+  const ALT_TICKS = [1, 5, 11, 20, 40];
+  const ALT_PLACES = Math.round((ALT_LINEAR - ALT_MIN) / ALT_STEP), altLog = Math.log(ALT_MAX / ALT_LINEAR);
+  const altPlace = h => Math.round(h <= ALT_LINEAR ? (h - ALT_MIN) / ALT_STEP
+    : ALT_PLACES + ALT_LOG_STEPS * Math.log(h / ALT_LINEAR) / altLog);
+  const altAt = u => Math.round(100 * (u <= ALT_PLACES ? ALT_MIN + u * ALT_STEP
+    : ALT_LINEAR * Math.exp((u - ALT_PLACES) / ALT_LOG_STEPS * altLog))) / 100;
   const altText = h => h < 20 ? Math.round(h * 100) * 10 + ' m' : h.toFixed(1) + ' km';
+  alt.max = ALT_PLACES + ALT_LOG_STEPS;
+  for (const h of ALT_TICKS) {
+    const tick = document.createElement('span');
+    tick.style.left = 100 * altPlace(h) / alt.max + '%';
+    tick.textContent = h === ALT_MAX ? h + ' km' : h;
+    alt.parentNode.querySelector('.ticks').append(tick);
+  }
   function setAltitude(h) {
     state.alt = Math.min(ALT_MAX, Math.max(ALT_MIN, h));
     alt.value = altPlace(state.alt);
