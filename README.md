@@ -37,7 +37,8 @@ panel has the focus):
 - **L**: back to straight and level flight.
 
 A key held keeps rolling or pitching; let go, the aircraft keeps its bank
-and its climb. On a touch screen, a stick at the bottom left does the same:
+and its climb. On a touch screen, a stick at the bottom left does the same
+(on a phone it shows when the panel has faded):
 push it to the side to bank, pull it down to raise the nose; its small
 button levels the wings. The view turns with the aircraft (you keep looking
 out of the same window), and a bank tilts the horizon; the sun stays where
