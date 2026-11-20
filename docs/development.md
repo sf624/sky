@@ -52,6 +52,7 @@ These are read directly.
 | `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
+| `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
 | `quality` | stored choice, else `auto` | The quality level: `low`, `mid`, `high`, `max` or `auto` (see [design.md](design.md#quality-levels)). A level that does not start falls back to the one below. Not stored. The tools add `quality=max` to every page they load, unless the query names a level |
 | `lang` | stored choice, else the browser's language | The page's language: `ja` or `en`. Not stored |
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
@@ -196,7 +197,9 @@ Each frame of the hero is six draws: the first stage of the clouds'
 light (the low clouds' pass, `fs` with `CLOUD_PASS` and `uStage` 0, a
 quarter of the pixels), the cirrus's pass and the low clouds' (with
 `CIRRUS_PASS`, `CLOUD_PASS`), the scene (`fs`) into the frame texture,
-`mean`, and `show` (the passes only with their clouds); at most every 100 ms a
+`mean`, and `show` (the passes only with their clouds; at `high` and `max`
+on a canvas with more pixels than the picture, the two draws of `enlarge`
+instead of `show`); at most every 100 ms a
 fifth, the exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
 November 2026; reading it back costs about 2 ms of the main thread here,
 none of the GPU's); and a frame that needs a new map of the clouds'
@@ -215,6 +218,14 @@ default limit (WQHD), a 4K window is drawn at 2560 x 1440.
 | 1920 x 1080 | 5.5 ms | 0.08 ms | 0.02 ms |
 | 2545 x 1440 | 9.3 ms | | |
 | 3825 x 2160 | 19 ms | | |
+
+`enlarge`, measured in November 2026 (`perf --dpr 1.5`, 2560 x 1318 CSS
+pixels, flying, the overcast deck): from a picture of 2676 x 1378 to a
+canvas of 3840 x 1977, 0.23 ms for the enlargement and 0.11 ms for the
+sharpening, where `show` took 0.03 ms. On Direct3D 11 (`d3d page`, a
+window of 3840 x 2160 with `pixels=fhd`, three runs each, alternated), a
+frame took 18.3 to 18.5 ms enlarged to 3818 x 2062 and 18.1 to 18.5 ms
+with `enlarge=0`: within the noise.
 
 Measured again at 2560 x 1440 (`perf`, `res=1`, flying, three runs, the
 scene's median) in November 2026: the default view by day (`date=172&time=15`)

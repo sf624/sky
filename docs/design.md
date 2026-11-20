@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and ten `<script>`
+`index.html` holds everything: the markup, the CSS and eleven `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -20,6 +20,7 @@ blocks. It loads no other file.
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| `enlarge` | fragment shader | Shows that picture on a canvas with more pixels, enlarged and sharpened, with dither (at `high` and `max`; see [The drawing size](#the-drawing-size)). |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
 | (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
@@ -92,7 +93,7 @@ The JS then runs once, at load, and does little:
    function: it waits a frame (`nextFrame`) wherever it would otherwise
    hold the main thread or wait for the GPU. Its steps:
    - `getContext`, and the extensions.
-   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `meter`) is
+   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `enlarge`, `meter`) is
      compiled and linked at once, and nothing asks how it went yet. With
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
@@ -3002,7 +3003,9 @@ textures for it, each with a second texture beside it (`aux`):
   (`outColor`), and the distance of what each pixel shows as its depth
   (`gl_FragDepth`, a 32-bit float texture: one target, see the loading);
 - two `pictures` that take turns: the one so far is read while the next is
-  drawn by `mean`; then `show` copies the new one to the canvas.
+  drawn by `mean`; then `show` copies the new one to the canvas, or
+  `enlarge` enlarges it there where the canvas has more pixels (see
+  [The drawing size](#the-drawing-size)).
 
 The frame is as large as the picture, except at the quality levels whose
 `frame` is under 1 (`low` and `mid`: half the picture's width and height,
@@ -3152,16 +3155,73 @@ start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
-`fit()` sizes the canvas (`canvasSize`): its CSS size times the device
+`fit()` sizes the picture (`drawnSize`): the canvas's CSS size times the device
 pixel ratio (at most the quality level's `dpr`, 2 at `max`), but no more
 pixels than the quality level's `pixels` and the resolution choice (`#pixels`,
 `HERO_PIXELS`): Full HD (1920 x 1080 pixels' worth), WQHD (2560 x 1440,
 the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 `localStorage` (`sky.pixels`, written when the choice changes), else WQHD.
 
+**The canvas's own size** (`shownSize`). At `low` and `mid` the canvas is
+as large as the picture, and where the screen has more pixels the browser
+stretches it, with its plain (bilinear) filter. At `high` and `max`
+(`enlarge`) the canvas takes the device pixels it covers (as the browser
+counts them, `devicePixelContentBoxSize` of a `ResizeObserver`, else its
+CSS size times the ratio; at most `SHOWN_MAX`, 5120 x 2880), and the page
+enlarges the picture to them itself, in two passes of the shader
+`enlarge` at the canvas's size, after AMD's FidelityFX Super Resolution 1
+(MIT, see `THIRD_PARTY_NOTICES.md`):
+
+- the edge-adaptive enlargement (EASU): twelve texels round each point, a
+  kernel of Lanczos 2 stretched along the edge they show and narrowed
+  across it, and the result held within the four nearest texels (no
+  ringing), into a texture of the canvas's size (`E.big`, half floats
+  where the picture is, else 8 bits);
+- the contrast-adaptive sharpening (RCAS) at `SHARP`, less where a pixel
+  stands alone against its four neighbours (noise, a star), then the
+  dither, at the canvas's pixels.
+
+The picture is as shown (after the exposure and the tone curve), which is
+what both expect. On such a canvas the same passes also show the picture
+drawn smaller while the view moves (below). Where the canvas is no larger
+than the drawn size (one device pixel per CSS pixel within the limit),
+`show` copies the picture, or stretches one drawn smaller, as before, and
+the tools' captures at a device pixel ratio of 1 are the same as without
+`enlarge`.
+
+The sharpening is for a still picture: while the view moves it is off,
+and once it stops it comes in as the picture settles (`still`, over
+`settleFrames`). Sharpened in flight, the noise of the moving picture
+crossed it in fine hatching that changed from frame to frame. The
+enlargement alone stays on in flight.
+
+Measured in November 2026 (issue #80) in a window of 2560 x 1318 CSS
+pixels at a ratio of 1.5 (3840 x 1977 device pixels) with the WQHD limit
+(a picture of 2676 x 1378, enlarged 1.43 times), against the picture
+drawn at 3840 x 1977 (`pixels=4k`), in six still views (the overcast deck
+at 6.4 km, the low sun over the sea, thick cirrus, a moonless night, a
+full moon, clouds near at 3 km):
+
+| Way to the screen | Error, RMS (8-bit levels) | High frequencies (of the drawn picture's) |
+|---|---|---|
+| the browser's stretch | 0.84 to 4.51 | 0.20 to 0.41 |
+| the enlargement alone | 0.59 to 4.56 | 0.34 to 0.87 |
+| the enlargement and the sharpening | 0.62 to 4.81 | 0.55 to 1.14 |
+
+(High frequencies: the mean square of the Laplacian of the luma.) Most of
+the error is detail that the larger picture draws and the smaller one
+does not (the deck's fine texture), which no enlargement brings back.
+Catmull-Rom (and Lanczos 2, tried on the deck) came between the stretch
+and the enlargement.
+Stars stay round, without dark rings; the horizon, the moon and the sun's
+glare get no halo. At `low` on a phone's screen the same passes made the
+grid of the half-size frames plainer, so `low` and `mid` keep the
+browser's stretch.
+
 **Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
-are drawn at `scale` times the canvas size, and `show` stretches them.
+are drawn at `scale` times the drawn size, and `show` stretches them to
+the canvas (`enlarge`, where it has more pixels than the drawn size).
 (At the levels whose `frame` is under 1 the picture stays at the canvas's
 size and only the frame shrinks: `frame` times `scale` times the canvas.
 Its targets, and those of the passes and the light, are made at full
@@ -3434,7 +3494,9 @@ the tops, the sky's light and the depth maps, `frame` the passes and the
 scene, `mean`, `meter`, `show`; a mean over the last few dozen frames), the draws of the last frame and the pixels they shaded
 (`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
-canvas's size, the CSS size it fills and the device pixel ratio, the sizes
+canvas's size, the CSS size it fills and the device pixel ratio, how
+the picture reaches the screen (`shown`: enlarged by the page, and
+stretched by the browser past the canvas, with their ratios), the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
 page to the first picture and when each part of the start ended
@@ -3519,8 +3581,8 @@ draws take under 1 ms of the GPU (0.07 ms for the moved maps, about 0.4
 ms each for the tops; measured drawing them every frame), which a moving
 slider pays on each frame, as it pays the shadow map.
 
-Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
+Units 6 to 9 hold the frame and the picture so far for `mean`; `show`,
+`enlarge` and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
 textures are built. Units 16 and 17 hold the passes before the scene
 (the cirrus's and the low clouds', and their depths), unit 18 the first
 stage of the clouds' light (see Low clouds). Units 14 and 20 hold the clouds' depth
