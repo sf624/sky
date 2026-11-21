@@ -24,6 +24,8 @@
     { "name": "dpr2-fhd", "q": "date=172&time=15&pixels=fhd", "w": 1280, "h": 720, "dpr": 2, "frames": 3 },
     { "name": "dpr1.5-fhd", "q": "date=172&time=14&alt=6.4&cloud=1&cirrus=0.5&pixels=fhd", "w": 1792, "h": 1008, "dpr": 1.5 },
     { "name": "flight", "q": "date=172&time=15&yaw=20&pitch=-12&speed=900&heading=0&at=40,60", "frames": 40, "ms": 16 },
+    { "name": "banked", "q": "date=172&time=16.5&yaw=60&pitch=-6&heading=0&bank=30&climb=4" },
+    { "name": "turning", "q": "date=172&time=15&yaw=150&pitch=-10&speed=900&heading=135&bank=25&at=40,60", "frames": 40, "ms": 16 },
     { "name": "time-lapse", "q": "date=172&time=16.5", "before": "document.getElementById('play').click()", "frames": 24 },
     { "name": "drag", "q": "date=172&time=15", "drag": [0.6, 0.5, 0.35, 0.4], "frames": 24 },
     { "name": "south-night", "q": "lat=-33.9&lon=151.2&clock=utc&date=172&time=11&moon=0&yaw=15&pitch=45&cloud=0.3" },

@@ -24,6 +24,27 @@ Click a picture to open the page with that view.
 Drag the view to look around, with the mouse or a finger. You can look up
 or down by up to 89 degrees.
 
+You can also fly the aircraft. With the keyboard (while no control of the
+panel has the focus):
+
+- **← →** or **A D**: bank to the left or right. A banked aircraft turns, as
+  a real one does: at 900 km/h a bank of 30 degrees turns 1.3 degrees a
+  second, and 60 degrees (the most) 3.9 degrees a second.
+- **↑ ↓** or **W S**: lower or raise the nose, as in a flight simulator
+  (↑ pushes the nose down). The aircraft climbs or descends, up to 15
+  degrees, and the altitude follows. At 300 m and at 40 km it levels off.
+- **Q E**: turn with the rudder, 3 degrees a second, without banking.
+- **L**: back to straight and level flight.
+
+A key held keeps rolling or pitching; let go, the aircraft keeps its bank
+and its climb. On a touch screen, a stick at the bottom left does the same
+(on a phone it shows when the panel has faded):
+push it to the side to bank, pull it down to raise the nose; its small
+button levels the wings. The view turns with the aircraft (you keep looking
+out of the same window), and a bank tilts the horizon; the sun stays where
+it is in the sky. At speed 0 the aircraft stands still: the bank and the
+climb only tilt it, and the rudder turns it on the spot.
+
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).
 **Language / 言語** in the panel switches it, and the browser remembers the
@@ -32,7 +53,8 @@ choice.
 The title and the hint about dragging fade out after a few seconds. The panel
 and the full-screen button (top right) fade out when nothing moves for a few
 seconds; moving the mouse, touching the screen, pressing a key or tabbing
-into them brings them back. They stay while the pointer is on them. The
+into them brings them back (the steering keys and the stick do not: the
+panel would cover the view). They stay while the pointer is on them. The
 mouse cursor hides with them over the view, and comes back with them.
 
 The panel at the bottom changes the time and the weather.
@@ -49,6 +71,8 @@ The panel at the bottom changes the time and the weather.
 - **Moon**: the age of the moon, 0 to 29.5 days.
 - **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
+- **Heading**: the direction flown, as a compass bearing (0 north, 90 east). The view turns with it. It follows the aircraft's turns.
+- **Bank**, **Climb**: the aircraft's bank, up to 60 degrees left or right, and its climb or descent, up to 15 degrees (with the rate in m/s). **Level** brings both back to 0.
 - **Altitude**: 300 m to 40 km (11,000 m at first). Above the cruise the sky overhead turns dark, the horizon curves and a thin blue band lies along it. The slider has a row of its own: up to 13 km it moves evenly, 20 m a step (a pixel is about 30 m on a desktop, 60 m on a phone), and above it moves faster, about 150 m a pixel at 40 km on a desktop. For an exact height, type it into the value beside the slider, in m or km (a number below 300 is km, from 300 on metres).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.

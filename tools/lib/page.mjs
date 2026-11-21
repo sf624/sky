@@ -5,8 +5,8 @@ import path from 'node:path';
 import { sleep, launchChrome, startServer, withQuality } from './browser.mjs';
 import { pageScript } from './inpage.mjs';
 
-// Hides the text and the controls over the hero (.fs: the full-screen button), and the scroll bar, from the first frame on.
-export const HIDE_CSS = '.title,.panel,.hint,.fs{display:none !important}body{overflow:hidden}';
+// Hides the text and the controls over the hero (.fs: the full-screen button; .stick: the stick), and the scroll bar, from the first frame on.
+export const HIDE_CSS = '.title,.panel,.hint,.fs,.stick{display:none !important}body{overflow:hidden}';
 // The instant the fake Date starts from (2026-11-15 00:00 UTC; the time zone is UTC too).
 export const EPOCH = Date.UTC(2026, 10, 15);
 const READY_MS = +(process.env.SKY_READY_MS || 180000);
