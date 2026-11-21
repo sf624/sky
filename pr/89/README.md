@@ -49,7 +49,7 @@ The panel at the bottom changes the time and the weather.
 - **Moon**: the age of the moon, 0 to 29.5 days.
 - **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
-- **Altitude**: 300 m to 13,000 m (11,000 m at first).
+- **Altitude**: 300 m to 40 km (11,000 m at first). Above the cruise the sky overhead turns dark, the horizon curves and a thin blue band lies along it. The slider has a row of its own: up to 13 km it moves evenly, 20 m a step (a pixel is about 30 m on a desktop, 60 m on a phone), and above it moves faster, about 150 m a pixel at 40 km on a desktop. For an exact height, type it into the value beside the slider, in m or km (a number below 300 is km, from 300 on metres).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
