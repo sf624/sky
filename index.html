@@ -1861,12 +1861,18 @@ uniform sampler2D uWarped, uSlopeW;
 // the depth. One target: see below.
 layout(location = 0) out uvec4 outCirrus;
 #elif defined(AIR_LUT)
-// The table of the air's light (see airTable): the light, four wavelengths
-// a target, and the optical depth.
+// The table of the air's light (see Q_AIR_LUT): the light, four
+// wavelengths a target, the optical depth, and (with Q_LUT_MRT 7, in the
+// same draw) the light scattered once.
 layout(location = 0) out vec4 outLut0;
 layout(location = 1) out vec4 outLut1;
 layout(location = 2) out vec4 outLut2;
 layout(location = 3) out vec4 outLut3;
+#if Q_LUT_MRT > 4
+layout(location = 4) out vec4 outLut4;
+layout(location = 5) out vec4 outLut5;
+layout(location = 6) out vec4 outLut6;
+#endif
 #elif defined(CLOUD_PASS)
 // The low clouds' pass (see clouds): in the first stage, the slow parts of
 // their light as seven half floats; in the second, tBar, sOne + sMany, sAmb
@@ -2165,7 +2171,8 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 
 #if Q_AIR_LUT || defined(AIR_LUT)
 // ---------- The air's light as a table (Q_AIR_LUT) ----------
-// Low marches the air of each pixel no more: the light the air scatters
+// At the levels with a table, the scene marches the air of each pixel no
+// more: the light the air scatters
 // towards the eye and its optical depth are made ahead, for the view rays of
 // LUT_AZ by LUT_EL directions round the eye and LUT_S distances along each
 // (AIR_LUT, a program of fs of its own), as Hillaire (2020) makes his
@@ -2176,8 +2183,12 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 // LUT_T0 to LUT_T1, evenly in their log. Two more slices hold the sky as the
 // sea sees it (from its surface, the whole way: skyAt; LUT_SEA) and the
 // whole ray, to the sea or out of the air (LUT_END). All in one 3D
-// texture: the seven parts of its width hold the three vec4 of the light,
-// the depth, and the three vec4 of the part of the light scattered once.
+// texture: seven parts of its depth, LUT_S + 2 slices each, hold the three
+// vec4 of the light, the depth, and the three vec4 of the part of the light
+// scattered once. (Parts along the depth, not side by side in its width:
+// AIR_LUT draws straight into the slices, each a layer, where a part beside
+// another had to be drawn apart and copied in, 462 copies a table that took
+// Direct3D 11 some 2 s.)
 // The light is divided by uLutScale (the light of the air the stronger of
 // the sun and the moon makes) to keep half floats' range by night.
 // The sizes are the level's (`airLut` in QUALITY).
@@ -2220,21 +2231,26 @@ uniform highp sampler3D uAirLut;
 // two slices, a mix of them), times f. once: the light only, part 4 (the
 // part scattered once); else part 0, and the depth.
 void airSlice(vec2 uv, float z, float f, bool once, out vec4 La[3], out vec3 oda) {
-  float x = clamp(uv.x, 0.5 / LUT_AZ, 1.0 - 0.5 / LUT_AZ) / LUT_PARTS;
-  z = (z + 0.5) / (LUT_S + 2.0);
-  float x0 = once ? 4.0 / LUT_PARTS : 0.0;
-  for (int k = 0; k < 3; k++) La[k] = f * uLutScale * textureLod(uAirLut, vec3(x + x0 + float(k) / LUT_PARTS, uv.y, z), 0.0);
-  oda = once ? vec3(0.0) : f * textureLod(uAirLut, vec3(x + 3.0 / LUT_PARTS, uv.y, z), 0.0).xyz;
+  // (Between two slices of a part, the filter mixes them; the end slices
+  // are read at their centres, so a part never mixes with the next.)
+  vec2 xy = vec2(clamp(uv.x, 0.5 / LUT_AZ, 1.0 - 0.5 / LUT_AZ), uv.y);
+  const float N = LUT_S + 2.0;
+  float z0 = once ? 4.0 : 0.0;
+  for (int k = 0; k < 3; k++) La[k] = f * uLutScale * textureLod(uAirLut, vec3(xy, ((z0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
+  oda = once ? vec3(0.0) : f * textureLod(uAirLut, vec3(xy, (3.0 * N + z + 0.5) / (LUT_PARTS * N)), 0.0).xyz;
 }
-// ...from the eye to t km: between the slices on either side, linearly in
-// t (a little nearer the march than mixed evenly in log t).
-void airAt(vec2 uv, float t, bool once, out vec4 La[3], out vec3 oda) {
+// The slice and the factor that airSlice reads the air from the eye to t
+// km with: between the slices on either side, linearly in t (a little
+// nearer the march than mixed evenly in log t). (Each read of the table in
+// the scene is one airSlice: Direct3D 11 compiles every call apart, and
+// the scene took longer to compile.)
+vec2 lutZ(float t) {
   float f = 1.0;
   if (t < LUT_T0) { f = max(t, 0.0) / LUT_T0; t = LUT_T0; }
   float q = clamp(log(t / LUT_T0) / log(LUT_T1 / LUT_T0), 0.0, 1.0) * (LUT_S - 1.0);
   float i = min(floor(q), LUT_S - 2.0);
   float ti = LUT_T0 * pow(LUT_T1 / LUT_T0, i / (LUT_S - 1.0)), tj = LUT_T0 * pow(LUT_T1 / LUT_T0, (i + 1.0) / (LUT_S - 1.0));
-  airSlice(uv, i + clamp((t - ti) / (tj - ti), 0.0, 1.0), f, once, La, oda);
+  return vec2(i + clamp((t - ti) / (tj - ti), 0.0, 1.0), f);
 }
 #endif
 
@@ -5706,8 +5722,9 @@ void main() {
 // without the clouds' shadows; in slice LUT_SEA, from the sea's surface up
 // through the whole air; in LUT_END, from the eye to the end of the ray.
 uniform float uLutSlice;
-// 0: the light and the depth (the parts 0 to 3 of the table); 1: the light
-// scattered once (parts 4 to 6).
+// With four targets (Q_LUT_MRT 4), two draws: 0, the light and the depth
+// (the parts 0 to 3 of the table); 1, the light scattered once (parts 4 to
+// 6). With seven, one draw writes all seven parts.
 uniform float uLutPart;
 const int LUT_NV = Q_NV > 14 ? Q_NV : 14, LUT_NSHADE = Q_NSHADE > 6 ? Q_NSHADE : 6, LUT_NFAR = Q_NFAR > 10 ? Q_NFAR : 10;
 void main() {
@@ -5767,11 +5784,21 @@ void main() {
     if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * gain, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
   }
+#if Q_LUT_MRT > 4
+  outLut0 = L[0];
+  outLut1 = L[1];
+  outLut2 = L[2];
+  outLut3 = vec4(od, 0.0);
+  outLut4 = lightOnce[0];
+  outLut5 = lightOnce[1];
+  outLut6 = lightOnce[2];
+#else
   bool once = uLutPart > 0.5;
   outLut0 = once ? lightOnce[0] : L[0];
   outLut1 = once ? lightOnce[1] : L[1];
   outLut2 = once ? lightOnce[2] : L[2];
-  outLut3 = once ? vec4(0.0) : vec4(od, 0.0);
+  outLut3 = vec4(od, 0.0);
+#endif
 }
 #elif defined(SKY_LIGHT)
 // One texel of uSkyLight: the sky's light (the sun's part) on a white
@@ -5997,7 +6024,7 @@ void main() {
   }
   int layer = 0;
 #if Q_AIR_LUT
-  // The air from the table (see airAt), except within LUT_NEAR of the sun
+  // The air from the table (see airSlice and lutZ), except within LUT_NEAR of the sun
   // or the moon, whose glow the table's texels are too coarse for: the
   // march below. The segments between the eye, the layers and the end:
   // the light of each is the table's at its end less at its start, seen
@@ -6046,13 +6073,15 @@ void main() {
       // (The ray's end from its own slice: mixed from the slices of distance
       // on either side, a ray that met the sea between them lost the light
       // of the dense air near its end.)
-      if (atLayer) airAt(uv, tEnd, false, Lb, odb); else airSlice(uv, LUT_END, 1.0, false, Lb, odb);
+      vec2 zf = atLayer ? lutZ(tEnd) : vec2(LUT_END, 1.0);
+      airSlice(uv, zf.x, zf.y, false, Lb, odb);
       for (int k = 0; k < 3; k++) L[k] += visX * max(Lb[k] - La[k], 0.0);
       float a = max(tA, sa0), b = min(tEnd, sb0);
       if (shade && b > a) {
         // (The light scattered once in each piece: the table's at its end
         // less at its start; at the ray's end, from its own slice.)
-        airAt(uv, a, true, Sc, odx);
+        zf = lutZ(a);
+        airSlice(uv, zf.x, zf.y, true, Sc, odx);
         for (int m = 0; m < Q_LUT_SHADE; m++) {
           float f = (float(m) + shaftJitter) / float(Q_LUT_SHADE), ts = a + (b - a) * f * f;
           float h = length(o + d * ts) - RG;
@@ -6060,8 +6089,8 @@ void main() {
           float lit = mix(1.0, exp(-cloudShadow(o + d * ts)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
           float mean = mix(1.0, mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h))), uLightShare);
           f = float(m + 1) / float(Q_LUT_SHADE);
-          if (m + 1 == Q_LUT_SHADE && b >= tEnd && !atLayer) airSlice(uv, LUT_END, 1.0, true, Sd, odx);
-          else airAt(uv, a + (b - a) * f * f, true, Sd, odx);
+          zf = m + 1 == Q_LUT_SHADE && b >= tEnd && !atLayer ? vec2(LUT_END, 1.0) : lutZ(a + (b - a) * f * f);
+          airSlice(uv, zf.x, zf.y, true, Sd, odx);
           for (int k = 0; k < 3; k++) L[k] += visX * (lit / mean - 1.0) * max(Sd[k] - Sc[k], 0.0);
           Sc = Sd;
         }
@@ -9146,6 +9175,9 @@ const SkySound = (() => {
     const BODY = Math.min(Q.body, software ? NOISE : 2 * NOISE);
     // The frames and the pictures: half floats where the GPU can draw to those (see picture).
     let fine = !!(gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float'));
+    // The targets one draw of the air's table writes (see Q_LUT_MRT in fs):
+    // all seven parts where the GPU draws into seven at once, else four and three.
+    const LUT_MRT = Math.min(gl.getParameter(gl.MAX_DRAW_BUFFERS), gl.getParameter(gl.MAX_COLOR_ATTACHMENTS)) >= 7 ? 7 : 4;
 
     // Every program is compiled and linked at once, and nothing asks how
     // one went until the GPU says it is done: with
@@ -9192,7 +9224,7 @@ const SkySound = (() => {
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2] } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       // (Not in the scene's own program: it reads the low clouds from their
       // pass, and with one more texture it would read 17, where Direct3D 11
       // allows 16.)
@@ -10106,32 +10138,33 @@ const SkySound = (() => {
     gl.activeTexture(gl.TEXTURE0);
     C('uniform1i', 'uSkyLight', 27);
     // The table of the air's light (see Q_AIR_LUT in fs), on unit 29: one 3D
-    // texture of RGBA16F, LUT_AZ x 7 by LUT_EL by LUT_S + 2 (seven parts of
-    // its width: the light in three, the depth in the fourth, the light
-    // scattered once in the last three), filtered. airProg draws a slice
-    // into four targets of LUT_AZ by LUT_EL twice (uLutPart 0 and 1), which
-    // are copied into it, when the sun, the moon, the haze,
-    // the height or the clouds have changed.
+    // texture of RGBA16F, LUT_AZ by LUT_EL by 7 (LUT_S + 2) (seven parts of
+    // its depth: the light in three, the depth in the fourth, the light
+    // scattered once in the last three), filtered. airProg draws each slice
+    // straight into its layers, all seven parts in one draw (LUT_MRT 7), or
+    // four and three in two (uLutPart 0 and 1), when the sun, the moon, the
+    // haze, the height or the clouds have changed.
     const [LUT_AZ, LUT_EL, LUT_S] = Q.airLut || [0, 0, 0];
     let lut = null;
     if (airProg) {
-      lut = { target: gl.createFramebuffer(), slices: [], texture: gl.createTexture(), for: '' };
-      gl.bindFramebuffer(gl.FRAMEBUFFER, lut.target);
-      for (let i = 0; i < 4; i++) {
-        const t = gl.createTexture();
-        gl.activeTexture(gl.TEXTURE29);
-        gl.bindTexture(gl.TEXTURE_2D, t);
-        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, LUT_AZ, LUT_EL);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0);
-        lut.slices.push(t);
-      }
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3]);
-      complete('the table of the air (four RGBA16F targets)');
+      // (A framebuffer for each slice and draw, made once: its targets the
+      // layers of that slice in the parts the draw writes.)
+      lut = { targets: [], texture: gl.createTexture(), for: '' };
+      gl.activeTexture(gl.TEXTURE29);
       gl.bindTexture(gl.TEXTURE_3D, lut.texture);
-      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, 7 * LUT_AZ, LUT_EL, LUT_S + 2);
+      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, LUT_AZ, LUT_EL, 7 * (LUT_S + 2));
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
         [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, k, v);
+      for (let sl = 0; sl < LUT_S + 2; sl++) {
+        for (const parts of LUT_MRT === 7 ? [[0, 1, 2, 3, 4, 5, 6]] : [[0, 1, 2, 3], [4, 5, 6]]) {
+          const t = gl.createFramebuffer();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, t);
+          parts.forEach((k, i) => gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, lut.texture, 0, k * (LUT_S + 2) + sl));
+          gl.drawBuffers(parts.map((k, i) => gl.COLOR_ATTACHMENT0 + i));
+          if (sl === 0) complete(`the table of the air (${parts.length} layers of an RGBA16F 3D texture)`);
+          lut.targets.push(t);
+        }
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.activeTexture(gl.TEXTURE0);
       C('uniform1i', 'uAirLut', 29);
@@ -10758,20 +10791,27 @@ const SkySound = (() => {
       // The table of the air's light, for this frame's light, air and height.
       const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare].join() : '';
       if (lut && lutKey !== lut.for) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, lut.target);
-        for (let sl = 0; sl <= LUT_S + 1; sl++) {
-          for (let part = 0; part < 2; part++) {
-            draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutPart', part], ['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)]], 3);
-            gl.activeTexture(gl.TEXTURE29);
-            gl.bindTexture(gl.TEXTURE_3D, lut.texture);
-            for (let q = 0; q < 4 - part; q++) {
-              gl.readBuffer(gl.COLOR_ATTACHMENT0 + q);
-              gl.copyTexSubImage3D(gl.TEXTURE_3D, 0, (4 * part + q) * LUT_AZ, 0, sl, 0, 0, LUT_AZ, LUT_EL);
-            }
+        // (Not read while drawn into.)
+        gl.activeTexture(gl.TEXTURE29);
+        gl.bindTexture(gl.TEXTURE_3D, null);
+        gl.activeTexture(gl.TEXTURE0);
+        // (The view's uniforms once, with the first draw; then only the slice.)
+        const draws = LUT_MRT === 7 ? 1 : 2, uSlice = place(airProg, 'uLutSlice'), uPart = place(airProg, 'uLutPart');
+        lut.targets.forEach((t, i) => {
+          const sl = Math.floor(i / draws), part = i % draws;
+          gl.bindFramebuffer(gl.FRAMEBUFFER, t);
+          if (!i) draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)], ['uniform1f', 'uLutSlice', 0], ['uniform1f', 'uLutPart', 0]], 3);
+          else {
+            gl.useProgram(airProg);
+            gl.uniform1f(uSlice, sl);
+            gl.uniform1f(uPart, part);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
           }
-          gl.readBuffer(gl.COLOR_ATTACHMENT0);
-          gl.activeTexture(gl.TEXTURE0);
-        }
+        });
+        gl.useProgram(prog);
+        gl.activeTexture(gl.TEXTURE29);
+        gl.bindTexture(gl.TEXTURE_3D, lut.texture);
+        gl.activeTexture(gl.TEXTURE0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
         lut.for = lutKey;
       }
