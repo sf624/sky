@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and ten `<script>`
+`index.html` holds everything: the markup, the CSS and eleven `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -20,6 +20,7 @@ blocks. It loads no other file.
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| `enlarge` | fragment shader | Shows that picture on a canvas with more pixels, enlarged and sharpened, with dither (at `high` and `max`; see [The drawing size](#the-drawing-size)). |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
 | (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
@@ -67,7 +68,9 @@ cloud amount, as before.
 - **Lengths** are in km, in the shaders and in the JS.
 - **Axes**: x west, y up, z south. The centre of the planet is the origin.
   The eye is at `(0, RG + uAlt, 0)`, with `RG` = 6360 km (the ground) and
-  `RT` = 6460 km (the top of the air).
+  `RT` = 6460 km (the top of the air). `uAlt` runs from 0.3 to 40 km (see
+  [The altitude](#from-the-address-bar-to-the-first-frame)): the eye is
+  always inside the air, and every ray starts at the eye.
 - **Directions**: `yaw` 0 looks south, 90 degrees west, -90 degrees east;
   a larger `yaw` turns the view to the right (clockwise seen from above),
   and a drag to the right lowers it. `pitch` is positive upwards.
@@ -114,8 +117,8 @@ The JS then runs once, at load, and does little:
    range and step): they win over the weather. Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
-   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
-   `pixels` and `res` are read directly (see
+   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,
+   `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -124,7 +127,7 @@ The JS then runs once, at load, and does little:
    function: it waits a frame (`nextFrame`) wherever it would otherwise
    hold the main thread or wait for the GPU. Its steps:
    - `getContext`, and the extensions.
-   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `meter`) is
+   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `enlarge`, `meter`) is
      compiled and linked at once, and nothing asks how it went yet. With
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
@@ -270,15 +273,55 @@ anyway.
 clock (taken as local solar time), the moon's age as moving the date does,
 the rate to real time, and plays.
 
+**The altitude.** `state.alt` runs from `ALT_MIN` = 0.3 to `ALT_MAX` = 40
+km. Its slider (`#alt`) has a row of its own under the time's, as long
+as the panel, and is not in km: up to `ALT_LINEAR` = 13 km it is even in
+km, 635 steps of `ALT_STEP` = 20 m, then even in log(h) over
+`ALT_LOG_STEPS` = 400 steps, 37 m a step at 13 km and 112 m at 40 km.
+`altPlace` and `altAt` turn a height into the slider's place and back;
+every height in steps of 0.1 km up to 13 km has a place of its own. The
+heights of `ALT_TICKS` (1, 5, 11, 20 and 40 km) are written under the
+track (`.ticks`). On the desktop's panel (a track of 778 px) a pixel is
+27 m up to 13 km, 75 m at 20 km and 150 m at 40 km; on a phone 411 px
+wide (329 px), 63, 177 and 354 m. Before, the slider shared a row with
+three others and was even from 0.3 to 13 km in steps of 0.1 km: 77 m a
+pixel on the desktop, 86 m on the phone, 100 m a step. The value beside it
+(`#altOut`) is a text field: it shows the height as the other values do
+(in m below 20 km, to 10 m; in km above, to 0.1 km) and reads a number
+typed into it (`altTyped`): in km below 300, in metres from 300 on (the
+heights in km end below 300, those in metres start there), or as `m` or
+`km` after it says. The state keeps the height itself, not the slider's
+place: `?alt=11` draws at 11 km exactly, as before; a height set by the
+slider is rounded to 10 m.
+
 ## Sun, moon and sky in the JS
 
 `celestial()` places the sun, the moon and the stars for `state.day` and
 `state.time`:
 
-- The observer is at `LATITUDE` = 35 degrees north. The time is local solar
-  time: the sun is due south at 12:00.
-- The sun moves along the ecliptic (`OBLIQUITY` = 23.44 degrees), at
-  longitude 0 on day 80.
+- The observer is at `state.lat` (35 degrees north at first, `?lat=`), at
+  any latitude from pole to pole: `onSky` turns a declination and an hour
+  angle into the local sky there, and the star map, the Milky Way and the
+  zodiacal light follow through `uSky`. Nothing else depends on the
+  latitude: the air's tables take only the sun's elevation, so a new
+  latitude costs what a new time does.
+- `state.clock` says what the date and the time are. On the solar clock (at
+  first) the time is local solar time: the sun is highest at 12:00 (due
+  south north of the tropics), and the sun moves evenly along the ecliptic
+  (`OBLIQUITY` = 23.44 degrees), at longitude 0 on day 80 (up to 1.5
+  degrees from the real sun). The longitude does not matter there: at the
+  same solar time the sky is the same at every longitude.
+- On the UTC clock (`?clock=utc`) the date and the time are a moment in
+  UTC, and the observer stands at `state.lon` (135 degrees east at first).
+  `sunAndSidereal` gives the sun's longitude and the local sidereal time
+  from the Astronomical Almanac's low-precision formulas (the sun within
+  0.01 degree of NOAA's solar calculator). The stars keep their J2000
+  places (precession is left out: up to 0.3 degree in 2026). The panel's
+  clock keeps the moment when it changes (`setClock`); the sun then moves by
+  the solar clock's error, at most 1.5 degrees.
+- The place button asks the browser for the place (only when it is
+  pressed; the browser asks the reader first), rounds it to 0.1 degree, and
+  sets the UTC clock and now. The place stays in the page.
 - The moon runs ahead of the sun along the ecliptic by its age
   (`state.moonAge / 29.53` of a turn). Its orbit's tilt is left out.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
@@ -1403,8 +1446,9 @@ switch: 62.5, 125 and 250 m), each N x N columns from `CB` to `CT` (141,
 71 and 36 slices): windows of 16, 32 and 64 km at N = 512. One R8 3D
 texture of N x N x 260 holds them one over another (unit 30, `uGrid`):
 each level's slices of the distance under the towers' surface,
-+-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: the top,
-the highest top within 0.8 km, the base, and how much of it is shown. One
++-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: how much
+the present field's heap gives way there (`own`), the highest top within
+0.8 km, the base, and how much of it is shown. One
 sampler only, and only in the programs that draw the low clouds (their
 pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
 a program, and the scene's own `fs` reads 16. That program reads the low
@@ -1431,22 +1475,61 @@ columns and uploads the rows of tiles that changed, once a frame.
 weight left times how much it is shown; a level finer than the read's smoothing (`lod`:
 level 0's voxels are texels of the noise at lod `GRID_LV`, -1 for 31 m)
 gives way to the next, so the light's long steps and the depth maps read
-the coarse levels. The present field's towers fade out by the weight the
-grid has there (`gridCut`); what no level covers keeps the present look.
-Then, as in the prototype, the grid's distance joins the present field by
-a smooth maximum and takes over its facts there (solid, heap, base).
+the coarse levels. A level is read up to the highest top within 0.8 km
+of the column and `GRID_OUT` over it (the reach of the detail below): by
+the column's own top, the crowns that the detail pushes out of a wall
+were cut off over the columns beside it, as upright curtains. The present
+field's towers fade out by the weight the grid has there (`gridCut`), and
+its heaps lose up to `GRID_OWN` = 0.7 of their height round a tower
+(`gridOwn`, read from the coarsest level, whose window holds the others);
+what no level covers keeps the present look. Then, as in the prototype,
+the grid's distance joins the present field by a smooth maximum and takes
+over its facts there (solid, heap, base).
+
+**The detail at render time** (from the prototype's round 2), on the
+distance, less of it low on a body (`GRID_LOW` = 0.4 of it below a fifth
+of its height, none at its foot): the heads of `uBody` (500 m to 125 m,
+read `GRID_HK` = 2 times finer, `GRID_HW` = 120 m deep at most) carve it as
+on main's body; the grid's own creases are cut in, `GRID_CR` = 1.5 times
+`cav`, the distance two levels coarser (smoothed over four voxels) less
+its own: positive between lobes, so the valleys between bulges are sharp
+and deep; packed billows (the A of `uBody`, `GRID_BK` = 2.33 times finer:
+214 m down to 54 m, `GRID_BW` = 120 m deep at most) on that, read at the
+pixel's level. In a crease (`gridCrease`, from `cav` and the heads), the
+light scattered many times and the sky's light are less by up to `GRID_AO`
+= 0.6, however the light falls: with the sun behind the eye the walls were
+flat cream, and from straight above at noon a tower was one white blob.
+After the switch, `,KEY=value` sets any of these for a test
+(`?grid=1,AO=0,BW=0`).
 
 **Where the towers stand.** After each map of the tops (each cloud
 amount), the warped weather map at 250 m (its mip level of 1024 texels)
 and the map of the tops are read back without a stall (pixel buffers and
 a fence) and sent to a worker. The worker (the script `towers`, made into
 a Worker from its text through a Blob: no file, no build; made at the
-first frame) finds the towers of the whole map: per world cell of 2 km,
-the place where the present field's `tower` is strongest, if no place
-within 1.5 km has more. Width (1 to 3.5 km), top and base (80 m over the
-level of the bases) follow the present field's formulas there; the seed
-of its lobes comes from the cell. So a cell gives the same tower whenever
-it comes into a window. At cloud 0.5 there are about 700 on the map.
+first frame) finds the towers of the whole map, with the present field's
+formulas: per world cell of 2 km, the place where the field's heap stands
+highest over the sheet, if no place within 1.5 km stands higher; only
+where the heap stands `H_MIN` = 0.8 km high or more, or the field draws a
+tower (where its tower is strong, it counts `TOWER_H` = 1.5 km per unit).
+(Seeded at the field's towers only and sized as them, the towers were no
+higher than the field's heaps round them, which hid them: posts with round
+heads standing out of those heaps. With a body in every heap from 0.5 km
+up, 1900 on the map at cloud 0.5, the frame under them at 0.3 km took 5 ms
+more than main's grid.) Its base is 80 m over
+the level of the bases there. Its height is the heap's or more, by a law
+of sizes: `u = rnd^2`, times a smooth random field of 12.8 km (the big
+ones in groups) and the strength of the field's tower round it; `H = 0.6 +
+3.4 u` km. It is at least as wide as the heap (the place within 2.5 km
+where the heap stands over 0.4 of its height here) and 1.25 times its
+height, 1.3 to 5 km, and at least 0.45 of its width high (flat bodies
+were a sheet of stratocumulus from below). A smaller tower within the foot
+of a bigger one gives way. The seed of its lobes comes from the cell: a
+cell gives the same tower whenever it comes into a window. About 800 on
+the map at cloud 0.5 (width 1.3 to 2.8 km, height 0.8 to 1.8 km, 10th to
+90th percentile; the highest 4.6 km), 700 at 0.8. Round its middle, the
+field's heap gives way
+(`own`: 1 within 0.3 of its width, none beyond 0.55 of it and 300 m).
 
 **The shape rule.** `lobesOf(seed, P, LEAN)` grows a tower as a tree of
 lobes (the rule of the shape prototype, round 2, kept apart from the plumbing:
@@ -1471,24 +1554,28 @@ them, and the clouds are the present field's.
 **The march's strides.** The map of the tops (`uTops`) is made from the
 present field, and a tower's lobes may stand higher than its tops: the
 strides over the tops would cut them. When a tower's lobes are made, the
-worker raises its copy of the map over them (each lobe's top and 70 m,
+worker raises its copy of the map over them (each lobe's top and 170 m,
+the reach of the detail,
 within 1, 2, 4 and 8 texels as the map's channels) and sends the part
 back, before any tile that shows the tower; the main thread uploads it
 into `uTops`.
 
-**First seconds and cost** (measured 2026-11-20, flying at 900 km/h).
+**First seconds and cost** (measured 2026-11-21, flying at 900 km/h).
 On GL (the RTX 3090, 1280 x 720): the first picture comes as without the
 grid, and the map is read back with it; the three levels are shown whole
-2 to 4 s later (the worker's first fill is about 2.6 s of one thread):
+3.3 to 4.2 s later (the worker's first fill is about 5 s of one thread):
 the towers fade in from the eye outwards over the present look. Then the
-worker spends about 55 ms of a thread per km flown, and keeps up (its
+worker spends 45 to 65 ms of a thread per km flown, and keeps up (its
 queue stays empty but for a moment when a window moves). The main thread
-spends 0.1 to 0.3 ms a frame (about 2 ms, and once 26 to 36 ms, while the
-levels fill). The GPU's frame is 1.5 to 1.8 ms longer at 4 and 11 km and
-3.4 ms at 0.3 km under the clouds. On Direct3D 11 (the same GPU, 1898 x
-982, two runs): the first picture 1.0 to 1.5 s later than without the
-grid, the levels whole 2.5 s after it, and the GPU's frame 20.2 ms
-against 17.0 ms.
+spends 0.1 to 0.3 ms a frame (about 2 ms, and once up to 150 ms, while
+the levels fill). The GPU's frame (all draws) is 17.0 ms at 0.3 km under
+the clouds (11.6 without the grid), 11.3 ms at 4 km (8.3 to 8.7) and 11.7
+to 12.7 ms at 11 km (10.0); the rule of round 2 of the plumbing, with its
+fewer and smaller towers and no detail, took 14.7, 10.3 and 10.5 to 11.8
+ms. On Direct3D 11 (the same GPU, 1898 x 982, 4 km): the first picture as
+without the grid, the levels whole 2.6 to 3.7 s after it, and the GPU's
+frame 25.2 ms against 18.9 ms without the grid (22.9 ms with the earlier
+rule).
 
 ## The clouds' shadow
 
@@ -2950,7 +3037,9 @@ textures for it, each with a second texture beside it (`aux`):
   (`outColor`), and the distance of what each pixel shows as its depth
   (`gl_FragDepth`, a 32-bit float texture: one target, see the loading);
 - two `pictures` that take turns: the one so far is read while the next is
-  drawn by `mean`; then `show` copies the new one to the canvas.
+  drawn by `mean`; then `show` copies the new one to the canvas, or
+  `enlarge` enlarges it there where the canvas has more pixels (see
+  [The drawing size](#the-drawing-size)).
 
 The frame is as large as the picture, except at the quality levels whose
 `frame` is under 1 (`low` and `mid`: half the picture's width and height,
@@ -3100,16 +3189,73 @@ start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
-`fit()` sizes the canvas (`canvasSize`): its CSS size times the device
+`fit()` sizes the picture (`drawnSize`): the canvas's CSS size times the device
 pixel ratio (at most the quality level's `dpr`, 2 at `max`), but no more
 pixels than the quality level's `pixels` and the resolution choice (`#pixels`,
 `HERO_PIXELS`): Full HD (1920 x 1080 pixels' worth), WQHD (2560 x 1440,
 the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 `localStorage` (`sky.pixels`, written when the choice changes), else WQHD.
 
+**The canvas's own size** (`shownSize`). At `low` and `mid` the canvas is
+as large as the picture, and where the screen has more pixels the browser
+stretches it, with its plain (bilinear) filter. At `high` and `max`
+(`enlarge`) the canvas takes the device pixels it covers (as the browser
+counts them, `devicePixelContentBoxSize` of a `ResizeObserver`, else its
+CSS size times the ratio; at most `SHOWN_MAX`, 5120 x 2880), and the page
+enlarges the picture to them itself, in two passes of the shader
+`enlarge` at the canvas's size, after AMD's FidelityFX Super Resolution 1
+(MIT, see `THIRD_PARTY_NOTICES.md`):
+
+- the edge-adaptive enlargement (EASU): twelve texels round each point, a
+  kernel of Lanczos 2 stretched along the edge they show and narrowed
+  across it, and the result held within the four nearest texels (no
+  ringing), into a texture of the canvas's size (`E.big`, half floats
+  where the picture is, else 8 bits);
+- the contrast-adaptive sharpening (RCAS) at `SHARP`, less where a pixel
+  stands alone against its four neighbours (noise, a star), then the
+  dither, at the canvas's pixels.
+
+The picture is as shown (after the exposure and the tone curve), which is
+what both expect. On such a canvas the same passes also show the picture
+drawn smaller while the view moves (below). Where the canvas is no larger
+than the drawn size (one device pixel per CSS pixel within the limit),
+`show` copies the picture, or stretches one drawn smaller, as before, and
+the tools' captures at a device pixel ratio of 1 are the same as without
+`enlarge`.
+
+The sharpening is for a still picture: while the view moves it is off,
+and once it stops it comes in as the picture settles (`still`, over
+`settleFrames`). Sharpened in flight, the noise of the moving picture
+crossed it in fine hatching that changed from frame to frame. The
+enlargement alone stays on in flight.
+
+Measured in November 2026 (issue #80) in a window of 2560 x 1318 CSS
+pixels at a ratio of 1.5 (3840 x 1977 device pixels) with the WQHD limit
+(a picture of 2676 x 1378, enlarged 1.43 times), against the picture
+drawn at 3840 x 1977 (`pixels=4k`), in six still views (the overcast deck
+at 6.4 km, the low sun over the sea, thick cirrus, a moonless night, a
+full moon, clouds near at 3 km):
+
+| Way to the screen | Error, RMS (8-bit levels) | High frequencies (of the drawn picture's) |
+|---|---|---|
+| the browser's stretch | 0.84 to 4.51 | 0.20 to 0.41 |
+| the enlargement alone | 0.59 to 4.56 | 0.34 to 0.87 |
+| the enlargement and the sharpening | 0.62 to 4.81 | 0.55 to 1.14 |
+
+(High frequencies: the mean square of the Laplacian of the luma.) Most of
+the error is detail that the larger picture draws and the smaller one
+does not (the deck's fine texture), which no enlargement brings back.
+Catmull-Rom (and Lanczos 2, tried on the deck) came between the stretch
+and the enlargement.
+Stars stay round, without dark rings; the horizon, the moon and the sun's
+glare get no halo. At `low` on a phone's screen the same passes made the
+grid of the half-size frames plainer, so `low` and `mid` keep the
+browser's stretch.
+
 **Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
-are drawn at `scale` times the canvas size, and `show` stretches them.
+are drawn at `scale` times the drawn size, and `show` stretches them to
+the canvas (`enlarge`, where it has more pixels than the drawn size).
 (At the levels whose `frame` is under 1 the picture stays at the canvas's
 size and only the frame shrinks: `frame` times `scale` times the canvas.
 Its targets, and those of the passes and the light, are made at full
@@ -3152,7 +3298,6 @@ asks which level it is.
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `minScale` | 0.35 | 0.35 | 0.35 | 1 |
 | `keys` | no | no | yes | yes |
-| `meterAsync` | yes | yes | no | no |
 | `airLut` | yes | no | no | no |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
@@ -3193,21 +3338,30 @@ asks which level it is.
 - `keys`: `mean` reads the past through Keys' six-point cubic (`KEYS`)
   instead of Catmull-Rom: sharper in flight, for 25 bilinear reads a pixel
   instead of nine (see [the mean over frames](#the-heros-mean-over-frames)).
-- `meterAsync`: the exposure meter's read in flight (see
+- (At every level, the exposure meter's read in flight (see
   [Exposure](#exposure-and-the-tone-curve)) goes into a buffer of the GPU's
   (`PIXEL_PACK_BUFFER`), taken once a fence says it has arrived. A plain
   `readPixels` makes the browser wait until the GPU has done all that it
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
-  idle while the next frame is made, every 100 ms. (`max` and `high` keep
-  the plain read: their frames stay as they were.) Taking the buffer
+  idle while the next frame is made, every 100 ms. Taking the buffer
   still waits for the GPU process: Chrome 156 keeps no copy of it ahead
   of the read (it warns that it dropped one), and on the test machine
   each read held the script 4 to 5 ms, up to 110 ms, with the fence
   passed and even with a new buffer each time. On a phone those reads
   were most of the script's time (8 ms a frame), and a frame that waited
-  missed its turn. So at these levels the meter waits between reads 20
-  times as long as the last read took (`METER_SHARE`, 5 %), at least
-  `meterMs` and at most `METER_SLOW` (1 s).
+  missed its turn. So the meter waits between reads 20 times as long as
+  the last read took (`METER_SHARE`, 5 %), at least `meterMs` and at most
+  `METER_SLOW` (1 s). `high` and `max` kept the plain read until issue
+  #80: on Direct3D 11 (Windows Chrome, headless, RTX 3090) with the
+  overcast deck at 2654 x 1280, flying, three runs each, it held the
+  script 12 to 20 ms a frame on average (`read` in `?stats`), and the
+  page drew 36.3 to 39.1 frames a second, with a tenth of the gaps
+  between frames 50 to 67 ms long; read through the buffer, 1 to 2 ms,
+  39.3 to 40.2 frames a second, and 33 to 50 ms. Each read still waits
+  there while the GPU is busy (23 to 29 ms), so the meter is read about
+  every 0.4 s at that size; the exposure in flight stays as steady (the
+  `flight` check: 0.0002 stops over the last 20 frames at cruise). At
+  1898 x 982, under 16.7 ms a frame, the frame rate did not change.)
 - `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
   and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
   the aircraft flies before a layer of a depth map is drawn again (see
@@ -3382,7 +3536,9 @@ the tops, the sky's light and the depth maps, `frame` the passes and the
 scene, `mean`, `meter`, `show`; a mean over the last few dozen frames), the draws of the last frame and the pixels they shaded
 (`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
-canvas's size, the CSS size it fills and the device pixel ratio, the sizes
+canvas's size, the CSS size it fills and the device pixel ratio, how
+the picture reaches the screen (`shown`: enlarged by the page, and
+stretched by the browser past the canvas, with their ratios), the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
 page to the first picture and when each part of the start ended
@@ -3467,8 +3623,8 @@ draws take under 1 ms of the GPU (0.07 ms for the moved maps, about 0.4
 ms each for the tops; measured drawing them every frame), which a moving
 slider pays on each frame, as it pays the shadow map.
 
-Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
+Units 6 to 9 hold the frame and the picture so far for `mean`; `show`,
+`enlarge` and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
 textures are built. Units 16 and 17 hold the passes before the scene
 (the cirrus's and the low clouds', and their depths), unit 18 the first
 stage of the clouds' light (see Low clouds). Units 14 and 20 hold the clouds' depth
