@@ -960,13 +960,22 @@ ploughed field, which no photograph shows.)
   outline) and drawn out along the rows; the large ones are caps with
   flat tops whose flanks meet the sheet at a finite slope (with domes
   of powers under 0.5 the flanks stood as cliffs at their foot, and
-  their rims glittered). The clumps and the large cells meet in a soft
+  their rims glittered), packed: some five times as wide as they are
+  high, so that they meet in narrow creases (three times as high and
+  apart, from 4 km they stood as round bulbs over dark gaps, where
+  photographs show a packed surface of shallow relief; lower and apart,
+  from above they were a grey blanket). The clumps and the large cells meet in a soft
   maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
   merge); the smaller ones stand on them as bumps and alone between
   them. Whether a puff is there is decided at its middle, from a map of
   where they gather (`uDeckCtl`, drawn first: rows about 1.5 km apart
   bent by slow noise, and patches of some 4 km), so that a puff is whole
-  or none. The map holds three tops, for closed, middling and open cover
+  or none. The map also holds the size of the cells by patches of 3 to
+  8 km (larger, higher and more of the large cells, fewer small puffs,
+  where it is high; the reverse where it is low), and how thick the
+  layer is by patches of 4 to 10 km (see its body): with one size
+  everywhere, the cells were as even as a carpet, where photographs show
+  lanes, darker patches and thicker areas at that scale. The map holds three tops, for closed, middling and open cover
   (the puffs of each a subset of the one before, smaller); the cover `C`
   picks between them: closed over most of the deck at full cloud, open
   cells where the cover over 4 km is less and as the slider comes down.
@@ -1005,8 +1014,13 @@ ploughed field, which no photograph shows.)
   top, the map of the tops takes the deck's highest top (`DECK_TOP`) in
   its 44 halvings, and the bake's loops take a bound from `uZ` so that
   they are not unrolled.
-- **Its body** is one density (`DECK_BODY`), its depth set by its
-  thickness alone. The shadow maps and the column maps do not resolve a
+- **Its body** is one density in a column, its depth set by its
+  thickness, and both by how thick the layer is there (`deckThick`, -1
+  to 1, `uDeck`'s A): the sheet's top 70 m higher or lower, the puffs
+  a fifth higher or lower (in the bake), and the density (`deckBody`)
+  a quarter more or less. So thinner patches show the sea through them,
+  darker from above, and lighter from below; thicker ones are darker
+  from below. The shadow maps and the column maps do not resolve a
   layer this thin (hard patches of light on the sea under it, bands in
   the air), so the deck's depths come from its top directly:
   `deckColumn` integrates the extinction up a column (of a smoother top,
@@ -1018,7 +1032,7 @@ ploughed field, which no photograph shows.)
   (1 + COLUMN tau)`. (With the beam's own depth, the air under the deck
   was dark out to the horizon, and from 0.4 km a dark brown band lay
   along it.)
-- **Its light** differs from the sheet's in three ways. Each step of the
+- **Its light** differs from the sheet's in four ways. Each step of the
   light's march towards the sun is read at a place in it new each frame
   (`LIGHT_AT`), not at its middle: from 11 km straight down, the first
   two steps, read at their middles, crossed the flanks of the puffs at
@@ -1032,7 +1046,12 @@ ploughed field, which no photograph shows.)
   crease between cells sees less of the sky, as deep as it lies under the
   mean top round it (the puffs read at two levels), and in its place the
   cells round it: their sunlit flanks, white. With the sky's light taken away alone, the creases were
-  the sun's light less the sky's: brown lines.
+  the sun's light less the sky's: brown lines. And everywhere on it, the
+  cells round a place, below its horizon, light it as a tenth of the sky
+  would, white (with the sky's light alone, the shade of the cells away
+  from a low sun was blue, where photographs show it grey; in place of a
+  tenth of the sky's light, it made the shade brown where the sun is
+  low).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -3624,8 +3643,8 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
-| `uDeck` | 19 | the level's `deck`: 2048^2 (1024^2 at `low` and `mid`, 512^2 on a renderer on the CPU) over 32 km, RGBA16F where the GPU can draw to it (else RGBA8), mipmapped, repeating | `noise` shader as `DECK_BAKE` (`uZ` -3), in strips, after `uDeckCtl`; at start if the slider stands at 0.8 or more, else when it first comes there (`deckLater`) | The top of the overcast (see [the deck](#low-clouds)): R, G, B its height over the sheet, as a share of `DECK_H`, for closed, middling and open cover; A how far from a crease between two cells |
-| `uDeckCtl` | 26, while the deck is drawn; then deleted | 512^2 over 32 km, RGBA8, linear, repeating | `noise` shader as `DECK_BAKE` (`uZ` -4) | R: how much the trains rule; G: a third of how many puffs stand there (read at each puff's middle) |
+| `uDeck` | 19 | the level's `deck`: 2048^2 (1024^2 at `low` and `mid`, 512^2 on a renderer on the CPU) over 32 km, RGBA16F where the GPU can draw to it (else RGBA8), mipmapped, repeating | `noise` shader as `DECK_BAKE` (`uZ` -3), in strips, after `uDeckCtl`; at start if the slider stands at 0.8 or more, else when it first comes there (`deckLater`) | The top of the overcast (see [the deck](#low-clouds)): R, G, B its height over the sheet, as a share of `DECK_H`, for closed, middling and open cover; A how thick the layer is (0.5 the mean: `uDeckCtl`'s A) |
+| `uDeckCtl` | 26, while the deck is drawn; then deleted | 512^2 over 32 km, RGBA8, linear, repeating | `noise` shader as `DECK_BAKE` (`uZ` -4) | R: how much the trains rule; G: a third of how many puffs stand there (read at each puff's middle); B: the size of the cells, by patches of 3 to 8 km; A: how thick the layer is, by patches of 4 to 10 km (0.5 the mean) |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
 changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
