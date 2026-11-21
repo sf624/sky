@@ -1325,8 +1325,9 @@ each cloud, not on its surface; no normal of the field enters it.
   (`dUnder = colAll - above`: light that went far into a sheet has forgotten
   its direction; on a sphere it leaks out sideways, so the spheres' `K` is
   far smaller); the lobe is `SLAB_MS.x HG(mu, MS1.y) e^(-SLAB_MS.y tauS)
-  (MS_UP (1 + mu) / 2 + K d) / (1 + K d)`: with nothing behind, only the
-  light that goes on forwards; the light that went into the whole mass
+  (SLAB_MS.w + K d) / (1 + K d)`: with nothing behind, only the light that
+  goes on through (the fit's `MS_UP (1 + mu) / 2`; its mean over the views,
+  as that use of `mu` cost 12 % of the frame on Direct3D 11); the light that went into the whole mass
   `SLAB_D.x / 4 pi dark (SLAB_D.z + K d) / (1 + SLAB_D.w min(tauCM, above /
   sunUp) + K d)`: deep in a sheet it fades slowly with the depth towards
   the light, as the Monte Carlo's light inside a slab does, and that depth
@@ -1339,16 +1340,16 @@ each cloud, not on its surface; no normal of the field enters it.
   light leaving the top (straight down and 60 degrees aslant on either
   side) and, for the sun's, to its light inside them; what the model gives
   over what the Monte Carlo gives, 10th to 90th percentile: the sun's light
-  on the tops 0.66 to 1.21 (the spheres' fit: 0.43 to 4.72), inside 0.79 to
-  1.30 (0.36 to 5.9), the sky's on the tops 0.71 to 1.62 (0.99 to 5.0).
+  on the tops 0.62 to 1.39 (the spheres' fit: 0.43 to 4.72), inside 0.73 to
+  1.25 (0.36 to 5.9), the sky's on the tops 0.71 to 1.62 (0.99 to 5.0).
   A second Monte Carlo (the same, with a top ridged as `A cos(2 pi x /
   L)`: `A` 2 to 8 and `L` 30 and 60 optical depths over a slab of 20, or
   thin floors of 2 and 4 between ridges of 18 and 20, the sun 60 to 80
   degrees from the zenith, the eye straight above and 60 degrees aslant
   on either side, pixel by pixel) checks the relief: the sun's light
-  scattered many times on the faces turned to the sun is 0.58 to 1.00 of
+  scattered many times on the faces turned to the sun is 0.52 to 1.09 of
   it (`sunUp` alone gave 0.33 to 0.75, and dusk decks were dark with
-  small gold bumps), in their shade 0.65 to 1.66, and the shade 0.1 to 0.5
+  small gold bumps), in their shade 0.58 to 1.67, and the shade 0.1 to 0.5
   as bright as the lit faces. Light between the ridges (cloud lit by the
   faces across a trough) is in it: the model's shade does not lack it. On
   a deck seen from above with the sun low, the darkest tenth is where the
