@@ -4330,7 +4330,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         float C = clamp(deckCover(xx, textureLod(uWeather, xx / WEATHER_KM, 6.5).r), 0.0, 1.0);
         float dh = DECK_H * (deckPuffs(xx, C, 4.0) - deckPuffs(xx, C, max(lod, 0.0) + 2.0));
         float lost = deckHere * (1.0 - below) * (1.0 - clamp(1.0 - max(dh, 0.0) / 0.1, 0.5, 1.0));
-        amb *= 1.0 - lost;
+        // From above, a layer thin straight through sends back less: two
+        // streams give COLUMN tau / (1 + COLUMN tau) of what falls on it
+        // (as throughDeck lets 1 / (1 + COLUMN tau) through), where the
+        // slab's light above has all of it from some 7 of depth on. A
+        // path tracer on the same field (sun, sky, the droplets' phase)
+        // drew the thin patches between the cells darker, and the deck from
+        // 11 km straight down at noon with half again the contrast of cells
+        // against creases; and no brown creases.
+        float tc = max(colAll, 0.0), kR = mix(1.0, COLUMN * tc / (1.0 + COLUMN * tc) / max(1.0 - exp(-tc / SLAB_T), 0.05), deckHere * (1.0 - below));
+        many *= kR;
+        amb *= kR * (1.0 - lost);
         // (And everywhere on it, light from the cells round it, below its
         // horizon, as a tenth of the sky: away from a low sun, with the
         // sky's light alone, the shade of the cells was blue, where
