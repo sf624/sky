@@ -2561,8 +2561,8 @@ light needs help to look as the eye sees it, the help is a constant gain
 Rays that reach the top of the air (no sea, not behind a thick cloud) get,
 all dimmed and reddened by the air:
 
-- **The sun**: a disc of 0.267 degrees radius, of a fixed brightness (2000
-  in these units).
+- **The sun**: a disc of 0.267 degrees radius (`SUN_R`), of a fixed
+  brightness (`SUN_L` = 2000 in these units).
 - **The moon**: a sphere lit by the sun (`uSun`), so its phase comes out by
   itself, with darker seas from noise, by day as well (a pale day moon).
   The dark side holds the earthshine, `EARTHSHINE` = 1e-6 of sunlight per
@@ -2666,11 +2666,54 @@ all dimmed and reddened by the air:
   eye; `STAR_SEEN`, `STAR_HUE`), and in proportion to the airglow only by
   day and in twilight.
 
-**Glare**: a glow of a few degrees around the sun, as strayed
-light in a lens, dimmed by the clouds (the shadow map at the eye) and the
-cirrus towards the sun. It is drawn within 26 degrees of the sun
-(`mu > 0.9`), and added to `L` and to `G` alone: `G` already holds the
-sun's disc or its glitter, which `L` has.
+**Glare**: light of the sun strayed in the eye or a lens, dimmed and
+reddened by the air on the sun's way to the eye, and by the clouds (the
+shadow map at the eye) and the cirrus towards the sun. Its shape is the
+eye's: the CIE general disability glare function (CIE 146:2002; J. J. Vos,
+"On the cause of disability glare and its dependence on glare angle, age
+and ocular pigmentation", Clin. Exp. Optom. 86, 2003), a veiling
+luminance of `10 / t^3 + 5 / t^2` times the sun's illuminance at the eye
+(`t` in degrees from the sun; a young eye, the pigment's terms left out),
+with `t` softened by the disc's radius (`SUN_R`), over which the light
+comes. Its strength is `GLARE` = 0.0027 of the eye's. At the eye's own,
+the veil runs into white some 4 degrees round the sun on a screen exposed
+for the sky, where the eye sees a small hard disc. Nor does the glare
+grow on the screen as the exposure opens up past `GLARE_EXPO` = 1.3
+(log2: a clear day's at 11 km with the sun high): above it, the glare is
+taken down by as much as the exposure rises. The eye looking at the sun
+adapts to the sun's surroundings, not to the dark sky of the
+stratosphere: at 40 km the exposure stands 3.5 stops higher than at 11
+km, and without the cap the glow ran into white 0.9 degrees round a high
+sun. (The meter counts the glare at `METER_GLINT` as before, so there the
+level depends a little on the exposure; the glow covers far fewer blocks
+than the 3 % that set the highlights.) With the sun in the view the
+exposure moved by at most 0.01 stops up to 11 km; at 40 km it rose by 0.1
+to 0.4 stops, where the old glow had covered enough of the view to hold
+it down. Where the sunlit Earth is in the view, the floor no longer lifts
+the exposure past white (see [Exposure](#exposure-and-the-tone-curve)):
+there it now stands 0.3 to 3.9 stops lower than on main.
+
+So the sun reads as a disc in clear air: from 4 to 40 km the picture
+leaves white 0.25 to 0.3 degrees from its centre (the disc is 0.267),
+with a glow that is down to a tenth of the way to white within 2 to 3
+degrees with the default haze. Haze widens the glow through the air's own
+forward scattering (the aureole, in `L`): with `haze=3`, to some 9 to 12
+degrees. Near the sea, the aureole itself runs into white 0.3 to 3.5
+degrees round the sun (a high sun in clear air to a low one in haze), as
+in photographs of a low sun through haze; the glare plays no part there.
+On the horizon the disc is a dim red disc, below white. It is drawn within 26 degrees of the sun
+(`mu > 0.9`), where it is 2e-5 of its value at the disc, and added
+to `L` and to `G` alone: `G` already holds the sun's disc or its glitter,
+which `L` has.
+
+Before, the glare was `0.3 / (t^2 + 0.3)`: a flat top half a degree wide,
+46 times the present glare at 1 degree, 78 times at 2 and 116 at 5. It ran into
+white within 2 degrees of a high sun at 11 to 13 km and 1.4 to 2 degrees
+at 4 km, in the clearest air as in haze, so that the disc's edge never
+showed; and its edge at 21 to 26 degrees (`mu` from 0.9 to 0.93) drew a
+faint ring round a high sun. At 40 km, under the higher exposure, it ran
+into white 6 degrees round a high sun, inside a pale disc with a hard
+edge 26 degrees from the sun.
 
 ## Exposure and the tone curve
 
@@ -2771,6 +2814,22 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   median, not on the darker quarter: after sunset the sea and the clouds
   below darken sooner than the sky, and a floor on them brightened the
   sky again for some ten minutes;
+- the floor is for a dim view. Where the highlights (`lit`) are
+  daylight's (`DAY_HIGH` or more), it does not lift them past white:
+  the exposure is at most `white` there, and `FLOOR_OVER` = 1 stop more
+  for each stop that they are dimmer. Above some 20 km the sky is so dark
+  that it fills the median whenever it fills half the view; the floor
+  then rose by 0.73 stops for each stop the median fell, and a sunlit
+  Earth below a dark sky ran into white. At 40 km towards the sun 20
+  degrees up (21 November, 15:00, a 2000x770 view raised 6 to 12 degrees
+  above the horizontal), the exposure stood 2.2 to 3.1 stops above
+  white's, and 46 to 99 % of the Earth was white (luma 250 or more);
+  now it stands at white's (-0.4), and 3 to 4 % is (the glitter, the
+  tops of clouds). Looking away from the sun at noon from 40 km, 2.3
+  against 0.2. Below 20 km the darker quarter and the median are lit
+  air or cloud, the floor stays under white, and nothing changes: 135
+  views at 0.3, 4 and 11 km, by day, at dusk and at night, within 0.05
+  stops;
 - in twilight another exposure takes over, blended in as the sun goes
   from `DUSK` = 8 to 1 degrees (a smoothstep, times `sunOn`): one set
   by the sky, the level that the brighter third of the picture passes
