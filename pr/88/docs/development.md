@@ -31,9 +31,11 @@ value that is not a number gives the default.
 
 | Parameter | Range, step | Default | Meaning |
 |---|---|---|---|
-| `time` | 0 to 24, 0.05 | 15 | Local solar time, hours (the sun is due south at 12) |
-| `date` | 1 to 365, 1 | today | Day of the current year |
+| `time` | 0 to 24, 0.05 | 15 | Time, hours, on the clock that `clock` names: local solar time (the sun is due south at 12 north of the tropics, due north south of them), or UTC |
+| `date` | 1 to 365, 1 | today | Day of the current year (a UTC date on the UTC clock) |
 | `moon` | 0 to 29.5, 0.5 | from the date | Age of the moon, days |
+| `lat` | -90 to 90, 0.1 | 35 | Latitude of the observer, degrees, north positive |
+| `lon` | -180 to 180, 0.1 | 135 | Longitude of the observer, degrees, east positive. Only the UTC clock uses it: at a given local solar time the sky is the same at every longitude |
 | `haze` | 0 to 6, 0.05 | 1 | Multiplier on the aerosol (an optical depth of 0.09 at 550 nm at 1, a clear day; see [The air](design.md#the-air)) |
 | `wind` | 1 to 15, 0.5 | 6 | Wind over the sea, m/s |
 | `alt` | 0.3 to 40, any | 11 | Altitude of the eye, km. The slider is even in km (20 m a step) up to 13 km and even in log(h) above; the value beside it takes a number typed in m or km |
@@ -53,6 +55,7 @@ These are read directly.
 | `stick` | none | `1`: shows the steering stick, which otherwise shows only on a touch screen (`pointer: coarse`) |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
+| `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
 | `quality` | stored choice, else `auto` | The quality level: `low`, `mid`, `high`, `max` or `auto` (see [design.md](design.md#quality-levels)). A level that does not start falls back to the one below. Not stored. The tools add `quality=max` to every page they load, unless the query names a level |
 | `lang` | stored choice, else the browser's language | The page's language: `ja` or `en`. Not stored |
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
@@ -64,7 +67,8 @@ These are read directly.
 | `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the script's time by part of the frame, the level, the canvas and the sizes drawn, the first picture and when each part of the start ended, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=bench` also holds the drawing scale at 1, 0.71, 0.5 and 0.35 in turn and shows the frames a second at each; `stats=bench3` measures the frame with each part taken away and with each candidate cut, at full scale, by the frames a second (some 40 to 60 s after the first picture; touch nothing). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `grid` | none (off) | `1`: the low clouds' towers are grown as trees of lobes by a worker and kept in grids that move with the eye (see [design.md](design.md#towers-in-grids-that-move-with-the-eye)). Only at `quality=max` and `high`; elsewhere it does nothing. `1,v62.5` (or `1,v62`): the finest voxels 62.5 m, not 31.25 m (the levels 62.5, 125 and 250 m); any other value of `v` keeps 31.25 m. `1,hK:W`: the heads of `uBody`, read K times finer (K over 0), also carve the towers' surface, seams W km deep. The two may be given together (`1,v62.5,h2:0.05`). A test switch: off, the page is main's |
-| `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
+| `clock` | `solar` | `utc`: `time` and `date` are UTC, and `lon` places the observer (see [design.md](design.md#sun-moon-and-sky-in-the-js)). Anything else: local solar time |
+| `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time (on the UTC clock, the date and the time in UTC). It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
 With `date` and no `moon`, the moon's age follows the given date.
 
@@ -201,7 +205,9 @@ Each frame of the hero is six draws: the first stage of the clouds'
 light (the low clouds' pass, `fs` with `CLOUD_PASS` and `uStage` 0, a
 quarter of the pixels), the cirrus's pass and the low clouds' (with
 `CIRRUS_PASS`, `CLOUD_PASS`), the scene (`fs`) into the frame texture,
-`mean`, and `show` (the passes only with their clouds); at most every 100 ms a
+`mean`, and `show` (the passes only with their clouds; at `high` and `max`
+on a canvas with more pixels than the picture, the two draws of `enlarge`
+instead of `show`); at most every 100 ms a
 fifth, the exposure `meter` (64 x 36 texels, 0.01 ms at 1920 x 1080, measured
 November 2026; reading it back costs about 2 ms of the main thread here,
 none of the GPU's); and a frame that needs a new map of the clouds'
@@ -220,6 +226,14 @@ default limit (WQHD), a 4K window is drawn at 2560 x 1440.
 | 1920 x 1080 | 5.5 ms | 0.08 ms | 0.02 ms |
 | 2545 x 1440 | 9.3 ms | | |
 | 3825 x 2160 | 19 ms | | |
+
+`enlarge`, measured in November 2026 (`perf --dpr 1.5`, 2560 x 1318 CSS
+pixels, flying, the overcast deck): from a picture of 2676 x 1378 to a
+canvas of 3840 x 1977, 0.23 ms for the enlargement and 0.11 ms for the
+sharpening, where `show` took 0.03 ms. On Direct3D 11 (`d3d page`, a
+window of 3840 x 2160 with `pixels=fhd`, three runs each, alternated), a
+frame took 18.3 to 18.5 ms enlarged to 3818 x 2062 and 18.1 to 18.5 ms
+with `enlarge=0`: within the noise.
 
 Measured again at 2560 x 1440 (`perf`, `res=1`, flying, three runs, the
 scene's median) in November 2026: the default view by day (`date=172&time=15`)

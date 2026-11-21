@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and ten `<script>`
+`index.html` holds everything: the markup, the CSS and eleven `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -20,6 +20,7 @@ blocks. It loads no other file.
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
+| `enlarge` | fragment shader | Shows that picture on a canvas with more pixels, enlarged and sharpened, with dither (at `high` and `max`; see [The drawing size](#the-drawing-size)). |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
 | (no id) | JS | `SkySound`: the background sound (see [Sound](#sound)). |
 | (no id) | JS | Everything else, in one function that runs at load and starts the loading. |
@@ -94,7 +95,7 @@ The JS then runs once, at load, and does little:
    function: it waits a frame (`nextFrame`) wherever it would otherwise
    hold the main thread or wait for the GPU. Its steps:
    - `getContext`, and the extensions.
-   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `meter`) is
+   - Every program (`fs`, `noise`, `ice`, `waves`, `mean`, `show`, `enlarge`, `meter`) is
      compiled and linked at once, and nothing asks how it went yet. With
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
@@ -317,10 +318,29 @@ before the renderer). A simple model, not a simulator:
 `celestial()` places the sun, the moon and the stars for `state.day` and
 `state.time`:
 
-- The observer is at `LATITUDE` = 35 degrees north. The time is local solar
-  time: the sun is due south at 12:00.
-- The sun moves along the ecliptic (`OBLIQUITY` = 23.44 degrees), at
-  longitude 0 on day 80.
+- The observer is at `state.lat` (35 degrees north at first, `?lat=`), at
+  any latitude from pole to pole: `onSky` turns a declination and an hour
+  angle into the local sky there, and the star map, the Milky Way and the
+  zodiacal light follow through `uSky`. Nothing else depends on the
+  latitude: the air's tables take only the sun's elevation, so a new
+  latitude costs what a new time does.
+- `state.clock` says what the date and the time are. On the solar clock (at
+  first) the time is local solar time: the sun is highest at 12:00 (due
+  south north of the tropics), and the sun moves evenly along the ecliptic
+  (`OBLIQUITY` = 23.44 degrees), at longitude 0 on day 80 (up to 1.5
+  degrees from the real sun). The longitude does not matter there: at the
+  same solar time the sky is the same at every longitude.
+- On the UTC clock (`?clock=utc`) the date and the time are a moment in
+  UTC, and the observer stands at `state.lon` (135 degrees east at first).
+  `sunAndSidereal` gives the sun's longitude and the local sidereal time
+  from the Astronomical Almanac's low-precision formulas (the sun within
+  0.01 degree of NOAA's solar calculator). The stars keep their J2000
+  places (precession is left out: up to 0.3 degree in 2026). The panel's
+  clock keeps the moment when it changes (`setClock`); the sun then moves by
+  the solar clock's error, at most 1.5 degrees.
+- The place button asks the browser for the place (only when it is
+  pressed; the browser asks the reader first), rounds it to 0.1 degree, and
+  sets the UTC clock and now. The place stays in the page.
 - The moon runs ahead of the sun along the ecliptic by its age
   (`state.moonAge / 29.53` of a turn). Its orbit's tilt is left out.
 - Moonlight is 2.5e-6 of sunlight at full moon, falling with the phase
@@ -3036,7 +3056,9 @@ textures for it, each with a second texture beside it (`aux`):
   (`outColor`), and the distance of what each pixel shows as its depth
   (`gl_FragDepth`, a 32-bit float texture: one target, see the loading);
 - two `pictures` that take turns: the one so far is read while the next is
-  drawn by `mean`; then `show` copies the new one to the canvas.
+  drawn by `mean`; then `show` copies the new one to the canvas, or
+  `enlarge` enlarges it there where the canvas has more pixels (see
+  [The drawing size](#the-drawing-size)).
 
 The frame is as large as the picture, except at the quality levels whose
 `frame` is under 1 (`low` and `mid`: half the picture's width and height,
@@ -3186,16 +3208,73 @@ start the mean again (a restart if the drawing size grows).
 
 ## The drawing size
 
-`fit()` sizes the canvas (`canvasSize`): its CSS size times the device
+`fit()` sizes the picture (`drawnSize`): the canvas's CSS size times the device
 pixel ratio (at most the quality level's `dpr`, 2 at `max`), but no more
 pixels than the quality level's `pixels` and the resolution choice (`#pixels`,
 `HERO_PIXELS`): Full HD (1920 x 1080 pixels' worth), WQHD (2560 x 1440,
 the default) or 4K (3840 x 2160). It comes from `?pixels=`, else from
 `localStorage` (`sky.pixels`, written when the choice changes), else WQHD.
 
+**The canvas's own size** (`shownSize`). At `low` and `mid` the canvas is
+as large as the picture, and where the screen has more pixels the browser
+stretches it, with its plain (bilinear) filter. At `high` and `max`
+(`enlarge`) the canvas takes the device pixels it covers (as the browser
+counts them, `devicePixelContentBoxSize` of a `ResizeObserver`, else its
+CSS size times the ratio; at most `SHOWN_MAX`, 5120 x 2880), and the page
+enlarges the picture to them itself, in two passes of the shader
+`enlarge` at the canvas's size, after AMD's FidelityFX Super Resolution 1
+(MIT, see `THIRD_PARTY_NOTICES.md`):
+
+- the edge-adaptive enlargement (EASU): twelve texels round each point, a
+  kernel of Lanczos 2 stretched along the edge they show and narrowed
+  across it, and the result held within the four nearest texels (no
+  ringing), into a texture of the canvas's size (`E.big`, half floats
+  where the picture is, else 8 bits);
+- the contrast-adaptive sharpening (RCAS) at `SHARP`, less where a pixel
+  stands alone against its four neighbours (noise, a star), then the
+  dither, at the canvas's pixels.
+
+The picture is as shown (after the exposure and the tone curve), which is
+what both expect. On such a canvas the same passes also show the picture
+drawn smaller while the view moves (below). Where the canvas is no larger
+than the drawn size (one device pixel per CSS pixel within the limit),
+`show` copies the picture, or stretches one drawn smaller, as before, and
+the tools' captures at a device pixel ratio of 1 are the same as without
+`enlarge`.
+
+The sharpening is for a still picture: while the view moves it is off,
+and once it stops it comes in as the picture settles (`still`, over
+`settleFrames`). Sharpened in flight, the noise of the moving picture
+crossed it in fine hatching that changed from frame to frame. The
+enlargement alone stays on in flight.
+
+Measured in November 2026 (issue #80) in a window of 2560 x 1318 CSS
+pixels at a ratio of 1.5 (3840 x 1977 device pixels) with the WQHD limit
+(a picture of 2676 x 1378, enlarged 1.43 times), against the picture
+drawn at 3840 x 1977 (`pixels=4k`), in six still views (the overcast deck
+at 6.4 km, the low sun over the sea, thick cirrus, a moonless night, a
+full moon, clouds near at 3 km):
+
+| Way to the screen | Error, RMS (8-bit levels) | High frequencies (of the drawn picture's) |
+|---|---|---|
+| the browser's stretch | 0.84 to 4.51 | 0.20 to 0.41 |
+| the enlargement alone | 0.59 to 4.56 | 0.34 to 0.87 |
+| the enlargement and the sharpening | 0.62 to 4.81 | 0.55 to 1.14 |
+
+(High frequencies: the mean square of the Laplacian of the luma.) Most of
+the error is detail that the larger picture draws and the smaller one
+does not (the deck's fine texture), which no enlargement brings back.
+Catmull-Rom (and Lanczos 2, tried on the deck) came between the stretch
+and the enlargement.
+Stars stay round, without dark rings; the horizon, the moon and the sun's
+glare get no halo. At `low` on a phone's screen the same passes made the
+grid of the half-size frames plainer, so `low` and `mid` keep the
+browser's stretch.
+
 **Dynamic resolution.** While the view moves or the light
 changes (within 150 ms of the last such frame), the frame and the picture
-are drawn at `scale` times the canvas size, and `show` stretches them.
+are drawn at `scale` times the drawn size, and `show` stretches them to
+the canvas (`enlarge`, where it has more pixels than the drawn size).
 (At the levels whose `frame` is under 1 the picture stays at the canvas's
 size and only the frame shrinks: `frame` times `scale` times the canvas.
 Its targets, and those of the passes and the light, are made at full
@@ -3238,7 +3317,6 @@ asks which level it is.
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `minScale` | 0.35 | 0.35 | 0.35 | 1 |
 | `keys` | no | no | yes | yes |
-| `meterAsync` | yes | yes | no | no |
 | `airLut` | yes | no | no | no |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
@@ -3279,21 +3357,30 @@ asks which level it is.
 - `keys`: `mean` reads the past through Keys' six-point cubic (`KEYS`)
   instead of Catmull-Rom: sharper in flight, for 25 bilinear reads a pixel
   instead of nine (see [the mean over frames](#the-heros-mean-over-frames)).
-- `meterAsync`: the exposure meter's read in flight (see
+- (At every level, the exposure meter's read in flight (see
   [Exposure](#exposure-and-the-tone-curve)) goes into a buffer of the GPU's
   (`PIXEL_PACK_BUFFER`), taken once a fence says it has arrived. A plain
   `readPixels` makes the browser wait until the GPU has done all that it
   was given, and a phone's GPU, busy for tens of ms a frame, then stands
-  idle while the next frame is made, every 100 ms. (`max` and `high` keep
-  the plain read: their frames stay as they were.) Taking the buffer
+  idle while the next frame is made, every 100 ms. Taking the buffer
   still waits for the GPU process: Chrome 156 keeps no copy of it ahead
   of the read (it warns that it dropped one), and on the test machine
   each read held the script 4 to 5 ms, up to 110 ms, with the fence
   passed and even with a new buffer each time. On a phone those reads
   were most of the script's time (8 ms a frame), and a frame that waited
-  missed its turn. So at these levels the meter waits between reads 20
-  times as long as the last read took (`METER_SHARE`, 5 %), at least
-  `meterMs` and at most `METER_SLOW` (1 s).
+  missed its turn. So the meter waits between reads 20 times as long as
+  the last read took (`METER_SHARE`, 5 %), at least `meterMs` and at most
+  `METER_SLOW` (1 s). `high` and `max` kept the plain read until issue
+  #80: on Direct3D 11 (Windows Chrome, headless, RTX 3090) with the
+  overcast deck at 2654 x 1280, flying, three runs each, it held the
+  script 12 to 20 ms a frame on average (`read` in `?stats`), and the
+  page drew 36.3 to 39.1 frames a second, with a tenth of the gaps
+  between frames 50 to 67 ms long; read through the buffer, 1 to 2 ms,
+  39.3 to 40.2 frames a second, and 33 to 50 ms. Each read still waits
+  there while the GPU is busy (23 to 29 ms), so the meter is read about
+  every 0.4 s at that size; the exposure in flight stays as steady (the
+  `flight` check: 0.0002 stops over the last 20 frames at cruise). At
+  1898 x 982, under 16.7 ms a frame, the frame rate did not change.)
 - `meterMs`, `stale` (`low`: 200 ms and 1 km; else `METER_MS`, 100 ms,
   and `SHADOW_STALE`, 0.5 km): how often the meter is read, and how far
   the aircraft flies before a layer of a depth map is drawn again (see
@@ -3468,7 +3555,9 @@ the tops, the sky's light and the depth maps, `frame` the passes and the
 scene, `mean`, `meter`, `show`; a mean over the last few dozen frames), the draws of the last frame and the pixels they shaded
 (`countDraws`, which wraps `drawArrays`, `viewport` and `scissor`), the level
 (and "(auto)"), the
-canvas's size, the CSS size it fills and the device pixel ratio, the sizes
+canvas's size, the CSS size it fills and the device pixel ratio, how
+the picture reaches the screen (`shown`: enlarged by the page, and
+stretched by the browser past the canvas, with their ratios), the sizes
 of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
 page to the first picture and when each part of the start ended
@@ -3553,8 +3642,8 @@ draws take under 1 ms of the GPU (0.07 ms for the moved maps, about 0.4
 ms each for the tops; measured drawing them every frame), which a moving
 slider pays on each frame, as it pays the shadow map.
 
-Units 6 to 9 hold the frame and the picture so far for `mean`; `show`
-and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
+Units 6 to 9 hold the frame and the picture so far for `mean`; `show`,
+`enlarge` and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
 textures are built. Units 16 and 17 hold the passes before the scene
 (the cirrus's and the low clouds', and their depths), unit 18 the first
 stage of the clouds' light (see Low clouds). Units 14 and 20 hold the clouds' depth

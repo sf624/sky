@@ -6,10 +6,11 @@ The page includes the following code and data by others (BSD-3-Clause, CC0-1.0, 
 
 | Component | Version | License | Included as |
 | --- | --- | --- | --- |
-| [Hash without Sine](https://www.shadertoy.com/view/4djSRW), by David Hoskins | 2014 | MIT | `hash` (hash12) in the `fs`, `mean` and `show` shaders and `hash3` (hash13) in the `fs` shader of `index.html` |
+| [Hash without Sine](https://www.shadertoy.com/view/4djSRW), by David Hoskins | 2014 | MIT | `hash` (hash12) in the `fs`, `mean`, `show` and `enlarge` shaders and `hash3` (hash13) in the `fs` shader of `index.html` |
 | [Tex2DCatmullRom.hlsl](https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1), by MJP | gist of 2016 | MIT | the weights and the nine bilinear reads of the Catmull-Rom filter in the `mean` shader of `index.html`, in GLSL |
 | [hash-prospector](https://github.com/skeeto/hash-prospector), by Chris Wellons: `lowbias32` | master branch, read 2026-11-16 | Unlicense | `ihash` in the `noise`, `waves` and `fs` shaders of `index.html` |
 | [Mulberry32](https://gist.github.com/tommyettinger/46a874533244883189143505d203312c), by Tommy Ettinger: `mulberry32.c` | 2017, read 2026-11-21 | CC0-1.0 | `rngOf` in the script `towers` of `index.html` (the worker of `?grid=1`), in JavaScript |
+| [FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR), by AMD: `ffx_fsr1.h` (EASU and RCAS) | 1.0 (v1.20210629, read 2026-11-21) | MIT | the edge-adaptive enlargement and the contrast-adaptive sharpening of the `enlarge` shader of `index.html` (the kernel, the measure of an edge, the limits of the sharpening), in GLSL |
 
 ## Data
 
@@ -85,6 +86,30 @@ credit is required.
 This is free and unencumbered software released into the public domain.
 https://github.com/skeeto/hash-prospector/blob/master/UNLICENSE
 https://unlicense.org/
+```
+
+### FidelityFX Super Resolution 1
+
+```text
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### Mulberry32

@@ -60,10 +60,14 @@ mouse cursor hides with them over the view, and comes back with them.
 The panel at the bottom changes the time and the weather.
 
 - **Play (▶)**: runs the time, at the speed chosen beside it. Press again to stop. Past midnight the date moves on to the next day, and the moon's age with it.
-- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. The clock of your device is taken as the page's time, which is local solar time.
+- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. On the solar clock, the clock of your device is taken as local solar time; on the UTC clock, the moment is exact.
+- **Here and now (pin)**: asks your browser where you are, then shows the sky there now: it sets the latitude and the longitude, turns the clock to UTC and does what Now does. The browser asks you first. The place is used only in the page: it is rounded to 0.1 degree, sent nowhere and not stored. Nothing asks for the place unless you press this button.
 - **Speed of time**: real time, 1 min/s, 10 min/s, 16 min/s (a day in a minute and a half; the first choice) or 1 h/s. In real time the sky is drawn again every 10 seconds and rests in between.
-- **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
+- **Time**: 0:00 to 24:00, on the clock chosen below. On the solar clock the sun is highest at 12:00.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
+- **Latitude**: 90 degrees south to 90 degrees north (35 degrees north at first). The sun, the moon and the stars take their paths for that place: the midnight sun and the polar night, the southern stars.
+- **Longitude**: 180 degrees west to 180 degrees east (135 degrees east at first). It matters only on the UTC clock, so it is greyed out on the solar clock: at the same local solar time, the sky is the same at every longitude.
+- **Clock**: **Solar time** (at first): the time is the place's local solar time. **UTC**: the date and the time are UTC, and the longitude says where you are, so moving it moves the sun and the stars as the earth turns beneath them. Changing the clock keeps the moment.
 - **Moon**: the age of the moon, 0 to 29.5 days.
 - **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
@@ -75,7 +79,7 @@ The panel at the bottom changes the time and the weather.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
 - **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
 - **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
-- **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels.
+- **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels. At High and Max, on a screen with more pixels than that, the page enlarges the picture to the screen's own pixels itself, sharper than the browser's plain stretch.
 - **Quality**: **Low**, **Medium**, **High** or **Max**, or **Auto** (at first). Lower levels draw fewer pixels and take fewer samples, so that phones and laptops can draw the sky at all; Max is the full picture, for strong desktop GPUs. Auto picks a level from what the device says of itself (phones start at Low, the strongest desktop GPUs at Max), then steps down if frames are too slow, or up if they are fast (a phone goes no higher than Medium); it shows the level it chose, as "Auto (Low)". Low and Medium draw each frame at half the size and build the full picture over several frames: still views are sharp, moving ones softer. Changing the level prepares the picture again, which takes a few seconds. A level that cannot start, or whose GPU stops drawing, falls back to the one below. The browser remembers the choice. In the address, `?quality=low` (or `mid`, `high`, `max`, `auto`) sets the level for that visit only.
 
 A view can also be given in the address, for example
