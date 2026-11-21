@@ -2541,8 +2541,8 @@ light needs help to look as the eye sees it, the help is a constant gain
 Rays that reach the top of the air (no sea, not behind a thick cloud) get,
 all dimmed and reddened by the air:
 
-- **The sun**: a disc of 0.267 degrees radius, of a fixed brightness (2000
-  in these units).
+- **The sun**: a disc of 0.267 degrees radius (`SUN_R`), of a fixed
+  brightness (`SUN_L` = 2000 in these units).
 - **The moon**: a sphere lit by the sun (`uSun`), so its phase comes out by
   itself, with darker seas from noise, by day as well (a pale day moon).
   The dark side holds the earthshine, `EARTHSHINE` = 1e-6 of sunlight per
@@ -2646,11 +2646,35 @@ all dimmed and reddened by the air:
   eye; `STAR_SEEN`, `STAR_HUE`), and in proportion to the airglow only by
   day and in twilight.
 
-**Glare**: a glow of a few degrees around the sun, as strayed
-light in a lens, dimmed by the clouds (the shadow map at the eye) and the
-cirrus towards the sun. It is drawn within 26 degrees of the sun
-(`mu > 0.9`), and added to `L` and to `G` alone: `G` already holds the
-sun's disc or its glitter, which `L` has.
+**Glare**: light of the sun strayed in the eye or a lens, dimmed and
+reddened by the air on the sun's way to the eye, and by the clouds (the
+shadow map at the eye) and the cirrus towards the sun. Its shape is the
+eye's: the CIE general disability glare function (CIE 146:2002; J. J. Vos,
+"On the cause of disability glare and its dependence on glare angle, age
+and ocular pigmentation", Clin. Exp. Optom. 86, 2003), a veiling
+luminance of `10 / t^3 + 5 / t^2` times the sun's illuminance at the eye
+(`t` in degrees from the sun; a young eye, the pigment's terms left out),
+with `t` softened by the disc's radius (`SUN_R`), over which the light
+comes. Its strength is `GLARE` = 0.0027 of the eye's. At the eye's own,
+the veil runs into white some 4 degrees round the sun on a screen exposed
+for the sky, where the eye sees a small hard disc. So the sun now reads as
+a disc in clear air: the picture leaves white 0.25 to 0.3 degrees from its
+centre (the disc is 0.267), with a glow that is down to a tenth of the way
+to white within about 2 degrees at 11 to 13 km. Haze widens the glow
+through the air's own forward scattering (the aureole, in `L`): with
+`haze=3` the glow reaches some 9 degrees. Near the sea the aureole of a
+low sun still runs into white over 1 to 3.5 degrees, as in photographs of
+a low sun through haze. It is drawn within 26 degrees of the sun
+(`mu > 0.9`), where it is 2e-5 of its value at the disc, and added
+to `L` and to `G` alone: `G` already holds the sun's disc or its glitter,
+which `L` has.
+
+Before, the glare was `0.3 / (t^2 + 0.3)`: a flat top half a degree wide,
+46 times the present glare at 1 degree, 78 times at 2 and 116 at 5. It ran into
+white within 2 degrees of a high sun at 11 to 13 km and 1.4 to 2 degrees
+at 4 km, in the clearest air as in haze, so that the disc's edge never
+showed; and its edge at 21 to 26 degrees (`mu` from 0.9 to 0.93) drew a
+faint ring round a high sun.
 
 ## Exposure and the tone curve
 
