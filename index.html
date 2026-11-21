@@ -4107,7 +4107,14 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
           x = ps + uLight * (sl + LIGHT_AT * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
+#ifdef DECK
+          // (In the deck, without the fine noise: light spreads over tens
+          // of metres there, and with it the flanks of the puffs from 4 km
+          // had a fur of fine streaks, which the path tracer does not show.)
+          fine = !moved && deckHere <= 0.0;
+#else
           fine = !moved;
+#endif
           wt = dl;
         }
         float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
