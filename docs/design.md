@@ -596,8 +596,9 @@ clouds, or without a light, nothing is sampled.
 
 **`depthToTop(p, d)`**, the optical depth from `p` to the top of the air:
 
-- One filtered read of the depth table `uDepth` (512 by 128, `DEPTH_MU` by
-  `DEPTH_R`), made at start in `makeSky` by a 16-step midpoint sum. Its axes follow Bruneton (2017): the distance to the top, between
+- One filtered read of the depth table (512 by 128, `DEPTH_MU` by
+  `DEPTH_R`; in `uMS`, after the multiple scattering: one texture less for
+  Direct3D 11's 16), made at start in `makeSky` by a 16-step midpoint sum. Its axes follow Bruneton (2017): the distance to the top, between
   its least and its most at that height, and the distance to the horizon
   (`rho / H_TOP`). The table is RGBA32F where the GPU can filter full floats
   (`OES_texture_float_linear`), else RGBA16F.
@@ -708,27 +709,34 @@ So the light of the sky is the page's atmosphere's; what still differs
 from photographs is mostly how much aerosol there is, and the exposure
 and tone curve (see [Exposure](#exposure-and-the-tone-curve)).
 
-**The air as a table** (`low`: the level's `airLut`, `Q_AIR_LUT` in `fs`).
-A phone spent most of the scene's time on the march above (`?stats=bench3`
-on an Adreno 660: 107 ms of a frame without clouds at full scale, 24 ms
-without the air's march). At `low` the scene reads the air from a table
-made ahead instead, as Hillaire (2020) makes his sky-view and
+**The air as a table** (`low`, `high` and `max`: the level's `airLut`,
+`Q_AIR_LUT` in `fs`; `mid` marches). A phone spent most of the scene's
+time on the march above (`?stats=bench3` on an Adreno 660: 107 ms of a
+frame without clouds at full scale, 24 ms without the air's march), and a
+desktop GPU a third of the frame at `max` (an RTX 3090 at 1920 x 1080, flying at
+cruise: the scene 4.9 ms of 13.9; 2.2 ms with the table). There the
+scene reads the air from a table made ahead instead, as Hillaire (2020) makes his sky-view and
 aerial-perspective tables (written here from the paper's ideas): `fs`
-compiled with `AIR_LUT` marches the air (as above, with 14, 6 and 10
-samples, more than the level's own, and without the clouds' shadows) for
-`LUT_AZ` x `LUT_EL` (64 x 48) directions round the eye and `LUT_S` (16)
-distances along each, from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
+compiled with `AIR_LUT` marches the air (as above, with the level's own
+samples but at least 14, 6 and 10: 20, 8 and 16 at `high` and `max`, 14, 6
+and 10 at `low`; and without the clouds' shadows) for `LUT_AZ` x `LUT_EL`
+directions round the eye and `LUT_S` distances along each (the level's
+`airLut`: 64 x 48 and 16 at `low`, 128 x 96 and 64 at `high` and `max`), from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
 evenly in their log; a ray that ends sooner (at the sea) keeps its end's
 values beyond. The directions are the azimuth from the stronger light's (the sun's,
 or the moon's at night: `uLutLight`; from the sun's, the moonlit sky
 stepped at the table's seam behind it), squeezed towards it (a square
 root: its glow), and the elevation from the horizon,
 squeezed towards the horizon, which lies at the middle of the table
-(`lutUV`, `lutDir`). One more slice holds the sky as the sea sees it, from
-its surface through the whole air (for `skyAt`). The table is one 3D
-texture of half floats on unit 29, four times as wide: the light's three
-`vec4` and the optical depth in its four quarters. Each slice is drawn into
-four targets and copied into it (`copyTexSubImage3D`), all 17 when the
+(`lutUV`, `lutDir`). Two more slices hold the sky as the sea sees it, from
+its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
+ray from the eye, to the sea or out of the air (`LUT_END`). The table is
+one 3D texture of half floats on unit 29, seven times as wide: the light's
+three `vec4`, the optical depth, and the three `vec4` of the part of the
+light scattered once (the part the clouds' shadows take). Each slice is
+drawn twice into four targets (`uLutPart` 0: the light and the depth; 1:
+the light scattered once) and copied into it (`copyTexSubImage3D`), all of
+them when the
 sun, the moon, the haze, the height or the amount of cloud has changed
 (`lut.for`); in flight, none of these changes. The light is kept divided by
 the stronger of the sun and the moon (`uLutScale`), so that half floats
@@ -737,15 +745,30 @@ hold the night's.
 The scene then takes, for each segment of its ray (the eye to the first
 layer, to the second, to the end), the table's light at its end less at
 its start, through the layers before it, and the layers' light through the
-table's depth at them (`airAt`), as the march adds them. The table holds
+table's depth at them (`airAt`), as the march adds them. Between two
+slices of distance it mixes them linearly in the distance. The end of the
+ray is read from its own slice: mixed from the slices on either side, a
+ray that met the sea between them lost the light of the dense air near
+its end, and the sea seen from above came out darker (down from 40 km, 10
+levels of 255). The table holds
 the clouds' shadows only by their mean (the direct light below the tops
 times 1 to 0.15 as the amount of cloud goes from 0.4 to 1: without it, the
 air under a deck shone orange at its far edge at dusk). So the part of each
-segment below the tops takes the shadow at `LUT_SHADE` (4) places in it,
-denser near the eye and new each frame (`shaftJitter`, as the march's
-shafts), over that mean: its light times the mean light let through there
-over the table's mean (with one place, the mean at rest kept the jitter's
-pattern over the far air). With the mean
+segment below the tops is cut into `Q_LUT_SHADE` pieces (16; 4 at `low`),
+shorter near the eye, and each takes the shadow at a place in it, new each
+frame (`shaftJitter`, as the march's shafts), over that mean: the piece's
+light scattered once, for each wavelength, times the light let through
+there over the table's mean. (One shadow, the mean of its places,
+over the whole part: at sunset the shafts of light and shadow under the
+clouds towards the sun faded to a haze outside the 8 degrees round the sun
+that the march draws. With one place, the mean at rest kept the jitter's
+pattern over the far air.) The light scattered many times, the sky's,
+keeps the table's mean. (With a share of 0.65 of the light taken as
+scattered once, the low air at sunset, lit almost only by the sky, went
+dark under the clouds' long shadows; with the true share but one for all
+wavelengths, the shadows took too little of the red light scattered once
+and too much of the sky's blue, and the horizon under an overcast towards
+a low sun turned yellow.) With the mean
 alone, the air between the eye and a cloud towards the sun, which lies in
 that cloud's shadow, shone with the sun's glow, and a deck overhead looked
 thin enough to show the sun through it; and the shafts of shadow over the
@@ -753,8 +776,12 @@ sea were gone. Within 8 degrees of the sun or the moon (`LUT_NEAR`), whose
 glow is finer than the table's texels, the pixel marches as before, with
 the clouds' shadows in full; so does `skyAt`, the sky the sea mirrors
 (mirrored in the glitter, the table's glow, spread over its texels, filled
-the clouds' shadows on the sea). The table leaves out the thin cloud's
-shade on the low air (`low` has none, `Q_CI_SHADE` 0). The
+the clouds' shadows on the sea). The pieces take the thin cloud's shade
+on the air below 2 km too, as the march does; without low clouds they
+cover that part alone (`low` has no such shade, `Q_CI_SHADE` 0).
+With 32 slices of distance at `high` and `max`, a deck seen from 11 km
+showed rings a few levels deep where its rays end between two slices;
+64 halve them. The
 sky's light on the clouds (`SKY_LIGHT`) keeps its own march.
 
 ## Low clouds
@@ -3521,7 +3548,8 @@ frames while frames take 24 to 40 ms.
 ## Quality levels
 
 The page draws at one of four levels: `low`, `mid`, `high` and `max`.
-`max` is the picture as it was before there were levels; each lower one
+`max` is the picture as it was before there were levels (but for the air,
+read from a table: see [The air](#the-air)); each lower one
 draws fewer pixels, bakes smaller textures and takes fewer samples. One
 table in the JS, `QUALITY`, sets everything a level changes; nothing else
 asks which level it is.
@@ -3533,7 +3561,8 @@ asks which level it is.
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `minScale` | 0.35 | 0.35 | 0.35 | 1 |
 | `keys` | no | no | yes | yes |
-| `airLut` | yes | no | no | no |
+| `airLut` | 64 x 48, 16 | none (march) | 128 x 96, 64 | 128 x 96, 64 |
+| `Q_LUT_SHADE` | 4 | | 16 | 16 |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
@@ -3640,7 +3669,11 @@ asks which level it is.
   separate sparkles), and `Q_CI_SHADE` (0: the cirrus casts no shadow on
   the low clouds and the sea and does not dim the glare: the scene then
   holds no copy of the cirrus's code), and `Q_AIR_LUT` (1: the scene
-  reads the air from a table, see [The air](#the-air)), and `Q_GOLD` (1:
+  reads the air from a table, see [The air](#the-air); set from the
+  level's `airLut`, with the table's sizes `Q_LUT_AZ`, `Q_LUT_EL` and
+  `Q_LUT_S`, where the GPU can draw half floats: else every level marches),
+  `Q_LUT_SHADE` (the pieces of the air below the tops that take the
+  clouds' shadow, with the table), and `Q_GOLD` (1:
   the jitters of the low clouds' march, of the point where their light is
   worked out and of the shafts step by the golden ratio and the plastic
   number each frame; IGN shifted along the diagonal, as at `max`, runs
@@ -3824,14 +3857,13 @@ later if the page starts without cirrus: when cirrus is first shown):
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
-| `uMS` | 0 | 40 x 72, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering; the sky's light on the clouds |
+| `uMS` | 0 | 512 x 272, RGBA32F, or RGBA16F without float filtering | JS: `buildMultiScatter` (y 0 to 143, 40 wide), `makeSky` (y 144 to 271) | The air's tables in one texture (Direct3D 11 gives a program 16): multiple scattering, the sky's light on the clouds and its lean; then the depth to the top of the air (`depthToTop`) |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile (G and B rounded at their points) |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
-| `uAirLut` | 29 | `low` only: 256 x 48 x 17, RGBA16F, linear | `fs` with `AIR_LUT`, a slice a draw, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| `uAirLut` | 29 | 7 `LUT_AZ` x `LUT_EL` x (`LUT_S` + 2), RGBA16F, linear: 896 x 96 x 66 (`high`, `max`; 45 MB), 448 x 48 x 18 (`low`); none at `mid` | `fs` with `AIR_LUT`, two draws a slice, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
