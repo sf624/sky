@@ -289,8 +289,9 @@ before the renderer). A simple model, not a simulator:
   second), at most `TURN_MAX` (30 degrees a second). The way of a frame
   follows the heading of its middle (the chord of the arc flown), at
   `v cos(climb)`; the altitude changes at `v sin(climb)`, through
-  `setAltitude` (the state, the slider, which rounds it, and the sound),
-  within the slider's range. At the top or the bottom of the range the
+  `climbTo` (the sound) and `setAltitude` (the state, the slider, the field,
+  the limits `ALT_MIN` and `ALT_MAX`; the one path of every altitude),
+  within 0.3 to 40 km. At the top or the bottom of the range the
   climb eases back to 0 at `PITCH_RATE`.
 - **The controls** give rates from -1 to 1: the keys (by `code`, so WASD
   sits in the same place on every layout; not while the focus is in a

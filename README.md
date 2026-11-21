@@ -32,7 +32,7 @@ panel has the focus):
   second, and 60 degrees (the most) 3.9 degrees a second.
 - **↑ ↓** or **W S**: lower or raise the nose, as in a flight simulator
   (↑ pushes the nose down). The aircraft climbs or descends, up to 15
-  degrees, and the altitude follows. At 300 m and at 13,000 m it levels off.
+  degrees, and the altitude follows. At 300 m and at 40 km it levels off.
 - **Q E**: turn with the rudder, 3 degrees a second, without banking.
 - **L**: back to straight and level flight.
 

@@ -510,15 +510,32 @@ export const CHECKS = {
       } finally {
         await p.close();
       }
-      const q = await ctx.session.open(ctx.page, 'date=172&time=14&alt=12.9&heading=0&climb=10&speed=900&at=40,60', ctx.size);
-      try {
-        await q.step(300, 16);
-        const fl = await flightNow(q);
-        pages.push(q);
-        lines.push(`climb to the top: altitude ${fl.alt} km, climb ${fl.climb.toFixed(3)} degrees after 300 frames`);
-        expect(fl.alt === 13 && fl.climb === 0, 'the climb levels off at 13 km');
-      } finally {
-        await q.close();
+      // The altitude has one path (setAltitude): through 13 km, where the slider's scale changes, and to both limits
+      // (0.3 and 40 km) the slider's place and the field agree with the state, and with a page opened at that altitude.
+      const sliderNow = (p) => p.eval("[+document.getElementById('alt').value, document.getElementById('altOut').value]");
+      for (const [name, start, climb, frames, want] of [['through 13 km', 12.95, 10, 120, null], ['down through 13 km', 13.05, -10, 120, null],
+        ['to the top', 39.9, 10, 400, 40], ['to the bottom', 0.4, -10, 400, 0.3]]) {
+        const q = await ctx.session.open(ctx.page, `date=172&time=14&alt=${start}&heading=0&climb=${climb}&speed=900&at=40,60`, ctx.size);
+        let fl, sl;
+        try {
+          await q.step(frames, 16);
+          fl = await flightNow(q);
+          sl = await sliderNow(q);
+          pages.push(q);
+        } finally {
+          await q.close();
+        }
+        const r = await ctx.session.open(ctx.page, `date=172&time=14&alt=${fl.alt}&speed=0`, ctx.size);
+        let ref;
+        try {
+          ref = await sliderNow(r);
+          pages.push(r);
+        } finally {
+          await r.close();
+        }
+        lines.push(`climb ${name}: altitude ${fl.alt} km, climb ${fl.climb.toFixed(3)} degrees, slider ${sl[0]} (${sl[1]}), a page opened there: ${ref[0]} (${ref[1]})`);
+        expect(want === null ? (start < 13) === (fl.alt > 13) : fl.alt === want && fl.climb === 0, `climb ${name}: the altitude ${want === null ? 'passes 13 km' : 'levels off at ' + want + ' km'}`);
+        expect(sl[0] === ref[0] && sl[1] === ref[1], `climb ${name}: the slider and the field agree with the altitude`);
       }
     }
 
