@@ -1018,7 +1018,14 @@ ploughed field, which no photograph shows.)
   (1 + COLUMN tau)`. (With the beam's own depth, the air under the deck
   was dark out to the horizon, and from 0.4 km a dark brown band lay
   along it.)
-- **Its light** differs from the sheet's in two ways. In the shadow of a
+- **Its light** differs from the sheet's in three ways. Each step of the
+  light's march towards the sun is read at a place in it new each frame
+  (`LIGHT_AT`), not at its middle: from 11 km straight down, the first
+  two steps, read at their middles, crossed the flanks of the puffs at
+  the same places frame after frame, and drew a hatch of fine parallel
+  lines on them, the same direction everywhere (it went with those two
+  steps left out, and stayed with every other noise of the light made
+  white, with a finer march and a finer `uDeck`). In the shadow of a
   puff towards the sun, the slab's light that went into the whole mass
   keeps half of its strength (light spreads in sideways from the lit
   cells); with 0.3 the shade was the sky's light alone, and blue. A

@@ -4037,6 +4037,18 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       float ab = 2.0 * PI * hash(gl_FragCoord.xy + 7.13 * uPass + 41.7);
       vec3 w = vec3(0.0), offL = off, offB = cos(ab) * off + sin(ab) * cross(uLight, off);
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
+#ifdef DECK
+      // In the deck, each step towards the light is read at a place in it
+      // new each frame (LIGHT_AT), not at its middle: from 11 km straight
+      // down, the first two steps, read at their middles, crossed the
+      // flanks of the puffs at the same places frame after frame, and drew
+      // a hatch of fine parallel lines on them (gone with those two steps
+      // left out; the same with every other noise of the light made white).
+      float lj = deckHere > 0.0 ? hash(gl_FragCoord.xy * 1.37 + 7.91 * fract(0.618034 * uPass) + 53.3) : 0.5;
+#define LIGHT_AT lj
+#else
+#define LIGHT_AT 0.5
+#endif
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
       for (int n = 0; n < LIGHT_STEPS; n++) {
         int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n - 16;
@@ -4066,7 +4078,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
-          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
+          x = ps + uLight * (sl + LIGHT_AT * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
         }
