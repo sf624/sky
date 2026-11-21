@@ -794,7 +794,7 @@ vec4 deckBake(vec2 uv) {
   // ragged, crisp edges).
   vec3 wq = vec3(uv, 0.15);
   x += 0.035 * vec2(perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 580.0), perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 590.0));
-  // (The cells are packed caps some three to four times as wide as they
+  // (The cells are packed caps some two to three times as wide as they
   // are high, meeting in narrow creases; the puffs on them lower and
   // round. Three times as high and apart, from 4 km they stood as round
   // bulbs over dark gaps, where photographs show a packed surface of

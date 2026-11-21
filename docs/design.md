@@ -955,20 +955,24 @@ ploughed field, which no photograph shows.)
 - **Its top** (`deckTop`) is the sheet's own top `ts` plus the puffs, read
   from `uDeck`: a tile of `DECK_KM` = 32 km baked once (`deckBake`, in
   the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km so that it
-  does not repeat. Four classes of puffs on jittered lattices, 1.07 km,
-  460 m, 360 m and 230 m apart, each lobed (three harmonics of its
-  outline) and drawn out along the rows; the large ones are caps with
+  does not repeat. Four classes of puffs on jittered lattices, 710 m,
+  305 m, 237 m and 152 m apart (half as many again as before: from 6.4
+  km the cells' period was 1.3 to 2 times a photograph's, now 1.0 to 1.2
+  times), each lobed (three harmonics of its outline) and drawn out
+  along the rows, and drawn at a place moved by noise of 250 and 125 m
+  (up to some 40 m), so that their outlines are ragged, not round; a
+  relief of 125 and 62 m, some 8 m high, lies on them; the large ones are caps with
   flat tops whose flanks meet the sheet at a finite slope (with domes
   of powers under 0.5 the flanks stood as cliffs at their foot, and
-  their rims glittered), packed: some three to four times as wide as they
+  their rims glittered), packed: some two to three times as wide as they
   are high, so that they meet in narrow creases (three times as high and
   apart, from 4 km they stood as round bulbs over dark gaps, where
   photographs show a packed surface of shallow relief; lower and apart,
   from above they were a grey blanket; a fifth wider and a quarter lower,
   from 6.4 km their light varied by 0.20 to 0.34 of its mean at the scale
-  of the cells, where a photograph's varies by 0.39 to 0.47, now 0.25 to
-  0.39). The clumps and the large cells meet in a soft
-  maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
+  of the cells, where a photograph's varies by 0.39 to 0.47, then 0.25
+  to 0.39; with the smaller cells, as high, 0.32 to 0.46). The clumps
+  and the large cells meet in a soft maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
   merge); the smaller ones stand on them as bumps and alone between
   them. Whether a puff is there is decided at its middle, from a map of
   where they gather (`uDeckCtl`, drawn first: rows about 1.5 km apart
@@ -984,6 +988,14 @@ ploughed field, which no photograph shows.)
   cells where the cover over 4 km is less and as the slider comes down.
   The heights are half floats where the GPU can draw to them: in 8 bits
   they stepped by 2 m, and the flanks showed terraces.
+- **Its fine billows**, near the eye (where a pixel is under 5 to 10 m),
+  are the heaps' (`cloudDetail`, uBody's heads of 18 to 71 m), under
+  half as deep (`q.w` 0.5 against 1.1): as deep, they covered the cells
+  from 4 and 6.4 km with a fur, where photographs show crisp cells with
+  ragged edges (a debug render without them showed no fur; without the
+  finer billows, with a crisp edge, or with the light's steps without
+  the fine noise, it stayed). Without them at all, the cells were
+  smooth as wax.
 - **Lanes**: where a slow field drawn out along the wind crosses a level,
   narrow clear rifts that wind over tens of km, in places only. Their
   edges, and those of the open patches, are moved by the map's finer
@@ -1019,11 +1031,15 @@ ploughed field, which no photograph shows.)
   they are not unrolled.
 - **Its body** is one density in a column, its depth set by its
   thickness, and both by how thick the layer is there (`deckThick`, -1
-  to 1, `uDeck`'s A): the sheet's top 70 m higher or lower, the puffs
+  to 1, `uDeck`'s A): the sheet's top 50 m higher or lower, the puffs
   a fifth higher or lower (in the bake), and the density (`deckBody`)
-  a quarter more or less. So thinner patches show the sea through them,
-  darker from above, and lighter from below; thicker ones are darker
-  from below. The shadow maps and the column maps do not resolve a
+  a quarter more or less. Closed, the sheet under the puffs is 100 to
+  200 m thick (`DECK_SHEET`): with 10 to 150 m, from 11 km the thin
+  patches between the cells were holes onto a deep-blue sea, where in
+  photographs a closed deck has none (with 150 to 250 m, from 11 km at
+  noon it was an even grey). So thinner patches are dimmer from above,
+  and lighter from below; thicker ones are darker from below; the sea
+  shows only where the cover is less. The shadow maps and the column maps do not resolve a
   layer this thin (hard patches of light on the sea under it, bands in
   the air), so the deck's depths come from its top directly:
   `deckColumn` integrates the extinction up a column (of a smoother top,
