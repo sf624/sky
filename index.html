@@ -2232,8 +2232,10 @@ const vec4 SKYB = vec4(1.338, 0.531, 0.0109, 4.28);
 // in comes back out as the depth under the place says, not the depth along
 // the light (on a sphere it leaks out sideways, and the fit's K is far
 // smaller). The lobe (SLAB_MS: gain, how fast it fades with the depth
-// towards the light, K of (u + K d) / (1 + K d), where u is MS_UP (1 + mu)
-// / 2: with nothing behind the place, only light that goes on forwards),
+// towards the light, K and u of (u + K d) / (1 + K d): with nothing behind
+// the place, only the light that goes on through it; the fit's u was MS_UP
+// (1 + mu) / 2, and u here is its mean over the views, as that use of mu
+// cost 12 % of the frame on Direct3D 11),
 // the light that went into the whole mass (SLAB_D: gain, K, c, as MSD,
 // and the K of the depth towards the light: light deep in a sheet comes
 // from all of it, and fades slowly with the depth),
@@ -2241,7 +2243,7 @@ const vec4 SKYB = vec4(1.338, 0.531, 0.0109, 4.28);
 // (SLAB_T). A sheet is cloud that is not a heap's 3D body (solidAt: decks,
 // sheets, the flat fragments by the heaps); a heap's light comes in through
 // its side, as the spheres'.
-const vec3 SLAB_MS = vec3(6.12, 0.163, 0.0318);
+const vec4 SLAB_MS = vec4(6.12, 0.163, 0.0318, 0.3);
 const vec4 SLAB_D = vec4(3.89, 0.0682, 0.199, 0.0179);
 const float SLAB_T = 2.5;
 // The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
@@ -3838,7 +3840,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       float sun0 = clamp(sunUp, 0.0, 1.0), th = min(tauB, dUnder), kSl = SLAB_MS.z * th, kSd = SLAB_D.y * th;
       float topLit = clamp(sun0 * (above + 1.0) / (sun0 * tauS + 1.0), sun0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
       float ms = hg(mu, MS1.y) * mix(MS1.x * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb),
-                                     SLAB_MS.x * exp(-SLAB_MS.y * tauS) * (MS_UP * 0.5 * (1.0 + mu) + kSl) / (1.0 + kSl) * topLit, wide);
+                                     SLAB_MS.x * exp(-SLAB_MS.y * tauS) * (SLAB_MS.w + kSl) / (1.0 + kSl) * topLit, wide);
       float diffuse = MSD.x / (4.0 * PI) * dark * mix((MSD.z + kb) / (1.0 + MSD.y * tauCM + kb),
                                      SLAB_D.x / MSD.x * (SLAB_D.z + kSd) / (1.0 + SLAB_D.w * min(tauCM, above / max(sun0, 0.05)) + kSd) * topLit, wide);
       // In a crease on the lit side, between heads that shade it, less of
