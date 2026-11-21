@@ -2232,7 +2232,10 @@ const vec4 SKYB = vec4(1.338, 0.531, 0.0109, 4.28);
 // in comes back out as the depth under the place says, not the depth along
 // the light (on a sphere it leaks out sideways, and the fit's K is far
 // smaller). The lobe (SLAB_MS: gain, how fast it fades with the depth
-// towards the light, K of K d / (1 + K d): nothing without cloud behind),
+// towards the light, K and u of (u + K d) / (1 + K d): with nothing behind
+// the place, only the light that goes on through it; the fit's u was MS_UP
+// (1 + mu) / 2, and u here is its mean over the views, as that use of mu
+// cost 12 % of the frame on Direct3D 11),
 // the light that went into the whole mass (SLAB_D: gain, K, c, as MSD,
 // and the K of the depth towards the light: light deep in a sheet comes
 // from all of it, and fades slowly with the depth),
@@ -2240,7 +2243,7 @@ const vec4 SKYB = vec4(1.338, 0.531, 0.0109, 4.28);
 // (SLAB_T). A sheet is cloud that is not a heap's 3D body (solidAt: decks,
 // sheets, the flat fragments by the heaps); a heap's light comes in through
 // its side, as the spheres'.
-const vec3 SLAB_MS = vec3(6.12, 0.163, 0.0318);
+const vec4 SLAB_MS = vec4(6.12, 0.163, 0.0318, 0.3);
 const vec4 SLAB_D = vec4(3.89, 0.0682, 0.199, 0.0179);
 const float SLAB_T = 2.5;
 // The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
@@ -3818,22 +3821,28 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // rim, a billow that stands out). The constants come from a Monte
       // Carlo of spheres (see design.md).
       float dark = mix(DARK, 1.0, P), kb = MSD.y * tauB;
-      float ms = MS1.x * hg(mu, MS1.y) * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb);
-      float diffuse = MSD.x / (4.0 * PI) * dark * (MSD.z + kb) / (1.0 + MSD.y * tauCM + kb);
       // The depth under the place (dUnder). In a sheet (wide: not a heap's
-      // body), the light of a slab (see SLAB_MS): per unit of area of a flat
-      // top as the sun's height says, back out as the depth under the place
-      // says, and less in a sheet thin straight through.
+      // body), the light of a slab (see SLAB_MS): per unit of area of the
+      // face the sun falls on (topLit), back out as the depth under the
+      // place says, and less in a sheet thin straight through. A flat top
+      // takes in sunUp; a face of the sheet's relief turned to the sun takes
+      // in more, as the depth straight up over the depth towards the sun
+      // says (the same on a flat top). Deep in a sheet the light that went
+      // into the whole mass came in through all of its top: it fades with
+      // the depth under that top along the light (above / sunUp), not with
+      // the depth through the heads between (towards a low sun, the map of
+      // the clouds' shadow crosses many). Checked against a Monte Carlo of
+      // slabs with ridged tops (see design.md).
       // (Seen from below or inside, where the light through a deck takes
       // over, below, the lobe stays the spheres'.)
       float below = fog ? 1.0 : basal * smoothstep(2.0, 6.0, above);
       float dUnder = max(colAll - above, 0.0), wide = (1.0 - bodyHere) * (1.0 - below);
-      if (wide > 0.0) {
-        float th = min(tauB, dUnder), kl = SLAB_MS.z * th, ks = SLAB_D.y * th;
-        float topLit = clamp(sunUp, 0.0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
-        ms = mix(ms, SLAB_MS.x * hg(mu, MS1.y) * exp(-SLAB_MS.y * tauS) * kl / (1.0 + kl) * topLit, wide);
-        diffuse = mix(diffuse, SLAB_D.x / (4.0 * PI) * dark * (SLAB_D.z + ks) / (1.0 + SLAB_D.w * tauCM + ks) * topLit, wide);
-      }
+      float sun0 = clamp(sunUp, 0.0, 1.0), th = min(tauB, dUnder), kSl = SLAB_MS.z * th, kSd = SLAB_D.y * th;
+      float topLit = clamp(sun0 * (above + 1.0) / (sun0 * tauS + 1.0), sun0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
+      float ms = hg(mu, MS1.y) * mix(MS1.x * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb),
+                                     SLAB_MS.x * exp(-SLAB_MS.y * tauS) * (SLAB_MS.w + kSl) / (1.0 + kSl) * topLit, wide);
+      float diffuse = MSD.x / (4.0 * PI) * dark * mix((MSD.z + kb) / (1.0 + MSD.y * tauCM + kb),
+                                     SLAB_D.x / MSD.x * (SLAB_D.z + kSd) / (1.0 + SLAB_D.w * min(tauCM, above / max(sun0, 0.05)) + kSd) * topLit, wide);
       // In a crease on the lit side, between heads that shade it, less of
       // that light. The spheres of the Monte Carlo have no creases: there,
       // a place with much cloud behind it and some depth towards the light
