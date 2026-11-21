@@ -95,7 +95,12 @@ The JS then runs once, at load, and does little:
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
      it, asking waits, so the page asks for one program a frame. A failed
-     program throws the compiler's or the linker's message.
+     program throws the compiler's or the linker's message. The programs
+     that draw the low clouds (`fs`, and as `CLOUD_PASS`, `SHADOW_MAP` and
+     `TOPS_MAP`) are made without the overcast's deck, unless the page
+     starts with the Clouds slider at 0.8 or more: then with it (`DECK`),
+     with the program of its top (`noise` as `DECK_BAKE`), and its top is
+     baked after the noise. (See [the deck](#low-clouds) for the rest.)
    - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
      (`slices`). Each is a generator (a job) that yields every little while;
      `finish(job)` runs one at once.
@@ -854,7 +859,7 @@ Where the cover breaks into heaps, two more things shape the map's heaps
   round domes, and from above the clouds were discs; moved, their outlines
   are lobed and drawn out. (The noise's Worley cells, eased, did the same
   at 3 ms more.) The moved map and its slope there are made once for each
-  amount of cloud, 2048 texels square (`uWarped`, `uSlopeW`; see
+  amount of cloud, 2048 texels square (`uWarped`, two layers; see
   [Textures made at start](#textures-made-at-start)): read in the field,
   the place moved first needed a read of the map that the next two
   waited for, on every step of every ray; made once, it saved 1.2 ms of
@@ -903,8 +908,8 @@ stand in the same ranks, with smaller billows (`rank`); with rolls in a
 few places only, the sheet from above was lumps without order. The
 billows of the tile lie on top. Sheet and
 heaps merge by a smooth max. Near the top of the slider (`level1`, 0.85
-to 1) the heaps on the sheet flatten to 40 % and few towers rise out of
-it: at `cloud=1` the domes stood up to 1.9 km over 1 to 3 km and looked
+to 1; there the deck takes over, below) the heaps on the sheet flatten
+to 40 % and few towers rise out of it: at `cloud=1` the domes stood up to 1.9 km over 1 to 3 km and looked
 like a range of mountains. Towers (G over 0.48) are a little more common
 than before among fields of cumulus. The early way out of `cloudShape`
 allows for the sheet's cells and billows (`fsMax`): with a fixed margin
@@ -935,6 +940,162 @@ the Worley domes fill the plane and meet in creases. With the whole rise
 kept, the heaps were smooth hills with long shadows. The early ways out
 and the map of the tops allow for what the cells, heads and rolls add
 over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+
+**The deck.** From 0.85 of cloud the overcast is one layer of its own,
+stratocumulus as photographs from above show it: small cells, some
+packed, some in short rows, on a thin sheet. `deckShare` says how much
+of the field it is: none at 0.85 (`DECK_FROM`), all at 1, and between
+more where the cover over some 20 km (`region`) is more (`t + 8 (region
+- 0.5) t (1 - t)`, `t` the slider's share of the way from 0.85 to 1), so
+that it comes in by patches tens of km wide; there `cloudShape` mixes the
+heaps' field and the deck's, and the light mixes their depths. (Above
+0.85 the heaps' field drew rows of rolls 1.2 km apart: from 6 km a
+ploughed field, which no photograph shows.)
+
+- **Its top** (`deckTop`) is the sheet's own top `ts` plus the puffs, read
+  from `uDeck`: a tile of `DECK_KM` = 32 km baked once (`deckBake`, in
+  the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km so that it
+  does not repeat. Four classes of puffs on jittered lattices, 710 m,
+  305 m, 237 m and 152 m apart (half as many again as before: from 6.4
+  km the cells' period was 1.3 to 2 times a photograph's, now 1.0 to 1.2
+  times), each lobed (three harmonics of its outline) and drawn out
+  along the rows, and drawn at a place moved by noise of 250 and 125 m
+  (up to some 40 m), so that their outlines are ragged, not round; a
+  relief of 125 and 62 m, some 8 m high, lies on them; the large ones are caps with
+  flat tops whose flanks meet the sheet at a finite slope (with domes
+  of powers under 0.5 the flanks stood as cliffs at their foot, and
+  their rims glittered), packed: some two to three times as wide as they
+  are high, so that they meet in narrow creases (three times as high and
+  apart, from 4 km they stood as round bulbs over dark gaps, where
+  photographs show a packed surface of shallow relief; lower and apart,
+  from above they were a grey blanket; a fifth wider and a quarter lower,
+  from 6.4 km their light varied by 0.20 to 0.34 of its mean at the scale
+  of the cells, where a photograph's varies by 0.39 to 0.47, then 0.25
+  to 0.39; with the smaller cells, as high, 0.32 to 0.46). The clumps
+  and the large cells meet in a soft maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
+  merge); the smaller ones stand on them as bumps and alone between
+  them. Whether a puff is there is decided at its middle, from a map of
+  where they gather (`uDeckCtl`, drawn first: rows about 1.5 km apart
+  bent by slow noise, and patches of some 4 km), so that a puff is whole
+  or none. The map also holds the size of the cells by patches of 3 to
+  8 km (larger, higher and more of the large cells, fewer small puffs,
+  where it is high; the reverse where it is low), and how thick the
+  layer is by patches of 4 to 10 km (see its body): with one size
+  everywhere, the cells were as even as a carpet, where photographs show
+  lanes, darker patches and thicker areas at that scale. The map holds three tops, for closed, middling and open cover
+  (the puffs of each a subset of the one before, smaller); the cover `C`
+  picks between them: closed over most of the deck at full cloud, open
+  cells where the cover over 4 km is less and as the slider comes down.
+  The heights are half floats where the GPU can draw to them: in 8 bits
+  they stepped by 2 m, and the flanks showed terraces.
+- **Its fine billows**, near the eye (where a pixel is under 5 to 10 m),
+  are the heaps' (`cloudDetail`, uBody's heads of 18 to 71 m), under
+  half as deep (`q.w` 0.5 against 1.1): as deep, they covered the cells
+  from 4 and 6.4 km with a fur, where photographs show crisp cells with
+  ragged edges (a debug render without them showed no fur; without the
+  finer billows, with a crisp edge, or with the light's steps without
+  the fine noise, it stayed). Without them at all, the cells were
+  smooth as wax.
+- **Lanes**: where a slow field drawn out along the wind crosses a level,
+  narrow clear rifts that wind over tens of km, in places only. Their
+  edges, and those of the open patches, are moved by the map's finer
+  cover (1 km and less): read at the map's texels alone (2.8 and 4 km),
+  they were straight lines kilometres long. Where the slow map is high,
+  the sheet is smoother and a little higher, with fewer puffs (stratus).
+- **Its programs.** The deck's code is in `fs` only with `DECK` defined
+  (and its bake in `noise` only with `DECK_BAKE`). Without it, the four
+  programs that draw the low clouds are those of before the deck, and
+  cost as much; with it, on Direct3D 11, `fs` took 30 % longer to link
+  and a frame of the default view 17 % longer, where no deck is drawn.
+  So the page makes the programs without the deck at start, and those
+  with it only when the slider first comes to `DECK_NEAR` = 0.8, a little
+  before the deck comes in (`deckLater`): it links them, the frames go on
+  with the old ones while the GPU process compiles them on its threads,
+  then it bakes `uDeck` two strips at a time, each after the GPU has done
+  the ones before (a fence), and from then on a frame over 0.85 of cloud
+  draws with them (`pickPrograms`), below with the old ones. If the
+  slider already stands over 0.85 when they are ready, the deck fades in
+  over 1.5 s (`uDeckIn` scales `deckShare`; the depth maps are drawn
+  again at each eighth of it), from the heaps' rows of rolls that the old
+  programs draw there. A page that starts at 0.8 or more makes them at
+  once, in place of the old ones. On Direct3D 11 (Chrome on Windows) the
+  deck is there some 16 to 18 s after the slider reaches 0.8 (14 to 17 s
+  of compiling, 1.5 to 1.9 s of baking), and the frames meanwhile come as they do
+  without it; the first frames of the fade take up to 165 ms (moving the
+  slider took up to 123 ms before the deck). Measured in
+  [tools/README.md](../tools/README.md#direct3d-11-on-windows).
+- **On Direct3D 11** every call is inlined, and the deck's reads are made
+  in a dozen places of the scene's program: the depths read the smoother
+  top, the map of the tops takes the deck's highest top (`DECK_TOP`) in
+  its 44 halvings, and the bake's loops take a bound from `uZ` so that
+  they are not unrolled.
+- **Its body** is one density in a column, its depth set by its
+  thickness, and both by how thick the layer is there (`deckThick`, -1
+  to 1, `uDeck`'s A): the sheet's top 50 m higher or lower, the puffs
+  a fifth higher or lower (in the bake), and the density (`deckBody`)
+  a quarter more or less. Closed, the sheet under the puffs is 100 to
+  200 m thick (`DECK_SHEET`): with 10 to 150 m, from 11 km the thin
+  patches between the cells were holes onto a deep-blue sea, where in
+  photographs a closed deck has none (with 150 to 250 m, from 11 km at
+  noon it was an even grey). So thinner patches are dimmer from above,
+  and lighter from below; thicker ones are darker from below; the sea
+  shows only where the cover is less. The shadow maps and the column maps do not resolve a
+  layer this thin (hard patches of light on the sea under it, bands in
+  the air), so the deck's depths come from its top directly:
+  `deckColumn` integrates the extinction up a column (of a smoother top,
+  `deckTopSoft`: the puffs on the cover by the map alone, without lanes
+  or smooth sheet), and `deckShadow`
+  takes the column above the place where the light crosses the layer's
+  middle. The air under the deck (`airShadow`) is lit by the light that
+  came through it, spread: a slab of depth `tau` lets through some `1 /
+  (1 + COLUMN tau)`. (With the beam's own depth, the air under the deck
+  was dark out to the horizon, and from 0.4 km a dark brown band lay
+  along it.)
+- **Its light** differs from the sheet's in six ways. Its depth towards
+  the light over the first two steps (`tauF`) is worked out at the point
+  at every distance, not taken from the first stage beyond 12 km: taken
+  there, where the first stage's ray entered the cloud at half the size,
+  the deck from 11 km towards the horizon and from 6.4 km in the distance
+  was a pale plain with dark pits, where a converged render (finer
+  steps, the slow light at each pixel, many frames) showed packed cells
+  with shaded rims. Those two steps read the field without the fine
+  noise: light spreads over tens of metres in the deck, and with it the
+  flanks of the puffs from 4 km had a fur of fine streaks. From above,
+  the light that a thin column sends back is less: two streams give
+  `COLUMN tau / (1 + COLUMN tau)` of what falls on it (as `throughDeck`
+  lets `1 / (1 + COLUMN tau)` through), where the slab's light takes a
+  thick slab's from some 7 of depth on; so thin patches between the
+  cells are darker from above. (Over 0.7: the deck as a whole sends back
+  as much as before; taken as it is, it was 0.35 to 0.65 stops darker,
+  and the exposure that made up for it turned it blue from 11 km away
+  from a low sun.) A path tracer on the same field (the sun,
+  a sky of even light, droplets of 20 um after Jendersie and d'Eon 2023)
+  showed the deck from 11 km straight down at noon with a contrast of
+  cells against creases (std over mean of the light) of 0.29 to 0.30
+  where the slab's light gave 0.18 to 0.20 (now 0.24), and no brown
+  creases. (The same path tracer found the deck as a whole three times
+  darker than the slab's light makes it: the layer as drawn is thin, 100
+  to 400 m at some 45 per km, and lets most of the light through to the
+  sea. Real decks are thicker; the slab's light stands for one.) Each step of the
+  light's march towards the sun is read at a place in it new each frame
+  (`LIGHT_AT`), not at its middle: from 11 km straight down, the first
+  two steps, read at their middles, crossed the flanks of the puffs at
+  the same places frame after frame, and drew a hatch of fine parallel
+  lines on them, the same direction everywhere (it went with those two
+  steps left out, and stayed with every other noise of the light made
+  white, with a finer march and a finer `uDeck`). In the shadow of a
+  puff towards the sun, the slab's light that went into the whole mass
+  keeps half of its strength (light spreads in sideways from the lit
+  cells); with 0.3 the shade was the sky's light alone, and blue. A
+  crease between cells sees less of the sky, as deep as it lies under the
+  mean top round it (the puffs read at two levels), and in its place the
+  cells round it: their sunlit flanks, white. With the sky's light taken away alone, the creases were
+  the sun's light less the sky's: brown lines. And everywhere on it, the
+  cells round a place, below its horizon, light it as a tenth of the sky
+  would, white (with the sky's light alone, the shade of the cells away
+  from a low sun was blue, where photographs show it grey; in place of a
+  tenth of the sky's light, it made the shade brown where the sun is
+  low).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -1160,7 +1321,8 @@ each cloud, not on its surface; no normal of the field enters it.
   growing by 1.6), with the fine noise: the crisp shadows of the small
   billows (where a pixel is wider than 10 m, beyond some 12 km at 1440p,
   from the first stage: its billows are many pixels wide there; worked out
-  in the second stage everywhere, it cost 0.5 ms in cruise); `tauCM`, past them out to 27.8 first steps (four more steps, moved
+  in the second stage everywhere, it cost 0.5 ms in cruise; not in the
+  deck, see there); `tauCM`, past them out to 27.8 first steps (four more steps, moved
   sideways by up to `PENUMBRA` = 60 m each frame, a third of a turn apart:
   light strays in a cloud, and the shadows soften; the stray grows with
   the depth the light has come through, by 1 + `tau` / `STRAY_TAU` (8), at
@@ -1441,7 +1603,9 @@ the present field's heap gives way there (`own`), the highest top within
 0.8 km, the base, and how much of it is shown. One
 sampler only, and only in the programs that draw the low clouds (their
 pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
-a program, and the scene's own `fs` reads 16. That program reads the low
+a program, and the scene's own `fs` reads 15 (16 before the deck, which
+added `uDeck` and freed two by packing tables: see the textures made at
+start). That program reads the low
 clouds from their pass. No mipmaps: a coarser read takes the next level. 68 MB of
 the GPU at `max`, 38 MB at `high` (36 MB at `max` with `,v62`).
 
@@ -1581,7 +1745,7 @@ Neumann (2001). The air, the sea and the glare read the light's map, and
 so does the clouds' own light: past its own steps towards the light (the
 long shadows of heaps on one another) and away from it (`tauB`). The
 clouds' light from below and inside reads the column's (see the light,
-above). They read the warped map (`uWarped`, `uSlopeW`) as the march does.
+above). They read the warped map (`uWarped`, both layers) as the march does.
 
 - **The plane.** A map lies on a plane across its lines, through the
   eye, with axes from `mapAxes` (the light's are `shX` and `shY`,
@@ -3237,6 +3401,7 @@ asks which level it is.
 | `ice` | 1024 | 2048 | 4096 | 4096 |
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
+| `deck` | 1024 | 1024 | 2048 | 2048 |
 | `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 6, 3, 6 | 12, 5, 10 | 20, 8, 16 | 20, 8, 16 |
 | `Q_MARCH` | 4 | 3 | 1.2 | 1 |
 | `Q_SHAFTS` | 1 | 6 | 12 | 16 |
@@ -3293,7 +3458,7 @@ asks which level it is.
 - `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
   heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
-  moved weather map (`uWarped`, `uSlopeW`) (see [Textures made at start](#textures-made-at-start)).
+  moved weather map and its slope (`uWarped`) (see [Textures made at start](#textures-made-at-start)).
   A renderer without a GPU still takes the smaller body and ice whatever
   the level, and no texture is larger than `MAX_TEXTURE_SIZE`.
 - `pass`: the passes before the scene (the low clouds' and the cirrus's)
@@ -3510,13 +3675,12 @@ later if the page starts without cirrus: when cirrus is first shown):
 
 | Texture | Unit | Size and format | Made by | Holds |
 |---|---|---|---|---|
-| `uMS` | 0 | 40 x 72, RGBA32F, or RGBA16F without float filtering | JS, `buildMultiScatter` | Multiple scattering; the sky's light on the clouds |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile (G and B rounded at their points) |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
+| `uDepth` | 5 | 512 x 272, RGBA32F, or RGBA16F without float filtering | JS, in `makeSky` | Rows 0 to 127: the depth to the top of the air. Under them, in the first 40 columns (`msTable`): multiple scattering, and the sky's light on the clouds (`buildMultiScatter`, drawn again when the haze changes). (One texture for both: with the deck, the scene would read 17 samplers with `?grid=1`, where Direct3D 11 allows 16.) |
 | `uAirLut` | 29 | `low` only: 256 x 48 x 17, RGBA16F, linear | `fs` with `AIR_LUT`, a slice a draw, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
@@ -3524,14 +3688,15 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
+| `uDeck` | 19 | the level's `deck`: 2048^2 (1024^2 at `low` and `mid`, 512^2 on a renderer on the CPU) over 32 km, RGBA16F where the GPU can draw to it (else RGBA8), mipmapped, repeating | `noise` shader as `DECK_BAKE` (`uZ` -3), in strips, after `uDeckCtl`; at start if the slider stands at 0.8 or more, else when it first comes there (`deckLater`) | The top of the overcast (see [the deck](#low-clouds)): R, G, B its height over the sheet, as a share of `DECK_H`, for closed, middling and open cover; A how thick the layer is (0.5 the mean: `uDeckCtl`'s A) |
+| `uDeckCtl` | 26, while the deck is drawn; then deleted | 512^2 over 32 km, RGBA8, linear, repeating | `noise` shader as `DECK_BAKE` (`uZ` -4) | R: how much the trains rule; G: a third of how many puffs stand there (read at each puff's middle); B: the size of the cells, by patches of 3 to 8 km; A: how thick the layer is, by patches of 4 to 10 km (0.5 the mean) |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
 changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
 
 | Texture | Unit | Size and format | Holds |
 |---|---|---|---|
-| `uWarped` | 25 | the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds) |
-| `uSlopeW` | 26 | as `uWarped` | `uSlope` read at the same moved place |
+| `uWarped` | 25 | a 2D array of two layers, each the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | Layer 0: `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds); layer 1: `uSlope` read at the same moved place. (One sampler for both: see `uDepth`.) |
 | `uTops` | 23 | 1024^2, RGBA8, nearest | How high the march may meet cloud within 1, 2, 4 and 8 texels (250 m to 2 km), rounded up (see the march) |
 
 The moved maps take a draw each (`uTopsPass` -2 and -1: one target a

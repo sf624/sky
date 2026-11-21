@@ -29,7 +29,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX] [--steps V@S,... [--watch S]]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
@@ -181,9 +181,15 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   With `--shot S`, instead of the GPU time: the canvas as a PNG, S s (real
   time) after the first picture, at the page's own drawing size (no
   `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
-  picture of S s flown on Direct3D 11.
+  picture of S s flown on Direct3D 11. With `--steps V@S,...`, instead:
+  the Clouds slider set to V at S s after the first picture, each in
+  turn, then the gaps between animation frames from the first step on,
+  for `--watch` s (default 30): how many, the median, how many over 50
+  and 100 ms, the five longest and when, and by 2 s the count over 50 ms
+  and the longest. (The page flies, so it draws every frame.)
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
-  with their defines), alone: the time to compile and link it, and of its
+  with their defines; and where `fs` has the overcast's deck, its four
+  programs with `DECK`, which the page makes later), alone: the time to compile and link it, and of its
   first draw into one target and into all its outputs (ANGLE compiles a
   program again for a draw into more than one target).
 
@@ -209,6 +215,41 @@ page draws it). Round 20 rebased on that main did not link: its `fs`
 read 20 textures, where Direct3D 11 allows 16. `d3d page`, three runs at
 2560 x 1440: the first picture 12.5 to 13.7 s (main 10.9 to 12.8 s), the
 GPU time per frame 24.1 to 24.9 ms (main 16.5 to 16.9 ms).
+
+The overcast's deck (2026-11-21, against 084964a, other runs sharing the
+GPU): `d3d programs`, link in s, base then page: `fs` 9.5 and 12.4, `fs
+(CLOUD_PASS)` 4.9 and 8.6, `fs (TOPS_MAP)` 1.7 and 4.0, `noise` 2.2 and
+3.6 (before the deck's code was cut down: 15.2, 9.8, 7.6 and 4.8).
+`d3d page`, three runs at 2560 x 1440, the default view (no deck): the
+first picture 16.7 to 17.9 s (base) and 24.2 to 26.1 s, the GPU time per
+frame 24.9 to 25.2 ms and 29.1 to 29.5 ms.
+
+The deck's programs made only from 0.8 of cloud (#98, 2026-11-21, three
+runs each against 084964a): `d3d programs`, link in s, base then page:
+`fs` 7.6 to 8.0 and 8.0 to 8.6, `fs (CLOUD_PASS)` 4.5 to 4.6 and 4.5
+to 4.6, `fs (TOPS_MAP)` 1.5 to 1.6 and 1.6 to 1.8, `noise` 1.9 to 2.0 and
+2.0; the deck's, made later: `fs (DECK)` 11.4 to 12.1, `fs (DECK
+CLOUD_PASS)` 7.8 to 8.1, `fs (DECK TOPS_MAP)` 3.8 to 4.1, `fs (DECK
+SHADOW_MAP)` 0.4 to 0.5, `noise (DECK_BAKE)` 0.5 to 0.6.
+`d3d page` at 2560 x 1440, the default view: the first picture 14.6 to
+16.3 s (base 14.6 to 16.3 s), the GPU time per frame 24.7 to 25.0 ms
+(base 24.8 to 25.1 ms). 6.4 km over the deck (`cloud=1`), against the
+deck's first version (bb62721): 16.2 to 16.7 s (16.8 to 17.1 s), 19.8 to
+19.9 ms (19.7 to 19.8 ms). `--steps 0.8@3,0.86@6,0.9@8,1@10 --watch 45`:
+the deck fades in 15.7 to 16.6 s after the slider reaches 0.8 (compiled
+after 14.1 to 15.0 s, baked in 1.6 to 1.7 s); while it compiles, 16 to 18 gaps
+over 50 ms every 2 s and the longest 81 to 122 ms, as on the base with
+the same steps (16 to 19, 76 to 123 ms); in the 2 s of the fade, the
+longest 147 to 165 ms. Again with the deck's packed cells and patches
+(55adb51; a slower session: the base's `fs` linked in 8.1 to 9.8 s, its
+first picture came after 16.8 to 20.4 s): `fs (DECK)` 13.2 to 14.9 s,
+`fs (DECK CLOUD_PASS)` 8.5 to 9.3 s, `fs (DECK TOPS_MAP)` 4.0 to 4.1 s,
+`noise (DECK_BAKE)` 0.7 to 0.9 s; the default view 17.1 to 18.1 s and
+25.2 to 25.6 ms (base 16.8 to 20.4 s, 24.9 to 25.7 ms); over the deck
+19.9 to 21.8 s and 19.6 to 20.1 ms (bb62721: 19.3 to 21.1 s, 19.9 to
+20.1 ms); the deck fades in 17.3 to 18.2 s after the slider reaches 0.8,
+the longest gap in the fade 153 to 162 ms, and while it compiles at most
+104 ms.
 
 ## Timings and limits
 
