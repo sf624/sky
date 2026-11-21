@@ -669,7 +669,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its
   top, whose default is `max`'s value; `QUALITY` in the JS gives the lower
   levels' values (see [design.md](design.md#quality-levels)). So `max` compiles to
-  the code it was before there were levels, and a new knob is one line in
+  the code it was before there were levels (but for the air's table, which
+  `airLut` sets at `low`, `high` and `max`), and a new knob is one line in
   each place. Compare a change at `max` (the tools' default) and at `low`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
