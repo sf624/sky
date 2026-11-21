@@ -766,20 +766,15 @@ vec3 deckClass(vec2 x, float N, float seed, vec3 pres, float rad, float hgt, flo
     float psi = atan(o.y, o.x);
     float R = rad * sp * (0.8 + 0.4 * r2.z) * (1.0 + 0.25 * max(sz, 0.0))
             * (1.0 + 0.12 * cos(2.0 * psi + 6.28 * r.x) + 0.09 * cos(3.0 * psi + 6.28 * r2.x) + 0.06 * cos(5.0 * psi + 6.28 * r.y));
-    // (Heights 0.7 to 1.3 of the class's: with 0.5 to 1.5, the highest
-    // stood out of the deck as columns.)
-    float hk = hgt * (0.7 + 0.6 * fract(r2.z * 7.31 + r.z * 3.7)) * (1.0 + 0.3 * max(sz, 0.0));
+    float hk = hgt * (0.5 + fract(r2.z * 7.31 + r.z * 3.7)) * (1.0 + 0.3 * max(sz, 0.0));
     float d2 = dot(v, v) / (R * R);
     vec3 sc = vec3(1.0 / 1.2, 1.0, 1.0 / 0.75);   // closed puffs wider, open ones smaller
     vec3 s = 1.0 - d2 * sc * sc;
-    // (A dome, or by flt a rounded cap whose flank meets the sheet at a
-    // finite slope, twice its height over its radius, and whose top is
-    // still a little round: with powers under 0.5 the flanks stood as
-    // cliffs at their foot, and their rims glittered; with a flat top,
-    // s (2 - s), the flanks met the sheet at four times that slope, and
-    // from 4 km the narrow cells stood upright like thumbs.)
+    // (A dome, or by flt a cap with a flat top whose flank meets the
+    // sheet at a finite slope: with powers under 0.5 the flanks stood as
+    // cliffs at their foot, and their rims glittered.)
     vec3 sp3 = max(s, 0.0);
-    vec3 h = hk * mix(pow(sp3, vec3(0.65)), sp3 * (1.0 + 0.4 * sp3 - 0.4 * sp3 * sp3), flt) + min(s, 0.0) * hk;
+    vec3 h = hk * mix(pow(sp3, vec3(0.65)), sp3 * (2.0 - sp3), flt) + min(s, 0.0) * hk;
     vec3 on = step(vec3(rk), th);
     S += on * exp(DECK_K * h);
   }
@@ -799,31 +794,27 @@ vec4 deckBake(vec2 uv) {
   // ragged, crisp edges).
   vec3 wq = vec3(uv, 0.15);
   x += 0.035 * vec2(perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 580.0), perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 590.0));
-  // (The large cells, 305 m apart, are low rounded caps: some 75 m high
-  // for some 300 m across, a relief of about a quarter of their width,
-  // and with the clumps under them and the bumps on them some 100 m from
-  // their tops to the gaps between them. As high as 160 m, from 4 km and
-  // lower they stood upright like thumbs, and photographs of a deck from
-  // above show a surface of shallow relief. Low and packed, from 6.4 km
-  // they were a grey blanket: in photographs the contrast of a deck comes
-  // mostly from its gaps, thinner cloud between thick cells. So they
-  // stand a little apart, and between them the deck is lower (below).)
-  vec3 cl = log(1.0 + deckClass(x, 45.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.02 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
-  vec3 lg = log(1.0 + deckClass(x, 105.0, 550.0, vec3(0.95, 0.65, 0.3), 0.45, 0.075 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
-  vec3 md = log(1.0 + deckClass(x, 135.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.04 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
-  vec3 sm = log(1.0 + deckClass(x, 210.0, 570.0, vec3(0.85, 0.55, 0.3), 0.5, 0.03 * hv, 1.5, 1.0, -1.0, tng)) / DECK_K;
+  // (The cells are packed caps some two to three times as wide as they
+  // are high, meeting in narrow creases; the puffs on them lower and
+  // round. Three times as high and apart, from 4 km they stood as round
+  // bulbs over dark gaps, where photographs show a packed surface of
+  // shallow relief; lower and apart, from above they were a grey blanket.
+  // A fifth wider and a quarter lower, from 6.4 km their light varied
+  // by 0.20 to 0.34 of its mean at the scale of the cells, and their
+  // period was 1.4 to 1.8 times a photograph's; now 0.25 to 0.39, the
+  // photograph's 0.39 to 0.47. Their period was still 1.3 to 2 times the
+  // photograph's, the cells smooth pillows where it shows small ones packed
+  // tight: now a third smaller, as high, so their flanks are steeper.)
+  vec3 cl = log(1.0 + deckClass(x, 45.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.05 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
+  vec3 lg = log(1.0 + deckClass(x, 105.0, 550.0, vec3(0.95, 0.65, 0.3), 0.6, 0.16 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
+  vec3 md = log(1.0 + deckClass(x, 135.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.07 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
+  vec3 sm = log(1.0 + deckClass(x, 210.0, 570.0, vec3(0.85, 0.55, 0.3), 0.5, 0.05 * hv, 1.5, 1.0, -1.0, tng)) / DECK_K;
   // The cells (clumps and large ones), the smaller puffs as bumps on them,
-  // and alone, low, where no cell is.
+  // and alone where no cell is.
   vec3 b0 = log(exp(DECK_K * cl) + exp(DECK_K * lg) - 1.0) / DECK_K;
   vec3 g = smoothstep(0.0, 0.06, b0);
   vec3 top = b0 + g * (0.7 * md + 0.6 * sm);
-  vec3 t = log(exp(DECK_K * top) + exp(0.4 * DECK_K * md) + exp(0.4 * DECK_K * sm) - 2.0) / DECK_K;
-  // Between the large cells the deck is lower, by up to 0.6 of its height
-  // there: the gaps, some 15 to 30 m over the sheet where the cells' tops
-  // stand 60 to 150 m over it. (Without, the clumps, the bumps and the
-  // soft maximum of the overlapping puffs filled the gaps up to 40 to 80
-  // m: no place of the deck lay lower than 50 m.)
-  t *= mix(vec3(0.4), vec3(1.0), smoothstep(0.0, 0.1, lg));
+  vec3 t = log(exp(DECK_K * top) + exp(DECK_K * md) + exp(DECK_K * sm) - 2.0) / DECK_K;
   // And a fine relief on them, of 125 and 62 m, some 8 m high: from near,
   // their tops have a texture of their own.
   t += 0.008 * perlinFbm(vec3(uv, 0.35), vec3(256.0, 256.0, 1.0), 2, 600.0) * smoothstep(0.0, 0.03, t);
@@ -2705,8 +2696,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       // 18 to 71 m, where photographs show crisp cells with ragged edges.)
       q.w = 0.5;
       heapUp = clamp(zD / max(tsD + fD / 3.0 + zD, 0.01), 0.0, 1.0);
-      // (A fringe over the puffs' lowest 100 m, as high as they now are.)
-      thin = 0.15 * (1.0 - smoothstep(tsD, tsD + 0.1, tsD + fD / 3.0 + zD));
+      thin = 0.15 * (1.0 - smoothstep(tsD, tsD + 0.15, tsD + fD / 3.0 + zD));
       carved = 1.0;
       overBase = zD;
       steep = 1.0;
@@ -3071,7 +3061,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     lump *= 1.0 - dk;
     relief *= 1.0 - dk;
     heapUp = mix(heapUp, clamp(zD / max(T, 0.01), 0.0, 1.0), dk);
-    thin = mix(thin, 0.15 * (1.0 - smoothstep(tsD, tsD + 0.1, T)), dk);
+    thin = mix(thin, 0.15 * (1.0 - smoothstep(tsD, tsD + 0.15, T)), dk);
     solidAt *= 1.0 - dk;
     carved = mix(carved, 1.0, dk);
     overBase = zD;
