@@ -210,6 +210,14 @@ read 20 textures, where Direct3D 11 allows 16. `d3d page`, three runs at
 2560 x 1440: the first picture 12.5 to 13.7 s (main 10.9 to 12.8 s), the
 GPU time per frame 24.1 to 24.9 ms (main 16.5 to 16.9 ms).
 
+The overcast's deck (2026-11-21, against 084964a, other runs sharing the
+GPU): `d3d programs`, link in s, base then page: `fs` 9.5 and 12.4, `fs
+(CLOUD_PASS)` 4.9 and 8.6, `fs (TOPS_MAP)` 1.7 and 4.0, `noise` 2.2 and
+3.6 (before the deck's code was cut down: 15.2, 9.8, 7.6 and 4.8).
+`d3d page`, three runs at 2560 x 1440, the default view (no deck): the
+first picture 16.7 to 17.9 s (base) and 24.2 to 26.1 s, the GPU time per
+frame 24.9 to 25.2 ms and 29.1 to 29.5 ms.
+
 ## Timings and limits
 
 Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.
