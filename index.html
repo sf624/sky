@@ -309,15 +309,6 @@
       <span class="row"><span data-t="moon">月</span><output id="moonOut"></output></span>
       <input id="moon" type="range" min="0" max="29.5" step="0.5">
     </label>
-    <div>
-      <span class="row"><span id="weatherName" data-t="weather">天気</span><output id="weatherOut"></output></span>
-      <span class="pick">
-        <select id="weather" aria-labelledby="weatherName"></select>
-        <button id="roll" type="button" aria-label="天気をランダムに選ぶ" title="天気をランダムに選ぶ" data-t-label="roll" data-t-title="roll">
-          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="2.5" width="13" height="13" rx="3"/><g fill="currentColor" stroke="none"><circle cx="6.2" cy="6.2" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="11.8" cy="11.8" r="1.3"/></g></svg>
-        </button>
-      </span>
-    </div>
     <label>
       <span class="row"><span data-t="lat">緯度</span><output id="latOut"></output></span>
       <input id="lat" type="range" min="-90" max="90" step="0.1" value="35">
@@ -333,6 +324,15 @@
         <option value="utc" data-t="clockUTC">協定世界時 (UTC)</option>
       </select>
     </label>
+    <div>
+      <span class="row"><span id="weatherName" data-t="weather">天気</span><output id="weatherOut"></output></span>
+      <span class="pick">
+        <select id="weather" aria-labelledby="weatherName"></select>
+        <button id="roll" type="button" aria-label="天気をランダムに選ぶ" title="天気をランダムに選ぶ" data-t-label="roll" data-t-title="roll">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="2.5" width="13" height="13" rx="3"/><g fill="currentColor" stroke="none"><circle cx="6.2" cy="6.2" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="11.8" cy="11.8" r="1.3"/></g></svg>
+        </button>
+      </span>
+    </div>
     <label>
       <span class="row"><span data-t="haze">大気の霞</span><output id="hazeOut"></output></span>
       <input id="haze" type="range" min="0" max="6" step="0.05" value="1">
