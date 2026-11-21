@@ -1887,6 +1887,9 @@ const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue lig
 const vec2 SKY_BLUE = vec2(0.001, 0.01);
 const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the meter (see main)
 const vec2 SHOULDER = vec2(0.75, 1.5);   // the tone curve's knee (on the looked value) and the power of its shoulder (see main)
+const float SUN_R = 0.00465;     // sine of the sun's angular radius (0.267 degrees)
+const float SUN_L = 2000.0;      // the sun's radiance (see main)
+const float GLARE = 0.0027;      // the glare's strength, as a share of the eye's (CIE general disability glare; see main)
 const int GRID = 128;
 const int SLOTS = 8;
 const float LN_FLUX_MAX = 5.9915;   // ln(400)
@@ -6027,7 +6030,7 @@ void main() {
     // the zodiacal light and stars, all dimmed and reddened by the air.
     float pix = 2.0 * uTan / uRes.y;
     // Sun disc (angular radius 0.267 degrees).
-    float sun = mu > 0.0 ? 2000.0 * smoothstep(0.0050, 0.0043, length(cross(d, uSun))) : 0.0;
+    float sun = mu > 0.0 ? SUN_L * smoothstep(SUN_R + 0.00035, SUN_R - 0.00035, length(cross(d, uSun))) : 0.0;
     // Moon: a sphere lit by the sun, so the phase comes out by itself.
     const float MOON_R = 0.00454;                    // sin(0.26 degrees)
     vec3 em = (d - uMoon * dot(d, uMoon)) / MOON_R;
@@ -6106,12 +6109,21 @@ void main() {
       L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
   }
-  // Glare: light of the sun strayed inside the eye or the lens, a glow of a
-  // few degrees around it (a "look", like the spikes of the stars). Clouds
-  // between the eye and the sun dim it.
+  // Glare: light of the sun strayed inside the eye or the lens. Its shape is
+  // the eye's, the CIE general disability glare function (CIE 146:2002;
+  // Vos, 2003): a veiling luminance of 10 / t^3 + 5 / t^2 times the
+  // illuminance at the eye (t in degrees from the light; a young eye, the
+  // pigment's terms left out), steep near the sun, with a wider tail. t is
+  // softened by the disc's radius, over which the light comes. Its strength
+  // is GLARE of the eye's: at the eye's own, the veil runs into white some
+  // 4 degrees round the sun on a screen exposed for the sky, where the eye
+  // sees a small hard disc. The air's own forward scattering (the aureole)
+  // is in L already, and widens the glow in haze. Clouds between the eye
+  // and the sun dim the glare.
   if (uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0) {
     float deg = degrees(acos(min(mu, 1.0)));
-    float glare = 0.3 / (deg * deg + 0.3);
+    float t2 = deg * deg + pow(degrees(SUN_R), 2.0);
+    float glare = GLARE * SUN_L * PI * SUN_R * SUN_R * (10.0 / (t2 * sqrt(t2)) + 5.0 / t2);
     if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
