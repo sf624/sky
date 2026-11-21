@@ -240,7 +240,16 @@ the deck fades in 15.7 to 16.6 s after the slider reaches 0.8 (compiled
 after 14.1 to 15.0 s, baked in 1.6 to 1.7 s); while it compiles, 16 to 18 gaps
 over 50 ms every 2 s and the longest 81 to 122 ms, as on the base with
 the same steps (16 to 19, 76 to 123 ms); in the 2 s of the fade, the
-longest 147 to 165 ms.
+longest 147 to 165 ms. Again with the deck's packed cells and patches
+(55adb51; a slower session: the base's `fs` linked in 8.1 to 9.8 s, its
+first picture came after 16.8 to 20.4 s): `fs (DECK)` 13.2 to 14.9 s,
+`fs (DECK CLOUD_PASS)` 8.5 to 9.3 s, `fs (DECK TOPS_MAP)` 4.0 to 4.1 s,
+`noise (DECK_BAKE)` 0.7 to 0.9 s; the default view 17.1 to 18.1 s and
+25.2 to 25.6 ms (base 16.8 to 20.4 s, 24.9 to 25.7 ms); over the deck
+19.9 to 21.8 s and 19.6 to 20.1 ms (bb62721: 19.3 to 21.1 s, 19.9 to
+20.1 ms); the deck fades in 17.3 to 18.2 s after the slider reaches 0.8,
+the longest gap in the fade 153 to 162 ms, and while it compiles at most
+104 ms.
 
 ## Timings and limits
 

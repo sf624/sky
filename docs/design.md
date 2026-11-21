@@ -1004,8 +1004,8 @@ ploughed field, which no photograph shows.)
   again at each eighth of it), from the heaps' rows of rolls that the old
   programs draw there. A page that starts at 0.8 or more makes them at
   once, in place of the old ones. On Direct3D 11 (Chrome on Windows) the
-  deck is there some 16 s after the slider reaches 0.8 (14 to 15 s of
-  compiling, 1.6 s of baking), and the frames meanwhile come as they do
+  deck is there some 16 to 18 s after the slider reaches 0.8 (14 to 17 s
+  of compiling, 1.5 to 1.9 s of baking), and the frames meanwhile come as they do
   without it; the first frames of the fade take up to 165 ms (moving the
   slider took up to 123 ms before the deck). Measured in
   [tools/README.md](../tools/README.md#direct3d-11-on-windows).
