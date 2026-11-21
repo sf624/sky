@@ -3818,8 +3818,6 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // rim, a billow that stands out). The constants come from a Monte
       // Carlo of spheres (see design.md).
       float dark = mix(DARK, 1.0, P), kb = MSD.y * tauB;
-      float ms = MS1.x * hg(mu, MS1.y) * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb);
-      float diffuse = MSD.x / (4.0 * PI) * dark * (MSD.z + kb) / (1.0 + MSD.y * tauCM + kb);
       // The depth under the place (dUnder). In a sheet (wide: not a heap's
       // body), the light of a slab (see SLAB_MS): per unit of area of a flat
       // top as the sun's height says, back out as the depth under the place
@@ -3828,12 +3826,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // over, below, the lobe stays the spheres'.)
       float below = fog ? 1.0 : basal * smoothstep(2.0, 6.0, above);
       float dUnder = max(colAll - above, 0.0), wide = (1.0 - bodyHere) * (1.0 - below);
-      if (wide > 0.0) {
-        float th = min(tauB, dUnder), kl = SLAB_MS.z * th, ks = SLAB_D.y * th;
-        float topLit = clamp(sunUp, 0.0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
-        ms = mix(ms, SLAB_MS.x * hg(mu, MS1.y) * exp(-SLAB_MS.y * tauS) * kl / (1.0 + kl) * topLit, wide);
-        diffuse = mix(diffuse, SLAB_D.x / (4.0 * PI) * dark * (SLAB_D.z + ks) / (1.0 + SLAB_D.w * tauCM + ks) * topLit, wide);
-      }
+      float th = min(tauB, dUnder), kSl = SLAB_MS.z * th, kSd = SLAB_D.y * th;
+      float topLit = clamp(sunUp, 0.0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
+      float ms = hg(mu, MS1.y) * mix(MS1.x * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb),
+                                     SLAB_MS.x * exp(-SLAB_MS.y * tauS) * kSl / (1.0 + kSl) * topLit, wide);
+      float diffuse = MSD.x / (4.0 * PI) * dark * mix((MSD.z + kb) / (1.0 + MSD.y * tauCM + kb),
+                                     SLAB_D.x / MSD.x * (SLAB_D.z + kSd) / (1.0 + SLAB_D.w * tauCM + kSd) * topLit, wide);
       // In a crease on the lit side, between heads that shade it, less of
       // that light. The spheres of the Monte Carlo have no creases: there,
       // a place with much cloud behind it and some depth towards the light
