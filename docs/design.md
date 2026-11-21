@@ -731,17 +731,23 @@ squeezed towards the horizon, which lies at the middle of the table
 (`lutUV`, `lutDir`). Two more slices hold the sky as the sea sees it, from
 its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
 ray from the eye, to the sea or out of the air (`LUT_END`). The table is
-one 3D texture of half floats on unit 29, seven times as wide: the light's
+one 3D texture of half floats on unit 29, seven times as deep (seven
+parts of `LUT_S` + 2 slices): the light's
 three `vec4`, the optical depth, and the three `vec4` of the part of the
 light scattered once from the light the clouds' map is of (the part their
 shadows take: the moon's, where it lights the clouds while the sun still
 lights the air; before, those shadows were left out there, and a low full
 moon over clouds showed the march's darker disc round it). Each slice is
-drawn twice into four targets (`uLutPart` 0: the light and the depth; 1:
-the light scattered once) and copied into it (`copyTexSubImage3D`), all of
+drawn straight into its layers of the seven parts, in one draw into seven
+targets where the GPU has them (`LUT_MRT`, `Q_LUT_MRT`), else in two
+(`uLutPart` 0: the light and the depth; 1: the light scattered once), a
+framebuffer made once for each, all of
 them when the
 sun, the moon, the haze, the height or the amount of cloud has changed
-(`lut.for`); in flight, none of these changes. The light is kept divided by
+(`lut.for`); in flight, none of these changes. (The parts once lay side by
+side in its width, each slice drawn into 2D targets and copied in: 462
+copies a table at `max`, which took Direct3D 11 some 2 s, before the first
+picture and on every frame of a time-lapse.) The light is kept divided by
 the light of the air that the stronger of the sun and the moon makes
 (`uLutScale`: the light's strength times the air's mean light at the eye
 with it at its elevation, `airLevel`), so that half floats hold the
@@ -3877,7 +3883,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uAirLut` | 29 | 7 `LUT_AZ` x `LUT_EL` x (`LUT_S` + 2), RGBA16F, linear: 896 x 96 x 66 (`high`, `max`; 45 MB), 448 x 48 x 18 (`low`); none at `mid` | `fs` with `AIR_LUT`, two draws a slice, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x 7 (`LUT_S` + 2), RGBA16F, linear: 128 x 96 x 462 (`high`, `max`; 45 MB), 64 x 48 x 126 (`low`); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, one draw a slice (two where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
