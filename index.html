@@ -11386,13 +11386,12 @@ const SkySound = (() => {
   // The compass bearing of a heading (0 north, 90 east): the heading is a
   // yaw, 0 towards the south and 90 degrees towards the west.
   const bearing = h => (((180 + h / RAD) % 360) + 360) % 360;
-  // The altitude, km, from a climb: state, slider, label and sound. (The
-  // slider rounds its value to its step; the state keeps it exact.)
+  // The sound follows a climb at a step of 10 m (the altitude itself is set
+  // by setAltitude, above: state, slider, field and the limits).
   let soundAlt = null;
-  function setAltitude(km) {
-    state.alt = km;
-    alt.value = km;
-    const heard = Math.round(km * 100);
+  function climbTo(km) {
+    setAltitude(km);
+    const heard = Math.round(state.alt * 100);
     if (heard !== soundAlt) {
       soundAlt = heard;
       sound.follow();
@@ -11405,7 +11404,6 @@ const SkySound = (() => {
   }
   function showFlight() {
     const T = TEXT[LANG];
-    altOut.textContent = Math.round(state.alt * 100) * 10 + ' m';
     const b = bearing(state.heading), deg = Math.round(b) % 360;
     headingOut.textContent = String(deg).padStart(3, '0') + '° ' + T.compass[Math.round(b / 45) % 8];
     const bank = Math.round(state.bank / RAD), climb = Math.round(state.climb / RAD * 2) / 2;
@@ -11440,7 +11438,7 @@ const SkySound = (() => {
     if (pitch) climb = clampTo(climb + pitch * PITCH_RATE * dt, CLIMB_MAX);
     const v = state.speed / 3600;                       // km/s
     // At the top and the bottom of the altitude's range the aircraft levels off.
-    const limited = v > 0 && (climb > 0 && state.alt >= +alt.max || climb < 0 && state.alt <= +alt.min);
+    const limited = v > 0 && (climb > 0 && state.alt >= ALT_MAX || climb < 0 && state.alt <= ALT_MIN);
     if (limited && !pitch) climb = toward(climb, 0, PITCH_RATE * dt);
     state.bank = bank;
     state.climb = climb;
@@ -11453,7 +11451,7 @@ const SkySound = (() => {
     const ahead = climb ? step * Math.cos(climb) : step;
     state.drift[0] = wrap(state.drift[0] + ahead * Math.sin(h));
     state.drift[1] = wrap(state.drift[1] + ahead * Math.cos(h));
-    if (climb && step) setAltitude(Math.min(+alt.max, Math.max(+alt.min, state.alt + step * Math.sin(climb))));
+    if (climb && step) climbTo(state.alt + step * Math.sin(climb));
     const shown = [state.heading, bank, climb, state.alt].join();
     if (shown !== shownFlight) {
       shownFlight = shown;
