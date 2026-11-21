@@ -41,6 +41,9 @@
       oklch(0.56 0.15 255) 70%, oklch(0.44 0.15 260) 100%);
   }
   .hero canvas:active { cursor: grabbing; }
+  /* The clear sky's last picture over the canvas while the clouds come in
+     (see bringClouds in the script): it lets the pointer through. */
+  .hero canvas.veil { pointer-events: none; background: none; }
   .title {
     position: absolute;
     left: clamp(20px, 6vw, 88px);
@@ -1717,6 +1720,14 @@ uniform float uPass;
 // It wraps at the width of the weather map, which every pattern must divide.
 uniform vec2 uDrift;
 uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
+#ifdef CLEAR_SKY
+// The scene without low clouds or cirrus, for a first picture while the
+// programs of the clouds still compile (see makeSky). As constants, they
+// take the code of the clouds and the cirrus out of the program, which then
+// compiles in about a third of the scene's time on Direct3D 11.
+#define uCloud 0.0
+#define uCirrus 0.0
+#endif
 // Cloud noise, repeating. R: Perlin-Worley; G, B, A: Worley at rising frequencies.
 uniform sampler3D uNoise;
 // Weather map, repeating. R: cloud cover, G: towers, B: gusts on the sea, A:
@@ -8611,8 +8622,11 @@ const SkySound = (() => {
     // A context lost while the page loads (the GPU process restarted, or a
     // driver gave up on a program) ends the loading with an error: a fence
     // or a program would otherwise be waited for for ever.
-    let lost = false;
-    canvas.addEventListener('webglcontextlost', () => { lost = true; });
+    let lost = false, veil = null;
+    canvas.addEventListener('webglcontextlost', () => {
+      lost = true;
+      if (veil) veil.remove();
+    });
     // (What the loading was doing, for the message.)
     let doing = 'starting';
     const alive = () => {
@@ -8642,7 +8656,18 @@ const SkySound = (() => {
     // scene make up for most of it. The name, not a timing, decides, so
     // that one renderer always draws the same.
     const info = gl.getExtension('WEBGL_debug_renderer_info');
-    const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    const rendererName = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(rendererName);
+    // ANGLE on Direct3D 11 (Chrome and Edge on Windows) compiles the scene's
+    // program and the passes of the clouds and the cirrus for many seconds
+    // (Microsoft's HLSL compiler). There the page first shows the sky
+    // without clouds (CLEAR_SKY in fs, a third of the scene's time), and
+    // the clouds fade in once their programs are done (see bringClouds).
+    // ?early=0: never; ?early=S: on any GPU, the clouds held back at least
+    // S s after that first picture (to look at it, and at the fade).
+    const earlyAsked = new URLSearchParams(location.search).get('early');
+    const earlyHold = earlyAsked && earlyAsked !== '0' ? Math.max(0, +earlyAsked || 0) : 0;
+    const earlyWanted = earlyAsked === null ? /Direct3D11|D3D11/.test(rendererName) : earlyAsked !== '0';
     const iceSize = Math.min(Q.ice, software ? ICE_SOFT : ICE, gl.getParameter(gl.MAX_TEXTURE_SIZE));
     // The aircraft's view reads its tables through the GPU's filter: full
     // floats where it can filter them, else half floats (rounded to within 5e-4).
@@ -8733,6 +8758,8 @@ const SkySound = (() => {
     // 3.5; the GPU process compiles several at once). The cirrus's pass (see CIRRUS_PASS in fs)
     // and the ice program only if the page starts with cirrus (see
     // buildIce): a sky without cirrus does not wait for their compiler.
+    // (The clear sky first: it is the first picture's.)
+    const clearProg = earlyWanted && parallel ? link('fs', '#define CLEAR_SKY') : null;
     let ciProg = state.cirrus > 0 ? link('fs', '#define CIRRUS_PASS') : null;
     const prog = link('fs');
     // fs as the low clouds' pass (see CLOUD_PASS).
@@ -8854,29 +8881,50 @@ const SkySound = (() => {
     // The programs. Without the extension, asking waits until a program is
     // done: one a frame.
     doing = 'compiling the programs';
-    for (let left = programs, told = performance.now(); left.length;) {
-      alive();
-      left = left.filter(([p]) => {
-        if (!parallel) return false;
-        if (!gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)) return true;
-        mark(`program ${names.get(p)} compiled`);
-        if (p === iceProgram && gl.getProgramParameter(p, gl.LINK_STATUS)) warm(p);
-        return false;
-      });
-      done(0.3 + 0.3 * (1 - left.length / programs.length));
-      if (timing && left.length && performance.now() - told > 5000) {
-        told = performance.now();
-        mark(`still compiling ${left.map(([p]) => names.get(p)).join(', ')}`);
+    // (With the clear sky, the first picture waits for all but the scene's
+    // program, the passes of the clouds and the cirrus, and the ice program;
+    // `late`.)
+    const late = clearProg ? [prog, cloudProg, ciProg, iceProgram].filter(Boolean) : [];
+    // (The program bound between draws: the scene's, or the clear sky's
+    // until the clouds come in.)
+    let home = prog;
+    const compiled = async (list, share) => {
+      for (let left = list, told = performance.now(); left.length;) {
+        alive();
+        left = left.filter(([p]) => {
+          if (!parallel) return false;
+          if (!gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)) return true;
+          mark(`program ${names.get(p)} compiled`);
+          if (p === iceProgram && gl.getProgramParameter(p, gl.LINK_STATUS)) {
+            warm(p);
+            if (home !== prog) gl.useProgram(home);
+          }
+          return false;
+        });
+        if (share) share(left.length / list.length);
+        if (timing && left.length && performance.now() - told > 5000) {
+          told = performance.now();
+          mark(`still compiling ${left.map(([p]) => names.get(p)).join(', ')}`);
+        }
+        if (left.length) await nextFrame();
       }
-      if (left.length) await nextFrame();
-    }
-    for (const p of programs) {
-      check(p);
-      if (!parallel) {
-        mark(`program ${names.get(p[0])} compiled`);
-        await nextFrame();
+      for (const p of list) {
+        check(p);
+        if (!parallel) {
+          mark(`program ${names.get(p[0])} compiled`);
+          await nextFrame();
+        }
       }
+    };
+    const first = programs.filter(([p]) => !late.includes(p)), rest = programs.filter(([p]) => late.includes(p));
+    await compiled(first, left => done(0.3 + 0.3 * (1 - left * first.length / programs.length)));
+    // The clear sky first only if the others are not done by now.
+    let early = !!clearProg && (earlyHold > 0 || late.some(p => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)));
+    if (clearProg && !early) {
+      await compiled(rest);
+      gl.deleteProgram(clearProg);
     }
+    if (early) home = clearProg;
 
     // Builds a texture's mipmaps, and reads it through them.
     const smooth = target => {
@@ -8894,7 +8942,7 @@ const SkySound = (() => {
     // batches after the noise, if the page starts with cirrus; else when
     // cirrus is first shown, all at once, so that a sky without cirrus never
     // pays for them.
-    let buildIce, iceParts;
+    let buildIce, iceParts, startIce = null;
     {
       let draw, uZ, uSize;
       const locate = program => {
@@ -8984,7 +9032,7 @@ const SkySound = (() => {
             gl.deleteFramebuffer(frame);
             gl.deleteProgram(draw);
             gl.activeTexture(gl.TEXTURE0);
-            gl.useProgram(prog);
+            gl.useProgram(home);
           }],
         ];
       };
@@ -8992,9 +9040,13 @@ const SkySound = (() => {
         // The map at once: some drivers finish a program only at its first
         // draw (see prime), and the ice program is large. Its driver works
         // on it while the noise is built; the rest follows the noise.
-        locate(iceProgram);
-        iceParts = parts();
-        iceParts.shift()[1]();
+        // (After the clear sky: when the clouds come in.)
+        startIce = () => {
+          locate(iceProgram);
+          iceParts = parts();
+          iceParts.shift()[1]();
+        };
+        if (!early) startIce();
         buildIce = () => {};
       } else {
         buildIce = () => {
@@ -9131,7 +9183,7 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
     }
 
-    if (iceParts) {
+    if (iceParts && !early) {
       doing = 'building the cirrus';
       await batches(iceParts, share => done(0.75 + 0.1 * share));
       mark('cirrus built');
@@ -9175,8 +9227,8 @@ const SkySound = (() => {
     }
     gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, NR, 0, gl.RGBA, gl.FLOAT, depths);
     gl.activeTexture(gl.TEXTURE0);
-    gl.useProgram(prog);
-    const U = n => gl.getUniformLocation(prog, n);
+    gl.useProgram(home);
+    const U = n => gl.getUniformLocation(home, n);
     // The uniforms that stay, set on the scene's program and kept to set
     // on the cirrus's pass (fixedFor), which is built from the same shader.
     const fixed = [];
@@ -9187,7 +9239,7 @@ const SkySound = (() => {
     const fixedFor = p => {
       gl.useProgram(p);
       for (const [method, name, args] of fixed) gl[method](gl.getUniformLocation(p, name), ...args);
-      gl.useProgram(prog);
+      gl.useProgram(home);
     };
     C('uniform1i', 'uDepth', 5);
     C('uniform1i', 'uNoise', 2);
@@ -9297,7 +9349,7 @@ const SkySound = (() => {
         set(p, view);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       };
-      if (stage === 1 && ((state.cirrus > 0 && ciProg) || v.cloud > 0)) {
+      if (stage === 1 && !early && ((state.cirrus > 0 && ciProg) || v.cloud > 0)) {
         // (A pixel of the passes for Q.pass by Q.pass of the frame's: see Q_PASS in fs.)
         passes = passTarget(passes, Math.ceil(full[0] / Q.pass), Math.ceil(full[1] / Q.pass));
         // (The cirrus's may be coarser still: ciPass, Q_CI_PASS in fs.)
@@ -9315,7 +9367,7 @@ const SkySound = (() => {
       gl.useProgram(p);
       set(p, view);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       gl.disable(gl.DEPTH_TEST);
     };
     // The passes before the scene for a frame of w by h pixels (see
@@ -9372,7 +9424,7 @@ const SkySound = (() => {
     // floats where the GPU can draw to those (eight times finer steps than
     // 8 bits, so the mean of many frames stays smooth); else 8 bits. Each
     // has a second texture of 8 bits for the distances and the counts.
-    const uSteps = U('uSteps');
+    let uSteps = U('uSteps');
     const M = {};
     gl.useProgram(mean);
     for (const n of ['uRes', 'uCam', 'uTan', 'uAlt', 'uCamPast', 'uResPast', 'uWay', 'uTrust', 'uSteps', 'uPass', ...(Q.frame < 1 ? ['uJitter', 'uFrameRes'] : [])]) {
@@ -9383,7 +9435,7 @@ const SkySound = (() => {
     gl.useProgram(show);
     gl.uniform1i(gl.getUniformLocation(show, 'uPicture'), 6);
     const uSize = gl.getUniformLocation(show, 'uSize'), uDither = gl.getUniformLocation(show, 'uDither');
-    gl.useProgram(prog);
+    gl.useProgram(home);
     // The meter: METER blocks of the picture, drawn into a small target, and
     // read back METER_LAG frames later, by which time the GPU has long drawn
     // them: the read does not wait for the GPU's work, only for a round trip
@@ -9393,7 +9445,7 @@ const SkySound = (() => {
     gl.useProgram(meter);
     gl.uniform1i(gl.getUniformLocation(meter, 'uPicture'), 6);
     gl.uniform2fv(gl.getUniformLocation(meter, 'uBlocks'), METER);
-    gl.useProgram(prog);
+    gl.useProgram(home);
     const blocks = { target: gl.createFramebuffer(), texture: gl.createTexture() };
     gl.activeTexture(gl.TEXTURE6);
     gl.bindTexture(gl.TEXTURE_2D, blocks.texture);
@@ -9449,7 +9501,7 @@ const SkySound = (() => {
       bind(6, p.colour);
       gl.activeTexture(gl.TEXTURE0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       if (when === 'now') readMeter();
       else if (when === 'later') waiting = 0;
     };
@@ -9547,13 +9599,13 @@ const SkySound = (() => {
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.activeTexture(gl.TEXTURE0);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       C('uniform1i', column ? 'uColumn' : 'uShadow', unit);
       gl.useProgram(shadowProg);
       return m;
     };
     const shadowMap = depthMap(14, SHADOW, false), columnMap = depthMap(20, COLUMN, true);
-    gl.useProgram(prog);
+    gl.useProgram(home);
     // The sky's light on the clouds (see uSkyLight in fs), on unit 27, 16 by
     // 3 texels: fs draws it (skyProg, stage 2) before a frame whose sun or haze has
     // changed. Half floats where the GPU can draw to them, else 8 bits (a
@@ -9637,7 +9689,7 @@ const SkySound = (() => {
     });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
-    gl.useProgram(prog);
+    gl.useProgram(home);
     C('uniform1i', 'uTops', 23);
     let topsFor = null;
     // The warped map and its slope (see uWarped in fs), on units 25 and 26,
@@ -9661,7 +9713,7 @@ const SkySound = (() => {
       gl.uniform1i(gl.getUniformLocation(pr, 'uWarped'), 25);
       gl.uniform1i(gl.getUniformLocation(pr, 'uSlopeW'), 26);
     }
-    gl.useProgram(prog);
+    gl.useProgram(home);
     C('uniform1i', 'uWarped', 25);
     C('uniform1i', 'uSlopeW', 26);
     // The towers' grids (?grid=1, see TOWER_GRID): three levels of N x N
@@ -9723,7 +9775,7 @@ const SkySound = (() => {
       C('uniform1i', 'uGrid', 30);
       gl.useProgram(shadowProg);
       gl.uniform1i(gl.getUniformLocation(shadowProg, 'uGrid'), 30);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       const mod = (a, b) => ((a % b) + b) % b;
       const near = x => x - 256 * Math.round(x / 256);
       const slot = (tx, tz) => mod(tz, n) * n + mod(tx, n), j0 = a => (a / n) | 0;
@@ -10010,16 +10062,16 @@ const SkySound = (() => {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       });
       gl.activeTexture(gl.TEXTURE0);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       topsFor = cloud;
       if (grid) grid.mapFor(cloud);
     };
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
-    for (const p of [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
+    for (const p of early ? [skyProg, airProg] : [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
     // (The scene's and the low clouds' programs that draw uses: other
     // variants only for ?stats=bench3.)
-    let sceneUse = prog, cloudUse = cloudProg, ciUse = null, benchRepeat = 1, benchSkip = {};
+    let sceneUse = home, cloudUse = cloudProg, ciUse = null, benchRepeat = 1, benchSkip = {};
     // A picture of w by h pixels: `old` if it has that size, else a new one
     // in its place. The frame (`depth`) keeps its distances as its depth
     // (see distanceCode), the pictures as a second target.
@@ -10116,6 +10168,11 @@ const SkySound = (() => {
     // while more frames are needed. probe: see prime.
     // (What the last frame drew, for ?stats; drew: a frame was drawn.)
     let sizes = null, drew = false, full = [1, 1];
+    // The clouds coming in after the clear sky (see bringClouds): hold, while
+    // only prime draws; failed, an error meanwhile; earlyAt, when the clear
+    // sky was first shown; unveil, which fades the veil out once the first
+    // picture with the clouds is shown.
+    let hold = false, failed = null, earlyAt = null, unveil = null;
     // (For ?stats: the script's time since the last lap, by part.)
     let lapAt = 0;
     const lap = name => {
@@ -10125,10 +10182,15 @@ const SkySound = (() => {
       lapAt = t;
     };
     const drawFrame = (fresh, now, probe) => {
+      // (While the clouds come in, only prime draws; a failure meanwhile
+      // fails the level here, as one while drawing.)
+      if (failed) throw failed;
+      if (hold && !probe) return false;
       lap('');
       const fitted = fit();
       if (!fitted) return false;
-      const v = view(), cam = camera(v.yaw, v.pitch);
+      // (The clear sky: no low clouds, and no passes; see early.)
+      const v = early ? { ...view(), cloud: 0 } : view(), cam = camera(v.yaw, v.pitch);
       lap('start');
       poll();
       lap('read');
@@ -10209,7 +10271,7 @@ const SkySound = (() => {
       const jitter = [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
       const each = [['uniform2f', 'uJitter', ...jitter], ['uniform1f', 'uPass', pass],
         ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
-      gl.uniform1f(uSteps, steps);
+      gl.uniform1f(home === prog ? uSteps : place(home, 'uSteps'), steps);
       // The map of the tops, for this frame's clouds.
       if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
       // The table of the air's light, for this frame's light, air and height.
@@ -10263,7 +10325,7 @@ const SkySound = (() => {
         gl.uniform1f(S.uCloud, v.cloud);
         if (grid) gl.uniform4fv(S.uGridO, grid.o);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
-        gl.useProgram(prog);
+        gl.useProgram(home);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
         m.at[layer] = [state.drift[0], state.drift[1]];
       };
@@ -10363,13 +10425,18 @@ const SkySound = (() => {
       gl.uniform2f(uSize, canvas.width, canvas.height);
       gl.uniform1f(uDither, fine ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       turn = 1 - turn;
       if (pictured) pictured(now);
       if (shown) {
-        mark('first picture shown');
+        mark(early ? 'early picture shown' : 'first picture shown');
+        if (early) earlyAt = now;
         shown();
         shown = null;
+      } else if (unveil && !early) {
+        mark('first picture shown');
+        unveil(now);
+        unveil = null;
       }
 
       lap('show');
@@ -10495,7 +10562,7 @@ const SkySound = (() => {
       gl.scissor(0, 0, 0, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
-      gl.useProgram(prog);
+      gl.useProgram(home);
       await settle();
       readMeter();
       const eyed = (a, b) => nightEyeFor(a) !== nightEyeFor(b) || nightGreyFor(a) !== nightGreyFor(b);
@@ -10512,10 +10579,79 @@ const SkySound = (() => {
     // (On Direct3D 11 the first draw of a program into two or more targets
     // compiles it again, while the GPU process waits: the scene's first
     // frame here.)
+    // The clouds after the clear sky (early): once the programs left are
+    // done (the ice program is drawn into its three targets as soon as it
+    // is, see warm), the frames stop for a moment (hold) while the cirrus's
+    // textures are built and the first frame with the clouds is drawn and
+    // metered (prime), as the page starts without the clear sky; from there
+    // on it draws as if it had started so. The clear sky's last picture
+    // stays over the canvas meanwhile (the veil, a copy of it), and fades
+    // out over CLOUDS_FADE ms once the first picture with the clouds is
+    // shown: the clouds and their light come in as the veil goes.
+    const CLOUDS_FADE = 2500;
+    const bringClouds = async () => {
+      try {
+        doing = 'compiling the clouds\' programs';
+        await compiled(rest);
+        while (earlyHold > 0 && (earlyAt === null || performance.now() - earlyAt < earlyHold * 1000)) {
+          await nextFrame();
+          alive();
+        }
+        hold = true;
+        veil = document.createElement('canvas');
+        veil.className = 'veil';
+        veil.width = canvas.width;
+        veil.height = canvas.height;
+        veil.getContext('2d').drawImage(canvas, 0, 0);
+        canvas.after(veil);
+        doing = 'bringing in the clouds';
+        if (startIce) {
+          startIce();
+          await batches(iceParts, () => {});
+          mark('cirrus built');
+        }
+        early = false;
+        home = prog;
+        gl.useProgram(prog);
+        uSteps = gl.getUniformLocation(prog, 'uSteps');
+        for (const p of [prog, ciProg, cloudProg]) if (p) fixedFor(p);
+        gl.deleteProgram(clearProg);
+        sceneUse = prog;
+        // (As at the start: see the state of the frames and of the meter.)
+        if (pack && pack.fence) {
+          gl.deleteSync(pack.fence);
+          pack.fence = null;
+        }
+        logE = null, firstE = 0, target = null, waiting = null, primed = null;
+        then = null, restart = false, camPast = null, driftPast = [0, 0], altPast = 0, lookPast = '';
+        calm = 0, relit = RELIGHT + 1, lastStir = -1e9, adapting = false, meteredAt = -1e9, drawn = 0, turn = 0;
+        doing = 'drawing the first frame';
+        await prime();
+        mark('first frame drawn');
+        const gone = veil;
+        unveil = start => {
+          const step = now => {
+            const f = Math.min(1, Math.max(0, now - start) / CLOUDS_FADE);
+            gone.style.opacity = String(1 - f * f * (3 - 2 * f));
+            if (f < 1 && gone.isConnected) requestAnimationFrame(step);
+            else {
+              gone.remove();
+              if (veil === gone) veil = null;
+            }
+          };
+          requestAnimationFrame(step);
+        };
+      } catch (err) {
+        if (!lost) failed = err;
+      }
+      hold = false;
+      wake();
+    };
     doing = 'drawing the first frame';
     await prime();
-    mark('first frame drawn');
+    mark(early ? 'early frame drawn' : 'first frame drawn');
     done(1);
+    if (early) bringClouds();
     return render;
   }
 
@@ -11070,7 +11206,7 @@ const SkySound = (() => {
   // page was opened), by the names of `mark` in makeSky; the programs as
   // one, when the last was done.
   const START_PARTS = [['WebGL2 context made', 'context'], ['tables built', 'tables'], ['program', 'programs'], ['noise and weather built', 'noise'],
-    ['cirrus built', 'cirrus'], ['waves built', 'waves'], ['first frame drawn', 'frame']];
+    ['cirrus built', 'cirrus'], ['waves built', 'waves'], ['early frame drawn', 'clear sky'], ['first frame drawn', 'frame']];
   const startParts = marks => START_PARTS.map(([what, name]) => {
     const at = marks.filter(([m]) => m === what || (what === 'program' && m.startsWith('program '))).map(([, s]) => s);
     return at.length ? `${name} ${Math.max(...at).toFixed(1)}` : '';

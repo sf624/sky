@@ -21,10 +21,18 @@ const winTemp = () => {
 // With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
 const INJECT = `<script>(() => {
   const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
+  const FADE = q.has('d3dFade');
+  // (The first picture with the clouds: the page's own line. A page that shows the clear sky first shows it later.)
+  let full = false;
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(Object.assign({ at: performance.now() / 1000 }, o)) }).catch(() => {});
   for (const k of ['info', 'log', 'warn', 'error']) {
     const f = console[k];
-    console[k] = (...a) => { post({ ev: 'console', msg: a.map(String).join(' ').slice(0, 500) }); f.apply(console, a); };
+    console[k] = (...a) => {
+      const msg = a.map(String).join(' ').slice(0, 500);
+      if (msg.startsWith('Sky: first picture shown')) full = true;
+      post({ ev: 'console', msg });
+      f.apply(console, a);
+    };
   }
   let gl = null, ext = null, started = false, done = false;
   const times = [], pending = [];
@@ -40,11 +48,18 @@ const INJECT = `<script>(() => {
     }
     return c;
   };
-  const finish = o => { done = true; post(o).then(() => post({ ev: 'done' })); };
+  // (d3dWarm=ID: once done, the same page again in this tab, reporting as ID: a second visit, whose programs the
+  // browser may have in its cache.)
+  const finish = o => {
+    done = true;
+    post(o).then(() => post({ ev: 'done' })).then(() => {
+      if (q.get('d3dWarm')) location.replace(location.href.replace('d3d=' + run, 'd3d=' + q.get('d3dWarm')).replace(/&d3dWarm=\\w+/, ''));
+    });
+  };
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = cb => raf(ts => {
     let query = null;
-    if (ext && started && !done && !gl.isContextLost()) { query = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, query); }
+    if (ext && started && full && !done && !gl.isContextLost()) { query = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, query); }
     try { cb(ts); } finally {
       if (query) { gl.endQuery(ext.TIME_ELAPSED_EXT); pending.push(query); }
       while (pending.length && gl.getQueryParameter(pending[0], gl.QUERY_RESULT_AVAILABLE)) {
@@ -52,7 +67,7 @@ const INJECT = `<script>(() => {
         if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) times.push(gl.getQueryParameter(p, gl.QUERY_RESULT) / 1e6);
         gl.deleteQuery(p);
       }
-      if (!done && !SHOT && times.length >= FRAMES + 10) {
+      if (!done && !SHOT && !FADE && times.length >= FRAMES + 10) {
         const s = times.slice(10).sort((a, b) => a - b);
         finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
       }
@@ -65,10 +80,44 @@ const INJECT = `<script>(() => {
       started = true;
       clearInterval(watch);
       post({ ev: 'shown', failed: hero.classList.contains('failed') });
-      if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
+      if (SHOT) setTimeout(() => finish({ ev: 'shot', tag: '', png: composite() }), SHOT * 1000);
+      else if (FADE) fade();
       else if (!ext || hero.classList.contains('failed')) finish({ ev: 'frames' });
     }
   }, 20);
+  // The hero as it shows: its canvases, each at its opacity (the clear sky's veil over the picture).
+  const composite = () => {
+    const sky = document.getElementById('sky'), c = document.createElement('canvas');
+    c.width = sky.width;
+    c.height = sky.height;
+    const x = c.getContext('2d');
+    for (const k of document.querySelectorAll('.hero canvas')) {
+      x.globalAlpha = +getComputedStyle(k).opacity;
+      x.drawImage(k, 0, 0, c.width, c.height);
+    }
+    return c.toDataURL('image/png');
+  };
+  // d3dFade: pictures of a start that shows the clear sky first: 1 s after the first picture ('early'), as the veil
+  // comes ('veil'), when it is half gone ('mid'), and 3 s after it is gone ('full').
+  const fade = () => {
+    let seen = false, mid = false;
+    setTimeout(() => post({ ev: 'shot', tag: 'early', png: composite() }), 1000);
+    const look = setInterval(() => {
+      const veil = document.querySelector('.hero canvas.veil');
+      if (veil && !seen) {
+        seen = true;
+        post({ ev: 'shot', tag: 'veil', png: composite() });
+      }
+      if (veil && !mid && +getComputedStyle(veil).opacity <= 0.5) {
+        mid = true;
+        post({ ev: 'shot', tag: 'mid', png: composite() });
+      }
+      if (full && !veil) {
+        clearInterval(look);
+        setTimeout(() => finish({ ev: 'shot', tag: 'full', png: composite() }), 3000);
+      }
+    }, 20);
+  };
 })();</script>`;
 
 // The harness page of \`programs\`: compiles each program of the page alone (as makeSky links it), polling
@@ -177,18 +226,35 @@ process.on('exit', () => {
   try { kill(processesOf(current.prof)); fs.rmSync(current.dir, { recursive: true, force: true }); } catch {}
 });
 
+// The browser's cache of WebGL's programs in a profile (Default/GPUCache): its size, and the size of each entry kept
+// in a file of its own (those over 16 kB).
+function cacheFiles(dir) {
+  let files = [];
+  const at = path.join(dir, 'Default', 'GPUCache');
+  try { files = fs.readdirSync(at).map((f) => ({ f, n: fs.statSync(path.join(at, f)).size })); } catch {}
+  const own = files.filter((f) => /^f_/.test(f.f)).map((f) => f.n).sort((a, b) => b - a);
+  console.log(`  program cache: ${(files.reduce((a, b) => a + b.n, 0) / 1e6).toFixed(2)} MB in ${files.length} files; entries over 16 kB: ${own.map((n) => (n / 1e3).toFixed(0) + ' kB').join(', ') || 'none'}`);
+}
+
 // One headless Windows Chrome on Direct3D 11 at url, until the page reports `done` or `limit` s pass.
-async function runChrome(url, reports, id, { limit, size }) {
-  const temp = winTemp(), prof = `sky-d3d-${process.pid}-${id}`;
-  fs.mkdirSync(path.join(temp.wsl, prof));
+// With `warm` (the reports of a second visit), the program cache is on, and the run waits for those too. With
+// `keep`, the profile stays for another run (`prof`, the profile's name, given back).
+async function runChrome(url, reports, id, { limit, size, warm = null, cache = false, prof = null, keep = false }) {
+  const temp = winTemp();
+  prof ||= `sky-d3d-${process.pid}-${id}`;
+  fs.mkdirSync(path.join(temp.wsl, prof), { recursive: true });
   current = { prof, dir: path.join(temp.wsl, prof) };
   const child = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', `--user-data-dir=${temp.win}\\${prof}`,
-    '--disable-gpu-shader-disk-cache', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
+    ...(cache ? [] : ['--disable-gpu-shader-disk-cache']), '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     `--window-size=${size.w},${size.h}`, url], { cwd: '/mnt/c', stdio: 'ignore' });
   child.on('error', (e) => reports.push({ ev: 'done', error: String(e) }));
   const t0 = Date.now();
-  while (Date.now() - t0 < limit * 1000 && !reports.some((r) => r.ev === 'done')) await sleep(250);
-  const timedOut = !reports.some((r) => r.ev === 'done');
+  const ended = () => reports.some((r) => r.ev === 'done') && (!warm || warm.some((r) => r.ev === 'done'));
+  while (Date.now() - t0 < limit * 1000 && !ended()) await sleep(250);
+  const timedOut = !ended();
+  // (Time for the browser to write its cache.)
+  if (cache) await sleep(5000);
+  if (cache) cacheFiles(path.join(temp.wsl, prof));
   for (let i = 0; i < 10; i++) {
     const pids = processesOf(prof);
     if (!pids.length) break;
@@ -196,17 +262,19 @@ async function runChrome(url, reports, id, { limit, size }) {
     await sleep(1000);
   }
   child.kill();
-  for (let i = 0; i < 10; i++) {
-    try { fs.rmSync(path.join(temp.wsl, prof), { recursive: true, force: true }); break; } catch { await sleep(1000); }
-  }
   const left = processesOf(prof);
   if (left.length) throw new Error(`d3d: Chrome processes of ${prof} left: ${left.join(' ')}`);
-  current = null;
-  return timedOut;
+  if (!keep) {
+    for (let i = 0; i < 10; i++) {
+      try { fs.rmSync(path.join(temp.wsl, prof), { recursive: true, force: true }); break; } catch { await sleep(1000); }
+    }
+    current = null;
+  }
+  return { timedOut, prof };
 }
 
 // `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
-export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
+export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null, warm = false, fade = false }) {
   if (!fs.existsSync(CHROME)) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
   const reports = new Map();
   const files = new Map();
@@ -245,17 +313,26 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
         } else {
           files.set(`/d3d/page/${id}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
           // (A picture is taken at the page's own drawing size: no res=1.)
-          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing${shot ? '' : '&res=1'}&${withQuality(q)}&d3d=${id}` +
-            (shot ? `&d3dShot=${shot}` : `&d3dFrames=${frames}`);
+          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing${shot || fade ? '' : '&res=1'}&${withQuality(q)}&d3d=${id}` +
+            (shot ? `&d3dShot=${shot}` : fade ? '&d3dFade' : `&d3dFrames=${frames}`) + (warm ? `&d3dWarm=${id}w` : '');
         }
         reports.set(id, []);
-        const timedOut = await runChrome(url, reports.get(id), id, { limit, size });
+        // (--warm: the page, then again in the same tab, then in a new Chrome on the same profile.)
+        if (warm) for (const k of ['w', 'r']) reports.set(id + k, []);
+        const { timedOut, prof } = await runChrome(url, reports.get(id), id, { limit, size, warm: warm ? reports.get(`${id}w`) : null, cache: warm, keep: warm });
         const got = reports.get(id);
         results.push({ page: page.name, run: r + 1, timedOut, got });
         print(page.name, r + 1, mode, got, timedOut, limit);
-        const png = got.find((g) => g.ev === 'shot')?.png;
-        if (png && out) {
-          const file = path.resolve(`${out}-${page.name.replace(/\W+/g, '_')}-${r + 1}.png`);
+        if (warm) {
+          results.push({ page: page.name, run: r + 1, visit: 'again', timedOut, got: reports.get(`${id}w`) });
+          print(`${page.name} (again in the tab)`, r + 1, mode, reports.get(`${id}w`), timedOut, limit);
+          const again = await runChrome(url.replace(`d3d=${id}`, `d3d=${id}r`).replace(/&d3dWarm=\w+/, ''), reports.get(`${id}r`), id, { limit, size, cache: true, prof });
+          results.push({ page: page.name, run: r + 1, visit: 'restart', timedOut: again.timedOut, got: reports.get(`${id}r`) });
+          print(`${page.name} (after a restart)`, r + 1, mode, reports.get(`${id}r`), again.timedOut, limit);
+        }
+        for (const { png, tag } of got.filter((g) => g.ev === 'shot')) {
+          if (!out) break;
+          const file = path.resolve(`${out}-${page.name.replace(/\W+/g, '_')}-${r + 1}${tag ? '-' + tag : ''}.png`);
           fs.writeFileSync(file, Buffer.from(png.slice(png.indexOf(',') + 1), 'base64'));
           console.log(`  shot: ${file}`);
         }

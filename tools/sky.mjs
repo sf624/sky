@@ -23,7 +23,7 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
-  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]
+  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S | --fade] [--out PREFIX] [--warm]
               on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
 common:       --page DIR (the page to test; default: this repository)
 environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
@@ -32,7 +32,7 @@ environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_L
 const LIMITS = { trace: 900, stills: 2400, check: 5400, drive: 900, perf: 300 };
 
 // The options that take no value: `--mobile --dpr 2.6` took '--dpr' as the value of --mobile, and the DPR stayed 1.
-const FLAGS = new Set(['mobile', 'no-gpu']);
+const FLAGS = new Set(['mobile', 'no-gpu', 'warm', 'fade']);
 function parseArgs(argv) {
   const opt = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -117,9 +117,9 @@ async function main() {
     if (opt.base) pages.unshift({ name: `base ${opt.base}`, dir: resolveBase(opt.base, REPO) });
     const mode = opt._[0] || 'page';
     if (!['page', 'programs'].includes(mode)) throw new Error(`d3d: no mode ${mode} (page, programs)`);
-    if (opt.shot && (mode !== 'page' || !opt.out)) throw new Error('d3d: --shot needs the mode page and --out PREFIX');
+    if ((opt.shot || 'fade' in opt) && (mode !== 'page' || !opt.out)) throw new Error('d3d: --shot and --fade need the mode page and --out PREFIX');
     await d3d(pages, { mode, q: opt.q || '', runs: +(opt.runs || 1), limit: +(opt.limit || 300), frames: +(opt.frames || 60),
-      size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null });
+      size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null, warm: 'warm' in opt, fade: 'fade' in opt });
     return 0;
   }
   const { Session } = await import('./lib/page.mjs');
