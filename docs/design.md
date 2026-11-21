@@ -1079,14 +1079,15 @@ clouds.
 slowly across the picture. So the hero draws the low clouds' pass
 (`CLOUD_PASS`) twice a frame (`uStage`): stage 0, at half the width and
 height, marches each ray to the first cloud it meets and keeps the slow
-parts of its light there (`uLightMap`: seven half floats, two to each of
+parts of its light there (`uLightMap`: eight half floats, two to each of
 four 32-bit integers, rounded towards zero as the GPU rounds into a
 target of half floats: the distance where the ray entered that cloud, the
 depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
 sky's lean towards the sun's side, the depth towards the light over its
-first two steps, and over its own steps past those without the map of the
-clouds' shadow, `tauN`, and over those of them within 175 m, `tauNn`), taken where the ray entered the cloud (marching on to the point
+first two steps, the depth straight through the place (`colAll`, for the
+light of a sheet), and the depth towards the light over its own steps past
+the first two that end within 175 m, `tauNn`), taken where the ray entered the cloud (marching on to the point
 where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
@@ -1290,10 +1291,7 @@ each cloud, not on its surface; no normal of the field enters it.
   base at the same depth (light leaks out sideways), which nothing along
   the light alone can tell. A two-stream `1 / (1 + 0.11 tau)` along the light
   over-lit the shaded sides of heaps: the fit's `K` came out at 0.004 to
-  0.014. The same form fails on slabs (their tops 2 to 4 times too bright
-  with the sun 10 degrees high, half as bright with it 60 degrees high: it
-  has no factor for the light per unit area of a flat top), so decks keep
-  their own terms (below). The sky's unit, a white matt surface facing up
+  0.014. The same form fails on slabs (see *In a sheet*, below). The sky's unit, a white matt surface facing up
   under the sky as drawn, is worked out (`uSkyLight`, below), against `2
   cloudSky`: 0.29 to 0.71 of it, more low down and at dusk. (Round 15 took
   0.35, measured on the picture by day; it is right at 3 km by day, but
@@ -1301,6 +1299,70 @@ each cloud, not on its surface; no normal of the field enters it.
   as drawn within 2 %, is 1.7 times that at 0.6 km and 1.5 to 2 times
   from sunset to 3 degrees after, and a deck at dusk was a dark slab.)
   The moon's and the night's light on the clouds keep 0.35.
+- *In a sheet* (cloud that is not a heap's 3D body: `1 - solidAt` at the
+  point, `wide`: decks, sheets, the flat fragments by the heaps) the light
+  scattered many times is that of a slab. A Monte Carlo of plane slabs
+  (optical depth 1 to 40, the sun 30, 60 and 80 degrees from the zenith,
+  the same phase function, no absorption; its albedo is within 1 to 10 %
+  of delta-Eddington's, 0.06 to 0.90) showed the spheres' fit wrong on
+  them in both directions: a deck's top 2.5 times too dark with the sun
+  60 degrees high and 4 to 6 times too bright with it 10 degrees high
+  (it has no factor for the light per unit of area of a flat top, which
+  falls with the sun's height: a sphere takes in as much light from any
+  side), a sheet of depth 1 to 2 3 to 5 times too bright (the lobe kept
+  0.7 of itself with nothing behind the place), and the sky's light on a
+  thin sheet 3 to 11 times too bright (it came back out of cloud that was
+  not there). In the darkest tenth of a deck seen from above, 70 to 78 %
+  of the light was the sun's scattered many times, and its shadows were
+  beige. In a sheet, both of the sun's terms take the light per unit of
+  area of the face the sun falls on, `topLit = clamp(sunUp (above + 1) /
+  (sunUp tauS + 1), sunUp, 1)`: `sunUp` on a flat top (there the depth
+  straight up is `sunUp` times the depth towards the sun), more on a face
+  of the sheet's relief turned to the sun; and `1 - e^(-colAll / SLAB_T)`,
+  with `colAll` the depth straight through the place (the map of the
+  columns at `CB` under it, kept by the first stage);
+  the depth behind the place is the depth under it, `min(tauB, dUnder)`
+  (`dUnder = colAll - above`: light that went far into a sheet has forgotten
+  its direction; on a sphere it leaks out sideways, so the spheres' `K` is
+  far smaller); the lobe is `SLAB_MS.x HG(mu, MS1.y) e^(-SLAB_MS.y tauS)
+  (SLAB_MS.w + K d) / (1 + K d)`: with nothing behind, only the light that
+  goes on through (the fit's `MS_UP (1 + mu) / 2`; its mean over the views,
+  as that use of `mu` cost 12 % of the frame on Direct3D 11); the light that went into the whole mass
+  `SLAB_D.x / 4 pi dark (SLAB_D.z + K d) / (1 + SLAB_D.w min(tauCM, above /
+  sunUp) + K d)`: deep in a sheet it fades slowly with the depth towards
+  the light, as the Monte Carlo's light inside a slab does, and that depth
+  is the one under the sheet's own top (towards a low sun the map of the
+  clouds' shadow crosses many heads of the deck, and its shade was 4
+  stops under its lit faces). The sky's light there
+  takes `SKYB.x (SKYB.y + K dUnder) / (1 + K dUnder) (1 - e^(-colAll /
+  SKYB.w))` as the eye looks down on the place (the light seen from under a
+  thin sheet came through it). The constants were fitted to the slabs'
+  light leaving the top (straight down and 60 degrees aslant on either
+  side) and, for the sun's, to its light inside them; what the model gives
+  over what the Monte Carlo gives, 10th to 90th percentile: the sun's light
+  on the tops 0.62 to 1.39 (the spheres' fit: 0.43 to 4.72), inside 0.73 to
+  1.25 (0.36 to 5.9), the sky's on the tops 0.71 to 1.62 (0.99 to 5.0).
+  A second Monte Carlo (the same, with a top ridged as `A cos(2 pi x /
+  L)`: `A` 2 to 8 and `L` 30 and 60 optical depths over a slab of 20, or
+  thin floors of 2 and 4 between ridges of 18 and 20, the sun 60 to 80
+  degrees from the zenith, the eye straight above and 60 degrees aslant
+  on either side, pixel by pixel) checks the relief: the sun's light
+  scattered many times on the faces turned to the sun is 0.52 to 1.09 of
+  it (`sunUp` alone gave 0.33 to 0.75, and dusk decks were dark with
+  small gold bumps), in their shade 0.58 to 1.67, and the shade 0.1 to 0.5
+  as bright as the lit faces. Light between the ridges (cloud lit by the
+  faces across a trough) is in it: the model's shade does not lack it. On
+  a deck seen from above with the sun low, the darkest tenth is where the
+  deck is thin under the place (`dUnder` of 1 or 2): the sky lights it,
+  and the air in front of it is a third of its light, so it is blue
+  grey (blue over red 1.9 to 2.1 in the renders; photographs 1.2 to 1.6).
+  Heaps keep the spheres' fit (a heap's light comes in through its side).
+  (A sheet told by the columns 1 and 2.5 km towards the light, both deep,
+  marked whole heaps and the parts of towers as sheets in blocks of the
+  map's texels; and the incidence of the light on the place, worked out
+  from the sky's directions as a normal, made the spheres' tops with the
+  sun low half as bright as their Monte Carlo: the light comes in through
+  their sides.)
 - *`uSkyLight`*: 16 heights from `CB` to `CT` by the three `vec4` of
   wavelengths; each texel the sun's part of the sky's light on a white
   matt surface facing up (64 directions by the cosine, `skyAt`), over `2
@@ -1318,7 +1380,12 @@ each cloud, not on its surface; no normal of the field enters it.
   out of the base is brighter overhead than aslant (`3 (1 + 2 cos) / 7`, the
   overcast sky of the CIE). The sun's part has a gain of `BELOW` = 0.5, set
   against photographs; the sky's part none, plus the 6 % the sea sends
-  back up. So a base follows the depth over each place: dark under thick
+  back up. (Against the Monte Carlo of slabs, at depths 10 to 40, the
+  sun's part is 0.55 to 0.9 times the reference and the sky's, in its unit
+  of `2 cloudSky`, 2.2 to 2.4 times: the base is bluer than a slab's. In
+  the white surface's unit, with `BELOW` = 0.75, both came within 0.8 to
+  1.5 times, but the sea's mirror of the base, which has to follow, cost
+  0.3 ms of the frame everywhere for three reads of `uSkyLight`.) So a base follows the depth over each place: dark under thick
   cells and rolls, light under thin parts. `above`, the depth straight up:
   the map of the columns (`columnDepth`, see [The clouds'
   shadow](#the-clouds-shadow)), the mean of two columns up to `SPREAD` =

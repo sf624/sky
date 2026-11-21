@@ -1786,7 +1786,7 @@ uint halfPair(vec2 v) {
   return halfBits(v.x) | (halfBits(v.y) << 16);
 }
 // The first stage's values at a texel: tIn, tauCM, above, sky (a), and
-// skyLean, tauF, tauN, tauNn (b).
+// skyLean, tauF, colAll, tauNn (b).
 void lightMapAt(ivec2 ij, out vec4 a, out vec4 b) {
   uvec4 u = texelFetch(uLightMap, ij, 0);
   a = vec4(unpackHalf2x16(u.x), unpackHalf2x16(u.y));
@@ -2217,6 +2217,35 @@ const vec4 CREASE = vec4(0.8, 4.0, 0.5, 0.9);
 // (The crease reads its depths near the place: out to CREASE_KM.)
 const float CREASE_KM = 0.175;
 const vec3 SKYV = vec3(2.205, 0.0382, 0.317);
+// In a sheet (see SLAB_MS) the sky's light needs cloud under the place to
+// come back out, and less comes out of a sheet thin straight through:
+// SKYB.x (c + K d) / (1 + K d) (1 - e^(-col / z)), with SKYB = (gain against
+// SKYV.x, c, K, z), d the depth straight down from the place and col the
+// depth straight through it. Fitted to a Monte Carlo of slabs and spheres
+// (see design.md).
+const vec4 SKYB = vec4(1.338, 0.531, 0.0109, 4.28);
+// In a wide sheet of cloud the sun's light scattered many times is that of
+// a slab, fitted to a Monte Carlo of slabs of optical depth 1 to 40 (see
+// design.md): a flat top takes in the sunlight per unit of area times the
+// cosine of the sun from the zenith (the spheres have no such factor: a
+// sphere takes in as much light from any side), and the light that went
+// in comes back out as the depth under the place says, not the depth along
+// the light (on a sphere it leaks out sideways, and the fit's K is far
+// smaller). The lobe (SLAB_MS: gain, how fast it fades with the depth
+// towards the light, K and u of (u + K d) / (1 + K d): with nothing behind
+// the place, only the light that goes on through it; the fit's u was MS_UP
+// (1 + mu) / 2, and u here is its mean over the views, as that use of mu
+// cost 12 % of the frame on Direct3D 11),
+// the light that went into the whole mass (SLAB_D: gain, K, c, as MSD,
+// and the K of the depth towards the light: light deep in a sheet comes
+// from all of it, and fades slowly with the depth),
+// and the depth straight through the place over which both build up
+// (SLAB_T). A sheet is cloud that is not a heap's 3D body (solidAt: decks,
+// sheets, the flat fragments by the heaps); a heap's light comes in through
+// its side, as the spheres'.
+const vec4 SLAB_MS = vec4(6.12, 0.163, 0.0318, 0.3);
+const vec4 SLAB_D = vec4(3.89, 0.0682, 0.199, 0.0179);
+const float SLAB_T = 2.5;
 // The sky's light on the clouds (main) is 2 sAmb times cloudSky, times
 // what a white matt surface facing up under the sky as drawn sends out, of
 // 2 cloudSky (uSkyLight: 0.3 to 0.7, more low down and at dusk). The Monte
@@ -3493,6 +3522,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // down there sees the sea, and under a deck the light that came down
       // through it. (The heaps' 3D body has no base of its own there.)
       float basal = smoothstep(0.0, 0.1, fb) * (1.0 - solidHere);
+      float bodyHere = solidAt;
       // The slow parts of the light change little across the picture: the
       // depth towards the light
       // past its first two steps (tauCM, with the long shadows), the depth
@@ -3504,7 +3534,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // thin fringe: only for the first, the outlines of billows seen
       // against those behind them were worked out in full, 4 ms of the
       // frame among the tops.)
-      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, tauN = 0.0, tauNn = 0.0, tauBn = 0.0;
+      float tauCM = 0.0, sky = 0.0, skyLean = 0.0, tauB = 0.0, tauF = -1.0, colAll = -1.0, tauNn = 0.0, tauBn = 0.0;
       // (For the sky's directions, below.)
       bool under0 = true;
       vec3 sunSide = vec3(0.0);
@@ -3555,7 +3585,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           sky = A.w;
           skyLean = B.x / ws;
           if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
-          tauN = B.z / ws;
+          colAll = B.z / ws;
           tauNn = B.w / ws;
         }
       }
@@ -3746,16 +3776,19 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // the frame in cruise.)
       if (tauF < 0.0) tauF = (slab ? 0.0 : crisp) * (1.0 - slabbed);
       // The depth towards the light over the light's own steps past the
-      // first two, without the map of the clouds' shadow (tauN: the crease
-      // below).
-      if (!mapped) {
-        tauN = tauL * (1.0 - slabbed);
-        tauNn *= 1.0 - slabbed;
-      }
+      // first two that end near the place, without the map of the clouds'
+      // shadow (tauNn: the crease below).
+      if (!mapped) tauNn *= 1.0 - slabbed;
+      // The depth straight through the place (colAll: the column at the
+      // clouds' base under it), for the light of a sheet (below). It changes
+      // little across the picture: the first stage keeps it. (Not read
+      // for a heap's body, which does not use it.)
+      vec3 pa = ps + eye();
+      if (uStage == 0.0 || (!mapped && (fog || bodyHere < 1.0))) colAll = columnDepth(pa * (RG + CB) / length(pa));
       if (uStage == 0.0) {
         // The first stage keeps these, and its ray ends here.
         mapA = vec4(tIn, tauCM, above, sky);
-        mapB = vec4(skyLean, tauF, tauN, tauNn);
+        mapB = vec4(skyLean, tauF, colAll, tauNn);
         return;
       }
       // How deep the point lies under the cloud's surface (P: 0 there, 1 at
@@ -3788,8 +3821,28 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // rim, a billow that stands out). The constants come from a Monte
       // Carlo of spheres (see design.md).
       float dark = mix(DARK, 1.0, P), kb = MSD.y * tauB;
-      float ms = MS1.x * hg(mu, MS1.y) * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb);
-      float diffuse = MSD.x / (4.0 * PI) * dark * (MSD.z + kb) / (1.0 + MSD.y * tauCM + kb);
+      // The depth under the place (dUnder). In a sheet (wide: not a heap's
+      // body), the light of a slab (see SLAB_MS): per unit of area of the
+      // face the sun falls on (topLit), back out as the depth under the
+      // place says, and less in a sheet thin straight through. A flat top
+      // takes in sunUp; a face of the sheet's relief turned to the sun takes
+      // in more, as the depth straight up over the depth towards the sun
+      // says (the same on a flat top). Deep in a sheet the light that went
+      // into the whole mass came in through all of its top: it fades with
+      // the depth under that top along the light (above / sunUp), not with
+      // the depth through the heads between (towards a low sun, the map of
+      // the clouds' shadow crosses many). Checked against a Monte Carlo of
+      // slabs with ridged tops (see design.md).
+      // (Seen from below or inside, where the light through a deck takes
+      // over, below, the lobe stays the spheres'.)
+      float below = fog ? 1.0 : basal * smoothstep(2.0, 6.0, above);
+      float dUnder = max(colAll - above, 0.0), wide = (1.0 - bodyHere) * (1.0 - below);
+      float sun0 = clamp(sunUp, 0.0, 1.0), th = min(tauB, dUnder), kSl = SLAB_MS.z * th, kSd = SLAB_D.y * th;
+      float topLit = clamp(sun0 * (above + 1.0) / (sun0 * tauS + 1.0), sun0, 1.0) * (1.0 - exp(-colAll / SLAB_T));
+      float ms = hg(mu, MS1.y) * mix(MS1.x * exp(-MS1.z * tauS) * (MS_UP + kb) / (1.0 + kb),
+                                     SLAB_MS.x * exp(-SLAB_MS.y * tauS) * (SLAB_MS.w + kSl) / (1.0 + kSl) * topLit, wide);
+      float diffuse = MSD.x / (4.0 * PI) * dark * mix((MSD.z + kb) / (1.0 + MSD.y * tauCM + kb),
+                                     SLAB_D.x / MSD.x * (SLAB_D.z + kSd) / (1.0 + SLAB_D.w * min(tauCM, above / max(sun0, 0.05)) + kSd) * topLit, wide);
       // In a crease on the lit side, between heads that shade it, less of
       // that light. The spheres of the Monte Carlo have no creases: there,
       // a place with much cloud behind it and some depth towards the light
@@ -3834,14 +3887,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // it near the top to 1 / (1 + COLUMN above) at the base, as the depth
       // under the place (under) is to the whole. (It was lit as a surface,
       // and the fog was a dark, flat grey.)
-      if (fog) {
-        vec3 pa = ps + eye();
-        under = max(columnDepth(pa * (RG + CB) / length(pa)) - columnDepth(pa), 0.0);
-      }
+      if (fog) under = max(colAll - columnDepth(pa), 0.0);
       float mu0 = clamp(sunUp, 0.0, 1.0), tDown = (1.0 + COLUMN * under) / (1.0 + COLUMN * (above + under));
       vec2 deck = fog ? throughDeck(mu0, tDown, dot(d, upL), COLUMN * under / (1.0 + COLUMN * under))
                       : throughDeck(mu0, tDown, max(dot(d, upL), 0.0), 0.0);
-      float below = fog ? 1.0 : basal * smoothstep(2.0, 6.0, above);
       // From below, a deck shows its cells: thick middles darker, thin rims
       // lighter, by up to half (at a fifth, a base seen from just under it
       // was a smooth blur), some 600 m and 100 m across (Worley cells of the
@@ -3863,11 +3912,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // less cloud surrounds the point, as the sun's light scattered many
       // times.
       float skyDark = mix(SKYV.z, 1.0, P);
-      // (The light through a deck, seen from under it or inside, keeps the
-      // unit it was set in against photographs, 2 cloudSky: main scales all
-      // of this by the white surface's light, unit.)
+      // In a sheet it needs cloud under the place to come back out (SKYB),
+      // and less comes out of a sheet thin straight through. (The light
+      // through a deck, seen from under it or inside, keeps the unit it was
+      // set in against photographs, 2 cloudSky: main scales all of this by
+      // the white surface's light, unit.)
+      // (Only as the eye looks down on the place: the light the eye sees
+      // from under a thin sheet came through it.)
+      float skyBack = mix(1.0, SKYB.x * (SKYB.y + SKYB.z * dUnder) / (1.0 + SKYB.z * dUnder) * (1.0 - exp(-colAll / SKYB.w)),
+                          wide * smoothstep(-0.2, 0.2, -dot(d, upL)));
       float unitHere = below > 0.0 ? uSkyEnc * textureLod(uSkyLight, vec2(clamp((heightAt(ps) - CB) / (CT - CB), 0.0, 1.0) * 15.0 / 16.0 + 0.5 / 16.0, 0.5), 0.0).y : 1.0;
-      amb = mix(SKYV.x * sky * skyDark, cells * deck.y / unitHere, below);
+      amb = mix(SKYV.x * sky * skyDark * skyBack, cells * deck.y / unitHere, below);
 #if defined(TGRID) && !defined(TOPS_MAP)
       amb *= 1.0 - GRID_AO * gridCrease;
 #endif
