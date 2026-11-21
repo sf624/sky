@@ -783,8 +783,13 @@ that cloud's shadow, shone with the sun's glow, and a deck overhead looked
 thin enough to show the sun through it; and the shafts of shadow over the
 sea were gone. Within 8 degrees of the sun or the moon (`LUT_NEAR`), whose
 glow is finer than the table's texels, the pixel marches as before, with
-the clouds' shadows in full; so does `skyAt`, the sky the sea mirrors
-(mirrored in the glitter, the table's glow, spread over its texels, filled
+the clouds' shadows in full, but with twice `NSHADE` (16 at `high` and
+`max`): with 8, the low air under a full moon 12 degrees up in twilight,
+seen from 0.3 km, came out up to 20 levels darker than a march of 160, 64
+and 128 samples (the table matches that to about a level of 255), and
+the circle showed its edge. (So the march of `mid`, and of `max` before the
+table, is that much too dark there.) Within those 8 degrees `skyAt`, the
+sky the sea mirrors, marches too (mirrored in the glitter, the table's glow, spread over its texels, filled
 the clouds' shadows on the sea). The pieces take the thin cloud's shade
 on the air below 2 km too, as the march does; without low clouds they
 cover that part alone (`low` has no such shade, `Q_CI_SHADE` 0).

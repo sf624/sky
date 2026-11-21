@@ -1950,7 +1950,13 @@ const vec3 AERO_FREE = vec3(0.048, 6.0, 5.0);    // density (as at sea level), h
 const vec3 AERO_STRAT = vec3(0.004, 20.0, 8.0);
 const float ISUN = 20.0;
 const int NV = Q_NV;            // view samples: the picture is within two steps of 8 bits of 40's
-const int NSHADE = Q_NSHADE;        // more samples in twilight: in the planet's shadow...
+// More samples in twilight: in the planet's shadow (twice as many where
+// the air comes from its table and the march is left to the glow of the sun
+// and the moon, see Q_AIR_LUT: with the level's own, the air low over the
+// sea under a full moon in twilight came out up to 20 levels darker than a
+// march of many samples, and the circle the march draws showed its edge
+// against the table's light)...
+const int NSHADE = Q_AIR_LUT == 1 ? 2 * Q_NSHADE : Q_NSHADE;
 const int NFAR = Q_NFAR;          // ...and in the lit air beyond it (see shadowSpan)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
