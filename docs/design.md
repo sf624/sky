@@ -955,16 +955,19 @@ ploughed field, which no photograph shows.)
 - **Its top** (`deckTop`) is the sheet's own top `ts` plus the puffs, read
   from `uDeck`: a tile of `DECK_KM` = 32 km baked once (`deckBake`, in
   the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km so that it
-  does not repeat. Four classes of puffs on jittered lattices, 1.3 km,
-  570 m, 360 m and 230 m apart, each lobed (three harmonics of its
+  does not repeat. Four classes of puffs on jittered lattices, 1.07 km,
+  460 m, 360 m and 230 m apart, each lobed (three harmonics of its
   outline) and drawn out along the rows; the large ones are caps with
   flat tops whose flanks meet the sheet at a finite slope (with domes
   of powers under 0.5 the flanks stood as cliffs at their foot, and
-  their rims glittered), packed: some five times as wide as they are
-  high, so that they meet in narrow creases (three times as high and
+  their rims glittered), packed: some three to four times as wide as they
+  are high, so that they meet in narrow creases (three times as high and
   apart, from 4 km they stood as round bulbs over dark gaps, where
   photographs show a packed surface of shallow relief; lower and apart,
-  from above they were a grey blanket). The clumps and the large cells meet in a soft
+  from above they were a grey blanket; a fifth wider and a quarter lower,
+  from 6.4 km their light varied by 0.20 to 0.34 of its mean at the scale
+  of the cells, where a photograph's varies by 0.39 to 0.47, now 0.25 to
+  0.39). The clumps and the large cells meet in a soft
   maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
   merge); the smaller ones stand on them as bumps and alone between
   them. Whether a puff is there is decided at its middle, from a map of
@@ -1032,7 +1035,32 @@ ploughed field, which no photograph shows.)
   (1 + COLUMN tau)`. (With the beam's own depth, the air under the deck
   was dark out to the horizon, and from 0.4 km a dark brown band lay
   along it.)
-- **Its light** differs from the sheet's in four ways. Each step of the
+- **Its light** differs from the sheet's in six ways. Its depth towards
+  the light over the first two steps (`tauF`) is worked out at the point
+  at every distance, not taken from the first stage beyond 12 km: taken
+  there, where the first stage's ray entered the cloud at half the size,
+  the deck from 11 km towards the horizon and from 6.4 km in the distance
+  was a pale plain with dark pits, where a converged render (finer
+  steps, the slow light at each pixel, many frames) showed packed cells
+  with shaded rims. Those two steps read the field without the fine
+  noise: light spreads over tens of metres in the deck, and with it the
+  flanks of the puffs from 4 km had a fur of fine streaks. From above,
+  the light that a thin column sends back is less: two streams give
+  `COLUMN tau / (1 + COLUMN tau)` of what falls on it (as `throughDeck`
+  lets `1 / (1 + COLUMN tau)` through), where the slab's light takes a
+  thick slab's from some 7 of depth on; so thin patches between the
+  cells are darker from above. (Over 0.7: the deck as a whole sends back
+  as much as before; taken as it is, it was 0.35 to 0.65 stops darker,
+  and the exposure that made up for it turned it blue from 11 km away
+  from a low sun.) A path tracer on the same field (the sun,
+  a sky of even light, droplets of 20 um after Jendersie and d'Eon 2023)
+  showed the deck from 11 km straight down at noon with a contrast of
+  cells against creases (std over mean of the light) of 0.29 to 0.30
+  where the slab's light gave 0.18 to 0.20 (now 0.24), and no brown
+  creases. (The same path tracer found the deck as a whole three times
+  darker than the slab's light makes it: the layer as drawn is thin, 100
+  to 400 m at some 45 per km, and lets most of the light through to the
+  sea. Real decks are thicker; the slab's light stands for one.) Each step of the
   light's march towards the sun is read at a place in it new each frame
   (`LIGHT_AT`), not at its middle: from 11 km straight down, the first
   two steps, read at their middles, crossed the flanks of the puffs at
@@ -1277,7 +1305,8 @@ each cloud, not on its surface; no normal of the field enters it.
   growing by 1.6), with the fine noise: the crisp shadows of the small
   billows (where a pixel is wider than 10 m, beyond some 12 km at 1440p,
   from the first stage: its billows are many pixels wide there; worked out
-  in the second stage everywhere, it cost 0.5 ms in cruise); `tauCM`, past them out to 27.8 first steps (four more steps, moved
+  in the second stage everywhere, it cost 0.5 ms in cruise; not in the
+  deck, see there); `tauCM`, past them out to 27.8 first steps (four more steps, moved
   sideways by up to `PENUMBRA` = 60 m each frame, a third of a turn apart:
   light strays in a cloud, and the shadows soften; the stray grows with
   the depth the light has come through, by 1 + `tau` / `STRAY_TAU` (8), at
