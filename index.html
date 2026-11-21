@@ -707,8 +707,8 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
 #ifdef DECK_BAKE
 // The top of the overcast layer (the deck: see deckTop in fs), baked once
 // on a tile of DECK_KM km (uZ -3), after a map of where its puffs gather
-// (uZ -4, uDeckCtl). Puffs of four sizes, each on a jittered lattice (1.07,
-// 0.46, 0.36 and 0.23 km), each drawn out along the local run of the trains
+// (uZ -4, uDeckCtl). Puffs of four sizes, each on a jittered lattice (710,
+// 305, 237 and 152 m), each drawn out along the local run of the trains
 // and lobed. The clumps and the large cells meet in a soft maximum
 // (log-sum-exp over 25 m: crisp creases, a fillet where they merge); the
 // smaller puffs stand on them as bumps (a cauliflower), and alone between
@@ -796,11 +796,13 @@ vec4 deckBake(vec2 uv) {
   // A fifth wider and a quarter lower, from 6.4 km their light varied
   // by 0.20 to 0.34 of its mean at the scale of the cells, and their
   // period was 1.4 to 1.8 times a photograph's; now 0.25 to 0.39, the
-  // photograph's 0.39 to 0.47.)
-  vec3 cl = log(1.0 + deckClass(x, 30.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.05 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
-  vec3 lg = log(1.0 + deckClass(x, 70.0, 550.0, vec3(0.95, 0.65, 0.3), 0.6, 0.16 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
-  vec3 md = log(1.0 + deckClass(x, 90.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.07 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
-  vec3 sm = log(1.0 + deckClass(x, 140.0, 570.0, vec3(0.85, 0.55, 0.3), 0.5, 0.05 * hv, 1.5, 1.0, -1.0, tng)) / DECK_K;
+  // photograph's 0.39 to 0.47. Their period was still 1.3 to 2 times the
+  // photograph's, the cells smooth pillows where it shows small ones packed
+  // tight: now a third smaller, as high, so their flanks are steeper.)
+  vec3 cl = log(1.0 + deckClass(x, 45.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.05 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
+  vec3 lg = log(1.0 + deckClass(x, 105.0, 550.0, vec3(0.95, 0.65, 0.3), 0.6, 0.16 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
+  vec3 md = log(1.0 + deckClass(x, 135.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.07 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
+  vec3 sm = log(1.0 + deckClass(x, 210.0, 570.0, vec3(0.85, 0.55, 0.3), 0.5, 0.05 * hv, 1.5, 1.0, -1.0, tng)) / DECK_K;
   // The cells (clumps and large ones), the smaller puffs as bumps on them,
   // and alone where no cell is.
   vec3 b0 = log(exp(DECK_K * cl) + exp(DECK_K * lg) - 1.0) / DECK_K;
