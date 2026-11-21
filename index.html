@@ -2521,7 +2521,7 @@ float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 // about 0.85 of cloud (deckShare): there the heaps flattened into rows of
 // rolls, which from above looked like a ploughed field.
 uniform sampler2D uDeck;
-const float DECK_KM = 32.0, DECK_H = 0.5;
+const float DECK_KM = 32.0, DECK_H = 0.5, DECK_SHEET = 0.15;
 // The share of the deck in the field: none at 0.85 of cloud (DECK_FROM),
 // all of it at 1; between, more where the cover over some 20 km is more
 // (region, as for the sheet), so that it comes in by patches tens of km
@@ -2585,8 +2585,13 @@ float deckTop(vec2 x, float region, float lod, out float ts, out float C) {
   // texels of 11 km alone, it stood as a plateau with straight cliffs.)
   float S = smoothstep(0.6, 0.8, sl.r + 0.3 * rag);
   float P = deckPuffs(x, C, lod + 2.0);
-  // (Where it is thicker, its sheet lies a little higher.)
-  ts = mix(mix(-0.03, 0.08, C) + 0.07 * C * deckThick, 0.18, S);
+  // (Where it is thicker, its sheet lies a little higher.) Closed, the
+  // sheet under the puffs is 100 to 200 m thick: with 10 to 150 m, the
+  // gaps between the cells were holes onto the sea from above, where in
+  // photographs a closed deck has none, its gaps dimmer cloud. (With 150
+  // to 250 m, from 11 km at noon the deck was an even grey, its cells
+  // hardly darker at their edges.)
+  ts = mix(mix(-0.03, DECK_SHEET, C) + 0.05 * C * deckThick, DECK_SHEET + 0.06, S);
   return ts + DECK_H * (1.0 - 0.6 * S) * P;
 }
 // The same for the deck's depths (deckColumn): without the lanes and the
@@ -2595,7 +2600,7 @@ float deckTop(vec2 x, float region, float lod, out float ts, out float C) {
 // Direct3D 11 took 60 % longer with the whole top).
 float deckTopSoft(vec2 x, float region) {
   float C = clamp(deckCover(x, region), 0.0, 1.0), P = deckPuffs(x, C, 0.0);
-  return mix(-0.03, 0.08, C) + 0.07 * C * deckThick + DECK_H * P;
+  return mix(-0.03, DECK_SHEET, C) + 0.05 * C * deckThick + DECK_H * P;
 }
 // The deck's field at height z over the level of its bases, and what
 // cloudShape gives with it (its body: one density for a column, its
@@ -2604,9 +2609,9 @@ float deckTopSoft(vec2 x, float region) {
 // darker from above and lighter from below).
 const float DECK_BODY = 0.3;
 float deckBody() { return DECK_BODY * (1.0 + 0.25 * deckThick); }
-// The highest top the deck has over its bases: a smooth sheet's 180 m
+// The highest top the deck has over its bases: a smooth sheet's 210 m
 // and 500 m of puffs.
-const float DECK_TOP = 0.18 + DECK_H;
+const float DECK_TOP = DECK_SHEET + 0.06 + DECK_H;
 float deckField(vec2 x, float z, float region, float lod, out float ts) {
   float C;
   return 3.0 * (deckTop(x, region, lod, ts, C) - z);
@@ -3644,9 +3649,9 @@ vec2 deckColumn(vec3 p, out float dk) {
 float deckShadow(vec3 pE, out float dk) {
   vec3 p = pE - eye();
   float h = heightAt(p);
-  // (Over the highest top the deck has: 300 m over CB for its bases, 180
+  // (Over the highest top the deck has: 300 m over CB for its bases, 210
   // m for a smooth sheet, and 500 m of puffs.)
-  if (h > CB + 1.0) {
+  if (h > CB + 1.1) {
     dk = deckShareAt(p.xz + uDrift);
     return 0.0;
   }
