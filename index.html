@@ -1889,7 +1889,8 @@ const float METER_GLINT = 0.15;  // the share of the sun and its glitter in the 
 const vec2 SHOULDER = vec2(0.75, 1.5);   // the tone curve's knee (on the looked value) and the power of its shoulder (see main)
 const float SUN_R = 0.00465;     // sine of the sun's angular radius (0.267 degrees)
 const float SUN_L = 2000.0;      // the sun's radiance (see main)
-const float GLARE = 0.0027;      // the glare's strength, as a share of the eye's (CIE general disability glare; see main)
+const float GLARE = 0.0027;      // the glare's strength, as a share of the eye's (CIE general disability glare; see main)...
+const float GLARE_EXPO = 1.3;    // ...up to this exposure (log2, a clear day's at 11 km, sun high); above it, less (see main)
 const int GRID = 128;
 const int SLOTS = 8;
 const float LN_FLUX_MAX = 5.9915;   // ln(400)
@@ -6117,13 +6118,18 @@ void main() {
   // softened by the disc's radius, over which the light comes. Its strength
   // is GLARE of the eye's: at the eye's own, the veil runs into white some
   // 4 degrees round the sun on a screen exposed for the sky, where the eye
-  // sees a small hard disc. The air's own forward scattering (the aureole)
-  // is in L already, and widens the glow in haze. Clouds between the eye
-  // and the sun dim the glare.
+  // sees a small hard disc. Nor does it grow on the screen as the exposure
+  // opens up past a clear day's at cruise (GLARE_EXPO): the eye looking at
+  // the sun adapts to the sun's surroundings, not to the dark sky of the
+  // stratosphere, where the exposure is 3.5 stops higher and the glow ran
+  // into white for a degree round the sun. The air's own forward scattering
+  // (the aureole) is in L already, and widens the glow in haze. Clouds
+  // between the eye and the sun dim the glare.
   if (uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0) {
     float deg = degrees(acos(min(mu, 1.0)));
     float t2 = deg * deg + pow(degrees(SUN_R), 2.0);
-    float glare = GLARE * SUN_L * PI * SUN_R * SUN_R * (10.0 / (t2 * sqrt(t2)) + 5.0 / t2);
+    float glare = GLARE * min(1.0, exp2(GLARE_EXPO) / uExposure)
+                * SUN_L * PI * SUN_R * SUN_R * (10.0 / (t2 * sqrt(t2)) + 5.0 / t2);
     if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.

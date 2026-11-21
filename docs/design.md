@@ -2677,14 +2677,29 @@ luminance of `10 / t^3 + 5 / t^2` times the sun's illuminance at the eye
 with `t` softened by the disc's radius (`SUN_R`), over which the light
 comes. Its strength is `GLARE` = 0.0027 of the eye's. At the eye's own,
 the veil runs into white some 4 degrees round the sun on a screen exposed
-for the sky, where the eye sees a small hard disc. So the sun now reads as
-a disc in clear air: the picture leaves white 0.25 to 0.3 degrees from its
-centre (the disc is 0.267), with a glow that is down to a tenth of the way
-to white within about 2 degrees at 11 to 13 km. Haze widens the glow
-through the air's own forward scattering (the aureole, in `L`): with
-`haze=3` the glow reaches some 9 degrees. Near the sea the aureole of a
-low sun still runs into white over 1 to 3.5 degrees, as in photographs of
-a low sun through haze. It is drawn within 26 degrees of the sun
+for the sky, where the eye sees a small hard disc. Nor does the glare
+grow on the screen as the exposure opens up past `GLARE_EXPO` = 1.3
+(log2: a clear day's at 11 km with the sun high): above it, the glare is
+taken down by as much as the exposure rises. The eye looking at the sun
+adapts to the sun's surroundings, not to the dark sky of the
+stratosphere: at 40 km the exposure stands 3.5 stops higher than at 11
+km, and without the cap the glow ran into white 0.9 degrees round a high
+sun. (The meter counts the glare at `METER_GLINT` as before, so there the
+level depends a little on the exposure; the glow covers far fewer blocks
+than the 3 % that set the highlights.) With the sun in the view the
+exposure moved by at most 0.01 stops up to 11 km; at 40 km it rose by 0.1
+to 0.4 stops, where the old glow had covered enough of the view to hold
+it down.
+
+So the sun reads as a disc in clear air: from 4 to 40 km the picture
+leaves white 0.25 to 0.3 degrees from its centre (the disc is 0.267),
+with a glow that is down to a tenth of the way to white within 2 to 3
+degrees with the default haze. Haze widens the glow through the air's own
+forward scattering (the aureole, in `L`): with `haze=3`, to some 9 to 12
+degrees. Near the sea, the aureole itself runs into white 0.3 to 3.5
+degrees round the sun (a high sun in clear air to a low one in haze), as
+in photographs of a low sun through haze; the glare plays no part there.
+On the horizon the disc is a dim red disc, below white. It is drawn within 26 degrees of the sun
 (`mu > 0.9`), where it is 2e-5 of its value at the disc, and added
 to `L` and to `G` alone: `G` already holds the sun's disc or its glitter,
 which `L` has.
@@ -2694,7 +2709,9 @@ Before, the glare was `0.3 / (t^2 + 0.3)`: a flat top half a degree wide,
 white within 2 degrees of a high sun at 11 to 13 km and 1.4 to 2 degrees
 at 4 km, in the clearest air as in haze, so that the disc's edge never
 showed; and its edge at 21 to 26 degrees (`mu` from 0.9 to 0.93) drew a
-faint ring round a high sun.
+faint ring round a high sun. At 40 km, under the higher exposure, it ran
+into white 6 degrees round a high sun, inside a pale disc with a hard
+edge 26 degrees from the sun.
 
 ## Exposure and the tone curve
 
