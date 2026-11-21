@@ -36,7 +36,9 @@ time (see the next section).
 - **Lengths** are in km, in the shaders and in the JS.
 - **Axes**: x west, y up, z south. The centre of the planet is the origin.
   The eye is at `(0, RG + uAlt, 0)`, with `RG` = 6360 km (the ground) and
-  `RT` = 6460 km (the top of the air).
+  `RT` = 6460 km (the top of the air). `uAlt` runs from 0.3 to 40 km (see
+  [The altitude](#from-the-address-bar-to-the-first-frame)): the eye is
+  always inside the air, and every ray starts at the eye.
 - **Directions**: `yaw` 0 looks south, 90 degrees west, -90 degrees east;
   a larger `yaw` turns the view to the right (clockwise seen from above),
   and a drag to the right lowers it. `pitch` is positive upwards.
@@ -81,8 +83,8 @@ The JS then runs once, at load, and does little:
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
-   time does not run yet (see below). `yaw`, `pitch`, `heading`, `at`,
-   `pixels` and `res` are read directly (see
+   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,
+   `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -236,6 +238,27 @@ anyway.
 **Now.** The now button sets the date to today, the time to the device's
 clock (taken as local solar time), the moon's age as moving the date does,
 the rate to real time, and plays.
+
+**The altitude.** `state.alt` runs from `ALT_MIN` = 0.3 to `ALT_MAX` = 40
+km. Its slider (`#alt`) has a row of its own under the time's, as long
+as the panel, and is not in km: up to `ALT_LINEAR` = 13 km it is even in
+km, 635 steps of `ALT_STEP` = 20 m, then even in log(h) over
+`ALT_LOG_STEPS` = 400 steps, 37 m a step at 13 km and 112 m at 40 km.
+`altPlace` and `altAt` turn a height into the slider's place and back;
+every height in steps of 0.1 km up to 13 km has a place of its own. The
+heights of `ALT_TICKS` (1, 5, 11, 20 and 40 km) are written under the
+track (`.ticks`). On the desktop's panel (a track of 778 px) a pixel is
+27 m up to 13 km, 75 m at 20 km and 150 m at 40 km; on a phone 411 px
+wide (329 px), 63, 177 and 354 m. Before, the slider shared a row with
+three others and was even from 0.3 to 13 km in steps of 0.1 km: 77 m a
+pixel on the desktop, 86 m on the phone, 100 m a step. The value beside it
+(`#altOut`) is a text field: it shows the height as the other values do
+(in m below 20 km, to 10 m; in km above, to 0.1 km) and reads a number
+typed into it (`altTyped`): in km below 300, in metres from 300 on (the
+heights in km end below 300, those in metres start there), or as `m` or
+`km` after it says. The state keeps the height itself, not the slider's
+place: `?alt=11` draws at 11 km exactly, as before; a height set by the
+slider is rounded to 10 m.
 
 ## Sun, moon and sky in the JS
 
@@ -1370,8 +1393,9 @@ switch: 62.5, 125 and 250 m), each N x N columns from `CB` to `CT` (141,
 71 and 36 slices): windows of 16, 32 and 64 km at N = 512. One R8 3D
 texture of N x N x 260 holds them one over another (unit 30, `uGrid`):
 each level's slices of the distance under the towers' surface,
-+-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: the top,
-the highest top within 0.8 km, the base, and how much of it is shown. One
++-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: how much
+the present field's heap gives way there (`own`), the highest top within
+0.8 km, the base, and how much of it is shown. One
 sampler only, and only in the programs that draw the low clouds (their
 pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
 a program, and the scene's own `fs` reads 16. That program reads the low
@@ -1398,22 +1422,61 @@ columns and uploads the rows of tiles that changed, once a frame.
 weight left times how much it is shown; a level finer than the read's smoothing (`lod`:
 level 0's voxels are texels of the noise at lod `GRID_LV`, -1 for 31 m)
 gives way to the next, so the light's long steps and the depth maps read
-the coarse levels. The present field's towers fade out by the weight the
-grid has there (`gridCut`); what no level covers keeps the present look.
-Then, as in the prototype, the grid's distance joins the present field by
-a smooth maximum and takes over its facts there (solid, heap, base).
+the coarse levels. A level is read up to the highest top within 0.8 km
+of the column and `GRID_OUT` over it (the reach of the detail below): by
+the column's own top, the crowns that the detail pushes out of a wall
+were cut off over the columns beside it, as upright curtains. The present
+field's towers fade out by the weight the grid has there (`gridCut`), and
+its heaps lose up to `GRID_OWN` = 0.7 of their height round a tower
+(`gridOwn`, read from the coarsest level, whose window holds the others);
+what no level covers keeps the present look. Then, as in the prototype,
+the grid's distance joins the present field by a smooth maximum and takes
+over its facts there (solid, heap, base).
+
+**The detail at render time** (from the prototype's round 2), on the
+distance, less of it low on a body (`GRID_LOW` = 0.4 of it below a fifth
+of its height, none at its foot): the heads of `uBody` (500 m to 125 m,
+read `GRID_HK` = 2 times finer, `GRID_HW` = 120 m deep at most) carve it as
+on main's body; the grid's own creases are cut in, `GRID_CR` = 1.5 times
+`cav`, the distance two levels coarser (smoothed over four voxels) less
+its own: positive between lobes, so the valleys between bulges are sharp
+and deep; packed billows (the A of `uBody`, `GRID_BK` = 2.33 times finer:
+214 m down to 54 m, `GRID_BW` = 120 m deep at most) on that, read at the
+pixel's level. In a crease (`gridCrease`, from `cav` and the heads), the
+light scattered many times and the sky's light are less by up to `GRID_AO`
+= 0.6, however the light falls: with the sun behind the eye the walls were
+flat cream, and from straight above at noon a tower was one white blob.
+After the switch, `,KEY=value` sets any of these for a test
+(`?grid=1,AO=0,BW=0`).
 
 **Where the towers stand.** After each map of the tops (each cloud
 amount), the warped weather map at 250 m (its mip level of 1024 texels)
 and the map of the tops are read back without a stall (pixel buffers and
 a fence) and sent to a worker. The worker (the script `towers`, made into
 a Worker from its text through a Blob: no file, no build; made at the
-first frame) finds the towers of the whole map: per world cell of 2 km,
-the place where the present field's `tower` is strongest, if no place
-within 1.5 km has more. Width (1 to 3.5 km), top and base (80 m over the
-level of the bases) follow the present field's formulas there; the seed
-of its lobes comes from the cell. So a cell gives the same tower whenever
-it comes into a window. At cloud 0.5 there are about 700 on the map.
+first frame) finds the towers of the whole map, with the present field's
+formulas: per world cell of 2 km, the place where the field's heap stands
+highest over the sheet, if no place within 1.5 km stands higher; only
+where the heap stands `H_MIN` = 0.8 km high or more, or the field draws a
+tower (where its tower is strong, it counts `TOWER_H` = 1.5 km per unit).
+(Seeded at the field's towers only and sized as them, the towers were no
+higher than the field's heaps round them, which hid them: posts with round
+heads standing out of those heaps. With a body in every heap from 0.5 km
+up, 1900 on the map at cloud 0.5, the frame under them at 0.3 km took 5 ms
+more than main's grid.) Its base is 80 m over
+the level of the bases there. Its height is the heap's or more, by a law
+of sizes: `u = rnd^2`, times a smooth random field of 12.8 km (the big
+ones in groups) and the strength of the field's tower round it; `H = 0.6 +
+3.4 u` km. It is at least as wide as the heap (the place within 2.5 km
+where the heap stands over 0.4 of its height here) and 1.25 times its
+height, 1.3 to 5 km, and at least 0.45 of its width high (flat bodies
+were a sheet of stratocumulus from below). A smaller tower within the foot
+of a bigger one gives way. The seed of its lobes comes from the cell: a
+cell gives the same tower whenever it comes into a window. About 800 on
+the map at cloud 0.5 (width 1.3 to 2.8 km, height 0.8 to 1.8 km, 10th to
+90th percentile; the highest 4.6 km), 700 at 0.8. Round its middle, the
+field's heap gives way
+(`own`: 1 within 0.3 of its width, none beyond 0.55 of it and 300 m).
 
 **The shape rule.** `lobesOf(seed, P, LEAN)` grows a tower as a tree of
 lobes (the rule of the shape prototype, round 2, kept apart from the plumbing:
@@ -1438,24 +1501,28 @@ them, and the clouds are the present field's.
 **The march's strides.** The map of the tops (`uTops`) is made from the
 present field, and a tower's lobes may stand higher than its tops: the
 strides over the tops would cut them. When a tower's lobes are made, the
-worker raises its copy of the map over them (each lobe's top and 70 m,
+worker raises its copy of the map over them (each lobe's top and 170 m,
+the reach of the detail,
 within 1, 2, 4 and 8 texels as the map's channels) and sends the part
 back, before any tile that shows the tower; the main thread uploads it
 into `uTops`.
 
-**First seconds and cost** (measured 2026-11-20, flying at 900 km/h).
+**First seconds and cost** (measured 2026-11-21, flying at 900 km/h).
 On GL (the RTX 3090, 1280 x 720): the first picture comes as without the
 grid, and the map is read back with it; the three levels are shown whole
-2 to 4 s later (the worker's first fill is about 2.6 s of one thread):
+3.3 to 4.2 s later (the worker's first fill is about 5 s of one thread):
 the towers fade in from the eye outwards over the present look. Then the
-worker spends about 55 ms of a thread per km flown, and keeps up (its
+worker spends 45 to 65 ms of a thread per km flown, and keeps up (its
 queue stays empty but for a moment when a window moves). The main thread
-spends 0.1 to 0.3 ms a frame (about 2 ms, and once 26 to 36 ms, while the
-levels fill). The GPU's frame is 1.5 to 1.8 ms longer at 4 and 11 km and
-3.4 ms at 0.3 km under the clouds. On Direct3D 11 (the same GPU, 1898 x
-982, two runs): the first picture 1.0 to 1.5 s later than without the
-grid, the levels whole 2.5 s after it, and the GPU's frame 20.2 ms
-against 17.0 ms.
+spends 0.1 to 0.3 ms a frame (about 2 ms, and once up to 150 ms, while
+the levels fill). The GPU's frame (all draws) is 17.0 ms at 0.3 km under
+the clouds (11.6 without the grid), 11.3 ms at 4 km (8.3 to 8.7) and 11.7
+to 12.7 ms at 11 km (10.0); the rule of round 2 of the plumbing, with its
+fewer and smaller towers and no detail, took 14.7, 10.3 and 10.5 to 11.8
+ms. On Direct3D 11 (the same GPU, 1898 x 982, 4 km): the first picture as
+without the grid, the levels whole 2.6 to 3.7 s after it, and the GPU's
+frame 25.2 ms against 18.9 ms without the grid (22.9 ms with the earlier
+rule).
 
 ## The clouds' shadow
 
