@@ -19,8 +19,13 @@ const winTemp = () => {
 // Script put first in the page's <head>: posts its console lines, the renderer, the GPU time of each animation
 // frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`.
 // With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
+// With d3dSteps=V@S,... it sets the Clouds slider to V at S s after the first picture, each in turn, and posts
+// instead the gaps between animation frames from the first step on, for d3dWatch s, then `done`.
 const INJECT = `<script>(() => {
   const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
+  const STEPS = (q.get('d3dSteps') || '').split(',').filter(Boolean).map(s => s.split('@').map(Number)), WATCH = +(q.get('d3dWatch') || 30);
+  let stepped = null, last = null;
+  const gaps = [];
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(Object.assign({ at: performance.now() / 1000 }, o)) }).catch(() => {});
   for (const k of ['info', 'log', 'warn', 'error']) {
     const f = console[k];
@@ -43,6 +48,9 @@ const INJECT = `<script>(() => {
   const finish = o => { done = true; post(o).then(() => post({ ev: 'done' })); };
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = cb => raf(ts => {
+    const t = performance.now();
+    if (stepped !== null && last !== null) gaps.push([t - last, (last - stepped) / 1000]);
+    last = t;
     let query = null;
     if (ext && started && !done && !gl.isContextLost()) { query = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, query); }
     try { cb(ts); } finally {
@@ -52,7 +60,7 @@ const INJECT = `<script>(() => {
         if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) times.push(gl.getQueryParameter(p, gl.QUERY_RESULT) / 1e6);
         gl.deleteQuery(p);
       }
-      if (!done && !SHOT && times.length >= FRAMES + 10) {
+      if (!done && !SHOT && !STEPS.length && times.length >= FRAMES + 10) {
         const s = times.slice(10).sort((a, b) => a - b);
         finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
       }
@@ -66,6 +74,28 @@ const INJECT = `<script>(() => {
       clearInterval(watch);
       post({ ev: 'shown', failed: hero.classList.contains('failed') });
       if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
+      else if (STEPS.length) {
+        const slider = document.getElementById('cloud');
+        for (const [v, s] of STEPS) setTimeout(() => {
+          if (stepped === null) stepped = performance.now();
+          slider.value = v;
+          slider.dispatchEvent(new Event('input', { bubbles: true }));
+          post({ ev: 'console', msg: 'd3d: slider at ' + v });
+        }, s * 1000);
+        setTimeout(() => {
+          const g = gaps.slice().sort((a, b) => b[0] - a[0]);
+          const gpu = times.slice().sort((a, b) => a - b);
+          const bins = [];
+          for (const [ms, at] of gaps) {
+            const b = Math.floor(at / 2);
+            bins[b] = bins[b] || [0, 0];
+            if (ms > 50) bins[b][0]++;
+            bins[b][1] = Math.max(bins[b][1], ms);
+          }
+          finish({ ev: 'gaps', n: gaps.length, worst: g.slice(0, 5), bins: [...bins].map(b => b || [0, 0]), over50: gaps.filter(x => x[0] > 50).length, over100: gaps.filter(x => x[0] > 100).length,
+            median: gaps.map(x => x[0]).sort((a, b) => a - b)[gaps.length >> 1], gpuMedian: gpu[gpu.length >> 1], gpuMax: gpu[gpu.length - 1] });
+        }, (STEPS[0][1] + WATCH) * 1000);
+      }
       else if (!ext || hero.classList.contains('failed')) finish({ ev: 'frames' });
     }
   }, 20);
@@ -146,16 +176,20 @@ const PROGRAMS = `<!doctype html><meta charset="utf-8"><canvas width="4" height=
   await post({ ev: 'done' });
 })().catch(e => fetch('/d3d/report/' + new URLSearchParams(location.search).get('d3d'), { method: 'POST', body: JSON.stringify({ ev: 'done', error: String(e) }) }));</script>`;
 
-// The programs makeSky links (its link('id'[, '#define X']) calls), with the outputs each declares.
+// The programs makeSky links (its link('id'[, [D +] '#define X']) calls), with the outputs each declares; and
+// where fs has the overcast's deck (#ifdef DECK), its programs with the deck too (made later by the page, see
+// deckLater in index.html), named as the page names them.
 function programsOf(html) {
   const shaders = {};
   for (const m of html.matchAll(/<script id="(\w+)" type="x-shader\/x-fragment">([\s\S]*?)<\/script>/g)) shaders[m[1]] = m[2].trim();
   const seen = new Set(), list = [];
-  for (const m of html.matchAll(/link\('(\w+)'(?:, '#define (\w+)')?\)/g)) {
-    const key = m[1] + (m[2] ? ' (' + m[2] + ')' : '');
-    if (seen.has(key) || !shaders[m[1]]) continue;
+  const calls = [...html.matchAll(/link\('(\w+)'(?:, (?:D \+ )?'#define (\w+)'|, D)?\)/g)].map((m) => [m[1], m[2] ? [m[2]] : []]);
+  if (/^#ifdef DECK$/m.test(shaders.fs || '')) for (const d of [[], ['CLOUD_PASS'], ['SHADOW_MAP'], ['TOPS_MAP']]) calls.push(['fs', ['DECK', ...d]]);
+  for (const [id, defs] of calls) {
+    const key = id + (defs.length ? ' (' + defs.join(' ') + ')' : '');
+    if (seen.has(key) || !shaders[id]) continue;
     seen.add(key);
-    const source = m[2] ? shaders[m[1]].replace('#version 300 es', '#version 300 es\n#define ' + m[2]) : shaders[m[1]];
+    const source = defs.length ? shaders[id].replace('#version 300 es', '#version 300 es\n' + defs.map((d) => '#define ' + d).join('\n')) : shaders[id];
     const outputs = [...source.matchAll(/^\s*(?:layout\(location = (\d+)\)\s*)?out\s+(\w+)\s+(\w+);/gm)]
       .map(o => ({ location: +(o[1] || 0), type: o[2], name: o[3] }));
     list.push({ name: key, source, outputs });
@@ -206,7 +240,7 @@ async function runChrome(url, reports, id, { limit, size }) {
 }
 
 // `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
-export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
+export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null, steps = '', watch = 30 }) {
   if (!fs.existsSync(CHROME)) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
   const reports = new Map();
   const files = new Map();
@@ -246,7 +280,7 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
           files.set(`/d3d/page/${id}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
           // (A picture is taken at the page's own drawing size: no res=1.)
           url = `http://localhost:${port}/d3d/page/${id}/index.html?timing${shot ? '' : '&res=1'}&${withQuality(q)}&d3d=${id}` +
-            (shot ? `&d3dShot=${shot}` : `&d3dFrames=${frames}`);
+            (shot ? `&d3dShot=${shot}` : `&d3dFrames=${frames}`) + (steps ? `&d3dSteps=${steps}&d3dWatch=${watch}` : '');
         }
         reports.set(id, []);
         const timedOut = await runChrome(url, reports.get(id), id, { limit, size });
@@ -280,6 +314,10 @@ function print(name, run, mode, got, timedOut, limit) {
   for (const g of got.filter((g) => g.ev === 'console')) console.log(`  ${g.msg}`);
   const shown = got.find((g) => g.ev === 'shown');
   if (shown) console.log(`  ${shown.failed ? 'failed' : 'first picture'} at ${shown.at.toFixed(2)} s (since the navigation)`);
+  const gp = got.find((g) => g.ev === 'gaps');
+  if (gp) console.log(`  frames from the first step on: ${gp.n}, median gap ${gp.median?.toFixed(1)} ms, over 50 ms ${gp.over50}, over 100 ms ${gp.over100}; ` +
+    `longest ${gp.worst.map(([ms, at]) => `${ms.toFixed(0)} ms at ${at.toFixed(1)} s`).join(', ')}; GPU per frame median ${gp.gpuMedian?.toFixed(1)} ms, max ${gp.gpuMax?.toFixed(1)} ms`);
+  if (gp?.bins) console.log(`  by 2 s from the first step (gaps over 50 ms/longest ms): ${gp.bins.map(([n, ms]) => `${n}/${ms.toFixed(0)}`).join(' ')}`);
   const f = got.find((g) => g.ev === 'frames');
   if (f?.median) console.log(`  GPU time per frame at ${f.w} x ${f.h}: median ${f.median.toFixed(2)} ms, p90 ${f.p90.toFixed(2)} ms`);
 }

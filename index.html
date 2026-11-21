@@ -704,6 +704,7 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   return sum;
 }
 
+#ifdef DECK_BAKE
 // The top of the overcast layer (the deck: see deckTop in fs), baked once
 // on a tile of DECK_KM km (uZ -3), after a map of where its puffs gather
 // (uZ -4, uDeckCtl). Puffs of four sizes, each on a jittered lattice (1.3,
@@ -797,13 +798,17 @@ vec4 deckBake(vec2 uv) {
   return vec4(clamp(t / DECK_H, 0.0, 1.0), clamp((m1 - max(m2, 0.0)) / 0.08, 0.0, 1.0));
 }
 
+// (A program of its own, DECK_BAKE, made only when the deck is first
+// wanted: in the noise program its code made that link 60 % longer on
+// Direct3D 11, for a texture most skies never read.)
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
-  if (uZ < -3.5) {
-    outColor = deckControl(uv);
-  } else if (uZ < -2.5) {
-    outColor = deckBake(uv);
-  } else if (uZ >= 2.0) {
+  outColor = uZ < -3.5 ? deckControl(uv) : deckBake(uv);
+}
+#else
+void main() {
+  vec2 uv = gl_FragCoord.xy / uSize;
+  if (uZ >= 2.0) {
     // The heaps' body: the turrets of 2 km and 1 km (4 and 8 cells across
     // the tile of 8 km), and the heads on them (heads).
     vec3 p = vec3(uv, uZ - 2.0);
@@ -877,6 +882,7 @@ void main() {
     outColor = vec4(smoothstep(-0.1, 0.45, c), 0.0, 0.0, 1.0);
   }
 }
+#endif
 </script>
 
 <script id="ice" type="x-shader/x-fragment">
@@ -2397,7 +2403,11 @@ bool coarse = false;
 float thin = 0.0;
 // And how much of the field there was the heaps' 3D body (solid), and how
 // high over its base (km).
-float solidAt = 0.0, overBase = 0.0, deckAt = 0.0;
+float solidAt = 0.0, overBase = 0.0;
+#ifdef DECK
+// And how much of it the deck's (see deckShare).
+float deckAt = 0.0;
+#endif
 // And how much of it the fine turrets carve (the body, and the heads of a
 // sheet or a deck: see cloudDetail).
 float carved = 0.0;
@@ -2479,6 +2489,7 @@ const float GRID_OUT = 0.06 + ERO_C * GRID_HW + 0.45 * GRID_BW;   // how far the
 float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 #define cloudShape cloudShape0
 #endif
+#ifdef DECK
 // The overcast (the deck): stratocumulus as one layer, puffs standing on a
 // thin sheet, whose top comes from a map baked at start (uDeck: see
 // deckBake in the noise shader). It takes over from the heaps' field above
@@ -2490,10 +2501,14 @@ const float DECK_KM = 32.0, DECK_H = 0.5;
 // all of it at 1; between, more where the cover over some 20 km is more
 // (region, as for the sheet), so that it comes in by patches tens of km
 // wide as the slider rises.
+// uDeckIn: 0 to 1 over a second when the deck's programs came in while
+// the slider stood above 0.85 (see deckLater in the JS), so that the
+// heaps' field gives way to the deck without a jump; else 1.
 const float DECK_FROM = 0.85;
+uniform float uDeckIn;
 float deckShare(float region) {
   float t = clamp((uCloud - DECK_FROM) / (1.0 - DECK_FROM), 0.0, 1.0);
-  return smoothstep(0.0, 1.0, t + 8.0 * (region - 0.5) * t * (1.0 - t));
+  return uDeckIn * smoothstep(0.0, 1.0, t + 8.0 * (region - 0.5) * t * (1.0 - t));
 }
 // The same at x (km on the map), for the light.
 float deckShareAt(vec2 x) {
@@ -2562,6 +2577,13 @@ float deckField(vec2 x, float z, float region, float lod, out float ts) {
   float C;
   return 3.0 * (deckTop(x, region, lod, ts, C) - z);
 }
+// (The heaps' field below gives its value as fH and goes on to the deck's.
+// Without the deck it returns it: the program is then the same as before
+// the deck, and costs as much.)
+#define HEAPS_OUT(v) { fH = (v); break; }
+#else
+#define HEAPS_OUT(v) return (v)
+#endif
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
   float h = topsH;
@@ -2576,7 +2598,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   thin = 0.0;
   upshear = 0.5;
   solidAt = 0.0;
+#ifdef DECK
   deckAt = 0.0;
+#endif
   carved = 0.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
@@ -2609,6 +2633,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, w.b);
   y = (h - level) / (CT - CB);
   base = 2.0 * (h - level);
+#ifdef DECK
   // Over most of the overcast, the deck (see deckTop) takes the place of
   // the heaps' field below; between, the two are mixed (dk).
   float dk = uCloud < DECK_FROM ? 0.0 : deckShare(region);
@@ -2641,6 +2666,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   }
   float fH = -9.0;
   do {
+#endif
   // The cloud amount sets the level of the map above which clouds stand.
   // Each heap of the map is a dome: its top stands as high as the map's G
   // says (higher in the middle of a heap, and on some heaps more than on
@@ -2747,7 +2773,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // to 6 times as fast as over a dome's top, mixed with the body's.)
   float topR = (TOP_R + 0.2) / (CT - CB) + 1.2 * sheetTop * smoothstep(0.3, 0.6, far.a) * sheet, fUp = f + 3.6 * lumps;
   bool clear = sheet <= 0.0 || mix(fUp > 0.0 ? fUp * top / 3.36 : fUp * top / 28.8, bodyMax / (BODY_G * (CT - CB)), solid) + topR < 0.0;
-  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) { fH = max(mix(f, bodyMax, solid), fs); break; }
+  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) HEAPS_OUT(max(mix(f, bodyMax, solid), fs));
   // How steep this field is where its surface over this place stands (yt),
   // against the top of a whole dome (where it rises by 4.8 / top per unit
   // of y): over the top of a heap about 1, on its walls up to 6. The
@@ -2786,10 +2812,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   bodyMax = BODY_G * (dEnv + bumpMax + shift);
 #ifdef TOPS_MAP
   // (The map of the tops wants the bound of this way out.)
-  fH = max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0);
-  break;
+  HEAPS_OUT(max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0));
 #endif
-  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax && (sheet <= 0.0 || hUp < 0.0)) { fH = max(mix(f, bodyMax, solid), fs); break; }
+  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax && (sheet <= 0.0 || hUp < 0.0)) HEAPS_OUT(max(mix(f, bodyMax, solid), fs));
   heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
   // Near the eye (a pixel finer than 16 m) the read moves by up to half a
@@ -2979,6 +3004,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       thin *= 1.0 - whole * (1.0 - solid * sN);
     }
   }
+#ifndef DECK
+  return f;
+#else
   fH = f;
   } while (false);
   if (dk > 0.0) {
@@ -3002,6 +3030,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     fH = mix(fH, fD, dk);
   }
   return fH;
+#endif
 }
 #if defined(TGRID) && !defined(TOPS_MAP)
 #undef cloudShape
@@ -3382,9 +3411,16 @@ float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p
   return mix(tau.x, tau.y, mix(z - float(k), 1.0, up));
 }
 
-float deckShadow(vec3 pE, out float dk);
 // The optical depth of the clouds from p towards the light. (Over the
 // deck, its own: see deckShadow.)
+#ifndef DECK
+float cloudShadow(vec3 p) {
+  return mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0);
+}
+// (The air's: see below.)
+#define airShadow cloudShadow
+#else
+float deckShadow(vec3 pE, out float dk);
 float cloudShadow(vec3 p) {
   float dk = 0.0, tD = uCloud < DECK_FROM ? 0.0 : deckShadow(p, dk);
   return dk >= 1.0 ? tD : mix(mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0), tD, dk);
@@ -3398,25 +3434,38 @@ float airShadow(vec3 p) {
   if (dk > 0.0 && heightAt(p - eye()) < CB + 0.15) tD = log(1.0 + COLUMN * tD);
   return dk >= 1.0 ? tD : mix(mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0), tD, dk);
 }
+#endif
 // The same, for a cloud's own light: with the light low, from the height
 // above p alone. (Read between two heights, which lie kilometres apart
 // along a low light, the depth from the one below took in the cloud
 // itself behind p, and drew bands across the lit walls of towers, one for
 // each height of the map.)
 float cloudShadowOwn(vec3 p) {
+#ifdef DECK
   float dk = 0.0, tD = uCloud < DECK_FROM ? 0.0 : deckShadow(p, dk);
   return dk >= 1.0 ? tD : mix(mapDepth(uShadow, shX, shY, uShadowShift, p, 1.0 - smoothstep(0.25, 0.45, uLight.y)), tD, dk);
+#else
+  return mapDepth(uShadow, shX, shY, uShadowShift, p, 1.0 - smoothstep(0.25, 0.45, uLight.y));
+#endif
 }
 
 // The optical depth of the clouds straight up from p, times the sheet's
 // relief where it lies (see shadowTexel).
+#ifdef DECK
 vec2 deckColumn(vec3 p, out float dk);
+#endif
 float columnDepth(vec3 p) {
+#ifdef DECK
   float dk = 0.0, tD = uCloud < DECK_FROM ? 0.0 : deckColumn(p - eye(), dk).y;
   if (dk >= 1.0) return tD;
+#endif
   vec3 ax, ay;
   mapAxes(vec3(0.0, 1.0, 0.0), ax, ay);
+#ifdef DECK
   return mix(mapDepth(uColumn, ax, ay, uColumnShift, p, 0.0), tD, dk);
+#else
+  return mapDepth(uColumn, ax, ay, uColumnShift, p, 0.0);
+#endif
 }
 
 // The same on the sea, with soft edges. The sun is a disc, and the light
@@ -3533,6 +3582,7 @@ float hg(float mu, float g) {
 // light they send to the eye per unit of sunlight (sOne: scattered once;
 // sMany: many times) and of skylight (sAmb), and the distance it comes from
 // (tBar; negative without clouds).
+#ifdef DECK
 // The deck's depth straight through it at p (x) and from p up (y), as its
 // field gives it (the extinction of cloudExtinction, its up factor
 // integrated over the height); dk: its share there (deckShare).
@@ -3567,6 +3617,7 @@ float deckShadow(vec3 pE, out float dk) {
   vec3 q = p + uLight * max(CB + 0.4 - h, 0.0) / up;
   return deckColumn(vec3(q.x, p.y, q.z), dk).y / up;
 }
+#endif
 void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             out float Tc, out float sOne, out float sMany, out float sAmb, out float sLean, out float tBar, out vec4 mapA, out vec4 mapB) {
   const float DS_MIN = 0.02 * Q_MARCH, DS_NEAR = 0.008 * Q_MARCH, DS_REL = 0.0045 * Q_MARCH, COARSE = 3.0, FINE = 0.35;
@@ -3813,7 +3864,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // down there sees the sea, and under a deck the light that came down
       // through it. (The heaps' 3D body has no base of its own there.)
       float basal = smoothstep(0.0, 0.1, fb) * (1.0 - solidHere);
-      float bodyHere = solidAt, deckHere = deckAt;
+      float bodyHere = solidAt;
+#ifdef DECK
+      float deckHere = deckAt;
+#endif
       // The slow parts of the light change little across the picture: the
       // depth towards the light
       // past its first two steps (tauCM, with the long shadows), the depth
@@ -4172,7 +4226,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // no neighbours: in the shadow of a puff towards the sun only what
       // spreads in sideways from the lit ones, half of it. (With 0.3, the
       // shade was the sky's light alone, and blue.)
+#ifdef DECK
       if (deckHere > 0.0) diffuse *= mix(1.0, mix(0.5, 1.0, exp(-tauS / 3.0)), deckHere);
+#endif
       // Seen from below, a cloud under more of itself shows the light that
       // came down through it, the sun's and the sky's, spread out
       // (throughDeck): a slab of optical depth above lets through 1 / (1 +
@@ -4225,6 +4281,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // 0.8, lit at the mean of the sun's height and 30 degrees, half of
       // them in sight). (With the sky's light taken away alone, the creases
       // were the sun's light less the sky's: brown lines.)
+#ifdef DECK
       if (deckHere > 0.0) {
         // (The puffs alone, read at the two levels: the lanes and the
         // sheet are the same in both.)
@@ -4235,6 +4292,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         amb *= 1.0 - lost;
         if (uLight.y > 0.0) many += lost * 0.2 * 0.8 / PI * mix(sun0, 0.5, 0.5);
       }
+#endif
 #if defined(TGRID) && !defined(TOPS_MAP)
       amb *= 1.0 - GRID_AO * gridCrease;
 #endif
@@ -4653,10 +4711,13 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       // towards the horizon mirrored a white sky.
       float lodk = log2(max(2.0 * sigma * dist / ck, 0.06) / TEXEL_KM);
       vec3 xk = ps - eye() + uk * dist;
-      float tv = 0.0, dkS = 0.0;
+      float tv = 0.0;
+#ifdef DECK
       // (Over the deck, its own column: see deckColumn.)
-      float tvD = uCloud < DECK_FROM ? 0.0 : deckColumn(xk, dkS).x;
-      if (dkS < 1.0) for (int i = 0; i < 4; i++) {
+      float dkS = 0.0, tvD = uCloud < DECK_FROM ? 0.0 : deckColumn(xk, dkS).x;
+      if (dkS < 1.0)
+#endif
+      for (int i = 0; i < 4; i++) {
         vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
         float y, bump, body, edge;
         coarse = true;
@@ -4664,7 +4725,9 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
         coarse = false;
         if (f > 0.0) tv += cloudExtinction(f, min(lodk, 2.0), y, body, edge) * h.y;
       }
+#ifdef DECK
       tv = mix(tv, tvD, dkS);
+#endif
       vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
       float sk = exp(-tv / ck);
       for (int k = 0; k < 3; k++) {
@@ -9009,6 +9072,11 @@ const SkySound = (() => {
     // The overcast's top (uDeck): 2048 texels over its 32 km, 15.6 m each;
     // on a software renderer 512, which bakes in a sixteenth of the time.
     const DECK = Math.min(Q.deck, software ? 512 : 2048);
+    // The deck is drawn from 0.85 of cloud (DECK_FROM in fs); its programs
+    // and its top are made from DECK_NEAR on, a little before, so that they
+    // are ready when it comes in (see deckLater). A page that starts there
+    // makes them at once.
+    const DECK_NEAR = 0.8, deckAtStart = state.cloud >= DECK_NEAR;
     // The frames and the pictures: half floats where the GPU can draw to those (see picture).
     let fine = !!(gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float'));
 
@@ -9055,13 +9123,13 @@ const SkySound = (() => {
       const prog = gl.createProgram(), shaders = [];
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
-      names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
+      names.set(prog, id + (defs ? ' (' + defs.replace(/#define /g, '').trim().replace(/\n/g, ' ') + ')' : ''));
       // (fs: the mip level of uBody's texels, as a level of the noise.)
       if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1 } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       // (Not in the scene's own program: it reads the low clouds from their
       // pass, and with one more texture it would read 17, where Direct3D 11
       // allows 16.)
-      if (id === 'fs' && TOWER_GRID && names.get(prog) !== 'fs') defs = TOWER_GRID.defs + defs;
+      if (id === 'fs' && TOWER_GRID && !/^fs( \(DECK\))?$/.test(names.get(prog))) defs = TOWER_GRID.defs + defs;
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
@@ -9091,17 +9159,26 @@ const SkySound = (() => {
     // and the ice program only if the page starts with cirrus (see
     // buildIce): a sky without cirrus does not wait for their compiler.
     let ciProg = state.cirrus > 0 ? link('fs', '#define CIRRUS_PASS') : null;
-    const prog = link('fs');
+    // The programs that draw the low clouds are made without the overcast's
+    // deck (see DECK in fs) unless the slider stands at DECK_NEAR or more
+    // (the deck comes in from 0.85): with it, they took 30 % longer to
+    // link on Direct3D 11, and a frame of the default view 17 % longer.
+    // When the slider first comes near, they are made again with it, in
+    // the background (see deckLater).
+    const D = deckAtStart ? '#define DECK\n' : '';
+    const prog = link('fs', D);
     // fs as the low clouds' pass (see CLOUD_PASS).
-    const cloudProg = link('fs', '#define CLOUD_PASS');
+    const cloudProg = link('fs', D + '#define CLOUD_PASS');
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const noiseProgram = link('noise'), wavesProgram = link('waves'), slopeProgram = link('slope');
     const mean = link('mean', [Q.frame < 1 ? '#define UPSCALE' : '', Q.keys ? '#define KEYS' : ''].filter(Boolean).join('\n')), show = link('show'), meter = link('meter');
     // fs again, as the map of the clouds' shadow (see cloudShadow).
-    const shadowProg = link('fs', '#define SHADOW_MAP');
+    const shadowProg = link('fs', D + '#define SHADOW_MAP');
     // And as the map of the tops (see uTops), and as the sky's light on the
     // clouds (see uSkyLight).
-    const topsProg = link('fs', '#define TOPS_MAP'), skyProg = link('fs', '#define SKY_LIGHT');
+    const topsProg = link('fs', D + '#define TOPS_MAP'), skyProg = link('fs', '#define SKY_LIGHT');
+    // The program that bakes the deck's top (see DECK_BAKE in noise).
+    const deckBakeProgram = deckAtStart ? link('noise', '#define DECK_BAKE') : null;
     // And as the table of the air's light (see Q_AIR_LUT), where the level
     // reads it (`airLut`) and the GPU can draw half floats.
     const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT') : null;
@@ -9240,6 +9317,75 @@ const SkySound = (() => {
       gl.generateMipmap(target);
       gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    };
+
+    // The top of the overcast's deck (uDeck, see deckBake in noise), on
+    // unit 19, DECK texels a side, drawn by the program `bake`, in parts
+    // (for batches): first the map of where its puffs gather (DECK_CTL
+    // texels a side, on unit 26 while the top reads it), then the top in
+    // strips of 64 rows (a strip costs some 4 slices of the noise per
+    // texel), then its mipmaps. Half floats where the GPU can draw to them
+    // (in 8 bits its heights stepped by 2 m, and the flanks of the puffs
+    // showed terraces). Each part leaves the state as the frames want it:
+    // when the deck is made later, they run between frames (deckLater).
+    const deckParts = bake => {
+      const CTL = 512, STRIP = 64, unit = NOISE * NOISE;
+      const uZ = gl.getUniformLocation(bake, 'uZ'), uSize = gl.getUniformLocation(bake, 'uSize');
+      let ctl = null, top = null, target = null;
+      const into = (texture, size, z) => {
+        gl.useProgram(bake);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        gl.viewport(0, 0, size, size);
+        gl.uniform1f(uSize, size);
+        gl.uniform1f(uZ, z);
+      };
+      const back = () => {
+        gl.disable(gl.SCISSOR_TEST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.useProgram(prog);
+      };
+      const parts = [[CTL * CTL / unit, () => {
+        target = gl.createFramebuffer();
+        gl.activeTexture(gl.TEXTURE26);
+        ctl = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, ctl);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, CTL, CTL);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        // (Not bound while it is drawn: a texture read and drawn at once
+        // is an error.)
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        into(ctl, CTL, -4);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindTexture(gl.TEXTURE_2D, ctl);
+        gl.uniform1i(gl.getUniformLocation(bake, 'uDeckCtl'), 26);
+        gl.activeTexture(gl.TEXTURE19);
+        top = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, top);
+        gl.texStorage2D(gl.TEXTURE_2D, Math.log2(DECK) + 1, fine ? gl.RGBA16F : gl.RGBA8, DECK, DECK);
+        back();
+      }]];
+      for (let y = 0; y < DECK; y += STRIP) {
+        parts.push([4 * STRIP * DECK / unit, () => {
+          into(top, DECK, -3);
+          gl.enable(gl.SCISSOR_TEST);
+          gl.scissor(0, y, DECK, STRIP);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          back();
+        }]);
+      }
+      parts.push([0, () => {
+        gl.activeTexture(gl.TEXTURE26);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.deleteTexture(ctl);
+        gl.deleteFramebuffer(target);
+        gl.activeTexture(gl.TEXTURE19);
+        smooth(gl.TEXTURE_2D);
+        back();
+        gl.deleteProgram(bake);
+      }]);
+      return parts;
     };
 
     // The cirrus's textures, drawn by the ice program (see Cirrus in
@@ -9382,13 +9528,6 @@ const SkySound = (() => {
       const body = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_3D, body);
       gl.texStorage3D(gl.TEXTURE_3D, Math.log2(BODY) + 1, gl.RGBA8, BODY, BODY, BODY);
-      // The top of the overcast layer, on unit 19 (see deckBake): half
-      // floats where the GPU can draw to them (in 8 bits its heights stepped
-      // by 2 m, and the flanks of the puffs showed terraces).
-      gl.activeTexture(gl.TEXTURE19);
-      const deck = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, deck);
-      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(DECK) + 1, fine ? gl.RGBA16F : gl.RGBA8, DECK, DECK);
       gl.activeTexture(gl.TEXTURE3);
       const weather = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, weather);
@@ -9453,60 +9592,26 @@ const SkySound = (() => {
             gl.drawArrays(gl.TRIANGLES, 0, 3);
           }]);
         }
-        // The deck's map of where its puffs gather (DECK_CTL texels a side,
-        // on unit 28 in place of uPop), then its top, in strips. (A strip
-        // of the deck costs some 4 slices of the noise per texel.)
-        const DECK_CTL = 512;
-        let ctl = null;
-        parts.push([DECK_CTL * DECK_CTL / (n * n), () => {
-          gl.activeTexture(gl.TEXTURE28);
-          gl.deleteTexture(pop);
-          ctl = gl.createTexture();
-          gl.bindTexture(gl.TEXTURE_2D, ctl);
-          gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, DECK_CTL, DECK_CTL);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          // (Not bound while it is drawn: uPop reads unit 28, and a texture
-          // read and drawn at once is an error.)
-          gl.bindTexture(gl.TEXTURE_2D, null);
-          gl.disable(gl.SCISSOR_TEST);
-          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, ctl, 0);
-          gl.viewport(0, 0, DECK_CTL, DECK_CTL);
-          gl.uniform1f(uSize, DECK_CTL);
-          gl.uniform1f(uZ, -4);
-          gl.drawArrays(gl.TRIANGLES, 0, 3);
-          gl.bindTexture(gl.TEXTURE_2D, ctl);
-          gl.activeTexture(gl.TEXTURE3);
-          gl.uniform1i(gl.getUniformLocation(draw, 'uDeckCtl'), 28);
-          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, deck, 0);
-          gl.viewport(0, 0, DECK, DECK);
-          gl.uniform1f(uSize, DECK);
-          gl.uniform1f(uZ, -3);
-          gl.enable(gl.SCISSOR_TEST);
-        }]);
-        for (let y = 0; y < DECK; y += STRIP) {
-          parts.push([4 * STRIP * DECK / (n * n), () => {
-            gl.scissor(0, y, DECK, STRIP);
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-          }]);
-        }
         parts.push([0, () => {
           gl.disable(gl.SCISSOR_TEST);
           gl.activeTexture(gl.TEXTURE28);
           gl.bindTexture(gl.TEXTURE_2D, null);
           gl.activeTexture(gl.TEXTURE3);
-          gl.deleteTexture(ctl);
+          gl.deleteTexture(pop);
         }]);
         doing = 'building the noise and the weather map';
         await batches(parts, share => done(0.6 + 0.15 * share));
         mark('noise and weather built');
+        if (deckBakeProgram) {
+          await batches(deckParts(deckBakeProgram), () => {});
+          mark('deck built');
+          gl.activeTexture(gl.TEXTURE3);
+        }
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.deleteFramebuffer(target);
         gl.deleteProgram(draw);
       }
       smooth(gl.TEXTURE_2D);
-      gl.activeTexture(gl.TEXTURE19);
-      smooth(gl.TEXTURE_2D);
-      gl.activeTexture(gl.TEXTURE3);
       // The map's slope, on unit 21, drawn from it (see the slope program).
       {
         gl.activeTexture(gl.TEXTURE21);
@@ -9688,6 +9793,7 @@ const SkySound = (() => {
         ['uniform1f', 'uLightI', state.lightI],
         ['uniform1f', 'uLightShare', state.lightShare],
         ['uniform1f', 'uStage', stage],
+        ['uniform1f', 'uDeckIn', use.deckIn],
         ...(grid ? [['uniform4fv', 'uGridO', grid.o]] : []),
         ...each,
       ];
@@ -9708,13 +9814,13 @@ const SkySound = (() => {
         if (ciPass > 1) gl.viewport(0, 0, Math.ceil(w / ciPass), Math.ceil(h / ciPass));
         if (state.cirrus > 0 && ciProg) pass(ciUse || ciProg, 0);
         if (ciPass !== Q.pass) gl.viewport(0, 0, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
-        if (v.cloud > 0) pass(cloudUse, 1);
+        if (v.cloud > 0) pass(cloudUse || use.cloud, 1);
         if (ciPass > 1) gl.viewport(0, 0, vw, vh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       }
       // The first stage of the clouds' light is the clouds' pass's, the
       // sky's light on the clouds skyProg's (into the bound framebuffer).
-      const p = stage === 0 ? cloudUse : stage === 2 ? skyProg : stage === 3 ? airProg : sceneUse;
+      const p = stage === 0 ? cloudUse || use.cloud : stage === 2 ? skyProg : stage === 3 ? airProg : sceneUse || use.scene;
       gl.useProgram(p);
       set(p, view);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -9775,7 +9881,6 @@ const SkySound = (() => {
     // floats where the GPU can draw to those (eight times finer steps than
     // 8 bits, so the mean of many frames stays smooth); else 8 bits. Each
     // has a second texture of 8 bits for the distances and the counts.
-    const uSteps = U('uSteps');
     const M = {};
     gl.useProgram(mean);
     for (const n of ['uRes', 'uCam', 'uTan', 'uAlt', 'uCamPast', 'uResPast', 'uWay', 'uTrust', 'uSteps', 'uPass', ...(Q.frame < 1 ? ['uJitter', 'uFrameRes'] : [])]) {
@@ -9924,14 +10029,25 @@ const SkySound = (() => {
     // layer where things were (uShadowShift, uColumnShift). Half floats
     // where the GPU can draw to them, else 8 bits.
     const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = Q.stale || 0.5;
-    const S = {};
+    // (The uniforms that stay, as for the scene's: kept for the deck's
+    // programs, see deckLater. And those of the map of the tops, below.)
+    const fixedShadow = [], fixedTops = [];
+    const fixedOn = (p, list) => {
+      gl.useProgram(p);
+      for (const [method, name, args] of list) gl[method](gl.getUniformLocation(p, name), ...args);
+      gl.useProgram(prog);
+    };
+    const SC = (method, name, ...args) => {
+      fixedShadow.push([method, name, args]);
+      gl[method](gl.getUniformLocation(shadowProg, name), ...args);
+    };
     gl.useProgram(shadowProg);
-    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud', ...(TOWER_GRID ? ['uGridO'] : [])]) S[n] = gl.getUniformLocation(shadowProg, n);
-    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
-    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
-    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uSlope'), 21);
-    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uBody'), 22);
-    gl.uniform1f(gl.getUniformLocation(shadowProg, 'uSlopeMax'), SLOPE_MAX);
+    SC('uniform1i', 'uNoise', 2);
+    SC('uniform1i', 'uWeather', 3);
+    SC('uniform1i', 'uSlope', 21);
+    SC('uniform1i', 'uBody', 22);
+    SC('uniform1i', 'uDeck', 19);
+    SC('uniform1f', 'uSlopeMax', SLOPE_MAX);
     const depthMap = (unit, size, column) => {
       const m = { size, column, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
       gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
@@ -10023,11 +10139,11 @@ const SkySound = (() => {
     // them round each, for each amount of cloud. 8 bits, rounded up.
     const TOPS = 1024;
     gl.useProgram(topsProg);
-    const uCloudTops = gl.getUniformLocation(topsProg, 'uCloud'), uTopsPass = gl.getUniformLocation(topsProg, 'uTopsPass');
-    gl.uniform1i(gl.getUniformLocation(topsProg, 'uWeather'), 3);
-    gl.uniform1i(gl.getUniformLocation(topsProg, 'uSlope'), 21);
-    gl.uniform1f(gl.getUniformLocation(topsProg, 'uSlopeMax'), SLOPE_MAX);
-    gl.uniform1i(gl.getUniformLocation(topsProg, 'uTopsIn'), 24);
+    for (const [method, name, ...args] of [['uniform1i', 'uWeather', 3], ['uniform1i', 'uSlope', 21], ['uniform1f', 'uSlopeMax', SLOPE_MAX],
+      ['uniform1i', 'uTopsIn', 24], ['uniform1f', 'uDeckIn', 1]]) {
+      fixedTops.push([method, name, args]);
+      gl[method](gl.getUniformLocation(topsProg, name), ...args);
+    }
     const tops = [24, 23].map(unit => {
       const t = { texture: gl.createTexture(), target: gl.createFramebuffer() };
       gl.activeTexture(gl.TEXTURE0 + unit);
@@ -10048,7 +10164,7 @@ const SkySound = (() => {
     // target each: see warm), with mipmaps.
     // (One 2D array, the map in layer 0 and its slope in layer 1, on unit
     // 25: one sampler for both.)
-    const WARPED = Q.warped, uResTops = gl.getUniformLocation(topsProg, 'uRes');
+    const WARPED = Q.warped;
     const warpedTex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE25);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, warpedTex);
@@ -10062,6 +10178,8 @@ const SkySound = (() => {
     });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     // (The map of the clouds' shadow reads them as the march does.)
+    fixedShadow.push(['uniform1i', 'uWarped', [25]]);
+    fixedTops.push(['uniform1i', 'uWarped', [25]]);
     for (const pr of [topsProg, shadowProg]) {
       gl.useProgram(pr);
       gl.uniform1i(gl.getUniformLocation(pr, 'uWarped'), 25);
@@ -10127,6 +10245,7 @@ const SkySound = (() => {
       C('uniform1i', 'uGrid', 30);
       gl.useProgram(shadowProg);
       gl.uniform1i(gl.getUniformLocation(shadowProg, 'uGrid'), 30);
+      fixedShadow.push(['uniform1i', 'uGrid', [30]]);
       gl.useProgram(prog);
       const mod = (a, b) => ((a % b) + b) % b;
       const near = x => x - 256 * Math.round(x / 256);
@@ -10384,9 +10503,10 @@ const SkySound = (() => {
       };
       return { o, frame, mapFor, get version() { return version; } };
     })();
-    const drawTops = cloud => {
-      gl.useProgram(topsProg);
-      gl.uniform1f(uCloudTops, cloud);
+    const drawTops = (cloud, key) => {
+      const tp = use.tops, uTopsPass = place(tp, 'uTopsPass'), uResTops = place(tp, 'uRes');
+      gl.useProgram(tp);
+      gl.uniform1f(place(tp, 'uCloud'), cloud);
       // (Unit 25 holds the targets of these draws: free while they run.)
       gl.viewport(0, 0, WARPED, WARPED);
       gl.uniform2f(uResTops, WARPED, WARPED);
@@ -10411,7 +10531,7 @@ const SkySound = (() => {
       });
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(prog);
-      topsFor = cloud;
+      topsFor = key;
       if (grid) grid.mapFor(cloud);
     };
     C('uniform1i', 'uPasses', 16);
@@ -10419,7 +10539,92 @@ const SkySound = (() => {
     for (const p of [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
     // (The scene's and the low clouds' programs that draw uses: other
     // variants only for ?stats=bench3.)
-    let sceneUse = prog, cloudUse = cloudProg, ciUse = null, benchRepeat = 1, benchSkip = {};
+    let sceneUse = null, cloudUse = null, ciUse = null, benchRepeat = 1, benchSkip = {};
+    // The programs a frame draws with (`use`, set by pickPrograms): those
+    // made at start (`plain`), or those with the deck (`withDeck`, DECK in
+    // fs) while the slider stands over 0.85 (DECK_FROM in fs), once they
+    // are made. deckIn: uDeckIn of fs.
+    const plain = { scene: prog, cloud: cloudProg, shadow: shadowProg, tops: topsProg, deck: deckAtStart, deckIn: 1 };
+    let use = plain, withDeck = deckAtStart ? plain : null, deckMaking = deckAtStart, deckCame = -Infinity;
+    // The deck made later, when the slider first comes to DECK_NEAR: its
+    // four programs and the program of its top are linked, and the frames
+    // go on with the old ones while the GPU process compiles them on its
+    // threads (asked once every 50 ms; without KHR_parallel_shader_compile
+    // the first ask waits, as for the cirrus). Then its top is drawn a part
+    // at a time, each after the GPU has done the one before (a fence), so
+    // that no frame waits long. If the slider stands over 0.85 by then,
+    // the deck fades in over DECK_FADE ms (uDeckIn): the heaps' field there
+    // (rows of rolls) gives way to it without a jump.
+    const DECK_FADE = 1500;
+    const deckLater = () => {
+      deckMaking = true;
+      mark('deck wanted');
+      const made = {};
+      for (const [k, defs] of [['scene', ''], ['cloud', '#define CLOUD_PASS'], ['shadow', '#define SHADOW_MAP'], ['tops', '#define TOPS_MAP']]) {
+        made[k] = link('fs', '#define DECK\n' + defs);
+      }
+      const bake = link('noise', '#define DECK_BAKE');
+      gl.flush();
+      const mine = programs.slice(-5);
+      // (A program that fails leaves the old picture: the heaps' rolls.)
+      const failed = err => console.error(`Sky: no deck: ${err.message}`);
+      const compiled = () => {
+        if (lost) return;
+        if (parallel && mine.some(([p]) => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR))) return void setTimeout(compiled, 50);
+        try {
+          mine.forEach(check);
+        } catch (err) {
+          return failed(err);
+        }
+        mark('deck programs compiled');
+        fixedFor(made.scene);
+        fixedFor(made.cloud);
+        fixedOn(made.shadow, fixedShadow);
+        fixedOn(made.tops, fixedTops);
+        const parts = deckParts(bake);
+        let i = 0, sync = null;
+        const step = () => {
+          if (lost) return;
+          if (sync) {
+            if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) return void setTimeout(step, 16);
+            gl.deleteSync(sync);
+            sync = null;
+          }
+          if (i < parts.length) {
+            // (Some 64 slices of the noise a time: two strips.)
+            for (let w = 0; i < parts.length && w < 64; i++) {
+              w += parts[i][0];
+              parts[i][1]();
+            }
+            sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+            gl.flush();
+            return void setTimeout(step, 16);
+          }
+          mark('deck built');
+          withDeck = { ...made, deck: true, deckIn: 1 };
+          deckCame = null;
+          wake();
+        };
+        step();
+      };
+      setTimeout(compiled, 50);
+    };
+    const pickPrograms = (v, now) => {
+      if (!deckMaking && v.cloud >= DECK_NEAR) deckLater();
+      const on = !!withDeck && v.cloud > 0.85;
+      // (The first frame with the deck over 0.85 starts its fade; made
+      // below 0.85, it needs none.)
+      if (deckCame === null) {
+        deckCame = on ? now : -Infinity;
+        mark(on ? 'deck fades in' : 'deck ready');
+      }
+      if (!on) {
+        use = plain;
+        return;
+      }
+      const deckIn = Math.min(Math.max((now - deckCame) / DECK_FADE, 0), 1);
+      if (use !== withDeck || withDeck.deckIn !== deckIn) use = withDeck = { ...withDeck, deckIn };
+    };
     // A picture of w by h pixels: `old` if it has that size, else a new one
     // in its place. The frame (`depth`) keeps its distances as its depth
     // (see distanceCode), the pictures as a second target.
@@ -10529,6 +10734,7 @@ const SkySound = (() => {
       const fitted = fit();
       if (!fitted) return false;
       const v = view(), cam = camera(v.yaw, v.pitch);
+      pickPrograms(v, now);
       lap('start');
       poll();
       lap('read');
@@ -10556,7 +10762,7 @@ const SkySound = (() => {
       // still while nothing is drawn).
       const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
       restart = false;
-      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
+      const look = [state.time, state.day, state.moonAge, state.haze, state.wind, state.cirrus, v.alt, v.cloud, use.deck, use.deckIn, ...(grid ? [grid.version] : [])].join();
       const flying = state.speed > 0;
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
@@ -10607,11 +10813,10 @@ const SkySound = (() => {
       // where its samples lie.
       const k = drawn++ % 1024 + 1;
       const jitter = [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
-      const each = [['uniform2f', 'uJitter', ...jitter], ['uniform1f', 'uPass', pass],
+      const each = [['uniform2f', 'uJitter', ...jitter], ['uniform1f', 'uPass', pass], ['uniform1f', 'uSteps', steps],
         ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
-      gl.uniform1f(uSteps, steps);
       // The map of the tops, for this frame's clouds.
-      if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
+      if (v.cloud > 0 && `${v.cloud},${use.deck}` !== topsFor) drawTops(v.cloud, `${v.cloud},${use.deck}`);
       // The table of the air's light, for this frame's light, air and height.
       const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare].join() : '';
       if (lut && lutKey !== lut.for) {
@@ -10646,22 +10851,21 @@ const SkySound = (() => {
       // The depth maps, for this frame's light and clouds, and a place near
       // enough: all of a map whose light or clouds have changed, else the
       // first layer that is stale (flown too far), one a frame.
-      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
-      const maps = [[shadowMap, shade, state.light], [columnMap, v.cloud > 0 ? String(v.cloud) : '', [0, 1, 0]]];
+      // (And for the programs that draw them: with the deck as it fades in,
+      // in eighths.)
+      const drawnBy = use.deck ? Math.ceil(8 * use.deckIn) : -1;
+      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, drawnBy, ...state.light].join() : '';
+      const maps = [[shadowMap, shade, state.light], [columnMap, v.cloud > 0 ? [v.cloud, drawnBy].join() : '', [0, 1, 0]]];
       const shiftOf = at => [wrapped(state.drift[0] - at[0]), wrapped(state.drift[1] - at[1])];
       const drawLayer = (m, dir, layer) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
         gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, m.texture, 0, layer);
         gl.viewport(0, 0, m.size, m.size);
-        gl.useProgram(shadowProg);
-        gl.uniform2f(S.uRes, m.size, m.size);
-        gl.uniform1f(S.uAlt, v.alt);
-        gl.uniform3fv(S.uDir, dir);
-        gl.uniform1f(S.uColumnMap, m.column ? 1 : 0);
-        gl.uniform1f(S.uLayer, layer);
-        gl.uniform2fv(S.uDrift, state.drift);
-        gl.uniform1f(S.uCloud, v.cloud);
-        if (grid) gl.uniform4fv(S.uGridO, grid.o);
+        const sp = use.shadow;
+        gl.useProgram(sp);
+        set(sp, [['uniform2f', 'uRes', m.size, m.size], ['uniform1f', 'uAlt', v.alt], ['uniform3fv', 'uDir', dir],
+          ['uniform1f', 'uColumnMap', m.column ? 1 : 0], ['uniform1f', 'uLayer', layer], ['uniform2fv', 'uDrift', state.drift],
+          ['uniform1f', 'uCloud', v.cloud], ['uniform1f', 'uDeckIn', use.deckIn], ...(grid ? [['uniform4fv', 'uGridO', grid.o]] : [])]);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.useProgram(prog);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
@@ -10844,8 +11048,8 @@ const SkySound = (() => {
       benchSkip = skip || {};
     };
     render.use = (scene, cloud, cirrus) => {
-      sceneUse = scene || prog;
-      cloudUse = cloud || cloudProg;
+      sceneUse = scene || null;
+      cloudUse = cloud || null;
       ciUse = cirrus || null;
     };
     // (?stats=bench: the drawing scale held at s, or let go with 0.)
