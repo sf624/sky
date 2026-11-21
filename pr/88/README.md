@@ -32,7 +32,7 @@ panel has the focus):
   second, and 60 degrees (the most) 3.9 degrees a second.
 - **↑ ↓** or **W S**: lower or raise the nose, as in a flight simulator
   (↑ pushes the nose down). The aircraft climbs or descends, up to 15
-  degrees, and the altitude follows. At 300 m and at 13,000 m it levels off.
+  degrees, and the altitude follows. At 300 m and at 40 km it levels off.
 - **Q E**: turn with the rudder, 3 degrees a second, without banking.
 - **L**: back to straight and level flight.
 
@@ -69,7 +69,7 @@ The panel at the bottom changes the time and the weather.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
 - **Heading**: the direction flown, as a compass bearing (0 north, 90 east). The view turns with it. It follows the aircraft's turns.
 - **Bank**, **Climb**: the aircraft's bank, up to 60 degrees left or right, and its climb or descent, up to 15 degrees (with the rate in m/s). **Level** brings both back to 0.
-- **Altitude**: 300 m to 13,000 m (11,000 m at first). It follows a climb or a descent.
+- **Altitude**: 300 m to 40 km (11,000 m at first). Above the cruise the sky overhead turns dark, the horizon curves and a thin blue band lies along it. The slider has a row of its own: up to 13 km it moves evenly, 20 m a step (a pixel is about 30 m on a desktop, 60 m on a phone), and above it moves faster, about 150 m a pixel at 40 km on a desktop. For an exact height, type it into the value beside the slider, in m or km (a number below 300 is km, from 300 on metres).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
