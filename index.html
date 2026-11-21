@@ -4348,8 +4348,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // path tracer on the same field (sun, sky, the droplets' phase)
         // drew the thin patches between the cells darker, and the deck from
         // 11 km straight down at noon with half again the contrast of cells
-        // against creases; and no brown creases.
-        float tc = max(colAll, 0.0), kR = mix(1.0, COLUMN * tc / (1.0 + COLUMN * tc) / max(1.0 - exp(-tc / SLAB_T), 0.05), deckHere * (1.0 - below));
+        // against creases; and no brown creases. (Over 0.7, so that the
+        // deck as a whole sends back as much as before: taken as it is, it
+        // was darker by 0.35 to 0.65 stops, and the exposure that made up
+        // for it turned the deck from 11 km away from a low sun blue.)
+        float tc = max(colAll, 0.0), kR = mix(1.0, COLUMN * tc / (1.0 + COLUMN * tc) / max(1.0 - exp(-tc / SLAB_T), 0.05) / 0.7, deckHere * (1.0 - below));
         many *= kR;
         amb *= kR * (1.0 - lost);
         // (And everywhere on it, light from the cells round it, below its
