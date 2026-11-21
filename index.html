@@ -703,9 +703,112 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
   return sum;
 }
 
+// The cells of an overcast deck's top (uZ -3; see deckTop in fs), on a
+// tile of DECK_TILE km (a whole share of the map): a round bump on each
+// point of a jittered lattice of DECK_CN cells across, wider on some points
+// than on others (few much wider: cells of many sizes, the large ones among
+// small ones), nearly as high on all (the top of a deck is nearly level).
+// A place belongs to the bump that stands highest over it; the bumps meet
+// in creases that bend (circles, where two bumps of different widths
+// meet). For each texel:
+// R: the height of the bumps, their smooth maximum (rounded creases), 0 to
+//    1 for DECK_HR.x to DECK_HR.y;
+// G: the rank of the nearest crease, 0 to 1 (a hash of the pair of cells,
+//    the same from both sides), mixed over the creases within some 90 m (it
+//    jumps at no corner). fs opens the creases ranked under a level that
+//    varies from place to place into gaps, and fills the highest: cells
+//    merge there. Where the cells run in trains (a direction and a
+//    strength that vary over the tile, some 16 km), the creases across a
+//    train rank high (its cells merge along it) and those along it low (the
+//    gaps between trains);
+// B: how far the texel lies from the nearest crease, over DECK_DE cells;
+// A: the same bumps' height on a finer lattice, DECK_CN2 cells across,
+//    all of one width: lobes on the cells.
+const float DECK_CN = 72.0, DECK_CN2 = 180.0, DECK_DE = 0.9, DECK_WARP = 0.22;
+const float DECK_W = 0.8;   // how much wider the widest bumps are: R^2 = 0.3 + DECK_W r^3 (cells^2)
+const vec2 DECK_HR = vec2(-0.5, 1.1);
+float deckRank(uint a, uint b) {
+  uint h = ihash(min(a, b) * 0x9e3779b9u ^ ihash(max(a, b) + 0x2545f491u));
+  return float(h >> 8u) / 16777216.0;
+}
+// A bump of the lattice at cell g (n cells across, seed): its middle (p),
+// 1 / R^2 and height (w.x, w.y), and its id.
+void deckBump(vec2 g, float n, float seed, float wide, out vec2 p, out vec2 w, out uint id) {
+  vec3 r = rnd(vec3(g, 0.0), vec3(n, n, 1.0), seed);
+  p = g + 0.5 + 0.9 * (r.xy - 0.5);
+  w = vec2(1.0 / (0.3 + wide * r.z * r.z * r.z), 0.85 + 0.3 * (rnd(vec3(g, 0.0), vec3(n, n, 1.0), seed + 1.0).x - 0.5));
+  uvec2 c = uvec2(mod(g, n));
+  id = c.x + c.y * 1024u;
+}
+// (Each bump falls as (r / R)^(2 DECK_P): nearly a cone, rounded at the
+// top. As a paraboloid, its flat top was lit as flat cloud with the sun
+// low, a grey disc with a sharp outline.)
+const float DECK_P = 0.6;
+vec2 deckSlope(vec2 d, vec2 w) {
+  float f = dot(d, d) * w.x + 1e-4;
+  return -w.y * DECK_P * pow(f, DECK_P - 1.0) * 2.0 * w.x * d;
+}
+vec4 deckCells(vec2 uv) {
+  const float PI = 3.14159265;
+  // The place, moved by up to a quarter of a cell (noise of half a cell and
+  // a quarter): the creases wind, as the outlines of cells do.
+  vec2 wp = vec2(perlin(vec3(uv, 0.1), vec3(2.0 * DECK_CN, 2.0 * DECK_CN, 1.0), 320.0) + 0.5 * perlin(vec3(uv, 0.2), vec3(4.0 * DECK_CN, 4.0 * DECK_CN, 1.0), 322.0),
+                 perlin(vec3(uv, 0.3), vec3(2.0 * DECK_CN, 2.0 * DECK_CN, 1.0), 321.0) + 0.5 * perlin(vec3(uv, 0.4), vec3(4.0 * DECK_CN, 4.0 * DECK_CN, 1.0), 323.0));
+  vec2 x = uv * DECK_CN + DECK_WARP * wp, g0 = floor(x);
+  float th = 1.6 * PI * perlinFbm(vec3(uv, 0.3), vec3(4.0, 4.0, 1.0), 2, 300.0);
+  vec2 along = vec2(cos(th), sin(th));
+  float trains = smoothstep(-0.15, 0.35, perlinFbm(vec3(uv, 0.6), vec3(4.0, 4.0, 1.0), 2, 310.0));
+  // The highest bump (a), and the smooth maximum of all.
+  float ba = -1e9, sum = 0.0;
+  vec2 ga = vec2(0.0), pa = vec2(0.0), wa = vec2(0.0);
+  uint ia = 0u;
+  for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
+    vec2 g = g0 + vec2(i, j), p, w;
+    uint id;
+    deckBump(g, DECK_CN, 400.0, DECK_W, p, w, id);
+    float b = w.y * (1.0 - pow(dot(x - p, x - p) * w.x + 1e-4, DECK_P));
+    sum += exp(12.0 * b);
+    if (b > ba) { ba = b; pa = p; wa = w; ia = id; }
+  }
+  float hs = log(sum) / 12.0;
+  // The creases: how far each lies (the difference of two bumps over the
+  // difference of their slopes), the nearest, and the ranks mixed over the
+  // nearest.
+  vec2 sa = deckSlope(x - pa, wa);
+  float de = 1e9, rw = 0.0, rs = 0.0;
+  for (int pass = 0; pass < 2; pass++) for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
+    vec2 g = g0 + vec2(i, j), p, w;
+    uint id;
+    deckBump(g, DECK_CN, 400.0, DECK_W, p, w, id);
+    if (id == ia) continue;
+    float b = w.y * (1.0 - pow(dot(x - p, x - p) * w.x + 1e-4, DECK_P));
+    float e = (ba - b) / max(length(sa - deckSlope(x - p, w)), 1e-3);
+    if (pass == 0) { de = min(de, e); continue; }
+    float k = exp(-(e - de) / 0.1);
+    vec2 ab = p - pa;
+    float inLine = abs(dot(ab, along)) / max(length(ab), 1e-3);
+    rs += k * clamp(deckRank(ia, id) + trains * 0.9 * (inLine - 0.5), 0.0, 1.0);
+    rw += k;
+  }
+  // The finer lobes.
+  vec2 x2 = uv * DECK_CN2 + 0.5 * DECK_WARP * wp * DECK_CN2 / DECK_CN, g2 = floor(x2);
+  float sum2 = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 g = g2 + vec2(i, j), p, w;
+    uint id;
+    deckBump(g, DECK_CN2, 402.0, 0.0, p, w, id);
+    sum2 += exp(12.0 * w.y * (1.0 - pow(dot(x2 - p, x2 - p) * w.x + 1e-4, DECK_P)));
+  }
+  float hs2 = log(sum2) / 12.0;
+  return vec4(clamp((hs - DECK_HR.x) / (DECK_HR.y - DECK_HR.x), 0.0, 1.0), rs / rw, clamp(de / DECK_DE, 0.0, 1.0),
+              clamp((hs2 - DECK_HR.x) / (DECK_HR.y - DECK_HR.x), 0.0, 1.0));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
-  if (uZ >= 2.0) {
+  if (uZ < -2.5) {
+    outColor = deckCells(uv);
+  } else if (uZ >= 2.0) {
     // The heaps' body: the turrets of 2 km and 1 km (4 and 8 cells across
     // the tile of 8 km), and the heads on them (heads).
     vec3 p = vec3(uv, uZ - 2.0);
@@ -1721,6 +1824,13 @@ uniform sampler3D uBody;
 #ifndef BODY_LOD
 #define BODY_LOD 1.0
 #endif
+// The cells of an overcast deck's top (see deckTop), baked at start on a
+// tile of DECK_TILE km (see deckCells in the noise shader). DECK_LOD: the
+// mip level of its texels, as a level of the noise (1 for 2048 texels).
+uniform sampler2D uDeck;
+#ifndef DECK_LOD
+#define DECK_LOD 1.0
+#endif
 // The tops (see clouds): for each texel of the weather map, how high the
 // march may meet cloud within 1, 2, 4 and 8 texels of it (R, G, B, A: 250
 // m to 2 km), as a share of CB to CT. Made with the clouds' amount.
@@ -2305,6 +2415,63 @@ float heapUp = 0.0;
 // And how much of the heap's side there faces upshear (1) or downshear (0),
 // from the slope of the map against the lean (see cloudShape).
 float upshear = 0.5;
+// And the deck's extinction there, as a share (deckTop), and how far its
+// edge is a gap's soft fringe.
+float deckM = 1.0, deckSoft = 0.0;
+
+// The top of an overcast deck (see cloudShape: where the cover is whole,
+// near the top of the slider). Its cells are bumps of uDeck (see deckCells
+// in the noise shader): rounded, packed edge to edge, of many sizes, nearly
+// as high as one another. Between them, a crease: where uDeck ranks it under
+// a level (DECK_OPEN), it opens into a gap, lower and thinner (wider the
+// lower it ranks: soft gaps of many widths, in some places and not in
+// others); over DECK_MERGE, the cells merge across it. The level follows a
+// field of thick and thin stretches some 10 to 40 km across (the weather
+// map's bands, and its gusts at a few km): closed where the deck is
+// thick, open where it is thin; and calm stretches have smaller cells and
+// few gaps. A cell's extinction is less towards its edge (DECK_EDGE) and
+// in a gap (DECK_GAP.z): thick middles, thin edges.
+// Read through mipmaps, the cells fade to their mean once a texel is half a
+// cell wide.
+const float DECK_TILE = 64.0;                   // km: the tile of uDeck (a whole share of the map)
+const vec2 DECK_OPEN = vec2(0.15, 0.45);        // the creases ranked under this open: in thick and in thin stretches
+const float DECK_MERGE = 0.8;                   // and over this, the cells merge (across a train more often)
+const vec4 DECK_GAP = vec4(0.25, 0.35, 0.95, 0.15); // a gap: how deep (km), how wide (km, at most 1.8 times), how much thinner, its soft edge (field)
+const vec4 DECK_H = vec4(0.15, 0.08, 0.1, 0.6); // how high the cells, their lobes (km), thick stretches over thin ones (km), a merged crease's height (of a cell's)
+const vec2 DECK_EDGE = vec2(0.5, 0.5);          // a cell's extinction at its edge, less by this; in thin stretches, of what thick ones have
+const float DECK_WARP = 1.5;                    // km: the cells' place moved by the slow map (the tile does not show)
+float deckTop(vec2 x, float lod, vec4 far, out float mExt, out float soft) {
+  vec4 mz = textureLod(uWeather, x / WEATHER_KM + vec2(0.19, 0.71), 3.5);
+  // Thick (1) and thin stretches; calm ones.
+  float tk = smoothstep(0.3, 0.7, far.a + 0.6 * (mz.b - 0.5));
+  float calm = smoothstep(0.65, 0.75, far.b);
+  vec2 xr = x + 2.0 * DECK_WARP * vec2(far.b - 0.5, mz.a - far.a);
+#if defined(CLOUD_PASS) || defined(SHADOW_MAP) || defined(TOPS_MAP)
+  float ld = lod + DECK_LOD;
+  vec4 c = textureLod(uDeck, xr / DECK_TILE, max(ld, 0.0));
+  float fade = 1.0 - smoothstep(2.5, 4.5, ld);
+#else
+  // (The scene's own program reads the low clouds only for the sea's
+  // mirror, far off and smoothed: the cells' mean. With uDeck it would read
+  // 17 textures, where Direct3D 11 allows 16.)
+  vec4 c = vec4(0.5);
+  float fade = 0.0;
+#endif
+  float level = (mix(DECK_OPEN.y, DECK_OPEN.x, tk) + 0.4 * (mz.b - 0.5)) * (1.0 - calm);
+  float open = 1.0 - smoothstep(level - 0.06, level + 0.06, c.g);
+  float merged = smoothstep(DECK_MERGE - 0.06, DECK_MERGE + 0.06, c.g);
+  // The bumps' height (0 at the creases, about 1 on a middle), the
+  // distance to the nearest crease (km), the lobes' height.
+  float H = c.r * 1.6 - 0.5, de = c.b * 0.9 * DECK_TILE / 72.0, H2 = c.a * 1.6 - 0.5;
+  H = mix(H, max(H, DECK_H.w), merged * (1.0 - smoothstep(0.0, 0.3, de)));
+  float ew = DECK_GAP.y * mix(1.0, mix(0.7, 1.8, clamp((level - c.g) / 0.25, 0.0, 1.0)), open) * mix(1.2, 0.85, tk);
+  float g = 1.0 - min(de / ew, 1.0);
+  g *= g * open;
+  float h = mix(-0.1 * DECK_GAP.x * level, (1.0 - 0.7 * calm) * (DECK_H.x * (H - 0.6) + DECK_H.y * (H2 - 0.6)) - DECK_GAP.x * g, fade) + DECK_H.z * (tk - 0.5);
+  mExt = mix(DECK_EDGE.y, 1.0, tk) * mix(1.0 - 0.3 * DECK_EDGE.x, mix(1.0 - DECK_EDGE.x * (1.0 - calm), 1.0, clamp(H, 0.0, 1.0)) * (1.0 - DECK_GAP.z * g), fade);
+  soft = g * fade;
+  return h;
+}
 
 // The weather map at x (km), smoothed as a mip level lod of the noise
 // would be. (mip: the level of the map's own texels, as a level of the
@@ -2388,6 +2555,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   lump = 0.0;
   base = -9.0;
   relief = 0.0;
+  deckM = 1.0;
+  deckSoft = 0.0;
   thin = 0.0;
   upshear = 0.5;
   solidAt = 0.0;
@@ -2678,7 +2847,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // show them (with rolls only in a few places, the sheet was lumps
     // without order).
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
-    float rows = smoothstep(0.3, 0.6, far.a) * sheet;
+    float deckOn = smoothstep(0.8, 0.92, uCloud + 0.2 * (region - 0.5));
+    float rows = smoothstep(0.3, 0.6, far.a) * sheet * (1.0 - deckOn);
     float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571);
     float roll = sin(ph);
     float along = sin(2.0 * PI * dot(x, vec2(-57.0, 114.0)) / WEATHER_KM + 0.5 * ph + 7.0 * far.g);
@@ -2749,9 +2919,17 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       hTop = hs + (1.0 - TOP_S * free) * (hTop - hs);
       float wc = whole * (1.0 - rows) * (1.0 - (1.0 - free) * sN);
       float rk = (1.0 + up) * (TOP_W.x * (n.g - 0.712) + TOP_W.y * (n.b - 0.715) + TOP_W.z * (n.a - 0.715));
+      float dW = wc * deckOn;
+      if (dW > 0.0) {
+        float dm, dsoft;
+        float dh = deckTop(x, lod, far, dm, dsoft);
+        rk = mix(rk, dh, deckOn);
+        deckM = mix(1.0, dm, dW);
+        deckSoft = dsoft * dW;
+      }
       float raiseN = rows * 0.12 * cells + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
       hTop += sheetTop * raiseN + wc * (rk + TOP_O) / (CT - CB);
-      hTop += TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
+      hTop += (1.0 - deckOn) * TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
       f = mix(f, hTop * mix(13.0, BODY_G * (CT - CB), solid * sN), whole);
       relief = mix(relief, clamp(raiseN + wc * rk / (sheetTop * (CT - CB)), -0.6, 0.9) * sheet, whole);
       steep = mix(steep, 1.9, wc);
@@ -2885,6 +3063,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   body = mix(body, max(body, 2.0), s);
   thin *= 1.0 - s;
   relief *= 1.0 - s;
+  deckM = mix(deckM, 1.0, s);
+  deckSoft *= 1.0 - s;
   lump *= 1.0 - s;
   base = mix(base, 9.0, s);
   y = mix(y, (h - gBase) / (CT - CB), s);
@@ -2998,6 +3178,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   edge = max(edge, 0.15 * solidAt * smoothstep(15.0, 45.0, length(p)));
   // Shreds under a base are thin and ragged: a deep, faint fringe.
   edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
+  edge = mix(edge, max(edge, DECK_GAP.w), deckSoft);
   bump = 0.0;
   // (Scaled as the billows are: see steep.) On the heaps' 3D body the fine
   // billows only carve: its surface stands out by fat for them (a little
@@ -3052,7 +3233,7 @@ float cloudExtinction(float f, float lod, float y, float body, float edge) {
   // the check allows.)
   float wet = mix(1.0, WET, smoothstep(0.0, MIXED, f / BODY_G));
   float up = mix(mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)), clamp(wet * pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2), solidAt);
-  return SIGMA * x * mix(x, 1.0, min(s / edge, 1.0)) * up * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
+  return deckM * SIGMA * x * mix(x, 1.0, min(s / edge, 1.0)) * up * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
 }
 
 // Extinction (per km) at p. fine: with the fine noise and the slope (else
@@ -7820,7 +8001,8 @@ const SkySound = (() => {
   // "Quality levels" in docs/design.md). max draws the picture as it was
   // before there were levels; the lower ones draw fewer pixels (pixels: at
   // most this many; dpr: at most this many per CSS pixel), bake smaller
-  // textures (body: the heaps' body, texels a side; ice: the cirrus's ice;
+  // textures (body: the heaps' body, texels a side; deck: the cells of an
+  // overcast deck, texels a side; ice: the cirrus's ice;
   // shadow, column: the clouds' depth maps; warped: the moved weather map;
   // grid: the towers' grids of ?grid=1, texels a side, none: no grids)
   // and take fewer samples in fs (fs: its defines, Q_ at its top). cost:
@@ -7830,13 +8012,13 @@ const SkySound = (() => {
   // 1: always the canvas's size). keys: the past is read through Keys'
   // six-point cubic, sharper in flight (see "mean").
   const QUALITY = {
-    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
+    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: true, meterAsync: true, meterMs: 200, stale: 1, pass: 1, ciPass: 2, body: 128, deck: 1024, ice: 1024, shadow: 256, column: 128, warped: 1024, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1 } },
-    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
+    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, meterAsync: true, pass: 1, body: 128, deck: 1024, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, pass: 1, body: 256, deck: 2048, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, pass: 1, body: 256, deck: 2048, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The canvas's size in pixels for a place of cw by ch CSS pixels at the
@@ -8690,6 +8872,8 @@ const SkySound = (() => {
     // takes 128 (software, as for the ice), which bakes in an eighth of the
     // time (seconds there).
     const BODY = Math.min(Q.body, software ? NOISE : 2 * NOISE);
+    // The deck's cells (uDeck): texels a side over DECK_TILE km.
+    const DECK = Math.min(Q.deck, software ? 1024 : 2048);
     // The frames and the pictures: half floats where the GPU can draw to those (see picture).
     let fine = !!(gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float'));
 
@@ -8737,8 +8921,9 @@ const SkySound = (() => {
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
-      // (fs: the mip level of uBody's texels, as a level of the noise.)
-      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1 } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      // (fs: the mip level of uBody's texels, and of uDeck's (64 km, 1024
+      // texels of the noise), as a level of the noise.)
+      if (id === 'fs') defs = `#define BODY_LOD ${Math.log2(BODY / NOISE).toFixed(1)}\n#define DECK_LOD ${Math.log2(DECK / 1024).toFixed(1)}\n` + Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1 } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       // (Not in the scene's own program: it reads the low clouds from their
       // pass, and with one more texture it would read 17, where Direct3D 11
       // allows 16.)
@@ -9063,6 +9248,10 @@ const SkySound = (() => {
       const body = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_3D, body);
       gl.texStorage3D(gl.TEXTURE_3D, Math.log2(BODY) + 1, gl.RGBA8, BODY, BODY, BODY);
+      gl.activeTexture(gl.TEXTURE19);
+      const deckTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, deckTex);
+      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(DECK) + 1, gl.RGBA8, DECK, DECK);
       gl.activeTexture(gl.TEXTURE3);
       const weather = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, weather);
@@ -9134,6 +9323,21 @@ const SkySound = (() => {
           gl.activeTexture(gl.TEXTURE3);
           gl.deleteTexture(pop);
         }]);
+        // The deck's cells (uDeck, on unit 19), in strips too.
+        parts.push([0, () => {
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, deckTex, 0);
+          gl.viewport(0, 0, DECK, DECK);
+          gl.uniform1f(uSize, DECK);
+          gl.uniform1f(uZ, -3);
+          gl.enable(gl.SCISSOR_TEST);
+        }]);
+        for (let y = 0; y < DECK; y += STRIP) {
+          parts.push([4 * STRIP * DECK / (n * n), () => {
+            gl.scissor(0, y, DECK, STRIP);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }]);
+        }
+        parts.push([0, () => gl.disable(gl.SCISSOR_TEST)]);
         doing = 'building the noise and the weather map';
         await batches(parts, share => done(0.6 + 0.15 * share));
         mark('noise and weather built');
@@ -9142,6 +9346,9 @@ const SkySound = (() => {
         gl.deleteProgram(draw);
       }
       smooth(gl.TEXTURE_2D);
+      gl.activeTexture(gl.TEXTURE19);
+      smooth(gl.TEXTURE_2D);
+      gl.activeTexture(gl.TEXTURE3);
       // The map's slope, on unit 21, drawn from it (see the slope program).
       {
         gl.activeTexture(gl.TEXTURE21);
@@ -9232,6 +9439,7 @@ const SkySound = (() => {
     C('uniform1i', 'uWeather', 3);
     C('uniform1i', 'uSlope', 21);
     C('uniform1i', 'uBody', 22);
+    C('uniform1i', 'uDeck', 19);
     C('uniform1f', 'uSlopeMax', SLOPE_MAX);
     C('uniform1i', 'uWaves', 4);
     C('uniform1i', 'uIce', 10);
@@ -9566,6 +9774,7 @@ const SkySound = (() => {
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uSlope'), 21);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uBody'), 22);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uDeck'), 19);
     gl.uniform1f(gl.getUniformLocation(shadowProg, 'uSlopeMax'), SLOPE_MAX);
     const depthMap = (unit, size, column) => {
       const m = { size, column, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
