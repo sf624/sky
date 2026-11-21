@@ -2686,7 +2686,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     if (dk >= 1.0) {
       base = 2.0 * zD;
       body = deckBody();
-      q.w = 1.1;
+      // (The fine billows near the eye, under half as deep as on a heap: as
+      // deep, the cells from 4 and 6.4 km were covered in a fur of heads of
+      // 18 to 71 m, where photographs show crisp cells with ragged edges.)
+      q.w = 0.5;
       heapUp = clamp(zD / max(tsD + fD / 3.0 + zD, 0.01), 0.0, 1.0);
       thin = 0.15 * (1.0 - smoothstep(tsD, tsD + 0.15, tsD + fD / 3.0 + zD));
       carved = 1.0;
