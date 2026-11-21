@@ -2468,7 +2468,10 @@ float deckTop(vec2 x, float lod, vec4 far, out float mExt, out float soft) {
   float g = 1.0 - min(de / ew, 1.0);
   g *= g * open;
   float h = mix(-0.1 * DECK_GAP.x * level, (1.0 - 0.7 * calm) * (DECK_H.x * (H - 0.6) + DECK_H.y * (H2 - 0.6)) - DECK_GAP.x * g, fade) + DECK_H.z * (tk - 0.5);
-  mExt = mix(DECK_EDGE.y, 1.0, tk) * mix(1.0 - 0.3 * DECK_EDGE.x, mix(1.0 - DECK_EDGE.x * (1.0 - calm), 1.0, clamp(H, 0.0, 1.0)) * (1.0 - DECK_GAP.z * g), fade);
+  // (Far off, where the cells have faded, the extinction is whole: thinner
+  // there, the march went deeper into a far deck, 13 % more of the frame
+  // at 11 km looking 15 degrees down.)
+  mExt = mix(1.0, mix(DECK_EDGE.y, 1.0, tk) * mix(1.0 - DECK_EDGE.x * (1.0 - calm), 1.0, clamp(H, 0.0, 1.0)) * (1.0 - DECK_GAP.z * g), fade);
   soft = g * fade;
   return h;
 }
@@ -2847,7 +2850,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // show them (with rolls only in a few places, the sheet was lumps
     // without order).
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
-    float deckOn = smoothstep(0.8, 0.92, uCloud + 0.2 * (region - 0.5));
+    float deckOn = smoothstep(0.85, 0.95, uCloud + 0.1 * (region - 0.5));
     float rows = smoothstep(0.3, 0.6, far.a) * sheet * (1.0 - deckOn);
     float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571);
     float roll = sin(ph);

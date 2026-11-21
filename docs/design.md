@@ -909,6 +909,10 @@ like a range of mountains. Towers (G over 0.48) are a little more common
 than before among fields of cumulus. The early way out of `cloudShape`
 allows for the sheet's cells and billows (`fsMax`): with a fixed margin
 they were cut flat, as mesas with a hatch on them.
+Where the deck is whole (`deckOn`: `uCloud`, plus a tenth of the cover
+over 20 km less a half, from 0.85 to 0.95) the rolls give way to the overcast deck's
+cells (below): from 6.4 to 11 km the rolls were regular rows, like a
+washboard, which photographs of a closed deck do not show.
 
 **One top.** Where the sheet is whole (`whole`), the sheet and the heaps
 on it are one top: what is said above holds only at its first edges
@@ -935,6 +939,68 @@ the Worley domes fill the plane and meet in creases. With the whole rise
 kept, the heaps were smooth hills with long shadows. The early ways out
 and the map of the tops allow for what the cells, heads and rolls add
 over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+
+**The overcast deck** (`deckTop`, work in progress: see below what it
+does not do yet). Where the deck is whole (`deckOn`), the Worley domes of
+one top give way to the cells of `uDeck`, a texture baked at start
+(`deckCells` in the `noise` shader) over a tile of 64 km, 2048 texels a
+side, read where the slow map moves it by up to 1.5 km (`DECK_WARP`, so
+that the tile does not repeat in step with itself):
+
+- *Cells.* A round bump on each point of a jittered lattice of 72 cells
+  across the tile (0.9 km), each falling as `(r / R)^1.2` (nearly a cone,
+  rounded at the top: as paraboloids, their flat tops were lit as flat
+  cloud with the sun low, grey discs with sharp outlines), `R^2` 0.3 to
+  1.1 cells^2 (`0.3 + 0.8 r^3`: few much wider; large cells among small
+  ones), all nearly as high (the top of a deck is nearly level). A place
+  belongs to the bump that stands highest over it: the creases between
+  them bend (circles, where bumps of two widths meet), and the lattice is
+  read at a place moved by a quarter of a cell (noise of half and a
+  quarter of a cell), so they wind. Their smooth maximum is the height
+  (R; creases rounded over some 80 m); a lattice 2.5 times finer gives
+  lobes on them (A). They raise the top by 0.15 and 0.08 km times their
+  height less 0.6 (`DECK_H`).
+- *Creases.* Each crease has a rank (G: a hash of its pair of cells, the
+  same from both sides, mixed over the creases within 90 m so that it
+  jumps at no corner). Over most of the tile, about a 16 km pattern, the
+  cells run in trains: the creases across a train rank higher, and those
+  along it lower. B is the distance to the nearest crease. A crease
+  ranked under a level opens into a gap: up to 0.25 km lower (`DECK_GAP`),
+  0.35 km wide and up to 1.8 times that the lower it ranks, its
+  extinction 95 % less at its middle, its edge a soft fringe (0.15 of the
+  field, some 50 m); over 0.8 the cells merge across it (its crease is
+  filled to 0.6 of a cell's height).
+- *Stretches.* The level is 0.15 where the deck is thick and 0.45 where
+  it is thin, plus 0.4 times the gusts' map at a few km less a half; thick
+  and thin come from the weather map's bands (A, smoothed over 11 km) and
+  its gusts (B, over 3 km). A thin stretch stands 0.1 km lower and has
+  half the extinction; a calm one (the gusts over 0.65 to 0.75, 11 km)
+  has a third of the cells' relief and no gaps.
+- *Extinction.* A cell's extinction falls to half towards its edge, as
+  its height does (`DECK_EDGE`): thick middles, thin edges. It goes to
+  `cloudExtinction` through `deckM`, so the march, the light's steps and
+  the depth maps all see the same deck.
+- Through the mipmaps, the cells fade to their mean from a texel of 180 m
+  to one of 700 m (`lod` + `DECK_LOD` 2.5 to 4.5), and the extinction to
+  the whole of it (thinner far off, the march went deeper into a far deck). The scene's own
+  program reads only that mean (the sea's mirror), so that it reads 16
+  textures, as Direct3D 11 allows.
+
+What it does not do yet (set against photographs of stratocumulus from
+above in the pull request that brought it): from 11 km straight down with
+the sun high the cells are soft lumps with dark slits where gaps open,
+fainter than in photographs (1.3 stops from the 5th to the 95th
+percentile, photographs 3.1 to 3.5); from 6.4 km a smooth plaster with
+pits; with the sun 30 degrees high, a field of rounded lumps or pebbles
+with dark holes, and aslant towards the sun dark blots on cream. Small
+cells inside large ones are rings (where two bumps of different widths
+meet, the crease is a circle). Where the cells fade to their mean, a far
+deck changes texture along an ellipse round the eye. From under the deck
+the gaps let the sky through in lanes. The light of a sheet takes the
+depth straight up from the map of the columns (156 m texels at best,
+heights 275 m apart): the cells' thin edges, a few hundred metres wide,
+hardly reach it, its texels show as soft squares on the cells, and the
+cells' relief is lit as hard shadows.
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -3234,6 +3300,7 @@ asks which level it is.
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
+| `deck` | 1024 | 1024 | 2048 | 2048 |
 | `ice` | 1024 | 2048 | 4096 | 4096 |
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
@@ -3290,8 +3357,8 @@ asks which level it is.
   the aircraft flies before a layer of a depth map is drawn again (see
   [The clouds' shadow](#the-clouds-shadow)): work a frame does now and
   then, which a slow GPU feels as a long frame.
-- `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
-  heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
+- `body`, `deck`, `ice`, `shadow`, `column` and `warped` are the sides of the
+  heaps' body (`uBody`), the cells of an overcast deck (`uDeck`), the cirrus's ice (`uIce`, and with it `uIcePhase`
   and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
   moved weather map (`uWarped`, `uSlopeW`) (see [Textures made at start](#textures-made-at-start)).
   A renderer without a GPU still takes the smaller body and ice whatever
@@ -3519,6 +3586,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uDepth` | 5 | 512 x 128, RGBA32F or RGBA16F | JS, in `makeSky` | Depth to the top of the air |
 | `uAirLut` | 29 | `low` only: 256 x 48 x 17, RGBA16F, linear | `fs` with `AIR_LUT`, a slice a draw, copied in | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
+| `uDeck` | 19 | the level's `deck`^2 over 64 km: 2048^2 (1024^2 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` -3), in strips | The cells of an overcast deck's top (see *The overcast deck*): R the bumps' height, G the rank of the nearest crease, B the distance to it, A the finer lobes' height |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
