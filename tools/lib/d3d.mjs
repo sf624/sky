@@ -246,7 +246,7 @@ async function runChrome(url, reports, id, { limit, size, warm = null, cache = f
   current = { prof, dir: path.join(temp.wsl, prof) };
   const child = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', `--user-data-dir=${temp.win}\\${prof}`,
     ...(cache ? [] : ['--disable-gpu-shader-disk-cache']), '--no-first-run', '--no-default-browser-check', '--disable-extensions',
-    `--window-size=${size.w},${size.h}`, url], { cwd: '/mnt/c', stdio: 'ignore' });
+    `--window-size=${size.w},${size.h}`, ...(process.env.SKY_WIN_FLAGS || '').split(' ').filter(Boolean), url], { cwd: '/mnt/c', stdio: 'ignore' });
   child.on('error', (e) => reports.push({ ev: 'done', error: String(e) }));
   const t0 = Date.now();
   const ended = () => reports.some((r) => r.ev === 'done') && (!warm || warm.some((r) => r.ev === 'done'));

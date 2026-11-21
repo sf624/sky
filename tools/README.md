@@ -172,7 +172,9 @@ served from WSL (Windows reaches its localhost) and posts what it measures
 back over HTTP. Each run ends after `done` or `--limit` s (default 300);
 then exactly its own processes are killed (found by the profile's path,
 never by name) and its profile is deleted. `SKY_WIN_CHROME` names another
-Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
+Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`),
+and `SKY_WIN_FLAGS` adds switches to its command line (separated by
+spaces), for a test.
 
 - `d3d page`: the page with `?timing&res=1` (and `--q`): its console lines
   (each program compiled, the textures, the first picture, in seconds since
