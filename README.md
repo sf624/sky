@@ -38,10 +38,14 @@ mouse cursor hides with them over the view, and comes back with them.
 The panel at the bottom changes the time and the weather.
 
 - **Play (▶)**: runs the time, at the speed chosen beside it. Press again to stop. Past midnight the date moves on to the next day, and the moon's age with it.
-- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. The clock of your device is taken as the page's time, which is local solar time.
+- **Now (clock)**: sets today's date and the present time, then plays in real time, so the sky stays on the present. On the solar clock, the clock of your device is taken as local solar time; on the UTC clock, the moment is exact.
+- **Here and now (pin)**: asks your browser where you are, then shows the sky there now: it sets the latitude and the longitude, turns the clock to UTC and does what Now does. The browser asks you first. The place is used only in the page: it is rounded to 0.1 degree, sent nowhere and not stored. Nothing asks for the place unless you press this button.
 - **Speed of time**: real time, 1 min/s, 10 min/s, 16 min/s (a day in a minute and a half; the first choice) or 1 h/s. In real time the sky is drawn again every 10 seconds and rests in between.
-- **Time**: 0:00 to 24:00. The sun is due south at 12:00. The place is at 35 degrees north.
+- **Time**: 0:00 to 24:00, on the clock chosen below. On the solar clock the sun is highest at 12:00.
 - **Date**: 1 January to 31 December. It starts at today. Moving the date also sets the moon's age for that day.
+- **Latitude**: 90 degrees south to 90 degrees north (35 degrees north at first). The sun, the moon and the stars take their paths for that place: the midnight sun and the polar night, the southern stars.
+- **Longitude**: 180 degrees west to 180 degrees east (135 degrees east at first). It matters only on the UTC clock, so it is greyed out on the solar clock: at the same local solar time, the sky is the same at every longitude.
+- **Clock**: **Solar time** (at first): the time is the place's local solar time. **UTC**: the date and the time are UTC, and the longitude says where you are, so moving it moves the sun and the stars as the earth turns beneath them. Changing the clock keeps the moment.
 - **Moon**: the age of the moon, 0 to 29.5 days.
 - **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
