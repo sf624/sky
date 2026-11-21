@@ -3948,7 +3948,16 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           above = A.z;
           sky = A.w;
           skyLean = B.x / ws;
+#ifdef DECK
+          // (Not in the deck, which works it out here at every distance:
+          // taken from the first stage, where its ray entered the cloud at
+          // half the size, the deck from 11 km towards the horizon was a pale
+          // plain with dark pits, where a converged render shows cells with
+          // shaded rims.)
+          if (0.8 * pix * tE > 0.01 && deckHere <= 0.0) tauF = B.y / ws;
+#else
           if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
+#endif
           colAll = B.z / ws;
           tauNn = B.w / ws;
         }
@@ -4149,7 +4158,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // billows). Where a pixel is wider than 10 m (beyond some 12 km at
       // 1440p), from the first stage too: its billows are many pixels wide
       // there. (Worked out in the second stage everywhere, it cost 0.5 ms of
-      // the frame in cruise.)
+      // the frame in cruise.) Not in the deck: see where the first stage's
+      // values are taken.
       if (tauF < 0.0) tauF = (slab ? 0.0 : crisp) * (1.0 - slabbed);
       // The depth towards the light over the light's own steps past the
       // first two that end near the place, without the map of the clouds'
