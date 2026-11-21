@@ -95,7 +95,12 @@ The JS then runs once, at load, and does little:
      `KHR_parallel_shader_compile`, the GPU process compiles them on threads
      of its own; the page asks `COMPLETION_STATUS_KHR` once a frame. Without
      it, asking waits, so the page asks for one program a frame. A failed
-     program throws the compiler's or the linker's message.
+     program throws the compiler's or the linker's message. The programs
+     that draw the low clouds (`fs`, and as `CLOUD_PASS`, `SHADOW_MAP` and
+     `TOPS_MAP`) are made without the overcast's deck, unless the page
+     starts with the Clouds slider at 0.8 or more: then with it (`DECK`),
+     with the program of its top (`noise` as `DECK_BAKE`), and its top is
+     baked after the noise. (See [the deck](#low-clouds) for the rest.)
    - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
      (`slices`). Each is a generator (a job) that yields every little while;
      `finish(job)` runs one at once.
@@ -948,8 +953,8 @@ heaps' field and the deck's, and the light mixes their depths. (Above
 ploughed field, which no photograph shows.)
 
 - **Its top** (`deckTop`) is the sheet's own top `ts` plus the puffs, read
-  from `uDeck`: a tile of `DECK_KM` = 32 km baked at start (`deckBake`,
-  in the noise shader), moved by a slow offset of up to 16 km so that it
+  from `uDeck`: a tile of `DECK_KM` = 32 km baked once (`deckBake`, in
+  the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km so that it
   does not repeat. Four classes of puffs on jittered lattices, 1.3 km,
   570 m, 360 m and 230 m apart, each lobed (three harmonics of its
   outline) and drawn out along the rows; the large ones are caps with
@@ -973,12 +978,33 @@ ploughed field, which no photograph shows.)
   cover (1 km and less): read at the map's texels alone (2.8 and 4 km),
   they were straight lines kilometres long. Where the slow map is high,
   the sheet is smoother and a little higher, with fewer puffs (stratus).
+- **Its programs.** The deck's code is in `fs` only with `DECK` defined
+  (and its bake in `noise` only with `DECK_BAKE`). Without it, the four
+  programs that draw the low clouds are those of before the deck, and
+  cost as much; with it, on Direct3D 11, `fs` took 30 % longer to link
+  and a frame of the default view 17 % longer, where no deck is drawn.
+  So the page makes the programs without the deck at start, and those
+  with it only when the slider first comes to `DECK_NEAR` = 0.8, a little
+  before the deck comes in (`deckLater`): it links them, the frames go on
+  with the old ones while the GPU process compiles them on its threads,
+  then it bakes `uDeck` two strips at a time, each after the GPU has done
+  the ones before (a fence), and from then on a frame over 0.85 of cloud
+  draws with them (`pickPrograms`), below with the old ones. If the
+  slider already stands over 0.85 when they are ready, the deck fades in
+  over 1.5 s (`uDeckIn` scales `deckShare`; the depth maps are drawn
+  again at each eighth of it), from the heaps' rows of rolls that the old
+  programs draw there. A page that starts at 0.8 or more makes them at
+  once, in place of the old ones. On Direct3D 11 (Chrome on Windows) the
+  deck is there some 16 s after the slider reaches 0.8 (14 to 15 s of
+  compiling, 1.6 s of baking), and the frames meanwhile come as they do
+  without it; the first frames of the fade take up to 165 ms (moving the
+  slider took up to 123 ms before the deck). Measured in
+  [tools/README.md](../tools/README.md#direct3d-11-on-windows).
 - **On Direct3D 11** every call is inlined, and the deck's reads are made
   in a dozen places of the scene's program: the depths read the smoother
   top, the map of the tops takes the deck's highest top (`DECK_TOP`) in
   its 44 halvings, and the bake's loops take a bound from `uZ` so that
-  they are not unrolled. Linking still takes longer than before the deck
-  (measured in [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
+  they are not unrolled.
 - **Its body** is one density (`DECK_BODY`), its depth set by its
   thickness alone. The shadow maps and the column maps do not resolve a
   layer this thin (hard patches of light on the sea under it, bands in
@@ -3591,8 +3617,8 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
-| `uDeck` | 19 | the level's `deck`: 2048^2 (1024^2 at `low` and `mid`, 512^2 on a renderer on the CPU) over 32 km, RGBA16F where the GPU can draw to it (else RGBA8), mipmapped, repeating | `noise` shader (`uZ` -3), in strips, after `uDeckCtl` | The top of the overcast (see [the deck](#low-clouds)): R, G, B its height over the sheet, as a share of `DECK_H`, for closed, middling and open cover; A how far from a crease between two cells |
-| `uDeckCtl` | 28, while the deck is drawn; then deleted | 512^2 over 32 km, RGBA8, linear, repeating | `noise` shader (`uZ` -4) | R: how much the trains rule; G: a third of how many puffs stand there (read at each puff's middle) |
+| `uDeck` | 19 | the level's `deck`: 2048^2 (1024^2 at `low` and `mid`, 512^2 on a renderer on the CPU) over 32 km, RGBA16F where the GPU can draw to it (else RGBA8), mipmapped, repeating | `noise` shader as `DECK_BAKE` (`uZ` -3), in strips, after `uDeckCtl`; at start if the slider stands at 0.8 or more, else when it first comes there (`deckLater`) | The top of the overcast (see [the deck](#low-clouds)): R, G, B its height over the sheet, as a share of `DECK_H`, for closed, middling and open cover; A how far from a crease between two cells |
+| `uDeckCtl` | 26, while the deck is drawn; then deleted | 512^2 over 32 km, RGBA8, linear, repeating | `noise` shader as `DECK_BAKE` (`uZ` -4) | R: how much the trains rule; G: a third of how many puffs stand there (read at each puff's middle) |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
 changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
