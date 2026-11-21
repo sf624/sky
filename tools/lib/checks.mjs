@@ -528,6 +528,7 @@ export const CHECKS = {
         const r = await ctx.session.open(ctx.page, `date=172&time=14&alt=${fl.alt}&speed=0`, ctx.size);
         let ref;
         try {
+          await r.step(2, 16);
           ref = await sliderNow(r);
           pages.push(r);
         } finally {
