@@ -2322,9 +2322,9 @@ float topsH;
 // "towers"), kept in three grids round the eye (see `grid` in the JS):
 // uGrid (R8) holds level l from its slice GRID_Z[l]: GRID_NZ[l] slices of
 // the distance under their surface over CB to CT (0.5 at it, +-GRID_R
-// km), then four of its columns (gridCol): the top (0: none; else a share
-// of CB to CT), the highest top within 0.8 km, the base, and how much of
-// it is shown. (One sampler, and none in the scene's own program, which
+// km), then four of its columns (gridCol): how much the present field's
+// heap gives way round a tower (own), the highest top within 0.8 km and the
+// base (shares of CB to CT), and how much of it is shown. (One sampler, and none in the scene's own program, which
 // reads the low clouds from their pass: Direct3D 11 allows a program 16,
 // and that one reads 16.) uGridO[l]: the middle of level l's window on the map (km), and
 // its texel there. The present field's towers give way where the grid
@@ -2333,7 +2333,32 @@ float topsH;
 uniform highp sampler3D uGrid;
 uniform vec4 uGridO[3];
 const float GRID_R = 0.25;
-float gridCut = 0.0;
+// The detail on the towers (see cloudShape below): the heads' scale and
+// depth, the creases', the billows', and how much of it low on a body.
+#ifndef GRID_HK
+#define GRID_HK 2.0
+#endif
+#ifndef GRID_HW
+#define GRID_HW 0.12
+#endif
+#ifndef GRID_CR
+#define GRID_CR 1.5
+#endif
+#ifndef GRID_BW
+#define GRID_BW 0.12
+#endif
+#ifndef GRID_LOW
+#define GRID_LOW 0.4
+#endif
+#ifndef GRID_OWN
+#define GRID_OWN 0.7
+#endif
+const float GRID_BK = 2.33;
+const float GRID_OUT = 0.06 + ERO_C * GRID_HW + 0.45 * GRID_BW;   // how far the detail may stand over the towers' surface
+#ifndef GRID_AO
+#define GRID_AO 0.6
+#endif
+float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 #define cloudShape cloudShape0
 #endif
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
@@ -2418,6 +2443,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float deck = smoothstep(2.6, 3.6, e - 1.5 * tower);
   float sheetTop = (0.25 + 0.35 * sheet) * (0.8 + 0.4 * smoothstep(0.3, 0.7, w.r)) / (CT - CB);
   float top = 0.12 + 0.32 * w.g * (1.0 - 0.6 * max(deck, level1)) + 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, w.g));
+#if defined(TGRID) && !defined(TOPS_MAP)
+  top *= 1.0 - GRID_OWN * gridOwn;
+#endif
   float thick = 1.0 - exp(-e / 1.6);
   float cube = top * top * top;
   float swell = 0.25 * clamp(e - 1.0, 0.0, 1.0 - 0.6 * sheet);
@@ -2728,10 +2756,16 @@ bool gridAt(vec2 x, int l, out vec2 uv) {
   uv = (uGridO[l].zw + dv / v) / GRID_N;
   return max(abs(dv.x), abs(dv.y)) < 0.5 * GRID_N * v;
 }
-// Level l's column c at uv (0 top, 1 the highest top within 0.8 km, 2 the
+// Level l's column c at uv (0 own, 1 the highest top within 0.8 km, 2 the
 // base, 3 how much it is shown).
 float gridCol(vec2 uv, int l, int c) {
   return textureLod(uGrid, vec3(uv, (GRID_Z[l] + GRID_NZ[l] + float(c) + 0.5) / GRID_NZT), 0.0).r;
+}
+// Level l's distance under the towers' surface at uv and the height yg
+// (a share of CB to CT), km.
+float gridD(vec2 uv, int l, float yg) {
+  float nz = GRID_NZ[l];
+  return (textureLod(uGrid, vec3(uv, (GRID_Z[l] + clamp(yg * nz, 0.5, nz - 0.5)) / GRID_NZT), 0.0).r * 2.0 - 1.0) * GRID_R;
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
   float h = heightAt(p);
@@ -2739,23 +2773,34 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // The levels, finest first, each with what the finer left (rest) times
   // how much of its column is shown; a level finer than the read's
   // smoothing (lod: level 0's voxels are texels of the noise at lod
-  // GRID_LV, -1 for 31 m) gives way to the next.
-  float yg = (h - CB) / (CT - CB), rest = 1.0, cover = 0.0, read = 0.0, dSum = 0.0;
+  // GRID_LV, -1 for 31 m) gives way to the next. A level is read up to the
+  // highest top within 0.8 km (and the detail's reach over it, GRID_OUT):
+  // by the column's own top, the crowns that the detail below pushes out
+  // of a wall were cut off over the columns beside it, as upright curtains.
+  // The present field's heap gives way round a tower (own: from the
+  // coarsest level, whose window holds the others; it is smooth).
+  float yg = (h - CB) / (CT - CB), rest = 1.0, cover = 0.0, read = 0.0, dSum = 0.0, own = 0.0;
   vec2 colSum = vec2(0.0);
+  int lC = -1;
   if (yg > 0.0 && yg < 1.0) {
     float lv = lod - GRID_LV;
     for (int l = 0; l < 3; l++) {
       float k = l == 2 ? 1.0 : clamp(1.0 - (lv - float(l)), 0.0, 1.0);
       vec2 uv;
-      if (rest * k < 1e-3 || !gridAt(x, l, uv)) continue;
-      float w = rest * k * gridCol(uv, l, 3);
+      if (!gridAt(x, l, uv)) continue;
+      float shown = gridCol(uv, l, 3);
+      if (l == 2) own = shown * gridCol(uv, l, 0);
+      if (rest * k < 1e-3) continue;
+      float w = rest * k * shown;
       if (w < 1e-3) continue;
-      float d = -GRID_R, top = gridCol(uv, l, 0);
-      if (top > 0.0 && h <= CB + top * (CT - CB) + 0.06) {
-        float nz = GRID_NZ[l];
-        d = (textureLod(uGrid, vec3(uv, (GRID_Z[l] + clamp(yg * nz, 0.5, nz - 0.5)) / GRID_NZT), 0.0).r * 2.0 - 1.0) * GRID_R;
+      float d = -GRID_R, heap = gridCol(uv, l, 1);
+      if (heap > 0.0 && h <= CB + heap * (CT - CB) + GRID_OUT) {
+        d = gridD(uv, l, yg);
         read += w;
-        colSum += w * vec2(gridCol(uv, l, 1), gridCol(uv, l, 2));
+        colSum += w * vec2(heap, gridCol(uv, l, 2));
+        // (The first level read that has a coarser one, for the creases
+        // below.)
+        if (lC < 0 && l < 2) lC = l;
       }
       dSum += w * d;
       cover += w;
@@ -2763,8 +2808,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     }
   }
   gridCut = cover;
+  gridOwn = own;
+  gridCrease = 0.0;
   float f = cloudShape0(p, lod, fine, y, q, body, lump, base);
   gridCut = 0.0;
+  gridOwn = 0.0;
   if (read <= 0.0) return f;
   // Where a tile fades in, its towers grow from within.
   float d = mix(-GRID_R, dSum / cover, cover);
@@ -2773,20 +2821,44 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // field by a smooth maximum, and takes over its facts there.)
   float hu = clamp((h - gBase) / max(heapTop - gBase, 0.05), 0.0, 1.0);
   vec3 qg = vec3(x.x, h, x.y) / BASE_KM;
-#ifdef GRID_HW
+  // Detail at render time (the prototype's round 2). Less of it low on a
+  // body (GRID_LOW of it below a fifth of its height: flat, softer bases),
+  // none at its foot.
+  float low = smoothstep(0.03, 0.25, hu) * mix(GRID_LOW, 1.0, smoothstep(0.2, 0.6, hu));
   // Heads of uBody (B: 500 m to 125 m, read GRID_HK times finer) carve the
   // surface as on main's body: crowns where it stands (ERO_C of their
-  // weight out), seams in by up to GRID_HW km, fading SKIN deeper.
-  float hw = GRID_HW * smoothstep(0.03, 0.25, hu);
-  if (d > -(ERO_C * hw + 0.05) && d < hw + SKIN) {
+  // weight out), seams in by up to GRID_HW km, fading SKIN deeper. The
+  // grid's own creases are cut in too (GRID_CR of cav: the distance two
+  // levels coarser, or the coarsest, less its own: positive
+  // between lobes, negative on their crowns): the valleys between bulges
+  // sharp and deep, the bulges kept.
+  float hw = GRID_HW * low;
+  if (d > -(ERO_C * hw + GRID_CR * 0.06 + 0.05) && d < hw + SKIN) {
     vec4 t = textureLod(uBody, qg * GRID_HK, max(lod + BODY_LOD + log2(GRID_HK), 0.0));
+    float cav = 0.0;
+    vec2 uv2;
+    if (lC >= 0 && gridAt(x, lC + 2 > 2 ? 2 : lC + 2, uv2)) cav = gridD(uv2, lC + 2 > 2 ? 2 : lC + 2, yg) - d;
     float dd = d + ERO_C * hw;
-    d = dd - hw * t.z * (1.0 - smoothstep(0.0, SKIN, dd - hw));
+    float sk = 1.0 - smoothstep(0.0, SKIN, dd - hw);
+    d = dd - hw * t.z * sk - GRID_CR * max(cav, 0.0) * sk;
+    // (How deep in a crease, for the light: see GRID_AO.)
+    gridCrease = smoothstep(0.0, 0.08, cav + hw * (t.z - 0.4));
   }
-#endif
+  // Packed billows on that (A of uBody, GRID_BK times finer than the tile:
+  // 16 to 64 cells across it, 214 m down to 54 m), every place on a billow
+  // and billows meeting in sharp seams; the same carving (crowns out by
+  // 0.45 of their weight, their mean), GRID_BW km deep at most, read at the
+  // pixel's level (smooth where they are smaller than a pixel).
+  float bw = GRID_BW * low;
+  if (d > -(0.45 * bw + 0.03) && d < bw + SKIN_F) {
+    float tb = textureLod(uBody, qg * GRID_BK, max(lod + BODY_LOD + log2(GRID_BK / DETAIL) + 1.7, 0.0)).w;
+    float db = d + 0.45 * bw;
+    d = db - bw * tb * (1.0 - smoothstep(0.0, SKIN_F, db - bw));
+  }
   float fg = BODY_G * d;
   float k = 0.1;
   float s = clamp(0.5 + (fg - f) / (2.0 * k), 0.0, 1.0);
+  gridCrease *= s;
   if (s <= 0.0) return f;
   f = mix(f, fg, s) + k * s * (1.0 - s);
   solidAt = mix(solidAt, 1.0, s);
@@ -3758,6 +3830,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // heads then.)
       float tauLoc = tauF * smoothstep(-0.95, -0.6, mu) + tauNn;
       float crease = 1.0 - CREASE.x * smoothstep(CREASE.z, CREASE.w, tauBn / (tauBn + tauLoc + 1e-3)) * (1.0 - exp(-tauLoc / CREASE.y));
+#if defined(TGRID) && !defined(TOPS_MAP)
+      // (?grid=1: deep in a crease of the towers less of it, and of the
+      // sky's, by up to GRID_AO, however the light falls.)
+      crease *= 1.0 - GRID_AO * gridCrease;
+#endif
       ms *= crease;
       diffuse *= crease;
       // Seen from below, a cloud under more of itself shows the light that
@@ -3804,6 +3881,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // of this by the white surface's light, unit.)
       float unitHere = below > 0.0 ? uSkyEnc * textureLod(uSkyLight, vec2(clamp((heightAt(ps) - CB) / (CT - CB), 0.0, 1.0) * 15.0 / 16.0 + 0.5 / 16.0, 0.5), 0.0).y : 1.0;
       amb = mix(SKYV.x * sky * skyDark, cells * deck.y / unitHere, below);
+#if defined(TGRID) && !defined(TOPS_MAP)
+      amb *= 1.0 - GRID_AO * gridCrease;
+#endif
       // With the sun low, the sky's light comes more from the sun's side
       // (the glow) than from the other: what sees the sky on that side gets
       // more of it, warm, and what sees it on the other side less, the blue
@@ -6566,7 +6646,8 @@ const P = {
   out: 0.35,         // outward bias
   minY: -0.7,        // lowest normal of a child (overhangs below -0)
   flatLow: 0.08,     // in the lowest share of the height, children only on top
-  rmin: 0.030,       // smallest lobe, km (about the voxel: smaller ones are dropped)
+  rmin: 0.040,       // smallest lobe, km (1.3 of the finest voxel: 30 m lobes doubled the worker's time, and the
+                     // billows at render time are as fine)
 };
 
 function lobesOf(obj, P, LEAN) {
@@ -6714,6 +6795,18 @@ const R = 0.25, S = 1000, FAR = Math.round(R * S);   // the distance kept, km; I
 const CELL = 2;                                      // a world cell: at most one tower
 const BASE_UP = 0.08;                                // a tower's base over the level of the bases, km
 const NC = WEATHER_KM / CELL;
+const SIZE_P = 2.0, H_LAW = [0.6, 4.0], W_RATIO = 1.25, H_W = 0.45, WH_K = 0.4, W_MIN = 1.3, W_MAX = 5.0;  // the law of sizes (see towersOf)
+const H_MIN = 0.8, TOWER_H = 1.5;                    // the least height of the field's heap that makes a tower, km; a tower's
+const GROUP_KM = 12.8;                               // the groups of big towers: a field of this lattice
+const OWN_IN = 0.3, OWN_OUT = 0.55, OWN_PAD = 0.3;  // the field's heap gives way within OWN_IN W of a middle, less out to OWN_OUT W + OWN_PAD km
+// A smooth random field over the map, 0 to 1 (value noise on a lattice of
+// GROUP_KM, which divides the map).
+const groupAt = (x, z) => {
+  const n = Math.round(WEATHER_KM / GROUP_KM), u = wrapKm(x) / GROUP_KM, v = wrapKm(z) / GROUP_KM;
+  const i = Math.floor(u), j = Math.floor(v), fu = sstep(0, 1, u - i), fv = sstep(0, 1, v - j);
+  const h = (a, b) => hash2(((a % n) + n) % n, ((b % n) + n) % n, 101) / 4294967296;
+  return (h(i, j) * (1 - fu) + h(i + 1, j) * fu) * (1 - fv) + (h(i, j + 1) * (1 - fu) + h(i + 1, j + 1) * fu) * fv;
+};
 let cfg = null;              // { T, levels: [{ V, nz }] }
 let towers = null, cells = null, mapGen = -1, maxReach = 0;
 const lobeCache = new Map(), brickCache = new Map();
@@ -6740,11 +6833,15 @@ const hash2 = (i, j, s) => {
 
 // The towers of the whole map, from the warped weather map (RGBA8, n
 // texels a side) at the cloud amount c: per world cell, the place where the
-// present field's `tower` is strongest, if no place within 1.5 km has more.
-// Width, top and base follow the present field's formulas there.
+// present field's heap stands highest (at least H_MIN over the level of
+// the bases, and over the sheet; or its tower is strong, TOWER_H per unit),
+// if no place within 1.5 km stands higher.
+// (Seeded at the field's towers only, the grids held a few of the big heaps,
+// and the field's own heaps, as high round them, hid them.) The base
+// follows the field's level there; width and top a law of sizes (below).
 function towersOf(px, n, c) {
   const t0 = performance.now();
-  const km = WEATHER_KM / n, g = new Float32Array(n * n), tv = new Float32Array(n * n);
+  const km = WEATHER_KM / n, hv = new Float32Array(n * n), tv = new Float32Array(n * n);
   // The cover over some 20 km (the shader's `region`, a mip of uWeather).
   const B = 32, nb = n / B, reg = new Float32Array(nb * nb);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) reg[(j / B | 0) * nb + (i / B | 0)] += px[4 * (j * n + i)] / 255 / (B * B);
@@ -6753,41 +6850,70 @@ function towersOf(px, n, c) {
     const at = (a, b) => reg[(((b % nb) + nb) % nb) * nb + (((a % nb) + nb) % nb)];
     return (at(i0, j0) * (1 - fu) + at(i0 + 1, j0) * fu) * (1 - fv) + (at(i0, j0 + 1) * (1 - fu) + at(i0 + 1, j0 + 1) * fu) * fv;
   };
+  // Per texel, as the shader's cloudShape: the height of the field's heap
+  // over its level (km) without its tower (the grids take that), less the
+  // sheet's top; and the strength of the field's tower (tv).
   const towersK = sstep(0.1, 0.5, c);
+  const poly = c * (1.181 - c * (2.197 - 2.102 * c)) - 0.1 * (1 - sstep(0.1, 0.35, c));
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const o = j * n + i, G = px[4 * o + 1] / 255;
+    const o = j * n + i, r = px[4 * o] / 255, G = px[4 * o + 1] / 255;
+    const region = regionAt(i, j), level1 = sstep(0.85, 1, c + 0.3 * (region - 0.5));
     const tg = Math.min(Math.max((G - 0.34) / 0.4, 0), 1);
-    g[o] = tg;
-    if (tg > 0) tv[o] = tg * (2 - tg) * towersK * (1 - 0.8 * sstep(0.85, 1, c + 0.3 * (regionAt(i, j) - 0.5)));
+    if (tg > 0) tv[o] = tg * (2 - tg) * towersK * (1 - 0.8 * level1);
+    const e = 3 * (r - 0.936 + poly);
+    if (e <= 0) continue;
+    const sheet = sstep(0.57, 0.82, c + 0.6 * (region - 0.5));
+    const topS = 0.12 + 0.32 * G * (1 - 0.6 * Math.max(sstep(2.6, 3.6, e), level1));
+    const thick = 1 - Math.exp(-e / 1.6), swell = 0.25 * Math.min(Math.max(e - 1, 0), 1 - 0.6 * sheet);
+    const sheetTop = sheet > 0 ? (0.25 + 0.35 * sheet) * (0.8 + 0.4 * sstep(0.3, 0.7, r)) : 0;
+    hv[o] = Math.max((CT - CB) * topS * Math.cbrt(thick + swell) - sheetTop, 0);
   }
+  // Where the field draws a tower, as high as its tower is strong (on a
+  // deck its heaps hardly stand over the sheet); none where the heap is
+  // lower than H_MIN and no tower (bodies in all the low heaps cost 5 ms of
+  // the frame under them, at 0.3 km).
+  for (let o = 0; o < n * n; o++) hv[o] = hv[o] >= H_MIN || tv[o] > 0.2 ? Math.max(hv[o], TOWER_H * tv[o]) : 0;
   const at = (a, b) => (((b % n) + n) % n) * n + (((a % n) + n) % n);
-  const cellT = CELL / km, nms = Math.round(1.5 / km), area = Math.round(2.5 / km);
+  const cellT = CELL / km, nms = Math.round(1.5 / km), foot = Math.round(2.5 / km);
   const list = [], grid = new Array(NC * NC).fill(null);
   for (let cj = 0; cj < NC; cj++) for (let ci = 0; ci < NC; ci++) {
-    let best = -1, bv = 0.2;
-    for (let j = cj * cellT; j < (cj + 1) * cellT; j++) for (let i = ci * cellT; i < (ci + 1) * cellT; i++) if (tv[j * n + i] > bv) { bv = tv[j * n + i]; best = j * n + i; }
+    let best = -1, bv = 0;
+    for (let j = cj * cellT; j < (cj + 1) * cellT; j++) for (let i = ci * cellT; i < (ci + 1) * cellT; i++) if (hv[j * n + i] > bv) { bv = hv[j * n + i]; best = j * n + i; }
     if (best < 0) continue;
     const bi = best % n, bj = (best / n) | 0;
     let keep = true;
     for (let dj = -nms; dj <= nms && keep; dj++) for (let di = -nms; di <= nms; di++) {
-      const v = tv[at(bi + di, bj + dj)];
+      const v = hv[at(bi + di, bj + dj)];
       // (Ties go to the lower index: two equal places make one tower.)
       if (v > bv || (v === bv && (dj < 0 || (dj === 0 && di < 0)))) { keep = false; break; }
     }
     if (!keep) continue;
-    let cnt = 0;
-    for (let dj = -area; dj <= area; dj++) for (let di = -area; di <= area; di++) if (di * di + dj * dj <= area * area && g[at(bi + di, bj + dj)] > 0) cnt++;
-    const o = 4 * best, r = px[o] / 255, G = px[o + 1] / 255, b = px[o + 2] / 255;
-    const W = Math.min(Math.max(0.8 * 2 * Math.sqrt(cnt * km * km / Math.PI), 1.0), 3.5);
+    const b = px[4 * best + 2] / 255;
     const level = CB + 0.15 + 0.15 * sstep(0.25, 0.75, b);
-    const region = regionAt(bi, bj), level1 = sstep(0.85, 1, c + 0.3 * (region - 0.5)), sheet = sstep(0.57, 0.82, c + 0.6 * (region - 0.5));
-    const tower = bv;
-    const e = 3 * (r - 0.936 + c * (1.181 - c * (2.197 - 2.102 * c)) - 0.1 * (1 - sstep(0.1, 0.35, c))) + 1.5 * tower;
-    const deck = sstep(2.6, 3.6, e - 1.5 * tower);
-    const topS = 0.12 + 0.32 * G * (1 - 0.6 * Math.max(deck, level1)) + 0.25 * tower * (0.7 + 0.3 * sstep(0.6, 0.9, G));
-    const thick = 1 - Math.exp(-e / 1.6), swell = 0.25 * Math.min(Math.max(e - 1, 0), 1 - 0.6 * sheet);
-    const top = Math.min(Math.max(level + (CT - CB) * topS * Math.cbrt(Math.max(thick + swell, 0.05)), level + 0.8), CT - 0.4);
     const seed = hash2(ci, cj, 7);
+    // At least as wide as the field's heap there (the place within 2.5 km
+    // where it stands over WH_K as high as here), and as high: the heap
+    // gives way to it (own, below). (Narrower, a tower stood in a crater, or
+    // the heap round it hid it.)
+    let cnt = 0;
+    for (let dj = -foot; dj <= foot; dj++) for (let di = -foot; di <= foot; di++) if (di * di + dj * dj <= foot * foot && hv[at(bi + di, bj + dj)] > WH_K * bv) cnt++;
+    const Wh = 2 * Math.sqrt(cnt * km * km / Math.PI);
+    // Its height: at least the heap's, more by a law of sizes (most small,
+    // some middle, few big: u = rnd^SIZE_P), the big ones in groups
+    // (GROUP_KM, a smooth random field) and where the field's tower is
+    // strong. As wide as tall or wider (W_RATIO): sized from the area of the
+    // field's tower round the place, 1 to 3.5 km, with the field's top, they
+    // were as tall as wide, and their turrets were posts with round heads.
+    let tmax = 0;
+    for (let dj = -nms; dj <= nms; dj++) for (let di = -nms; di <= nms; di++) tmax = Math.max(tmax, tv[at(bi + di, bj + dj)]);
+    const rr = (seed >>> 20) / 4096, str = Math.min(Math.max(tmax / 0.8, 0), 1);
+    const u = Math.pow(rr, SIZE_P) * (0.35 + 0.65 * sstep(0.25, 0.75, groupAt(bi * km, bj * km))) * (0.3 + 0.7 * str);
+    const Hl = H_LAW[0] + (H_LAW[1] - H_LAW[0]) * u;
+    const W = Math.min(Math.max(Wh, W_RATIO * Hl, W_MIN), W_MAX);
+    // (No lower than H_W of its width: flat wide bodies were a sheet of
+    // stratocumulus from below.)
+    const H = Math.min(Math.max(hv[best], Hl, H_W * W), CT - 0.35 - level - BASE_UP);
+    const top = level + BASE_UP + H;
     const t = {
       id: cj * NC + ci, x: wrapKm((bi + 0.5) * km + ((seed & 1023) / 1023 - 0.5) * 0.2), z: wrapKm((bj + 0.5) * km + (((seed >>> 10) & 1023) / 1023 - 0.5) * 0.2),
       // (Its flat base a little over the level of the present field's bases:
@@ -6798,12 +6924,19 @@ function towersOf(px, n, c) {
     // made, for the tiles it may touch (lobesFor counts a tower whose lobes
     // go past it, stats.over: the tiles would cut it).
     t.reach = 1.5 * W + 0.2 * (top - level) + 0.3;
-    maxReach = Math.max(maxReach, t.reach);
-    grid[t.id] = t;
     list.push(t);
   }
+  // A small tower within the foot of a bigger one gives way (biggest first).
+  list.sort((a, b) => b.W - a.W);
+  const kept = [];
+  for (const t of list) {
+    if (kept.some(k => Math.hypot(near(t.x - k.x), near(t.z - k.z)) < OWN_IN * k.W + 0.25 * t.W)) continue;
+    kept.push(t);
+    maxReach = Math.max(maxReach, t.reach);
+    grid[t.id] = t;
+  }
   stats.seedsMs = Math.round(performance.now() - t0);
-  return { list, grid };
+  return { list: kept, grid };
 }
 
 // The map of the tops (RGBA8, nTops texels a side over the map: the
@@ -6811,17 +6944,18 @@ function towersOf(px, n, c) {
 // texels), as the main thread read it back: raised over each tower when its
 // lobes are made, before any tile shows it, and the part sent back.
 let tops = null, nTops = 0;
+const TOPS_OUT = 0.17;
 function raiseTops(t, L) {
   const n = nTops, km = WEATHER_KM / n, M = 8;
   const i0 = Math.floor((t.x + L.box[0]) / km) - M, i1 = Math.ceil((t.x + L.box[1]) / km) + M;
   const j0 = Math.floor((t.z + L.box[2]) / km) - M, j1 = Math.ceil((t.z + L.box[3]) / km) + M;
   const w = i1 - i0, h = j1 - j0, g = new Uint8Array(w * h);
-  // The top of each lobe over the texels it covers (50 m more, as the
-  // present field's, and rounded up).
+  // The top of each lobe over the texels it covers (TOPS_OUT more: the
+  // reach of the detail over the surface, GRID_OUT in fs; rounded up).
   const f = L.lobes;
   for (let q = 0; q < L.n; q++) {
     const x = t.x + f[5 * q], z = t.z + f[5 * q + 2], r = f[5 * q + 3];
-    const v = Math.min(255, Math.ceil((f[5 * q + 1] + r + 0.07 - CB) / (CT - CB) * 255));
+    const v = Math.min(255, Math.ceil((f[5 * q + 1] + r + TOPS_OUT - CB) / (CT - CB) * 255));
     for (let j = Math.floor((z - r) / km); j <= Math.floor((z + r) / km); j++) for (let i = Math.floor((x - r) / km); i <= Math.floor((x + r) / km); i++) {
       const o = (j - j0) * w + i - i0;
       if (g[o] < v) g[o] = v;
@@ -7033,8 +7167,9 @@ function towersNear(x0, x1, z0, z1, m) {
   return out;
 }
 
-// The columns (RGBA: top, the highest top within 0.8 km, base) as shares
-// of CB to CT in 8 bits.
+// The columns (RGBA): how much the present field's heap gives way round a
+// tower (own, 0 to 255); the highest top within 0.8 km and the base, as
+// shares of CB to CT in 8 bits; how much is shown (set by the main thread).
 const share = h => Math.min(255, Math.max(0, Math.ceil((h - CB) / (CT - CB) * 255)));
 const HEAP = 0.8;
 
@@ -7052,7 +7187,7 @@ function* tileGen(l, tx, tz) {
   }
   const t0 = performance.now();
   const data = new Uint8Array(T * T * nz), cols = new Uint8Array(T * T * 4);
-  const top = new Uint8Array(T * T), heap = new Uint8Array(T * T);
+  const top = new Uint8Array(T * T), heap = new Uint8Array(T * T), own = new Float32Array(T * T);
   const base = new Float32Array(T * T).fill(CB + 0.25);
   const ti = tx * T, tj = tz * T;
   for (const t of near0) {
@@ -7066,6 +7201,9 @@ function* tileGen(l, tx, tz) {
         const xc = x0 + (i + 0.5) * V - cx;
         const ex = Math.max(box[0] - xc, 0, xc - box[1]), e = Math.hypot(ex, ez), o = j * T + i;
         if (e < HEAP) { heap[o] = Math.max(heap[o], share(L.top)); base[o] = Math.min(base[o] === CB + 0.25 ? 9 : base[o], t.base); }
+        // (The field's heap gives way round the tower's middle.)
+        const rr = Math.hypot(xc, zc);
+        if (rr < OWN_OUT * t.W + OWN_PAD) own[o] = Math.max(own[o], 1 - sstep(OWN_IN * t.W, OWN_OUT * t.W + OWN_PAD, rr));
       }
     }
     const b = brickFor(t, l);
@@ -7084,7 +7222,7 @@ function* tileGen(l, tx, tz) {
     }
   }
   for (let o = 0; o < T * T; o++) {
-    cols[4 * o] = top[o];
+    cols[4 * o] = Math.round(own[o] * 255);
     cols[4 * o + 1] = Math.max(heap[o], top[o] ? top[o] - 1 : 0);
     cols[4 * o + 2] = Math.round((base[o] - CB) / (CT - CB) * 255);
     cols[4 * o + 3] = 0;   // (the main thread sets how much is shown)
@@ -8532,7 +8670,9 @@ const SkySound = (() => {
     // ?grid=1 (off by default): towers grown as trees of lobes by a worker
     // and kept in grids that move with the eye (see `grid` below, TGRID in
     // fs, the script "towers"). Only at levels with `grid` texels a side.
-    // `,hK:W` after it: the heads of uBody carve them (GRID_HK, GRID_HW).
+    // `,hK:W` after it: the heads of uBody that carve them (GRID_HK, GRID_HW;
+    // 2 and 0.12 without it); `,KEY=value` sets GRID_KEY of fs for a test
+    // (the detail's and the light's knobs: CR, BW, LOW, OWN, AO).
     const TOWER_GRID = (() => {
       const v = (new URLSearchParams(location.search).get('grid') || '').split(',');
       if (v[0] !== '1' || !Q.grid) return null;
@@ -8550,7 +8690,8 @@ const SkySound = (() => {
       const f = x => x.toFixed(1);
       return { N, T, levels, z, nzt,
         defs: `#define TGRID 1\n#define GRID_V0 ${V0.toFixed(6)}\n#define GRID_LV ${Math.log2(V0 / 0.0625).toFixed(1)}\n#define GRID_N ${f(N)}\n#define GRID_NZ vec3(${levels.map(l => f(l.nz))})\n#define GRID_Z vec3(${z.map(f)})\n#define GRID_NZT ${f(nzt)}\n`
-          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '') };
+          + (hk ? `#define GRID_HK ${(+hm[1]).toFixed(3)}\n#define GRID_HW ${(+hm[2]).toFixed(3)}\n` : '')
+          + v.slice(1).filter(t => /^[A-Z]+=[0-9.]+$/.test(t)).map(t => `#define GRID_${t.split('=')[0]} ${(+t.split('=')[1]).toFixed(4)}\n`).join('') };
     })();
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
