@@ -71,6 +71,7 @@ All the parameters are listed in [docs/development.md](docs/development.md).
 
 - A browser with WebGL2. Without it, or when the GPU cannot draw the sky even at Low, the page says so, with the reason in small type.
 - While the page prepares the picture (compiling its shaders can take a few seconds the first time), it shows a dark sky with a line of progress. The browser stays responsive meanwhile.
+- On Windows (Chrome and Edge), where compiling takes longest, the sky shows first without clouds, after about 5 s; the clouds fade in once they are ready, after some 15 s. Before, the dark sky stayed until the whole picture was ready.
 - A fast GPU. The page is heavy on the GPU. Time to draw one frame, measured on an RTX 3090 (the first view, flying):
   - 1920×1080: about 5.5 ms
   - 2560×1440: about 9.3 ms

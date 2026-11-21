@@ -186,8 +186,10 @@ The JS then runs once, at load, and does little:
      nothing of this runs (`?early=S` forces it on any GPU, the clouds held
      back at least S s; `?early=0` turns it off). Measured on the owner's
      machine (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)):
-     the clear sky at about 6 s, the clouds at the time the whole picture
-     came before.
+     the clear sky at 5.3 to 5.5 s, the clouds at 16.7 to 17.8 s, where
+     the whole picture came at 17.1 to 18.6 s before. The ice program's
+     second compile holds the GPU process for some 4 s at about 7 s: the
+     clear sky stands still meanwhile, as everything in the browser does.
    - A context lost meanwhile (`webglcontextlost`: the GPU process
      restarted, or its driver gave up) ends the loading with an error at the
      next wait, instead of waiting for a fence for ever.

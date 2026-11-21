@@ -225,6 +225,19 @@ read 20 textures, where Direct3D 11 allows 16. `d3d page`, three runs at
 2560 x 1440: the first picture 12.5 to 13.7 s (main 10.9 to 12.8 s), the
 GPU time per frame 24.1 to 24.9 ms (main 16.5 to 16.9 ms).
 
+The clear sky first (2026-11-21, `d3d page --base origin/main --runs 3`
+at 1920 x 1080, cold, other runs sharing the machine): main's first
+picture 17.1 to 18.6 s; the page's clear sky 5.3 to 5.4 s, its first
+picture with the clouds 16.7 to 17.8 s. `--warm`, two runs each: again in
+the same tab both show the picture after 0.9 s (every program from the
+browser's memory; no clear sky); after a restart, main 13.7 and 14.3 s,
+the page's clear sky 3.9 and 4.3 s and its clouds 12.1 and 14.5 s. After
+a restart two to four of the large programs (`TOPS_MAP`, `SKY_LIGHT`,
+`CLOUD_PASS`, `CIRRUS_PASS`, the scene; a different set each run) are
+compiled again, while the small ones come from the disk cache
+(`Default/GPUCache`, about 6 MB). With `SKY_WIN_FLAGS=--gpu-disk-cache-size-kb=65536`
+the same: why is not known.
+
 ## Timings and limits
 
 Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.
