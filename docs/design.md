@@ -2669,7 +2669,9 @@ level depends a little on the exposure; the glow covers far fewer blocks
 than the 3 % that set the highlights.) With the sun in the view the
 exposure moved by at most 0.01 stops up to 11 km; at 40 km it rose by 0.1
 to 0.4 stops, where the old glow had covered enough of the view to hold
-it down.
+it down. Where the sunlit Earth is in the view, the floor no longer lifts
+the exposure past white (see [Exposure](#exposure-and-the-tone-curve)):
+there it now stands 0.3 to 3.9 stops lower than on main.
 
 So the sun reads as a disc in clear air: from 4 to 40 km the picture
 leaves white 0.25 to 0.3 degrees from its centre (the disc is 0.267),
@@ -2792,6 +2794,22 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   median, not on the darker quarter: after sunset the sea and the clouds
   below darken sooner than the sky, and a floor on them brightened the
   sky again for some ten minutes;
+- the floor is for a dim view. Where the highlights (`lit`) are
+  daylight's (`DAY_HIGH` or more), it does not lift them past white:
+  the exposure is at most `white` there, and `FLOOR_OVER` = 1 stop more
+  for each stop that they are dimmer. Above some 20 km the sky is so dark
+  that it fills the median whenever it fills half the view; the floor
+  then rose by 0.73 stops for each stop the median fell, and a sunlit
+  Earth below a dark sky ran into white. At 40 km towards the sun 20
+  degrees up (21 November, 15:00, a 2000x770 view raised 6 to 12 degrees
+  above the horizontal), the exposure stood 2.2 to 3.1 stops above
+  white's, and 46 to 99 % of the Earth was white (luma 250 or more);
+  now it stands at white's (-0.4), and 3 to 4 % is (the glitter, the
+  tops of clouds). Looking away from the sun at noon from 40 km, 2.3
+  against 0.2. Below 20 km the darker quarter and the median are lit
+  air or cloud, the floor stays under white, and nothing changes: 135
+  views at 0.3, 4 and 11 km, by day, at dusk and at night, within 0.05
+  stops;
 - in twilight another exposure takes over, blended in as the sun goes
   from `DUSK` = 8 to 1 degrees (a smoothstep, times `sunOn`): one set
   by the sky, the level that the brighter third of the picture passes

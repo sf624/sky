@@ -7862,6 +7862,7 @@ const SkySound = (() => {
   const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
   const SUN_SHARE = 0.5;         // ...down to this share of their light
   const DEEP = 0.8, MID_GAP = 0.5;        // how far highlights may stop down (exposureFor)...
+  const FLOOR_OVER = 1;          // the floor lifts daylight's highlights no further than white, and FLOOR_OVER stops past it for each stop that they are dimmer
   const DUSK = [8, 1];           // twilight's exposure takes over as the sun goes from 8 to 1 degrees:
   const DUSK_SHARE = 0.65;       // ...set by the level that the brighter third of the picture passes (the sky):
   const DUSK_MID = -3, DUSK_SHOWN = -0.8;   // ...at DUSK_MID at sunset, it is shown at DUSK_SHOWN...
@@ -8370,7 +8371,11 @@ const SkySound = (() => {
   //   night instead of reaching the night's level early and staying there.
   //   The median, not the darker quarter: after sunset the sea and the
   //   clouds below darken sooner than the sky, and a floor on them would
-  //   brighten the sky again;
+  //   brighten the sky again. The floor is for a dim view: it lifts
+  //   daylight's highlights (lit at DAY_HIGH or more) no further than
+  //   white, and FLOOR_OVER stops past it for each stop that they are
+  //   dimmer. From the stratosphere the dark sky fills the median, and
+  //   the floor ran a sunlit Earth below it into white;
   // - in twilight (the sun from DUSK[0] down to DUSK[1] degrees, and as
   //   long as it lights the air, sunOn) the exposure above gives way to
   //   one set by the sky: the level that the brighter third of the picture
@@ -8429,7 +8434,7 @@ const SkySound = (() => {
     const lit = high + day * (st.lit - st.high);
     const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
-    const byDay = Math.max(Math.min(key, white), floor);
+    const byDay = Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit)));
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
     const eye = NIGHT_OPEN - NIGHT_RATE * (Math.max(st.sky + d, LOG_RANGE[0]) - NIGHT_SKY);
     const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
