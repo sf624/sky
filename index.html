@@ -2034,9 +2034,11 @@ vec3 phases(float mu) {
 }
 
 #ifdef AIR_LUT
-// The light scattered once that addLight has added (the part the clouds'
-// shadows take): the air's table keeps it (see Q_AIR_LUT).
+// The light scattered once that addLight has added while onceOn (from the
+// light whose shadows the clouds' map holds: the part they take): the air's
+// table keeps it (see Q_AIR_LUT).
 vec4 lightOnce[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
+bool onceOn = false;
 #endif
 // Light from one source (sun or moon) scattered towards the eye at p:
 // scattered once (times `direct`: less in the shadow of a cloud), plus what
@@ -2063,7 +2065,7 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
       vec4 once = direct * exp(-(uBR[k] * odl.x + extM * uMA[k] * odl.y + uBO[k] * odl.z)) * (sc * phase.x + sm * mix(phase.z, phase.y, dens.w));
       a += once;
 #ifdef AIR_LUT
-      lightOnce[k] += gain * once;
+      if (onceOn) lightOnce[k] += gain * once;
 #endif
     }
     L[k] += gain * a;
@@ -2084,8 +2086,9 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 // sea sees it (from its surface, the whole way: skyAt; LUT_SEA) and the
 // whole ray, to the sea or out of the air (LUT_END). All in one 3D
 // texture: the seven parts of its width hold the three vec4 of the light,
-// the depth, and the three vec4 of the part of the light scattered once. The light is divided by uLutScale (the stronger of the sun
-// and the moon) to keep half floats' range by night.
+// the depth, and the three vec4 of the part of the light scattered once.
+// The light is divided by uLutScale (the light of the air the stronger of
+// the sun and the moon makes) to keep half floats' range by night.
 // The sizes are the level's (`airLut` in QUALITY).
 const float LUT_AZ = float(Q_LUT_AZ), LUT_EL = float(Q_LUT_EL), LUT_S = float(Q_LUT_S), LUT_T0 = 0.05, LUT_T1 = 1200.0;
 const float LUT_SEA = LUT_S, LUT_END = LUT_S + 1.0, LUT_PARTS = 7.0;
@@ -5667,7 +5670,9 @@ void main() {
     // this, the air under a deck shone orange at its far edge at dusk).
     float direct = mix(1.0, mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h))), uLightShare);
     bool sunLight = dot(uLight, uSun) > 0.999;
+    onceOn = sunLight;
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * gain, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
+    onceOn = !sunLight;
     if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * gain, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
   }
@@ -5924,11 +5929,11 @@ void main() {
     // mean of its places, over the whole part: at sunset the shafts of light
     // and shadow under the clouds towards the sun faded to a haze outside
     // LUT_NEAR, where the march draws them. With one place, the mean at rest
-    // kept the jitter's pattern over the far air. Not where the moon lights
-    // the clouds while the sun lights the air: the map is the moon's.) The
-    // shadows take only the light scattered once there, not the sky's,
-    // scattered many times: the table keeps that light apart, for each
-    // wavelength. (With a share fixed at 0.65, the low air at sunset, lit
+    // kept the jitter's pattern over the far air.) The shadows take only
+    // the light scattered once there, from the light the map is of (the
+    // moon's, where it lights the clouds while the sun still lights the air),
+    // not the sky's, scattered many times: the table keeps that light apart,
+    // for each wavelength. (With a share fixed at 0.65, the low air at sunset, lit
     // almost only by the sky, went dark under the clouds' long shadows; with
     // one share for all wavelengths, the shadows took too little of the red
     // light scattered once and too much of the sky's blue, and the horizon
@@ -5941,7 +5946,7 @@ void main() {
       else if (lo2.x >= 0.0 && lo2.x < 1e8) { sa0 = lo2.x; sb0 = lo2.y; }
       sb0 = min(sb0, tmax);
     }
-    bool shade = sb0 > sa0 && (sunLight || uSunI <= 0.0);
+    bool shade = sb0 > sa0;
     float tA = 0.0;
     for (int s = 0; s < 3; s++) {
       float tEnd = s == 2 ? tmax : tLayer;
@@ -9934,9 +9939,18 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE0);
       C('uniform1i', 'uAirLut', 29);
     }
-    // The light the table is kept in units of (see uLutScale).
-    const lutScale = () => Math.max(state.sunOn, state.moonI * moonAirFor(), 1e-30);
-    const lutLight = () => state.moonI * moonAirFor() > state.sunOn ? state.moon : state.sun;
+    // The light of the air that the sun and the moon make at a height of alt
+    // km: the light's strength times the air's mean light there with it at
+    // its elevation (airLevel). The table is kept in units of the stronger
+    // (see uLutScale), and its azimuth is the stronger's. (In units of the
+    // sun's strength alone, at the end of twilight, the sun 18 degrees down
+    // and still counted at 0.97, the air's light was some 1e-8 of it, below
+    // what half floats hold: it came out brighter and in steps, a bright
+    // block at the horizon under a crescent moon.)
+    const lutLights = alt => [state.sunOn * 2 ** airLevel(alt, state.elev),
+      state.moonI * moonAirFor() * 2 ** airLevel(alt, Math.asin(state.moon[1]) / RAD)];
+    const lutScale = alt => Math.max(...lutLights(alt), 1e-30);
+    const lutLight = alt => { const [sun, moon] = lutLights(alt); return moon > sun ? state.moon : state.sun; };
     // The map of the tops (see uTops in fs), on unit 23, one texel for each
     // of the weather map's: fs draws it (topsProg) in two draws, the tops
     // over each texel into a first texture (on unit 24), then the highest of
@@ -10543,7 +10557,7 @@ const SkySound = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, lut.target);
         for (let sl = 0; sl <= LUT_S + 1; sl++) {
           for (let part = 0; part < 2; part++) {
-            draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutPart', part], ['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]], 3);
+            draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutSlice', sl], ['uniform1f', 'uLutPart', part], ['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)]], 3);
             gl.activeTexture(gl.TEXTURE29);
             gl.bindTexture(gl.TEXTURE_3D, lut.texture);
             for (let q = 0; q < 4 - part; q++) {
@@ -10609,7 +10623,7 @@ const SkySound = (() => {
       if (stale && !benchSkip.maps) drawLayer(...stale);
       // (Where things were when each layer was drawn, for every program
       // that reads the maps.)
-      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale()], ['uniform3fv', 'uLutLight', lutLight()]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
+      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)])];
       lap('maps');
       // The first stage of the clouds' light, then the frame, which reads it.
       // (benchRepeat, benchSkip: ?stats=bench3 only.)

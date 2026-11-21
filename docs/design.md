@@ -597,14 +597,23 @@ its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
 ray from the eye, to the sea or out of the air (`LUT_END`). The table is
 one 3D texture of half floats on unit 29, seven times as wide: the light's
 three `vec4`, the optical depth, and the three `vec4` of the part of the
-light scattered once (the part the clouds' shadows take). Each slice is
+light scattered once from the light the clouds' map is of (the part their
+shadows take: the moon's, where it lights the clouds while the sun still
+lights the air; before, those shadows were left out there, and a low full
+moon over clouds showed the march's darker disc round it). Each slice is
 drawn twice into four targets (`uLutPart` 0: the light and the depth; 1:
 the light scattered once) and copied into it (`copyTexSubImage3D`), all of
 them when the
 sun, the moon, the haze, the height or the amount of cloud has changed
 (`lut.for`); in flight, none of these changes. The light is kept divided by
-the stronger of the sun and the moon (`uLutScale`), so that half floats
-hold the night's.
+the light of the air that the stronger of the sun and the moon makes
+(`uLutScale`: the light's strength times the air's mean light at the eye
+with it at its elevation, `airLevel`), so that half floats hold the
+night's, and the azimuth is measured from that one. (Divided by the sun's
+strength alone, at the end of twilight, the sun 18 degrees down and still
+counted at 0.97, the air's light was some 1e-8 of it, below what half
+floats hold: it came out brighter and in steps, a bright block at the
+horizon under a crescent moon.)
 
 The scene then takes, for each segment of its ray (the eye to the first
 layer, to the second, to the end), the table's light at its end less at
