@@ -806,9 +806,8 @@ vec4 deckBake(vec2 uv) {
   // lower they stood upright like thumbs, and photographs of a deck from
   // above show a surface of shallow relief. Low and packed, from 6.4 km
   // they were a grey blanket: in photographs the contrast of a deck comes
-  // mostly from its gaps, thinner cloud between thick cells (see
-  // deckCore in fs). So they stand a little apart, and between them the
-  // deck is lower (below).)
+  // mostly from its gaps, thinner cloud between thick cells. So they
+  // stand a little apart, and between them the deck is lower (below).)
   vec3 cl = log(1.0 + deckClass(x, 45.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.02 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
   vec3 lg = log(1.0 + deckClass(x, 105.0, 550.0, vec3(0.95, 0.65, 0.3), 0.45, 0.075 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
   vec3 md = log(1.0 + deckClass(x, 135.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.04 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
@@ -2562,17 +2561,6 @@ float deckCover(vec2 x, float region) {
 // It also sets deckThick: how thick the layer is there, -1 to 1 (uDeck's A,
 // by patches of 4 to 10 km: see deckControl in noise).
 float deckThick = 0.0;
-// Whether a place lies in a cell (1) or in a gap between cells (0), by the
-// height of the puffs there (P, of DECK_H): the cells' tops stand 60 to
-// 150 m over the sheet, the gaps 15 to 30 m (see deckBake), so the edge is
-// at some 50 m, higher where the layer is thicker (the bake made its puffs
-// higher there). The gaps are thinner cloud (deckBody). Set by deckTop and
-// deckTopSoft.
-float deckCore = 1.0;
-float deckCoreOf(float P) {
-  float th = 0.1 * (1.0 + 0.2 * deckThick);
-  return smoothstep(th - 0.04, th + 0.04, P);
-}
 float deckPuffs(vec2 x, float C, float lod) {
   vec2 wv = textureLod(uWeather, x / WEATHER_KM + vec2(0.71, 0.19), 6.0).rb - 0.5;
   vec4 m = textureLod(uDeck, (x + 16.0 * wv) / DECK_KM, max(lod, 0.0));
@@ -2606,8 +2594,6 @@ float deckTop(vec2 x, float region, float lod, out float ts, out float C) {
   // texels of 11 km alone, it stood as a plateau with straight cliffs.)
   float S = smoothstep(0.6, 0.8, sl.r + 0.3 * rag);
   float P = deckPuffs(x, C, lod + 2.0);
-  // (The smooth sheet is cloud through, with no gaps.)
-  deckCore = mix(deckCoreOf(P), 1.0, S);
   // (Where it is thicker, its sheet lies a little higher.) Closed, the
   // sheet under the puffs is 100 to 200 m thick: with 10 to 150 m, the
   // gaps between the cells were holes onto the sea from above, where in
@@ -2623,7 +2609,6 @@ float deckTop(vec2 x, float region, float lod, out float ts, out float C) {
 // Direct3D 11 took 60 % longer with the whole top).
 float deckTopSoft(vec2 x, float region) {
   float C = clamp(deckCover(x, region), 0.0, 1.0), P = deckPuffs(x, C, 0.0);
-  deckCore = deckCoreOf(P);
   return mix(-0.03, DECK_SHEET, C) + 0.05 * C * deckThick + DECK_H * P;
 }
 // The deck's field at height z over the level of its bases, and what
@@ -2631,17 +2616,8 @@ float deckTopSoft(vec2 x, float region) {
 // depth by its thickness, and both by deckThick: thinner patches of the
 // layer, lower and a quarter less dense, show the sea through them,
 // darker from above and lighter from below).
-// In the gaps between the cells (deckCore) the cloud is thinner, its
-// extinction 0.7 of a cell's: a column there is some 5 deep, through a
-// cell 10 to 14. In photographs of a deck from above the contrast
-// comes mostly from that, thick bright cells and dimmer gaps, with a
-// shallow relief; with the same density everywhere, low cells were a grey
-// blanket from 6.4 km (their light varied by 0.19 to 0.23 of its mean at
-// the scale of the cells, a photograph's by 0.39 to 0.47), and only tall
-// ones, which stood like thumbs from 4 km, made up for it. (With 0.2 to
-// 0.5 of a cell's, from 11 km at noon the gaps were holes onto the sea.)
-const float DECK_BODY = 0.3, DECK_GAP = 0.75;
-float deckBody() { return DECK_BODY * (1.0 + 0.25 * deckThick) * mix(DECK_GAP, 1.0, deckCore); }
+const float DECK_BODY = 0.3;
+float deckBody() { return DECK_BODY * (1.0 + 0.25 * deckThick); }
 // The highest top the deck has over its bases: a smooth sheet's 210 m
 // and 500 m of puffs.
 const float DECK_TOP = DECK_SHEET + 0.06 + DECK_H;
