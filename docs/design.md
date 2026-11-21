@@ -17,7 +17,7 @@ blocks. It loads no other file.
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own (and, on Direct3D 11, a sixth time with `CLEAR_SKY`: the scene without clouds, see the next section): with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `meter` | fragment shader | Meters the picture for the exposure, block by block. |
@@ -154,13 +154,48 @@ The JS then runs once, at load, and does little:
      gave, until a reading lies within `ADAPT_START` of the exposure it was
      drawn at (see [Exposure](#exposure-and-the-tone-curve)); by day one
      reading does.
+   - **The clear sky first.** On ANGLE's Direct3D 11 (Chrome and Edge on
+     Windows; the renderer's name says `Direct3D11`), Microsoft's compiler
+     takes 10 to 17 s over the scene's program and the passes of the low
+     clouds and the cirrus, together. There `fs` is also compiled with
+     `CLEAR_SKY`: `uCloud` and `uCirrus` become the constant 0, which
+     takes the code of both kinds of cloud out of the program (2.8 s
+     alone, against 9.1 s for the scene). The loading then waits for
+     every program but those four (the scene's, the two passes', the
+     ice's), builds the noise, the weather map and the waves, and, if
+     the four are still compiling, draws the first picture with the clear
+     sky (`early`): the view (`view`) without low clouds, no passes,
+     `sceneUse` and the program bound between draws (`home`) the clear
+     sky's. Its first frame is drawn and metered by `prime` as any first
+     frame. The page hands over, and flies, with that picture.
+     `bringClouds` meanwhile waits for the four (the ice program is drawn
+     into its three targets as soon as it is done, `warm`, which holds the
+     GPU process a few seconds: the clear sky stops moving meanwhile).
+     Then the frames stop (`hold`); a copy of the canvas, the veil (a 2D
+     canvas, `.veil`), goes over it; the cirrus's textures are built;
+     the fixed uniforms are set on the four; the state of the frames and
+     of the meter is set back to that of a page that has just loaded; and
+     `prime` draws and meters the first frame with the clouds. From there
+     on the page draws as if it had started without the clear sky. Once
+     the first picture with the clouds is shown, the veil fades out over
+     `CLOUDS_FADE` = 2.5 s (a smoothstep of the page's clock, not a CSS
+     transition, so that the tools' fake clock drives it too): the clouds
+     and their light come in as the clear sky goes, and the exposure, the
+     meter's for each picture, passes from one to the other with the
+     fade. Elsewhere the programs are done well before the textures, and
+     nothing of this runs (`?early=S` forces it on any GPU, the clouds held
+     back at least S s; `?early=0` turns it off). Measured on the owner's
+     machine (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)):
+     the clear sky at about 6 s, the clouds at the time the whole picture
+     came before.
    - A context lost meanwhile (`webglcontextlost`: the GPU process
      restarted, or its driver gave up) ends the loading with an error at the
      next wait, instead of waiting for a fence for ever.
    - With `?timing` in the address, each part prints to the console as it
      ends (seconds since the page was opened: the tables, each program
-     compiled, the noise, the cirrus, the waves, the first frame, the first
-     picture), and every 5 s the programs it still waits for.
+     compiled, the noise, the cirrus, the waves, the clear sky's first
+     frame and picture, the first frame, the first picture), and every 5 s
+     the programs it still waits for.
 3. **The hand-over.** The hero's `data-sky` becomes `ready` (`failed`
    without WebGL2 or if the loading failed). A loading that fails (a
    program did not compile, or the context was lost) is tried again a
@@ -3420,8 +3455,9 @@ of the picture, the frame, the low clouds' pass, the first stage of their
 light and the cirrus's pass, the drawing scale, the time from opening the
 page to the first picture and when each part of the start ended
 (`START_PARTS`, from `mark`: the context, the tables, the last program
-compiled, the noise and the weather map, the cirrus, the waves, the first
-frame), the GPU memory of the level (its textures,
+compiled, the noise and the weather map, the cirrus, the waves, the clear
+sky's first frame where it comes first, the first frame with the clouds;
+the first picture is then the clear sky's), the GPU memory of the level (its textures,
 counted as `makeSky` makes them, by wrapping the calls that allocate and
 free them on its context, `countMemory`; and the canvas's own buffers as 12
 bytes a pixel), the contexts lost and the levels that failed, and the GPU's

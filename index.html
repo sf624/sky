@@ -8896,8 +8896,14 @@ const SkySound = (() => {
           if (!gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)) return true;
           mark(`program ${names.get(p)} compiled`);
           if (p === iceProgram && gl.getProgramParameter(p, gl.LINK_STATUS)) {
+            // (Under the clear sky, the frames' state is kept: the program,
+            // and unit 0's texture, the table of multiple scattering, uMS.)
+            const kept = home !== prog && gl.getParameter(gl.TEXTURE_BINDING_2D);
             warm(p);
-            if (home !== prog) gl.useProgram(home);
+            if (home !== prog) {
+              gl.useProgram(home);
+              gl.bindTexture(gl.TEXTURE_2D, kept);
+            }
           }
           return false;
         });
@@ -10592,7 +10598,24 @@ const SkySound = (() => {
     const bringClouds = async () => {
       try {
         doing = 'compiling the clouds\' programs';
-        await compiled(rest);
+        // The cirrus's textures as soon as the ice program is done: its
+        // second compile (warm) holds the GPU process then anyway.
+        if (startIce) {
+          await compiled(rest.filter(([p]) => p === iceProgram));
+          // (Not before the clear sky is on the screen.)
+          while (earlyAt === null) {
+            await nextFrame();
+            alive();
+          }
+          hold = true;
+          doing = 'building the cirrus';
+          startIce();
+          await batches(iceParts, () => {});
+          mark('cirrus built');
+          hold = false;
+          wake();
+        }
+        await compiled(rest.filter(([p]) => p !== iceProgram));
         while (earlyHold > 0 && (earlyAt === null || performance.now() - earlyAt < earlyHold * 1000)) {
           await nextFrame();
           alive();
@@ -10605,11 +10628,6 @@ const SkySound = (() => {
         veil.getContext('2d').drawImage(canvas, 0, 0);
         canvas.after(veil);
         doing = 'bringing in the clouds';
-        if (startIce) {
-          startIce();
-          await batches(iceParts, () => {});
-          mark('cirrus built');
-        }
         early = false;
         home = prog;
         gl.useProgram(prog);

@@ -29,7 +29,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S \| --fade] [--out PREFIX] [--warm]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
@@ -178,10 +178,23 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   (each program compiled, the textures, the first picture, in seconds since
   the page was opened), then the GPU time of `--frames` frames (default 60,
   `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080).
-  With `--shot S`, instead of the GPU time: the canvas as a PNG, S s (real
+  The GPU time is taken from the first picture with the clouds (the
+  page's line `first picture shown`): where the clear sky comes first,
+  its frames are not counted.
+  With `--shot S`, instead of the GPU time: the hero as a PNG, S s (real
   time) after the first picture, at the page's own drawing size (no
   `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
-  picture of S s flown on Direct3D 11.
+  picture of S s flown on Direct3D 11. The hero is its canvases, each at
+  its opacity: the clear sky's veil over the picture while the clouds
+  fade in. With `--fade`, four such pictures of a start that shows the
+  clear sky first, `PREFIX-<page>-<run>-<tag>.png`: `early` (1 s after
+  the first picture), `veil` (as the veil comes, just before the clouds),
+  `mid` (the veil half gone) and `full` (3 s after it has gone).
+- `--warm`: the program cache on, and the page three times on one
+  profile: cold; again in the same tab (the browser's memory holds the
+  programs); and in a new Chrome (its disk cache). Each prints its own
+  lines, and the cache's size on disk (`Default/GPUCache`) is printed
+  after the first Chrome and after the second.
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
   with their defines), alone: the time to compile and link it, and of its
   first draw into one target and into all its outputs (ANGLE compiles a

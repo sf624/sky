@@ -60,6 +60,7 @@ These are read directly.
 | `play` | none | `1` starts playing at load |
 | `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the script's time by part of the frame, the level, the canvas and the sizes drawn, the first picture and when each part of the start ended, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=bench` also holds the drawing scale at 1, 0.71, 0.5 and 0.35 in turn and shows the frames a second at each; `stats=bench3` measures the frame with each part taken away and with each candidate cut, at full scale, by the frames a second (some 40 to 60 s after the first picture; touch nothing). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
+| `early` | none | The clear sky first, its clouds fading in once their programs are done (see [design.md](design.md#from-the-address-bar-to-the-first-frame)): by default only on Direct3D 11 (ANGLE), and only if those programs are not done by then. `0`: never. `S` (a number of seconds over 0): on any GPU, the clouds held back at least S s after the clear sky's first picture, to look at it and at the fade. A test switch |
 | `grid` | none (off) | `1`: the low clouds' towers are grown as trees of lobes by a worker and kept in grids that move with the eye (see [design.md](design.md#towers-in-grids-that-move-with-the-eye)). Only at `quality=max` and `high`; elsewhere it does nothing. `1,v62.5` (or `1,v62`): the finest voxels 62.5 m, not 31.25 m (the levels 62.5, 125 and 250 m); any other value of `v` keeps 31.25 m. `1,hK:W`: the heads of `uBody`, read K times finer (K over 0), also carve the towers' surface, seams W km deep. The two may be given together (`1,v62.5,h2:0.05`). A test switch: off, the page is main's |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time. It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
@@ -161,7 +162,12 @@ these rules, and new work at start should too:
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
   ice program needs three targets: it is drawn once into a pixel of three
   as soon as it links (`warm`), and its second compile runs while the
-  scene's programs still compile. `?timing` prints where the time goes;
+  scene's programs still compile. There the first picture is the clear
+  sky, drawn by a seventh program of `fs` (`CLEAR_SKY`), while the
+  scene's and the passes' programs compile; they bring the clouds in
+  later (see [design.md](design.md#from-the-address-bar-to-the-first-frame)).
+  A change to the loading must keep both ways working: look at
+  `?early=3` too. `?timing` prints where the time goes;
   `node tools/sky.mjs d3d` measures it on Windows from WSL (see
   [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
