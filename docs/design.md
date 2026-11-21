@@ -12,7 +12,7 @@ blocks. It loads no other file.
 
 | Block | Kind | What it is |
 |---|---|---|
-| (no id) | JS | `TEXT`, the strings in Japanese and English, and `applyLanguage`. It runs right after the panel. |
+| (no id) | JS | `TEXT`, the strings in Japanese and English, `WEATHERS` (the weathers of the panel's list, see [Weathers](#weathers)) and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
@@ -30,6 +30,38 @@ sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
 over frames. It fills the window, and the page does not scroll.
 `makeSky(canvas, view, { done, shown })` makes its renderer, a step at a
 time (see the next section).
+
+### Weathers
+
+`WEATHERS`, a table in the first script, holds the weathers of the panel's
+list. Each has an id (its name in the address), its names in English and
+Japanese, a weight, the values of the four sliders it sets (`cloud`,
+`cirrus`, `haze`, `wind`) and a place on the weather map (`at`, km). A
+value is a number or `[low, usual, high]`. The list's options and their
+text are made from the table; a field added to it later (a kind of deck,
+the height of the bases) needs no change of the panel.
+
+- Chosen from the list, a weather sets its usual values and moves the
+  aircraft to its place. The place jumps, so the picture starts again
+  without its past (`reset` in the frame, a move of more than 1 km).
+- The die draws a weather from a seed: one of the table by weight, then
+  each value between its low and its high, and any whole-km place on the
+  map. The seed's numbers are xorshift32 started from the seed through
+  lowbias32. The same seed gives the same weather, values and place.
+- The list shows the weather while the four sliders hold what it set
+  (after their rounding); once one is moved it shows "custom", an option
+  that is hidden and disabled otherwise. Without `weather` in the address,
+  it shows the weather whose usual values the sliders hold: the page's
+  first values are those of "Partly cloudy" (`mixed`, cumulus and cirrus).
+- A choice in the panel writes `weather` (and `seed`) into the address
+  with `history.replaceState`, and takes out the parameters it sets
+  (`cloud`, `cirrus`, `haze`, `wind`, `at`), so that the address can be
+  shared. `?weather=random` without a seed only adds the seed drawn.
+- Nothing changes the weather by itself: the time-lapse leaves it.
+
+A weather is only the present sliders and a place: the shapes of the
+clouds (their kinds, heights and the share of towers) are those of the
+cloud amount, as before.
 
 ## Conventions
 
@@ -79,8 +111,10 @@ script.
 
 The JS then runs once, at load, and does little:
 
-1. **Inputs.** URL parameters with the id of a slider set that slider's
-   value (the browser clamps it to the slider's range and step). Then
+1. **Inputs.** `weather` sets the sliders of a weather and the place
+   (see [Weathers](#weathers)). Then URL parameters with the id of a
+   slider set that slider's value (the browser clamps it to the slider's
+   range and step): they win over the weather. Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
    time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,

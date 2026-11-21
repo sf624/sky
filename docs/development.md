@@ -51,6 +51,8 @@ These are read directly.
 | `pitch` | -8 | Elevation of the view, degrees, up positive. Not clamped (a drag clamps to 89) |
 | `heading` | `yaw` - 60 | Direction flown, degrees, as `yaw` |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
+| `weather` | none | A weather of the panel's list, by its id: `clear`, `hazy`, `fair`, `cumulus`, `mixed`, `broken`, `overcast`, `cirrus`, `cirrus-cloud`, `windy` (see `WEATHERS` and [design.md](design.md#weathers)). It sets `cloud`, `cirrus`, `haze`, `wind` and the place; those parameters, and `at`, win over it. `random` draws one from `seed`. Another value counts as none given |
+| `seed` | drawn at random | With `weather=random`: a whole number that gives the weather, its values and its place. Without it, the page draws a seed and adds it to the address |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
 | `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
 | `quality` | stored choice, else `auto` | The quality level: `low`, `mid`, `high`, `max` or `auto` (see [design.md](design.md#quality-levels)). A level that does not start falls back to the one below. Not stored. The tools add `quality=max` to every page they load, unless the query names a level |

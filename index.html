@@ -127,6 +127,11 @@
   }
   .panel select option { color: #123; }
   .panel .time select { width: auto; flex: none; margin: 0; }
+  /* The weather: its list, and beside it a die that draws one at random. */
+  .panel .pick { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .panel .pick select { flex: 1; min-width: 0; margin: 0; padding: 4px 6px; letter-spacing: 0; }
+  .panel .pick button { width: 28px; height: 28px; }
+  .panel .pick button svg { width: 16px; height: 16px; }
   .title .hint {
     margin: 10px 0 0;
     font-size: 12px;
@@ -319,6 +324,15 @@
         <option value="utc" data-t="clockUTC">協定世界時 (UTC)</option>
       </select>
     </label>
+    <div>
+      <span class="row"><span id="weatherName" data-t="weather">天気</span><output id="weatherOut"></output></span>
+      <span class="pick">
+        <select id="weather" aria-labelledby="weatherName"></select>
+        <button id="roll" type="button" aria-label="天気をランダムに選ぶ" title="天気をランダムに選ぶ" data-t-label="roll" data-t-title="roll">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="2.5" width="13" height="13" rx="3"/><g fill="currentColor" stroke="none"><circle cx="6.2" cy="6.2" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="11.8" cy="11.8" r="1.3"/></g></svg>
+        </button>
+      </span>
+    </div>
     <label>
       <span class="row"><span data-t="haze">大気の霞</span><output id="hazeOut"></output></span>
       <input id="haze" type="range" min="0" max="6" step="0.05" value="1">
@@ -418,6 +432,7 @@ const TEXT = {
     hazes: ['澄みきった', '澄んだ', 'うす霞', '霞'],
     clouds: ['なし', '少ない', '中くらい', '多い', '一面'],
     cirri: ['なし', '少ない', '中くらい', '多い'],
+    weather: '天気', weatherCustom: 'カスタム', weatherRandom: 'ランダム', roll: '天気をランダムに選ぶ',
   },
   en: {
     title: 'Sky — a Rayleigh-scattered sky',
@@ -452,8 +467,52 @@ const TEXT = {
     hazes: ['crystal clear', 'clear', 'light haze', 'hazy'],
     clouds: ['none', 'few', 'some', 'many', 'overcast'],
     cirri: ['none', 'few', 'some', 'many'],
+    weather: 'Weather', weatherCustom: 'Custom', weatherRandom: 'random', roll: 'Random weather',
   },
 };
+// The weathers of the panel's list (see the main script: Weather). Each
+// sets the sliders it names and the place to start from. A value is a
+// number, or [low, usual, high]: chosen from the list, a weather takes its
+// usual values (each on its slider's step) and its place; drawn at random
+// (weight: how often, against the others), any value from low to high, and
+// any place on the weather map. More kinds of weather come with more values
+// here; the list is made from this table.
+const WEATHERS = [
+  { id: 'clear', en: 'Clear', ja: '快晴', weight: 8,
+    cloud: 0, cirrus: 0, haze: [0.3, 0.45, 0.7], wind: [3, 5, 8], at: [0, 0] },
+  { id: 'hazy', en: 'Hazy', ja: '霞んだ空', weight: 8,
+    cloud: [0, 0.08, 0.15], cirrus: [0, 0.05, 0.15], haze: [2.5, 3.5, 4.5], wind: [2, 3, 5], at: [0, 0] },
+  { id: 'fair', en: 'Fair weather', ja: '晴天積雲', weight: 16,
+    cloud: [0.12, 0.2, 0.3], cirrus: [0, 0.05, 0.15], haze: [0.8, 1, 1.3], wind: [3, 5, 7], at: [0, 0] },
+  { id: 'cumulus', en: 'Cumulus', ja: '積雲', weight: 10,
+    cloud: [0.55, 0.62, 0.68], cirrus: [0, 0.1, 0.2], haze: [0.8, 1, 1.3], wind: [4, 6, 8], at: [0, 0] },
+  // The page's own first values.
+  { id: 'mixed', en: 'Partly cloudy', ja: '積雲と巻雲', weight: 10,
+    cloud: [0.4, 0.5, 0.6], cirrus: [0.3, 0.4, 0.55], haze: [0.8, 1, 1.3], wind: [4, 6, 8], at: [0, 0] },
+  { id: 'broken', en: 'Mostly cloudy', ja: '曇りがち', weight: 12,
+    cloud: [0.7, 0.74, 0.8], cirrus: [0, 0.05, 0.15], haze: [0.8, 1, 1.3], wind: [6, 8, 11], at: [0, 0] },
+  { id: 'overcast', en: 'Overcast', ja: '曇り', weight: 12,
+    cloud: [0.9, 0.96, 1], cirrus: [0, 0, 0.1], haze: [0.6, 0.8, 1.1], wind: [6, 8, 12], at: [0, 0] },
+  { id: 'cirrus', en: 'Cirrus', ja: '巻雲', weight: 9,
+    cloud: [0, 0.08, 0.2], cirrus: [0.5, 0.65, 0.85], haze: [0.6, 0.8, 1.1], wind: [3, 5, 8], at: [0, 0] },
+  { id: 'cirrus-cloud', en: 'Two layers', ja: '下層雲と巻雲', weight: 6,
+    cloud: [0.7, 0.78, 0.88], cirrus: [0.75, 0.9, 1], haze: [1, 1.3, 1.8], wind: [7, 9, 12], at: [0, 0] },
+  { id: 'windy', en: 'Windy, clear', ja: '風の強い晴れ', weight: 7,
+    cloud: [0.2, 0.3, 0.45], cirrus: [0, 0.03, 0.1], haze: [0.2, 0.35, 0.5], wind: [10, 12, 15], at: [150, 90] },
+];
+// Their names in both languages, and the list: the weathers, then "custom"
+// (shown only while the sliders differ from the weather chosen).
+{
+  const list = document.getElementById('weather');
+  for (const w of [...WEATHERS, { id: 'custom' }]) {
+    const key = w.id === 'custom' ? 'weatherCustom' : 'weather.' + w.id, option = document.createElement('option');
+    if (w.en) { TEXT.en[key] = w.en; TEXT.ja[key] = w.ja; }
+    option.value = w.id;
+    option.dataset.t = key;
+    list.append(option);
+  }
+  list.lastChild.disabled = list.lastChild.hidden = true;
+}
 // The language: the address (?lang=en), else the reader's last choice, else
 // the browser's first Japanese or English language; English for all others.
 let LANG = (() => {
@@ -10427,8 +10486,7 @@ const SkySound = (() => {
       if (grid && grid.frame(now)) wake();
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
       // Start again without a past: at first, when the canvas has changed,
-      // and if the place ever jumps (today it cannot: the aircraft stands
-      // still while nothing is drawn).
+      // and when the place jumps (a weather chosen in the panel moves it).
       const reset = restart || !camPast || fitted === 2 || Math.hypot(way[0], way[2]) > 1;
       restart = false;
       const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, v.alt, v.cloud, ...(grid ? [grid.version] : [])].join();
@@ -10978,7 +11036,110 @@ const SkySound = (() => {
   }
   // A view can be given in the address: ?time=17.5&cloud=0.7&yaw=120&pitch=-10
   const params = new URLSearchParams(location.search);
+  // ---------- Weather ----------
+  // A weather of WEATHERS sets the sliders it names (WEATHER_SLIDERS) and
+  // the place: chosen from the list, its usual values; drawn by the die, a
+  // weather by weight and values within its ranges, from a seed. The list
+  // shows the weather while the sliders hold what it set, and "custom" once
+  // one is moved. Nothing changes by itself: a time-lapse keeps the weather.
+  // In the address, ?weather=NAME or ?weather=random&seed=N; the sliders'
+  // own parameters and at= win over it.
+  const WEATHER_SLIDERS = ['cloud', 'cirrus', 'haze', 'wind'];
+  const weatherList = document.getElementById('weather'), weatherOut = document.getElementById('weatherOut');
+  // chosen: { w, values: the sliders after their rounding, random } or null.
+  let chosen = null;
+  // A seed's numbers, 0 to 1: lowbias32 (Wellons' hash, as in the noise
+  // shader) spreads the seed, xorshift32 (Marsaglia) goes on from it.
+  const numbers = seed => {
+    let s = (seed ^ 0x9e3779b9) >>> 0;
+    s = Math.imul(s ^ (s >>> 16), 0x7feb352d);
+    s = Math.imul(s ^ (s >>> 15), 0x846ca68b);
+    s = ((s ^ (s >>> 16)) >>> 0) || 1;
+    return () => {
+      s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+      return (s >>> 0) / 4294967296;
+    };
+  };
+  const usual = x => Array.isArray(x) ? x[1] : x;
+  const usualValues = w => Object.fromEntries(WEATHER_SLIDERS.map(id => [id, usual(w[id])]));
+  // A weather drawn from a seed: which one, its values and its place.
+  function drawWeather(seed) {
+    const next = numbers(seed);
+    let k = next() * WEATHERS.reduce((sum, w) => sum + w.weight, 0), w = WEATHERS[0];
+    for (w of WEATHERS) if ((k -= w.weight) < 0) break;
+    const values = {};
+    for (const id of WEATHER_SLIDERS) {
+      const x = w[id], r = next();
+      values[id] = Array.isArray(x) ? x[0] + r * (x[2] - x[0]) : x;
+    }
+    return { w, values, at: [Math.floor(next() * WEATHER_KM), Math.floor(next() * WEATHER_KM)] };
+  }
+  const sliderValues = () => Object.fromEntries(WEATHER_SLIDERS.map(id => [id, +document.getElementById(id).value]));
+  // Sets the sliders, and keeps what they hold.
+  function setWeather(w, values, random) {
+    for (const id of WEATHER_SLIDERS) document.getElementById(id).value = values[id];
+    chosen = { w, values: sliderValues(), random };
+  }
+  function showWeather() {
+    const now = sliderValues();
+    const same = chosen && WEATHER_SLIDERS.every(id => now[id] === chosen.values[id]);
+    weatherList.value = same ? chosen.w.id : 'custom';
+    weatherList.lastChild.hidden = same;
+    weatherOut.textContent = same && chosen.random ? TEXT[LANG].weatherRandom : '';
+  }
+  // The address follows a choice in the panel, so that it can be shared:
+  // the weather (and the seed of a draw) replace the values it sets. At
+  // load, a draw without a seed only adds its seed.
+  function weatherAddress(name, seed, atLoad) {
+    const q = new URLSearchParams(location.search);
+    if (!atLoad) for (const id of [...WEATHER_SLIDERS, 'at', 'seed']) q.delete(id);
+    q.set('weather', name);
+    if (seed !== undefined) q.set('seed', seed);
+    try { history.replaceState(history.state, '', '?' + q.toString().replace(/%2C/g, ',') + location.hash); } catch (err) {}
+  }
+  const newSeed = () => 1 + Math.floor(Math.random() * 99999);
+  // From the address, before the sliders' own parameters.
+  let weatherAt = null;
+  {
+    const name = params.get('weather'), w = WEATHERS.find(w => w.id === name);
+    if (name === 'random') {
+      const asked = params.get('seed'), seed = asked !== null && asked !== '' && isFinite(asked) ? Math.floor(+asked) >>> 0 : newSeed();
+      const d = drawWeather(seed);
+      setWeather(d.w, d.values, true);
+      weatherAt = d.at;
+      if (asked !== String(seed)) weatherAddress('random', seed, true);
+    } else if (w) {
+      setWeather(w, usualValues(w), false);
+      weatherAt = w.at;
+    }
+  }
   for (const id in sliders) if (params.has(id)) document.getElementById(id).value = params.get(id);
+  // Without a weather in the address, the list shows one whose usual values
+  // the sliders hold (the page's first values are one), else "custom".
+  if (!chosen) {
+    const now = sliderValues(), w = WEATHERS.find(w => WEATHER_SLIDERS.every(id => usual(w[id]) === now[id]));
+    if (w) chosen = { w, values: now, random: false };
+  }
+  // A weather chosen in the panel: the sliders, and the place (a jump: the
+  // picture starts again without its past).
+  function toWeather(w, values, at, random, seed) {
+    setWeather(w, values, random);
+    for (const id of WEATHER_SLIDERS) read(id);
+    state.drift = [wrap(at[0]), wrap(at[1])];
+    weatherAddress(random ? 'random' : w.id, random ? seed : undefined);
+    showWeather();
+    showLabels();
+    update();
+  }
+  weatherList.addEventListener('change', () => {
+    const w = WEATHERS.find(w => w.id === weatherList.value);
+    if (w) toWeather(w, usualValues(w), w.at, false);
+  });
+  document.getElementById('roll').addEventListener('click', () => {
+    const seed = newSeed(), d = drawWeather(seed);
+    toWeather(d.w, d.values, d.at, true, seed);
+  });
+  for (const id of WEATHER_SLIDERS) document.getElementById(id).addEventListener('input', showWeather);
   // The drawing limit of the hero: the address, else the last choice, else WQHD.
   const pixels = document.getElementById('pixels');
   let storedPixels = null;
@@ -11283,6 +11444,7 @@ const SkySound = (() => {
     showFullScreen();
     sound.show();
     showQuality();
+    showWeather();
     showIntro();
   });
 
@@ -11328,7 +11490,8 @@ const SkySound = (() => {
   if (params.has('at')) {
     const [x, z] = params.get('at').split(',');
     state.drift = [wrap(+x || 0), wrap(+z || 0)];
-  }
+  } else if (weatherAt) state.drift = [wrap(weatherAt[0]), wrap(weatherAt[1])];
+  showWeather();
 
   // ---------- Loading ----------
   // The page shows at once, in its loading state (.loading in the style).
