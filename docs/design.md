@@ -907,8 +907,11 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     before the sun was two lobes one on the other); a
     tower's 2.8 to 4.2 km.
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
-  the depth: flat under, round over. `k` = 2, and 3 for a tower, which
-  keeps its width higher up.
+  the depth: flat under, round over, `k` = 2. A tower's `t` is divided
+  by 0.55 to 1 (`smoothstep(0.5, 0.9)` of the larger read of the base
+  shape, below): it stands highest over the middle of its large cell and
+  lower towards its sides, a dome of turrets and not a block with a flat
+  top.
 - **The base shape**, from `uNoise` (128^3; R Perlin-Worley, G, B, A Worley
   cells of 2 km, 1 km and 500 m in a tile of `BASE_KM` = 8 km), read at a
   depth that drifts from place to place (`far`) so that no two tiles look
@@ -917,7 +920,10 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   Worley cells, mixed `CF_BIG` = 0.25 with the same read 4 times larger
   (which gathers heaps), stretched from `CF_LO` to `CF_HI`, plus `CF_SMALL`
   = 0.35 of the 1 km cells by themselves (small heaps between the large).
-  A tower's shape is read 0.45 as fast upwards: turrets on one stem. For a
+  A tower is a larger heap: the larger read weighs 0.55 there, not
+  `CF_BIG`. (Its shape was read 0.45 as fast upwards, with `k` = 3: its
+  cells became columns, which the carving fluted into bundles of needles,
+  like a ridge of rock.) For a
   sheet: the Worley cells themselves at every size from 8 km to 500 m,
   which meet in creases; the small ones are read through a matrix that
   draws them out across the wind (whole 32nds, so the pattern still wraps
