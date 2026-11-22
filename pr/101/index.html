@@ -2107,7 +2107,7 @@ void addSharp(vec3 p, vec3 od, vec4 dens, float scM, float extM, vec3 dir, float
 // sky-view and aerial-perspective tables, and the scene reads them where
 // each layer and the end of its ray lie. Directions: the azimuth from the
 // sun's, squeezed towards it (the glow), and the elevation from the
-// horizon, squeezed towards it (the horizon at v = 0.5). Distances: from
+// horizon, squeezed towards it (the horizon at v = LUT_VH). Distances: from
 // LUT_T0 to LUT_T1, evenly in their log. Two more slices hold the sky as the
 // sea sees it (from its surface, the whole way: skyAt; LUT_SEA) and the
 // whole ray, to the sea or out of the air (LUT_END). All in one 3D
@@ -2146,20 +2146,50 @@ void lutAxes(vec3 up, out vec3 sh, out vec3 side) {
 }
 // The horizon's elevation (radians, negative) at a height of alt km.
 float lutHorizon(float alt) { return -acos(clamp(RG / (RG + max(alt, 0.0)), 0.0, 1.0)); }
+// Above the horizon, v's share of the rows above it for x, the
+// elevation's share of the way from the horizon to the zenith: its square
+// root (dense near the horizon), and from above 1.6 km more rows where the
+// rays graze the boundary layer's top (BL.x): along such a ray the haze
+// ends within some 0.6 km of height, and the ray's depth and light change
+// several times over within a degree. With the square root alone a row
+// spanned 0.8 km of that height at 4 km, 1.5 km at 11 km: the table mixed
+// rays on either side of the top, and the sky at the horizon in twilight
+// showed a band, the lower edge of a setting sun a red row (its depth from
+// the table some 50 % too deep in the haze). An arctangent step adds some
+// 5 rows there (LUT_WARP); 8 rows come from below the horizon, where the
+// sky changes slowly but near the horizon (LUT_VH: the horizon at 40 rows
+// of 96, not 48).
+const float LUT_VH = floor(LUT_EL * 5.0 / 12.0 + 0.5) / LUT_EL, LUT_WARP = 0.05;
+float lutWarp(float x, float alt) {
+  float c = LUT_WARP * smoothstep(1.6, 2.6, alt);
+  float r0 = RG + alt, hor = lutHorizon(alt), span = 0.5 * PI - hor;
+  float el0 = -acos(min((RG + BL.x) / r0, 1.0));     // the ray that grazes the top
+  float x0 = (el0 - hor) / span, w = 0.6 / (r0 * max(sin(-el0), 1e-3) * span);
+  return (sqrt(x) + c * (atan((x - x0) / w) - atan(-x0 / w))) / (1.0 + c * (atan((1.0 - x0) / w) - atan(-x0 / w)));
+}
 vec2 lutUV(vec3 d, vec3 up, float alt) {
   vec3 sh, side;
   lutAxes(up, sh, side);
   float phi = atan(dot(d, side), dot(d, sh));
   float el = asin(clamp(dot(d, up), -1.0, 1.0)), hor = lutHorizon(alt);
-  float v = el >= hor ? 0.5 + 0.5 * sqrt((el - hor) / (0.5 * PI - hor)) : 0.5 - 0.5 * sqrt((hor - el) / (hor + 0.5 * PI));
+  float v = el >= hor ? LUT_VH + (1.0 - LUT_VH) * lutWarp((el - hor) / (0.5 * PI - hor), alt) : LUT_VH * (1.0 - sqrt((hor - el) / (hor + 0.5 * PI)));
   return vec2(0.5 + 0.5 * sign(phi) * sqrt(abs(phi) / PI), v);
 }
 vec3 lutDir(vec2 uv, vec3 up, float alt) {
   vec3 sh, side;
   lutAxes(up, sh, side);
-  float s = uv.x - 0.5, q = uv.y - 0.5, hor = lutHorizon(alt);
+  float s = uv.x - 0.5, hor = lutHorizon(alt);
   float phi = PI * sign(s) * 4.0 * s * s;
-  float el = q >= 0.0 ? hor + (0.5 * PI - hor) * 4.0 * q * q : hor - (hor + 0.5 * PI) * 4.0 * q * q;
+  float q = 1.0 - uv.y / LUT_VH, el = hor - (hor + 0.5 * PI) * q * q;
+  if (uv.y >= LUT_VH) {
+    // (lutWarp turned back, by halving.)
+    float lo = 0.0, hi = 1.0, t = (uv.y - LUT_VH) / (1.0 - LUT_VH);
+    for (int i = 0; i < 24; i++) {
+      float m = 0.5 * (lo + hi);
+      if (lutWarp(m, alt) < t) lo = m; else hi = m;
+    }
+    el = hor + (0.5 * PI - hor) * 0.5 * (lo + hi);
+  }
   return cos(el) * (cos(phi) * sh + sin(phi) * side) + sin(el) * up;
 }
 #endif
@@ -8188,6 +8218,9 @@ const SkySound = (() => {
                                               // band stands more than GLOW_FREE stops above the sky
   const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
                                        // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
+  const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // in sunlight the eye opens up at most DAY_OPEN[0] stops past the exposure
+                                       // that shows a white surface facing the sun, in the sun's light at the eye, at
+                                       // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
   const MONO_DEEP = [-3, -6];                 // the first in civil twilight, the second from the sun MONO_DEEP[1] down
@@ -8657,16 +8690,25 @@ const SkySound = (() => {
   // Unchanged by day and by night.
   const DAY_BALANCE = [0.932, 1.013, 1.074];
   const BALANCE_ADAPT = 0.5, BALANCE_IN = [2.5, -0.5], BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
+  // The sun's light at height alt, with the sine of its elevation mus,
+  // through the air, by wavelength (relative to the bare sun's), into out:
+  // none where the planet hides it.
+  const sunThrough = (alt, mus, out) => {
+    const ds = [0, 0, 0], sun = sunDepth(RG + alt, mus, ds), bMe = BETA_M * MIE_EXT * state.haze;
+    for (let w = 0; w < NW; w++) out[w] = sun ? Math.exp(-(BR[w] * ds[0] + bMe * MA[w] * ds[1] + BO[w] * ds[2])) : 0;
+    return out;
+  };
+  const sunScratch = new Float64Array(NW);
   const lightOn = (alt, mus, out) => {
     const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
     const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
     const k00 = (j0 * NMU + i0) * NW, k01 = k00 + NW, k10 = k00 + NMU * NW, k11 = k10 + NW;
-    const ds = [0, 0, 0], sun = mus > 0 && sunDepth(RG + alt, mus, ds), bMe = BETA_M * MIE_EXT * state.haze;
+    const sun = sunThrough(alt, mus, sunScratch);
     for (let w = 0; w < NW; w++) {
       out[w] = upData[k00 + w] * (1 - fx) * (1 - fy) + upData[k01 + w] * fx * (1 - fy)
              + upData[k10 + w] * (1 - fx) * fy + upData[k11 + w] * fx * fy
-             + (sun ? Math.exp(-(BR[w] * ds[0] + bMe * MA[w] * ds[1] + BO[w] * ds[2])) * mus / (4 * Math.PI) : 0);
+             + (mus > 0 ? sun[w] * mus / (4 * Math.PI) : 0);
     }
     const c = W.map(row => row.reduce((a, v, w) => a + v * out[w], 0));
     const y0 = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
@@ -8771,9 +8813,47 @@ const SkySound = (() => {
   //   floor held the median at the same shown level from dusk down to a
   //   moonless night: a half moon's clouds came out nearly as light as by
   //   day, as in a long exposure, yet with the stars of a short one.
+  // - and while the sun shines on the eye, the eye opens up no further
+  //   than the sun's light lets it: the exposure (after all the above) is
+  //   at most DAY_OPEN[0] stops past the one that shows a white surface
+  //   facing the sun, in the sun's light at the eye (sunlitLevel), at
+  //   WHITE (dayEye). It hangs on the light where the eye is, not on the
+  //   view, so turning the view does not move it; and on the sun as the
+  //   eye sees it, not on its height over the ground's horizon: from 40 km
+  //   the sun sets some 6 degrees below it, and until then its light
+  //   barely dims (to a fifth at 4 degrees down, in the model's air). So
+  //   the limit lifts by itself as the sun's light at the eye fades into
+  //   the limb, and twilight's exposure then comes in as before. Up to the
+  //   cruise heights no view comes near it: the darkest, the deep blue
+  //   zenith from 11 km, stays 0.26 stops below or more. From DAY_KM[0] km
+  //   up it closes to DAY_OPEN[1] at DAY_KM[1] km, a little above where a
+  //   view with the sunlit Earth in it stands: above the cruise heights
+  //   the sky over the eye is near space, and the eye, adapted to the sun
+  //   and the sunlit Earth round it, sees it near black. Without it a
+  //   view of the sky alone opened up 4.4 to 5 stops further at 40 km and
+  //   1.2 to 1.6 at 20 km, and came out a clear dark blue, where
+  //   photographs from the stratosphere show it near black. It bounds the
+  //   exposure of the sun as it is, not the envelope of the sun higher:
+  //   there it held the night down by up to 6 stops at 40 km.
   // Of the picture only its levels at five shares are needed: they are
   // sorted once, and the same view a stop brighter is the same shares a
   // stop higher.
+  // The level (log2, as the meter reads it) of a white surface facing the
+  // sun at height alt, the sun at elevation e (degrees), in the sun's light
+  // alone (sunThrough): ISUN / pi times its luminance; -Infinity where the
+  // planet hides the sun.
+  const ISUN = 20;   // the bare sun's luminance, as in the shader (ISUN in fs)
+  const sunlit = new Float64Array(NW);
+  function sunlitLevel(alt, e) {
+    sunThrough(alt, Math.sin(e * RAD), sunlit);
+    return Math.log2(ISUN / Math.PI * WY.reduce((a, y, w) => a + y * sunlit[w], 0));
+  }
+  // The day's eye (see DAY_OPEN): the most the exposure may be, from the
+  // sun's light where the eye is now (none once the sun has set there).
+  function dayEye() {
+    const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
+    return WHITE + open - sunlitLevel(state.alt, state.elev);
+  }
   function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     const key = KEY - EYE * low;
@@ -8861,7 +8941,7 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return E;
+    return Math.min(E, dayEye());
   }
 
   // ---------- Drawing ----------
