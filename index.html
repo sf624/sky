@@ -2411,6 +2411,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   heapKm = -9.0;
   heapMix = 0.0;
   heapAll = false;
+  // (These too are set at every call, though cloudField reads them only where they are set below. Else the compiler
+  // keeps each from the call before through every loop that reads the field: on Direct3D 11, under heaps at 0.3 km,
+  // the frame took a quarter longer. Not knob, swirl and sheetF: just over a top, the carving takes those of the
+  // read before. Nor heapGate: set here too, it moved a few pixels by a few levels on this machine's GL.)
+  overBase = 0.0;
+  formAt = 0.0;
+  heapHeads = 0.0;
+  heapIn = 0.0;
+  heapSmall = 1.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
   Layer a = cloudLayer(x, lod);
