@@ -688,7 +688,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   133 s (one copy of their body, not two); the last place and warp kept
   from call to call in globals (`ciPlace`, `ciWarp`), removed, 105 s;
   both 57 s. Global state that many copies read and write costs much:
-  keep such functions pure. Unrolling small loops did not help (the
+  keep such functions pure. It costs at run time too: a global that a
+  call may leave as it was is kept from call to call through every loop
+  that reads the field. Set at every call of `cloudShape`, the heaps'
+  (#113) took the frame under heaps at 0.3 km on Direct3D 11 from 39.5 to
+  31.6 ms (main 31.8). Unrolling small loops did not help (the
   gather unrolled 180 s; every small loop of the cirrus's pass unrolled
   26 s against 21). In the whole scene, the bounds the compiler cannot
   know (`LONG_N`, `CI_N`) and vectors in place of arrays written at a
