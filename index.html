@@ -3202,8 +3202,23 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           // the clouds' shadow: the other heaps towards the light, out to
           // tens of km, so that with the sun low they shade one another.
           // It holds the depth along the line of light through this place
-          // from a height upwards, so read where the steps ended.
-          tauCM = tauL + cloudShadowOwn(ps + eye() + uLight * (27.8 * max(step, 0.015)));
+          // from a height upwards, so read where the steps ended. With the
+          // light low it is read at the map's next height above that place
+          // (cloudShadowOwn), which lies up to 5 km farther along the light
+          // (275 m of height at 3 degrees): that way to it is marched here,
+          // in 8 steps at about the map's own level. (Without it, the cloud
+          // on that way was left out, more the lower in each height of the
+          // map: lit slabs with flat tops across the shaded sides of heaps,
+          // one for each height of the map.)
+          vec3 xe = ps + uLight * reach;
+          float tauGap = 0.0;
+          if (overMap < 1.0) {
+            float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
+            float g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
+            float lg = max(log2(0.04 * g / TEXEL_KM), lod);
+            for (int n = 0; n < 8; n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
+          }
+          tauCM = tauL + (1.0 - overMap) * tauGap + cloudShadowOwn(xe + eye());
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
         }
       }
@@ -5285,15 +5300,21 @@ void main() {
     bool want = i == 0 ? cloudLit && uCirrus > 0.0 : i == 1 ? uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0 : glareCi;
     if (!want) continue;
     vec3 p = i == 0 ? o + d * tBar : o + d * tmax;
-    // (On the low clouds, from where the ray crosses 1.1 km, not from the
-    // mean place it met them: with the sun at 3 degrees a place 50 m
+    // (On the low clouds, from near where the ray crosses 1.1 km, not from
+    // the mean place it met them: with the sun at 3 degrees a place 50 m
     // higher takes the shadow of cirrus 1 km farther off, and on a soft
     // deck, whose mean place jumps from pixel to pixel, the shadow's edge
-    // stood in steps.)
+    // stood in steps. The way along the ray is the height to go over the
+    // ray's slope there, s, less where the ray is nearly level (s^2 +
+    // 0.03^2 for s^2), and at most 10 km. Where the ray crossed 1.1 km, if
+    // within 30 km, with the eye near the clouds' height the place jumped
+    // from that crossing to the cloud across one row, and raced along the
+    // ray over the rows where the ray grazes that height: a thin dark line
+    // and flat bright slabs across the clouds a degree below the eye's
+    // level.)
     if (i == 0) {
-      vec2 hc = raySphere(o, d, RG + CB + 0.5);
-      float tc = abs(hc.x - tBar) < abs(hc.y - tBar) ? hc.x : hc.y;
-      if (tc > 0.0 && tc < 1e8 && abs(tc - tBar) < 30.0) p = o + d * tc;
+      float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5;
+      p += d * clamp(-s * dh / (s * s + 9e-4), -min(tBar, 10.0), 10.0);
     }
     vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
     float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
