@@ -204,9 +204,12 @@ these rules, and new work at start should too:
   scene writes its distance as the depth, the cirrus's pass its numbers
   as the bits of one target and the depth (see
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
-  ice program needs three targets: it is drawn once into a pixel of three
-  as soon as it links (`warm`), and its second compile runs while the
-  scene's programs still compile. `?timing` prints where the time goes;
+  ice program needs three targets, the air's table (`airProg`) seven
+  (four where the GPU has fewer): each is drawn once into a pixel of as
+  many as soon as it links (`warm`), and its second compile runs while the
+  scene's programs still compile. Every draw of the air's table binds the
+  same count of targets (spare layers fill the draws that write fewer):
+  another count is another compile. `?timing` prints where the time goes;
   `node tools/sky.mjs d3d` measures it on Windows from WSL (see
   [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
@@ -669,7 +672,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its
   top, whose default is `max`'s value; `QUALITY` in the JS gives the lower
   levels' values (see [design.md](design.md#quality-levels)). So `max` compiles to
-  the code it was before there were levels, and a new knob is one line in
+  the code it was before there were levels (but for the air's table, which
+  `airLut` sets at `low`, `high` and `max`), and a new knob is one line in
   each place. Compare a change at `max` (the tools' default) and at `low`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
