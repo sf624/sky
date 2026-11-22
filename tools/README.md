@@ -27,7 +27,8 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `trace-diff A B [--ignore CLASSES] [--max N]` | Compares two traces. Prints the first differences by canvas, frame and call, then a summary. Exit status 0 if identical, 1 if not. |
 | `stills [--views a,b] [--base DIR\|REV] [--size WxH]` | Stills of the views in `tools/views.json`, and `index.html` to look at them. With `--base`, also the base's stills, the difference of each, and a difference picture (x8). |
 | `img-diff A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]` | Mean and max difference of two pictures (8-bit levels), the share of pixels that differ by more than 2 and 8 levels, and the worst tile of an 8 x 8 grid. |
-| `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
+| `look [--only a,b] [--page DIR\|REV] [--size WxH] [--from DIR] [--sheet [--base DIR\|REV]]` | The look invariants: a still of each view of `look.json`, measured against its limits. See [Look invariants](#look-invariants). |
+| `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs `look` on the GPU (unless names are given without `look`; on SwiftShader it is skipped, with a line saying so), then the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
 | `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
@@ -78,6 +79,37 @@ The trace and the stills of a view come from one run of it, so the two checks to
 Without `--base`, the checks that need one are skipped (`SKIP`), and the others still run. A check that fails prints its numbers; its pictures are in its own folder of the run.
 
 **The trace and the stills prove different things.** Equal traces mean that the page sent WebGL the same commands with the same values, and got the same buffers back. Equal stills mean that the composited picture is the same, with the CSS around the canvas and the overlays. A CSS filter on the canvas changes the stills and not the trace; a frame drawn in another order may change the trace and not the stills.
+
+## Look invariants
+
+`look.json` holds the flaws the owner reported, one entry each: the view (the query of the debug overlay, as reported), the date, what was wrong, the measures with their limits, and the commits where the flaw was seen (`bad`) and fixed (`fixed`). `look` renders each view once (one still of 46 frames of 50 ms at 1280x720, the registry's `size`; two entries with the same query share it) and prints a line per entry:
+
+- `PASS`: every measure within its limits.
+- `FAIL`: a measure out of its limits (marked `!`), or the page logged errors.
+- `KNOWN`: a known open flaw (`expected: "fail"`) still fails. It does not fail the run.
+- `PASS?`: a known open flaw passes. The run fails until the mark is removed (or the limit is set where the fix leaves it).
+
+The last line is the one to paste into a pull request: `look: 9 PASS, 5 KNOWN, 0 FAIL at efd2b2f` (`+changes` when `index.html` has uncommitted changes). Exit status 0 when no entry is `FAIL` or `PASS?`.
+
+The limits are absolute: no base is needed, and a flaw that was merged is still flagged after. They are set from the stills of the bad and the fixed commits, with a margin both ways; they change only on purpose, in a commit that says why. `--page REV` renders a commit (exported like a base): `look --page 9041c58 --only overcast-rows-11km` shows the proof of an entry. `--from DIR` measures the stills of an earlier run again, without Chrome (to try a limit). `--sheet` writes `sheet.png`, the stills of every entry in one picture; with `--base REV`, each row is base | page (`look --sheet --base origin/main` for a pull request).
+
+It takes about 90 s on the GPU for the 14 entries (13 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
+
+The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of the picture), in 8-bit sRGB levels as shown:
+
+| Measure | What it gives | What it cannot tell |
+|---|---|---|
+| `lumaPct` | The `p`-th percentile of the luma. A moonlit night is dark; sunlit tops are near white; the sky at 40 km is near black. | Whether the brightness is right for the scene: it holds a limit, not a photograph's value. |
+| `brightColour` | The mean r/g, b/g or saturation (`of`) of the brightest pixels (over the `p`-th percentile): white tops near 1, 1 and 0. | Which pixels are cloud: in a view with sun glitter or a bright sky, those are the brightest. |
+| `regularity` | The rebound of the luma's autocorrelation, in square windows of the region (the largest over them): how far the autocorrelation rises again after falling, along any direction. A lattice or rows rebound 0.9 to 2; natural cloud 0.3 to 0.6. Each window alone, so that the period may change with perspective. | A regular pattern larger than half a window (64 px), or one in a small part of a window. A single large cloud edge can rebound too (the many-clouds view at 3 km gives 0.58 on main). |
+| `speckDensity`, `specksCv` | The dark (or bright, `dark: false`) specks: blobs whose local contrast (against a box of `k` px) is beyond `t`, of 4 px or more. Their count per 10 000 px, and the spread of their areas (coefficient of variation). | The count depends on the size of the picture (keep the registry's size). The spread did not separate the fields of equal specks from the fixed decks (1.2 to 1.6 on both): only the count is used. |
+| `verticalWalls` | The share of the strong edges (over the `p`-th percentile of the gradient) that are near-vertical and run down at least `run` px. | Walls that are not shaded as edges; a tower outside the region. Natural turrets give some (0.004 on the clouds before #104). |
+| `edgeRatio` | The horizontal gradient against the vertical one: clouds seen obliquely are below 1. | It moved little for the needle tower (0.66 against 0.60). Kept for views where walls fill the region. |
+| `relief` | The mean gradient of the luma inside the cloud mask, over the mean luma, at scales of 1, 2 and 4 px: knobs, shade and folds. | The cloud mask (luma at least `cloudLuma`, saturation at most `cloudSat`) is rough: grey sky near the sun and haze pass it. Grain and noise count as relief. |
+| `blobSize` | The connected parts of the cloud mask: the area-weighted mean of their areas, as a share of the region. Large merged heaps: large. | Clouds that touch are one blob; only for views down onto clouds over the sea, where the mask is clean. |
+| `cover` | The share of the region in the cloud mask. | The same rough mask. |
+| `detailScale` | The lag at which the autocorrelation falls to 0.5, over the picture's width: the size of the detail. | It is dominated by the finest grain; it did not separate the cumulus before and after #104. |
+| `lineDip` | A thin dark line across the region: per row, the dip of rows y, y + 1 below the rows on both sides, the median over `cols` strips, the largest over rows. | A line across less than half the strips; a line that is not darker than both sides. |
 
 ## The fake clock
 
@@ -258,4 +290,7 @@ Other copies broken on purpose, each caught: the loop stopping one frame early (
 | `lib/png.mjs` | PNG reading and writing (Node's zlib), picture differences, the shift between two pictures. |
 | `lib/run.mjs` | Running a view; the commands `trace`, `stills`, `drive`, `perf`; base revisions. |
 | `lib/checks.mjs` | The checks and their limits. |
+| `look.json` | The look invariants: the flaws reported, their views, measures and limits. |
+| `lib/look.mjs`, `lib/measures.mjs`, `lib/sheet.mjs` | The command `look`; the measures of a still; the contact sheet. |
+| `test/measures.test.mjs` | Unit tests of the measures on synthetic pictures, and of the registry: `node --test tools/test/*.test.mjs`. |
 | `lib/d3d.mjs` | The command `d3d`: Windows Chrome on Direct3D 11, its harness pages, its cleanup. |

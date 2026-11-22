@@ -131,6 +131,44 @@ against a still, and a GL trace that shows whether a change sends the
 same commands to WebGL. For example
 `node tools/sky.mjs check --base origin/main`.
 
+**The look invariants.** `node tools/sky.mjs look` renders the views of
+the flaws the owner reported (`tools/look.json`), one still each, and
+measures each against absolute limits. No base is needed, so a flaw
+that was merged once is still flagged afterwards. It takes about a
+minute and a half on the GPU. Run it before pushing any change of
+`index.html`, and put its lines (`PASS`, `FAIL`, `KNOWN`) and its last
+line (`look: 9 PASS, 5 KNOWN, 0 FAIL at <commit>`) in the pull
+request's description. `check` runs it first. A pull request that
+changes the picture also carries the contact sheet of the registry,
+before | after (`look --sheet --base origin/main`, one picture), with
+what changed described in words, and shows it to the owner. It is a
+local test: it needs a GPU to run in that time. The measures, and what
+each cannot tell, are in
+[tools/README.md](../tools/README.md#look-invariants).
+
+**When the owner reports a flaw.** Add it to `tools/look.json` in the
+pull request that fixes it:
+- the view: the query line of the debug overlay (see above), as it was
+  reported, with the date and one line of what was wrong;
+- a measure of the flaw, on a region of the picture, with a limit;
+- the proof: the measure fails on a commit with the flaw (`look --page
+  <commit> --only <name>`) and passes on the fix, with a margin. Write
+  both commits in the entry (`bad`, `fixed`) and the numbers in the pull
+  request.
+
+Where no measure separates the two, keep the view without measures: it
+stays on the contact sheet. A flaw that is reported but not yet fixed
+gets `expected: "fail"`: `look` reports it as `KNOWN` and does not fail.
+Once it passes, `look` fails (`PASS?`) until the mark is removed. A limit
+changes only on purpose, in a commit that says why.
+
+**Reading a failure.** The line names the entry and each measure's value
+and limit; a `!` marks the measures out of their limits. The stills are
+in the folder printed at the end (`tools/out/look/…`, or `--out`).
+Compare the still with one of the commit named in the entry's `fixed`.
+`look --from DIR` measures the stills of a folder again without
+rendering them.
+
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
 frames and stops (`SETTLE + RELIGHT`, and the frame of the change), or
