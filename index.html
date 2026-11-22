@@ -8074,7 +8074,7 @@ const SkySound = (() => {
                                               // band stands more than GLOW_FREE stops above the sky
   const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
                                        // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
-  const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // by day the eye opens up at most DAY_OPEN[0] stops past the exposure
+  const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // in sunlight the eye opens up at most DAY_OPEN[0] stops past the exposure
                                        // that shows a white surface facing the sun, in the sun's light at the eye, at
                                        // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
@@ -8669,25 +8669,28 @@ const SkySound = (() => {
   //   floor held the median at the same shown level from dusk down to a
   //   moonless night: a half moon's clouds came out nearly as light as by
   //   day, as in a long exposure, yet with the stars of a short one.
-  // - and by day the eye opens up no further than daylight lets it: the
-  //   day's exposure (byDay) is at most DAY_OPEN[0] stops past the one
-  //   that shows a white surface facing the sun, in the sun's light at the
-  //   eye (sunlitLevel), at WHITE. It hangs on the light where the eye is,
-  //   not on the view, so turning the view does not move it; it goes with
-  //   the day's exposure as twilight's takes over, and where the planet
-  //   hides the sun. Up to the cruise heights no view by day comes near
-  //   it: the darkest, the deep blue zenith from 11 km, stays 0.26 stops
-  //   below or more. From DAY_KM[0] km up it closes to DAY_OPEN[1] at
-  //   DAY_KM[1] km, a little above where a view with the sunlit Earth in it
-  //   stands: above the cruise heights the sky over the eye is near space,
-  //   and the eye, adapted to the sun and the sunlit Earth round it, sees
-  //   it near black. Without it a view of the sky alone opened up 4.4 to 5
-  //   stops further at 40 km and 1.2 to 1.6 at 20 km, and came out a clear
-  //   dark blue, where photographs from the stratosphere show it near
-  //   black. It bounds the exposure of the sun as it is (dayEye), not the
-  //   envelope of the sun higher: there, at 0.8 stops for each stop the
-  //   air darkens, it held deep twilight and the night down by up to 6
-  //   stops at 40 km and 0.9 at 11 km.
+  // - and while the sun shines on the eye, the eye opens up no further
+  //   than the sun's light lets it: the exposure (after all the above) is
+  //   at most DAY_OPEN[0] stops past the one that shows a white surface
+  //   facing the sun, in the sun's light at the eye (sunlitLevel), at
+  //   WHITE (dayEye). It hangs on the light where the eye is, not on the
+  //   view, so turning the view does not move it; and on the sun as the
+  //   eye sees it, not on its height over the ground's horizon: from 40 km
+  //   the sun sets some 6 degrees below it, and until then its light
+  //   barely dims (to a fifth at 4 degrees down, in the model's air). So
+  //   the limit lifts by itself as the sun's light at the eye fades into
+  //   the limb, and twilight's exposure then comes in as before. Up to the
+  //   cruise heights no view comes near it: the darkest, the deep blue
+  //   zenith from 11 km, stays 0.26 stops below or more. From DAY_KM[0] km
+  //   up it closes to DAY_OPEN[1] at DAY_KM[1] km, a little above where a
+  //   view with the sunlit Earth in it stands: above the cruise heights
+  //   the sky over the eye is near space, and the eye, adapted to the sun
+  //   and the sunlit Earth round it, sees it near black. Without it a
+  //   view of the sky alone opened up 4.4 to 5 stops further at 40 km and
+  //   1.2 to 1.6 at 20 km, and came out a clear dark blue, where
+  //   photographs from the stratosphere show it near black. It bounds the
+  //   exposure of the sun as it is, not the envelope of the sun higher:
+  //   there it held the night down by up to 6 stops at 40 km.
   // Of the picture only its levels at five shares are needed: they are
   // sorted once, and the same view a stop brighter is the same shares a
   // stop higher.
@@ -8701,13 +8704,13 @@ const SkySound = (() => {
     sunThrough(alt, Math.sin(e * RAD), sunlit);
     return Math.log2(ISUN / Math.PI * WY.reduce((a, y, w) => a + y * sunlit[w], 0));
   }
-  // The day's eye (see DAY_OPEN): the most the day's exposure may be,
-  // from the sun's light where the eye is now.
+  // The day's eye (see DAY_OPEN): the most the exposure may be, from the
+  // sun's light where the eye is now (none once the sun has set there).
   function dayEye() {
     const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
     return WHITE + open - sunlitLevel(state.alt, state.elev);
   }
-  function exposureAt(st, elev, d, cap = Infinity) {
+  function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     const key = KEY - EYE * low;
     // By day, the highlights near the sun count for less (st.lit), and
@@ -8716,7 +8719,7 @@ const SkySound = (() => {
     const lit = high + day * (st.lit - st.high);
     const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
-    const byDay = Math.min(Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit))), cap);
+    const byDay = Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit)));
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
     const eye = NIGHT_OPEN - NIGHT_RATE * (Math.max(st.sky + d, LOG_RANGE[0]) - NIGHT_SKY);
     const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
@@ -8785,7 +8788,7 @@ const SkySound = (() => {
     const lit = Float64Array.from(v, (x, i) => x + near[i]).sort();
     const st = { low: share(LOW_SHARE), high: bandOf(q, 1 - HIGH_SHARE, HIGH_BAND), mid: share(0.5), sky: share(DUSK_SHARE),
                  peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND) };
-    let E = exposureAt(st, state.elev, 0, dayEye());
+    let E = exposureAt(st, state.elev, 0);
     if (state.elev < DUSK[0]) {
       const here = airLevel(state.alt, state.elev);
       const rate = MONO_RATE[1] + (MONO_RATE[0] - MONO_RATE[1]) * smooth01((state.elev - MONO_DEEP[1]) / (MONO_DEEP[0] - MONO_DEEP[1]));
@@ -8794,7 +8797,7 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return E;
+    return Math.min(E, dayEye());
   }
 
   // ---------- Drawing ----------
