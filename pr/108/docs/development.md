@@ -70,7 +70,6 @@ These are read directly.
 | `debug` | stored choice, else off | `1`: shows the debug overlay, `0`: hides it (see [Reporting a flaw](#reporting-a-flaw-with-the-debug-overlay)). Not stored; the `I` key stores its choice |
 | `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the script's time by part of the frame, the level, the canvas and the sizes drawn, the first picture and when each part of the start ended, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=bench` also holds the drawing scale at 1, 0.71, 0.5 and 0.35 in turn and shows the frames a second at each; `stats=bench3` measures the frame with each part taken away and with each candidate cut, at full scale, by the frames a second (some 40 to 60 s after the first picture; touch nothing). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
-| `grid` | none (off) | `1`: the low clouds' towers are grown as trees of lobes by a worker and kept in grids that move with the eye (see [design.md](design.md#towers-in-grids-that-move-with-the-eye)). Only at `quality=max` and `high`; elsewhere it does nothing. `1,v62.5` (or `1,v62`): the finest voxels 62.5 m, not 31.25 m (the levels 62.5, 125 and 250 m); any other value of `v` keeps 31.25 m. `1,hK:W`: the heads of `uBody`, read K times finer (K over 0), also carve the towers' surface, seams W km deep. The two may be given together (`1,v62.5,h2:0.05`). A test switch: off, the page is main's |
 | `clock` | `solar` | `utc`: `time` and `date` are UTC, and `lon` places the observer (see [design.md](design.md#sun-moon-and-sky-in-the-js)). Anything else: local solar time |
 | `now` | none | `1` does what the now button does: today's date, the present time and the moon's age for the date, playing in real time (on the UTC clock, the date and the time in UTC). It wins over `time`, `date` and `moon`; a `rate` given with it wins over real time |
 
@@ -204,9 +203,12 @@ these rules, and new work at start should too:
   scene writes its distance as the depth, the cirrus's pass its numbers
   as the bits of one target and the depth (see
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
-  ice program needs three targets: it is drawn once into a pixel of three
-  as soon as it links (`warm`), and its second compile runs while the
-  scene's programs still compile. `?timing` prints where the time goes;
+  ice program needs three targets, the air's table (`airProg`) seven
+  (four where the GPU has fewer): each is drawn once into a pixel of as
+  many as soon as it links (`warm`), and its second compile runs while the
+  scene's programs still compile. Every draw of the air's table binds the
+  same count of targets (spare layers fill the draws that write fewer):
+  another count is another compile. `?timing` prints where the time goes;
   `node tools/sky.mjs d3d` measures it on Windows from WSL (see
   [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
@@ -604,7 +606,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   (`clouds`, both stages of their light) before the scene, which reads
   them; with `SHADOW_MAP`: the clouds' depth maps (the shadow and the
   columns) with the same cloud field; with `TOPS_MAP` (the map of the
-  tops, and the warped weather map). A change to the field changes all
+  tops). A change to the field changes all
   of these, and the scene's (the sea reads it). The depth maps' program
   has its uniforms set apart (`S` in `makeSky`): a new uniform that the
   cloud field reads must be set there too. With `CIRRUS_PASS`: the cirrus
@@ -669,7 +671,8 @@ The shaders must run on any WebGL2. The code keeps these rules:
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its
   top, whose default is `max`'s value; `QUALITY` in the JS gives the lower
   levels' values (see [design.md](design.md#quality-levels)). So `max` compiles to
-  the code it was before there were levels, and a new knob is one line in
+  the code it was before there were levels (but for the air's table, which
+  `airLut` sets at `low`, `high` and `max`), and a new knob is one line in
   each place. Compare a change at `max` (the tools' default) and at `low`.
 - **Comments** are plain English sentences that say what and why. No
   commented-out code, no debug leftovers, no unused functions.
