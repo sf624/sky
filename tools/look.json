@@ -271,7 +271,6 @@
      "min": 0.033
     }
    ],
-   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.0366
@@ -311,7 +310,6 @@
      "max": 0.063
     }
    ],
-   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.0351,
@@ -353,7 +351,6 @@
      "max": 0.154
     }
    ],
-   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.037,
