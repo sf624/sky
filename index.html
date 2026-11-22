@@ -1956,13 +1956,7 @@ const vec3 AERO_FREE = vec3(0.048, 6.0, 5.0);    // density (as at sea level), h
 const vec3 AERO_STRAT = vec3(0.004, 20.0, 8.0);
 const float ISUN = 20.0;
 const int NV = Q_NV;            // view samples: the picture is within two steps of 8 bits of 40's
-// More samples in twilight: in the planet's shadow (twice as many where
-// the air comes from its table and the march is left to the glow of the sun
-// and the moon, see Q_AIR_LUT: with the level's own, the air low over the
-// sea under a full moon in twilight came out up to 20 levels darker than a
-// march of many samples, and the circle the march draws showed its edge
-// against the table's light)...
-const int NSHADE = Q_AIR_LUT == 1 ? 2 * Q_NSHADE : Q_NSHADE;
+const int NSHADE = Q_NSHADE;        // more samples in twilight: in the planet's shadow...
 const int NFAR = Q_NFAR;          // ...and in the lit air beyond it (see shadowSpan)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
@@ -2123,12 +2117,17 @@ vec4 zodiacal(float x, float y) {
 float cornetteShanks(float g, float mu) {
   return 3.0 / (8.0 * PI) * ((1.0 - g * g) * (1.0 + mu * mu)) / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
 }
-// The air's, the boundary layer's and the higher aerosol's.
-vec3 phases(float mu) {
+// The boundary layer's sharp lobe (see MIE_PHASE), its share of the light
+// in.
+float sharpLobe(float mu) { return MIE_PHASE.x * cornetteShanks(MIE_PHASE.y, mu); }
+// The air's, the boundary layer's and the higher aerosol's; broad: without
+// that sharp lobe (the air's table keeps its light apart, see Q_AIR_LUT).
+vec3 phases(float mu, bool broad) {
   return vec3(3.0 / (16.0 * PI) * (1.0 + mu * mu),
-              mix(cornetteShanks(MIE_PHASE.z, mu), cornetteShanks(MIE_PHASE.y, mu), MIE_PHASE.x),
+              (1.0 - MIE_PHASE.x) * cornetteShanks(MIE_PHASE.z, mu) + (broad ? 0.0 : sharpLobe(mu)),
               cornetteShanks(MIE_G_UP, mu));
 }
+vec3 phases(float mu) { return phases(mu, false); }
 
 #ifdef AIR_LUT
 // The light scattered once that addLight has added while onceOn (from the
@@ -2168,6 +2167,16 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
     L[k] += gain * a;
   }
 }
+#ifdef AIR_LUT
+// The light of the boundary layer's sharp lobe from dir, scattered once at
+// p towards the eye, without its phase (sharpLobe): the part of addLight's
+// once that the air's table keeps apart (see Q_AIR_LUT).
+void addSharp(vec3 p, vec3 od, vec4 dens, float scM, float extM, vec3 dir, float gain, inout vec4 S[3]) {
+  if (raySphere(p, dir, RG).y >= 0.0) return;          // behind the planet
+  vec3 odl = od + depthToTop(p, dir);
+  for (int k = 0; k < 3; k++) S[k] += gain * scM * dens.w * uMA[k] * exp(-(uBR[k] * odl.x + extM * uMA[k] * odl.y + uBO[k] * odl.z));
+}
+#endif
 
 #if Q_AIR_LUT || defined(AIR_LUT)
 // ---------- The air's light as a table (Q_AIR_LUT) ----------
@@ -2183,17 +2192,26 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
 // LUT_T0 to LUT_T1, evenly in their log. Two more slices hold the sky as the
 // sea sees it (from its surface, the whole way: skyAt; LUT_SEA) and the
 // whole ray, to the sea or out of the air (LUT_END). All in one 3D
-// texture: seven parts of its depth, LUT_S + 2 slices each, hold the three
-// vec4 of the light, the depth, and the three vec4 of the part of the light
-// scattered once. (Parts along the depth, not side by side in its width:
-// AIR_LUT draws straight into the slices, each a layer, where a part beside
-// another had to be drawn apart and copied in, 462 copies a table that took
-// Direct3D 11 some 2 s.)
+// texture: thirteen parts of its depth, LUT_S + 2 slices each, hold the
+// three vec4 of the light (0 to 2), the depth (3), the three vec4 of the
+// part of the light scattered once that the clouds' shadows take (4 to 6),
+// and three vec4 each of the light of the boundary layer's sharp lobe from
+// the sun (7 to 9) and from the moon (10 to 12). (Parts along the depth, not
+// side by side in its width: AIR_LUT draws straight into the slices, each a
+// layer, where a part beside another had to be drawn apart and copied in,
+// 462 copies a table that took Direct3D 11 some 2 s.)
+// That lobe's light is kept without its phase (sharpLobe), which the scene
+// applies for each pixel: it is some 4 degrees wide round the light, where
+// the table's texels are 1 to 3 degrees apart, and read from the table its
+// peak came out low and its outline the texels'. (Before, the scene marched
+// the air within 8 degrees of the sun and the moon: a second way through
+// the air that Direct3D 11 took 1.5 s longer to compile.) The rest of the
+// light, with the broad lobes and the air's phase, is the table's.
 // The light is divided by uLutScale (the light of the air the stronger of
 // the sun and the moon makes) to keep half floats' range by night.
 // The sizes are the level's (`airLut` in QUALITY).
 const float LUT_AZ = float(Q_LUT_AZ), LUT_EL = float(Q_LUT_EL), LUT_S = float(Q_LUT_S), LUT_T0 = 0.05, LUT_T1 = 1200.0;
-const float LUT_SEA = LUT_S, LUT_END = LUT_S + 1.0, LUT_PARTS = 7.0;
+const float LUT_SEA = LUT_S, LUT_END = LUT_S + 1.0, LUT_PARTS = 13.0;
 uniform float uLutScale;
 // The stronger light (the sun's or the moon's direction), which the
 // azimuth is measured from: the table's seam, behind it, then lies where its
@@ -2228,15 +2246,23 @@ vec3 lutDir(vec2 uv, vec3 up, float alt) {
 #if Q_AIR_LUT
 uniform highp sampler3D uAirLut;
 // The air's light and depth along the direction at uv in slice z (between
-// two slices, a mix of them), times f. once: the light only, part 4 (the
-// part scattered once); else part 0, and the depth.
-void airSlice(vec2 uv, float z, float f, bool once, out vec4 La[3], out vec3 oda) {
+// two slices, a mix of them), times f; sh: the sharp lobe's phase towards
+// the sun and the moon there (sharpLobe). once: the light only, part 4 (the
+// part scattered once) and the sharp lobe's of the light the clouds' map
+// is of; else part 0, the sharp lobe's of both, and the depth.
+void airSlice(vec2 uv, float z, float f, bool once, vec2 sh, out vec4 La[3], out vec3 oda) {
   // (Between two slices of a part, the filter mixes them; the end slices
   // are read at their centres, so a part never mixes with the next.)
   vec2 xy = vec2(clamp(uv.x, 0.5 / LUT_AZ, 1.0 - 0.5 / LUT_AZ), uv.y);
   const float N = LUT_S + 2.0;
-  float z0 = once ? 4.0 : 0.0;
-  for (int k = 0; k < 3; k++) La[k] = f * uLutScale * textureLod(uAirLut, vec3(xy, ((z0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
+  bool moonMap = once && dot(uLight, uSun) < 0.999;
+  float z0 = once ? 4.0 : 0.0, zs = moonMap ? 10.0 : 7.0, ws = moonMap ? sh.y : sh.x;
+  for (int k = 0; k < 3; k++) {
+    vec4 l = textureLod(uAirLut, vec3(xy, ((z0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0)
+           + ws * textureLod(uAirLut, vec3(xy, ((zs + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
+    if (!once) l += sh.y * textureLod(uAirLut, vec3(xy, ((10.0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
+    La[k] = f * uLutScale * l;
+  }
   oda = once ? vec3(0.0) : f * textureLod(uAirLut, vec3(xy, (3.0 * N + z + 0.5) / (LUT_PARTS * N)), 0.0).xyz;
 }
 // The slice and the factor that airSlice reads the air from the eye to t
@@ -4092,17 +4118,14 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
   const int NS = Q_SKY_NS;
   S[0] = vec4(0.0); S[1] = vec4(0.0); S[2] = vec4(0.0);
 #if Q_AIR_LUT && !defined(SKY_LIGHT)
-  // (From the table's last slice: the sky as the sea sees it. Not for the
-  // sky's light on the clouds, drawn now and then from their heights; nor
-  // within 8 degrees of the sun or the moon, whose glow the table's texels
-  // spread wide: mirrored in the glitter, it filled the clouds' shadows on
-  // the sea.)
-  if (!((uSunI > 0.0 && dot(dir, uSun) > 0.99) || (uMoonI > 0.0 && skyMoon && dot(dir, uMoon) > 0.99))) {
-    vec3 odS;
-    airSlice(lutUV(dir, normalize(p0), 0.0), LUT_SEA, 1.0, false, S, odS);
-    return;
-  }
-#endif
+  // (From the table's slice LUT_SEA: the sky as the sea sees it. Not for
+  // the sky's light on the clouds, drawn now and then from their heights.
+  // The sharp lobe's phase as the pixel's: with the table's alone, the
+  // sun's glow spread wide, and mirrored in the glitter it filled the
+  // clouds' shadows on the sea.)
+  vec3 odS;
+  airSlice(lutUV(dir, normalize(p0), 0.0), LUT_SEA, 1.0, false, vec2(sharpLobe(dot(dir, uSun)), sharpLobe(dot(dir, uMoon))), S, odS);
+#else
   float tmax = raySphere(p0, dir, RT).y;
   vec3 phaseSun = phases(dot(dir, uSun));
   vec3 phaseMoon = phases(dot(dir, uMoon));
@@ -4127,6 +4150,7 @@ void skyAt(vec3 p0, vec3 dir, float betaM, float extM, out vec4 S[3]) {
     if (uMoonI > 0.0 && skyMoon) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI, 1.0, 1.0, phaseMoon, dir, Tv, S);
     od += 0.5 * dens.xyz;
   }
+#endif
 }
 
 // How much of a rough sea hides behind its own waves, seen from a direction
@@ -5722,9 +5746,11 @@ void main() {
 // without the clouds' shadows; in slice LUT_SEA, from the sea's surface up
 // through the whole air; in LUT_END, from the eye to the end of the ray.
 uniform float uLutSlice;
-// With four targets (Q_LUT_MRT 4), two draws: 0, the light and the depth
-// (the parts 0 to 3 of the table); 1, the light scattered once (parts 4 to
-// 6). With seven, one draw writes all seven parts.
+// Each slice in two draws with seven targets (Q_LUT_MRT 7): 0, the parts 0
+// to 6 of the table; 1, the sharp lobe's (7 to 12). With four, in four: 0,
+// the light and the depth (0 to 3); 1, the light scattered once (4 to 6);
+// 2 and 3, the sharp lobe's (7 to 10, 11 and 12). A draw of the sharp
+// lobe's light marches the same samples, but only for that light.
 uniform float uLutPart;
 const int LUT_NV = Q_NV > 14 ? Q_NV : 14, LUT_NSHADE = Q_NSHADE > 6 ? Q_NSHADE : 6, LUT_NFAR = Q_NFAR > 10 ? Q_NFAR : 10;
 void main() {
@@ -5738,10 +5764,11 @@ void main() {
   if (uLutSlice < LUT_S - 0.5) tmax = min(tmax, LUT_T0 * pow(LUT_T1 / LUT_T0, uLutSlice / (LUT_S - 1.0)));
   float betaM = BETA_M * uHaze, extM = betaM * MIE_EXT;
   float under = mix(1.0, UNDER, smoothstep(0.4, 1.0, uCloud));
-  vec3 phaseSun = phases(dot(d, uSun)), phaseMoon = phases(dot(d, uMoon));
+  vec3 phaseSun = phases(dot(d, uSun), true), phaseMoon = phases(dot(d, uMoon), true);
+  bool sharp = uLutPart > (Q_LUT_MRT > 4 ? 0.5 : 1.5);
   vec3 od = vec3(0.0);
-  vec4 L[3], Tv[3];
-  L[0] = vec4(0.0); L[1] = vec4(0.0); L[2] = vec4(0.0);
+  vec4 L[3], Tv[3], S[3], M[3];   // S, M: the sharp lobe's light from the sun, the moon
+  for (int k = 0; k < 3; k++) { L[k] = vec4(0.0); S[k] = vec4(0.0); M[k] = vec4(0.0); }
   float sa = tmax, sb = tmax, prev = 0.0;
   int n = LUT_NV, j = 0;
   if (uSunI > 0.0 && shadowSpan(o, d, tmax, uSun, sa, sb)) {
@@ -5749,6 +5776,7 @@ void main() {
     if (sa <= 0.0) j = LUT_NV;
   }
   float gain = 1.0 / max(uLutScale, 1e-30);
+  bool sunLight = dot(uLight, uSun) > 0.999;
   for (int i = 0; i < LONG_N(LUT_NV + LUT_NSHADE + LUT_NFAR); i++) {
     if (j >= n) break;
     float t1;
@@ -5771,33 +5799,37 @@ void main() {
     vec4 dens = densities(h) * vec4(dt, dt, dt, 1.0);
     od += 0.5 * dens.xyz;
     float scM = betaM * dens.y;
-    for (int k = 0; k < 3; k++) Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
-    float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
     // The clouds' shadows, by their mean: below the tops, a deck lets
     // through little of the light (the table has no place for them; without
     // this, the air under a deck shone orange at its far edge at dusk).
     float direct = mix(1.0, mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h))), uLightShare);
-    bool sunLight = dot(uLight, uSun) > 0.999;
-    onceOn = sunLight;
-    if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * gain, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
-    onceOn = !sunLight;
-    if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * gain, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
+    if (sharp) {
+      if (uSunI > 0.0) addSharp(p, od, dens, scM, extM, uSun, uSunI * gain * (sunLight ? direct : 1.0), S);
+      if (uMoonI > 0.0) addSharp(p, od, dens, scM, extM, uMoon, uMoonI * gain * (sunLight ? 1.0 : direct), M);
+    } else {
+      for (int k = 0; k < 3; k++) Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
+      float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
+      onceOn = sunLight;
+      if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * gain, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
+      onceOn = !sunLight;
+      if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * gain, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
+    }
     od += 0.5 * dens.xyz;
   }
 #if Q_LUT_MRT > 4
-  outLut0 = L[0];
-  outLut1 = L[1];
-  outLut2 = L[2];
-  outLut3 = vec4(od, 0.0);
-  outLut4 = lightOnce[0];
-  outLut5 = lightOnce[1];
+  outLut0 = sharp ? S[0] : L[0];
+  outLut1 = sharp ? S[1] : L[1];
+  outLut2 = sharp ? S[2] : L[2];
+  outLut3 = sharp ? M[0] : vec4(od, 0.0);
+  outLut4 = sharp ? M[1] : lightOnce[0];
+  outLut5 = sharp ? M[2] : lightOnce[1];
   outLut6 = lightOnce[2];
 #else
-  bool once = uLutPart > 0.5;
-  outLut0 = once ? lightOnce[0] : L[0];
-  outLut1 = once ? lightOnce[1] : L[1];
-  outLut2 = once ? lightOnce[2] : L[2];
-  outLut3 = vec4(od, 0.0);
+  int part = int(uLutPart + 0.5);
+  outLut0 = part == 0 ? L[0] : part == 1 ? lightOnce[0] : part == 2 ? S[0] : M[1];
+  outLut1 = part == 0 ? L[1] : part == 1 ? lightOnce[1] : part == 2 ? S[1] : M[2];
+  outLut2 = part == 0 ? L[2] : part == 1 ? lightOnce[2] : S[2];
+  outLut3 = part == 0 ? vec4(od, 0.0) : M[0];
 #endif
 }
 #elif defined(SKY_LIGHT)
@@ -6013,25 +6045,14 @@ void main() {
   float tSecond = cloudsFirst ? tHigh : tBar;
   float tLayer = cloudsFirst ? tBar : tHigh;         // the next layer; negative: none
   if (tLayer < 0.0) tLayer = 1e9;
-  // Without the planet's shadow on the ray, NV samples from the eye to the
-  // end. With it, NV up to the shadow, NSHADE in it and NFAR beyond, each
-  // run denser at its start; a run of no length is skipped.
-  float sa = tmax, sb = tmax;
-  int n = NV, j = 0;
-  if (uSunI > 0.0 && shadowSpan(o, d, tmax, uSun, sa, sb)) {
-    n = sb < tmax ? NV + NSHADE + NFAR : NV + NSHADE;
-    if (sa <= 0.0) j = NV;
-  }
   int layer = 0;
 #if Q_AIR_LUT
-  // The air from the table (see airSlice and lutZ), except within LUT_NEAR of the sun
-  // or the moon, whose glow the table's texels are too coarse for: the
-  // march below. The segments between the eye, the layers and the end:
-  // the light of each is the table's at its end less at its start, seen
-  // through the layers before it, as the march adds it.
-  const float LUT_NEAR = 0.99;                       // cos 8 degrees
-  if (!((uSunI > 0.0 && mu > LUT_NEAR) || (uMoonI > 0.0 && dot(d, uMoon) > LUT_NEAR))) {
-    vec2 uv = lutUV(d, vec3(0.0, 1.0, 0.0), uAlt);
+  // The air from the table (see airSlice and lutZ). The segments between
+  // the eye, the layers and the end: the light of each is the table's at
+  // its end less at its start, seen through the layers before it, as the
+  // march adds it.
+  {
+    vec2 uv = lutUV(d, vec3(0.0, 1.0, 0.0), uAlt), sh = vec2(sharpLobe(mu), sharpLobe(dot(d, uMoon)));
     vec4 La[3], Lb[3];
     vec4 Sc[3], Sd[3];
     vec3 odb, odx;
@@ -6045,9 +6066,8 @@ void main() {
     // and each takes the shadow at a place in it (new each frame, as the
     // march's SHAFTS) over the mean the table took there. (One shadow, the
     // mean of its places, over the whole part: at sunset the shafts of light
-    // and shadow under the clouds towards the sun faded to a haze outside
-    // LUT_NEAR, where the march draws them. With one place, the mean at rest
-    // kept the jitter's pattern over the far air.) The shadows take only
+    // and shadow under the clouds towards the sun faded to a haze. With one
+    // place, the mean at rest kept the jitter's pattern over the far air.) The shadows take only
     // the light scattered once there, from the light the map is of (the
     // moon's, where it lights the clouds while the sun still lights the air),
     // not the sky's, scattered many times: the table keeps that light apart,
@@ -6074,14 +6094,14 @@ void main() {
       // on either side, a ray that met the sea between them lost the light
       // of the dense air near its end.)
       vec2 zf = atLayer ? lutZ(tEnd) : vec2(LUT_END, 1.0);
-      airSlice(uv, zf.x, zf.y, false, Lb, odb);
+      airSlice(uv, zf.x, zf.y, false, sh, Lb, odb);
       for (int k = 0; k < 3; k++) L[k] += visX * max(Lb[k] - La[k], 0.0);
       float a = max(tA, sa0), b = min(tEnd, sb0);
       if (shade && b > a) {
         // (The light scattered once in each piece: the table's at its end
         // less at its start; at the ray's end, from its own slice.)
         zf = lutZ(a);
-        airSlice(uv, zf.x, zf.y, true, Sc, odx);
+        airSlice(uv, zf.x, zf.y, true, sh, Sc, odx);
         for (int m = 0; m < Q_LUT_SHADE; m++) {
           float f = (float(m) + shaftJitter) / float(Q_LUT_SHADE), ts = a + (b - a) * f * f;
           float h = length(o + d * ts) - RG;
@@ -6090,7 +6110,7 @@ void main() {
           float mean = mix(1.0, mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h))), uLightShare);
           f = float(m + 1) / float(Q_LUT_SHADE);
           zf = m + 1 == Q_LUT_SHADE && b >= tEnd && !atLayer ? vec2(LUT_END, 1.0) : lutZ(a + (b - a) * f * f);
-          airSlice(uv, zf.x, zf.y, true, Sd, odx);
+          airSlice(uv, zf.x, zf.y, true, sh, Sd, odx);
           for (int k = 0; k < 3; k++) L[k] += visX * (lit / mean - 1.0) * max(Sd[k] - Sc[k], 0.0);
           Sc = Sd;
         }
@@ -6111,9 +6131,17 @@ void main() {
       if (vis <= 0.0) break;
       La = Lb;
     }
-    n = 0;                                           // (no march)
   }
-#endif
+#else
+  // Without the planet's shadow on the ray, NV samples from the eye to the
+  // end. With it, NV up to the shadow, NSHADE in it and NFAR beyond, each
+  // run denser at its start; a run of no length is skipped.
+  float sa = tmax, sb = tmax;
+  int n = NV, j = 0;
+  if (uSunI > 0.0 && shadowSpan(o, d, tmax, uSun, sa, sb)) {
+    n = sb < tmax ? NV + NSHADE + NFAR : NV + NSHADE;
+    if (sa <= 0.0) j = NV;
+  }
   for (int i = 0; i < LONG_N(NV + NSHADE + NFAR + 2); i++) {
     if (j >= n) break;
     float t1;
@@ -6155,14 +6183,7 @@ void main() {
         lit += wt * exp(-cloudShadow(ps));
         sum += wt;
       }
-#if Q_AIR_LUT
-      // (Low: read at a place in the step new each frame. Its few steps
-      // read at their middles left dark blots near the sun, where one fell
-      // in the shadow of a far cloud.)
-      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(o + d * (prev - dt * fract(shaftJitter + 0.618034 * float(j)))));
-#else
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
-#endif
     }
     // Under a deck the light of the sky reaches the low air only through
     // the deck: else the air under it, a hundred km of it towards the
@@ -6187,6 +6208,7 @@ void main() {
       if (vis <= 0.0) break;
     }
   }
+#endif
 
   if (vis <= 0.0) {
     // Behind a thick cloud.
@@ -10138,13 +10160,15 @@ const SkySound = (() => {
     gl.activeTexture(gl.TEXTURE0);
     C('uniform1i', 'uSkyLight', 27);
     // The table of the air's light (see Q_AIR_LUT in fs), on unit 29: one 3D
-    // texture of RGBA16F, LUT_AZ by LUT_EL by 7 (LUT_S + 2) (seven parts of
-    // its depth: the light in three, the depth in the fourth, the light
-    // scattered once in the last three), filtered. airProg draws each slice
-    // straight into its layers, all seven parts in one draw (LUT_MRT 7), or
-    // four and three in two (uLutPart 0 and 1), when the sun, the moon, the
-    // haze, the height or the clouds have changed.
+    // texture of RGBA16F, LUT_AZ by LUT_EL by 13 (LUT_S + 2) (thirteen parts
+    // of its depth: the light in three, the depth in the fourth, the light
+    // scattered once in the next three, the light of the sharp lobe from the
+    // sun and from the moon in three each), filtered. airProg draws each
+    // slice straight into its layers, seven parts and six in two draws
+    // (LUT_MRT 7), or 4, 3, 4 and 2 in four (uLutPart 0 to 3), when the sun,
+    // the moon, the haze, the height or the clouds have changed.
     const [LUT_AZ, LUT_EL, LUT_S] = Q.airLut || [0, 0, 0];
+    const LUT_PARTS = 13, LUT_DRAWS = LUT_MRT === 7 ? [[0, 1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]] : [[0, 1, 2, 3], [4, 5, 6], [7, 8, 9, 10], [11, 12]];
     let lut = null;
     if (airProg) {
       // (A framebuffer for each slice and draw, made once: its targets the
@@ -10152,11 +10176,11 @@ const SkySound = (() => {
       lut = { targets: [], texture: gl.createTexture(), for: '' };
       gl.activeTexture(gl.TEXTURE29);
       gl.bindTexture(gl.TEXTURE_3D, lut.texture);
-      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, LUT_AZ, LUT_EL, 7 * (LUT_S + 2));
+      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, LUT_AZ, LUT_EL, LUT_PARTS * (LUT_S + 2));
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
         [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, k, v);
       for (let sl = 0; sl < LUT_S + 2; sl++) {
-        for (const parts of LUT_MRT === 7 ? [[0, 1, 2, 3, 4, 5, 6]] : [[0, 1, 2, 3], [4, 5, 6]]) {
+        for (const parts of LUT_DRAWS) {
           const t = gl.createFramebuffer();
           gl.bindFramebuffer(gl.FRAMEBUFFER, t);
           parts.forEach((k, i) => gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, lut.texture, 0, k * (LUT_S + 2) + sl));
@@ -10796,7 +10820,7 @@ const SkySound = (() => {
         gl.bindTexture(gl.TEXTURE_3D, null);
         gl.activeTexture(gl.TEXTURE0);
         // (The view's uniforms once, with the first draw; then only the slice.)
-        const draws = LUT_MRT === 7 ? 1 : 2, uSlice = place(airProg, 'uLutSlice'), uPart = place(airProg, 'uLutPart');
+        const draws = LUT_DRAWS.length, uSlice = place(airProg, 'uLutSlice'), uPart = place(airProg, 'uLutPart');
         lut.targets.forEach((t, i) => {
           const sl = Math.floor(i / draws), part = i % draws;
           gl.bindFramebuffer(gl.FRAMEBUFFER, t);
