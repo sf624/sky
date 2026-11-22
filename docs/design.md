@@ -871,405 +871,108 @@ Places in the clouds are given from the eye (`p` less `eye()`), and
 `heightAt` finds their height. At the Earth's radius a float steps by half
 a metre, and the finest noise showed those steps as terraces.
 
-**The field.** A signed field says where cloud is: positive inside,
-rising by about 1 per km of depth under the surface. `cloudShape` builds it
-as a sum (a height field; heaps that stand alone and towers have a 3D body
-instead, below):
+**The field.** One density says where every low cloud is, after
+Schneider's clouds for games (2015, 2017): a base shape from the noise,
+times a profile over the height of the layer, less what the layer's amount
+takes away, all of it in 3D; finer noise then works on its edge.
+`cloudShape` gives `CF_K` = 0.5 times that density before it is clamped:
+nought at the surface, positive inside, negative outside, where it falls
+about as fast as the shape does per km (the march strides by it).
+(Until #77 the field was a height field with analytic terms for each kind
+of cloud, heaps drawn into the weather map as discs, a baked body of
+turrets, rolls, and blends between them; its clouds were hard solids, and
+the joins between its kinds drew flat-topped blocks, walls and rims.)
 
-- the weather map `uWeather` at `p.xz + uDrift` (R: cover, G: how high
-  the heap stands),
-  against a level set by `uCloud` (a cubic in `uCloud`, 0.1 higher below
-  0.1 and easing to the cubic by 0.35: the map's heaps are many, and at
-  0.1 3 % of the sea was cloud from 13 km). `weather` reads
-  it: through the GPU's filter, which bends where the map's texels meet
-  (every 250 m). Along the march and towards the light those bends move a
-  surface by less than a metre. (The light once took normals of the field,
-  and there the bends showed as upright streaks on the sides of clouds:
-  those reads were eased and shaken. The light now takes no normals: see
-  the light, below);
-- less what height costs: a dome over a flat base (`y` cubed over the
-  cube of `top`), thicker where the map is higher. `top` follows G: each
-  heap of the map is a dome 0.5 to 1.2 km over a deck between heaps and
-  up to 1.9 km over its base on the highest heaps; the tallest (G over
-  0.46) are towers, a kilometre higher still. A tower rises over its
-  heap as a dome, `t (2 - t)` of its height with `t` going from 0 to 1 as G
-  goes from 0.34 to 0.74 (`TOWER`; 0.42 to 0.87 in round 17, when 0.1 % of
-  the map was a third of the way up a tower or more, and few towers stood
-  anywhere; 0.46 to 0.76 before round 17: with G a dome of
-  each heap, its wall stood over a quarter of the heap's radius, a cliff),
-  70 to 100 % as high as the heap's G says: when
-  its top rose with G in a straight line, towers were cones, like
-  mountains; on the whole middle of the heap at once (G from 0.48 to
-  0.62), they were columns with flat tops and upright walls, like
-  tombstones. So a field of cloud is a
-  field of domes of many sizes even where the cover is whole; before,
-  the top was one height wherever the cover was whole, and the noise of
-  the tile made all the forms: one size of lumps with pits in them, like
-  crumpled paper. Where the cover is thickest (`deck`) the domes flatten
-  to a third of their height and the noise's 500 m cells take over
-  (stratocumulus); a tower's own rise does not count towards `deck` (with
-  it, towers in a thick cover flattened into the deck, and at `cloud` 0.7
-  to 0.8 hardly one stood). A deck swells a little where the map is high
-  (`swell`, a share of the height, not a fixed one); the lowest 180 m
-  rounded off (`rim`). `y` counts from the base's `level`: 150 to 300 m
-  over `CB`, higher or lower across tens of km (it follows the gusts'
-  map, B, as a slow pattern);
-- plus the noise of the tile (`uNoise`, one tile per `BASE_KM` = 8 km),
-  read at a depth that drifts from place to place (`far`) so that no two
-  tiles look alike. Worley values are rounded into domes (`v (2 - v)`).
-  Its billows (`lump`: Worley cells of 2 km, 1 km and 500 m) weigh 0.9,
-  0.7 and 0.35 on a sheet, the big ones most (with the 500 m ones first,
-  the tops of a deck from above were a carpet of lumps of one size, where
-  photographs show smooth billows of a kilometre or more), and 0.35, 0.75
-  and 0.9 on heaps that stand alone and on walls (with the big ones first
-  there, heaps were smooth domes, like balls of putty; in photographs a
-  heap is turrets on turrets, a third of its width and less). They are as
-  large as the heap is high (`0.7 + 1.3 G`), bulge out more than they
-  dent in (dents count 0.6, by a smooth curve: a kink at nought showed as
-  ridges) and fade to 30 % deep in a body (over the first 0.6 of the
-  field inside, as `steep` scales it), so that they shape its outside and
-  cannot punch holes through it: with full billows everywhere, the forms
-  from 4 km had dark pits.
-- **`steep`**: the billows, and the fine noise below, are scaled by how
-  steep the heap's field is where its surface over that place stands
-  (at `yt = top rise^(1/3)`, `rise` = `thick + swell`), against the top
-  of a whole dome (where it rises by `4.8 / top` per unit of `y`): about
-  1 over a top, up to 6 on a wall. So they move the surface by as many
-  metres on a steep wall as on a top. Added to the field alone, they moved
-  the walls of towers and big heaps, where the field is four to eight
-  times as steep, by a few metres, and those were smooth pillars. The
-  slope across comes from the slope of the weather map (`uSlope`, a
-  texture made from it at start: R and G per km along x and z), through
-  the derivatives of `thick` and `top`. Taken at the place's own height,
-  the slope grew with the height over a wall's foot (the field goes with
-  `y` cubed), and billows scaled by it stood above the walls as spikes.
-  It costs 2 ms of the frame at 1440p among the tops (a register-heavy
-  part of every read of the field): reads that sum a depth over long steps
-  (the depth maps, the light's later steps, the hollows, the sky's
-  reach, `coarse`) leave it at 1, which
-  saves another 2 ms; they smooth the billows over far more than a wall's
-  anyway.
-  The GPU's filter bends where the noise's texels meet, every 62 m. From
-  inside a cloud's fringe, the march's reads made the fog a set of flat
-  grey polygons with straight edges: the facets of the filter's surfaces.
-  So the march's reads of the noise move by up to half a texel each frame
-  (`shake`), and the mean over the frames is smooth: where a pixel is
-  finer than 1 m (to 16 m, it cost
-  2.4 ms more at 2 km of altitude), by half a texel within 100 m of the eye
-  and by 30 % of that from 300 m on: shaken by half a texel (31 m) there,
-  heaps a few hundred metres off were blurred by as much each frame, and
-  the mean over the frames was a soft, grainy white blob without relief.
-  `lump` says how far a place stands out of the billows; `body` how thick
-  the cloud is there; `q.w` how rough; `thin` how near the edge of its
-  heap's foot (`rise` under 0.4; nought on a sheet).
-
-**The 3D body of heaps and towers.** The field above is a height field:
-for each column of the weather map one top, and billows that push that
-surface. It cannot overhang, nor hold a cleft that goes in under a
-turret, and its walls are the walls of the dome whatever the billows do:
-towers and big heaps came out as lumpy columns, scattered cumulus as round
-heaps of one size. So where the cover breaks into heaps (no sheet, below),
-and for towers wherever they stand, the heaps have a 3D body instead
-(`solid`: the larger of `(1 - max(deck, level1)) (1 - sheet)` and
-`(1 - level1) max(stand, tower)`, smoothly: a tower and a heap that stands
-out of a sheet or a deck have it there too;
-`stand` is how far the heap's dome stands out of the sheet, 0 to 250 m
-(250 to 600 m before round 17: the lower heaps on a sheet were the field
-above, smooth domes among the sheet's heads, like stones under a sheet):
-with the body on towers only, the heaps on a sheet from 4 km were pillars
-and fins with smooth, upright curtains where the body met the field above;
-with the body on the whole sheet, the decks from above were a rubble of
-lumps with dark gaps. The sheet itself, the deck and the top of the slider
-keep the field above, which is closest to photographs there). After Schneider (2015, 2017): a broad
-envelope from the weather map, with a 3D shape on its surface.
-
-- The envelope `env` is how deep a place lies in its heap, from the same
-  terms as the dome: `rise - y^3 / top^3`, with `rise` = `thick + swell`
-  (1 at the foot of a heap's middle, 0 where the dome's top would stand),
-  the same surface as the field's own dome. (Round 12 shrank `rise` where
-  the body gave way to the field, on a sheet where a tower ended; with
-  `stand` the body ends where the heap sinks into the sheet, and the
-  shrinking only drew the curtains above.)
-- `env` is turned into a distance (km, `dEnv`): divided by how fast it
-  rises across its surface over this place, `3 steep / (top (CT - CB))`
-  (`steep` as below, read from `uSlope` for the body too; reads that sum a
-  depth over long steps (`coarse`) take it as over a top, which saved 1.5
-  to 3 ms of the frame at 1440p).
-  As `env` itself, the surface of round 11 had a gentle slope across the
-  side of a heap, and the turrets alone made its outside: a union of free
-  balls, with more of them standing off the heap.
-- **A tower is thermals stacked one on another**: its envelope swells
-  and narrows by `PILE` = 0.2 of `rise` every 0.9 km of height (the phase
-  drifts from place to place with `far`), and is up to a quarter wider
-  towards its top. With one envelope from base to top, the walls of towers
-  read as pillars. Every heap **leans** with the wind's shear: the map is
-  read `LEAN` = (0.06, 0.03) km upwind for each km of height (twice that
-drew towers seen from above as teardrops with a pointed tail).
-- On that surface stand the turrets and heads of `uBody` (see
-  [Textures made at start](#textures-made-at-start)), one read at the same
-  place in the noise as the billows (`q`). The turrets of 2 km and 1 km
-  shape it, as bumps: each moves the surface out by up to `BODY_K` (700
-and 400 m), in by less (`BODY_C` = 0.45 is the value that moves it
-neither way; with 600 and 300 m, heaps from above were round blobs). The heads baked on them
-  (500, 250 and 125 m) only carve it (erosion, after Schneider's clouds
-  for games, 2015 to 2017): their seams go in by up to `BODY_K.z` = 600 m
-  in all, the body's surface stands `ERO_C` = 0.4 of that out for them
-  (their mean, so that the cover stays), and a crown of every size reaches
-  it. Deeper than that they fade out over `SKIN` = 150 m, so the core is
-  whole. They carve nothing on the lowest part of a heap (`heapUp` under
-  0.03, all of it from 0.25): seen from below, its base and the foot of
-  its sides were a rubble of heads; in photographs a base is flat. The
-  heads count only on heaps whose dome may be 250 m high and more
-  (`smoothstep(0.5, 1.5, top (CT - CB) / 0.5 km)`), each turret on heaps
-  half its size high; on a sheet as if the dome were up to twice as high,
-  with the heads weighed 0.55 (the low heaps that stand out of a sheet
-  were a rubble of small heads; in photographs they are broad, bulging
-  domes). (Until round 17 the carving was turrets of 500 m and 250 m, 250
-  and 140 m deep, read per step from two channels; heads of 125 m came
-  only from the fine noise within 4 to 8 km, and a tower seen from 8 km
-  was a few large, soft lobes.)
-- The field is `BODY_G (dEnv + bumps + shift)`, with `BODY_G` = 2 per km.
-  `shift` (`BODY_B` = -60 m, 90 m less from `cloud` 0.4 to 0.7, and 50 m
-less below 0.15, easing to none by 0.4: the heads of round 18 ate the
-smallest heaps) moves the surface in a little. (Round 16 had -150 m, for the cover of the slider;
-  with the heaps of round 17, most of them small, it ate the heaps under
-  500 m.) The cover of the slider: over 100 by 100 km round the eye
-  (column depth over 1, 200 m pixels), 0.4, 2.1, 4.0, 4.8, 7.8, 13.4,
-  19.5, 85.3, 97.1 and 98.7 % at `cloud` 0.1 to 1 (round 17: 0.5, 1.8,
-  4.3, 5.8, 8.8, 14.4, 21.0, 83.6, 96.5, 98.7 %).
-- The fine noise (`cloudDetail`) is weighed `BODY_D` = 1.3 on the body
-  (`steep` there). On the body it is the billows of `uBody` (A), read 7
-  times finer (`DETAIL`): heads of 71, 36 and 18 m that meet in sharp
-  creases (see [Textures made at start](#textures-made-at-start)), their
-  seams `GEO_S` = 0.25 deep in all, so that the heads go on down in the
-  same form, a cauliflower from 2 km to 18 m (the `MICRO` noise adds
-  smaller billows near). (Until #50 R1 the heads of B were read there
-  again: turrets whose clefts are rounded over `SOFT`, seams 0.15 deep;
-  from near, heads so made were soft lumps.) They carve too: the surface
-  stands out by `fat` (`ERO_F` = 0.55 of their weight, a little more than
-  their mean, 0.43, so that the cover stays: by their deepest seam, the
-  heaps grew), their seams go in from there, and deeper than their weight
-  they fade out over `SKIN_F` = 100 m. (In round 18 the seams went twice
-  as deep and the surface stood out by their mean, 0.4: the seams of heads
-  of 71 m and less went 90 m under the body's surface, and cut the skin of
-  heads through to the smooth body in patches with stepped outlines.)
-  **The kind of detail** follows where in the heap a place is (after
-  Schneider's Nubis, 2022 and 2023, where a profile of the cloud chooses
-  between billowy and wispy detail): `billowy` is 1 on the growing heads,
-  high on a heap (`heapUp` over 0.45) on its side that faces upshear, half
-  that on the side the shear leans over (`upshear`: the slope of the map
-  against `LEAN`, read with the body's slope), and 0 low on its sides
-  (`heapUp` under 0.15). Where it is less, the billows carve the heads'
-  middles instead (`WISP` = 0.6 of the way), and leave the seams as ragged
-  wisps; the edge is softer there too (below). The fine noise reaches as
-  far as a pixel is under `GEO_PIX` = 5 m wide, fading out by 10 m (6 to
-  12 km at 1440p, 4.5 to 9 km at 1080p): farther, its heads are a few
-  pixels or less, and the body has no fine noise at all (until #50 R1, 4
-  to 8 km at every size; until round 17 the Worley billows of the sheet
-  took over there and blurred the body's heads). (Read out to 8 km and
-  farther, where they are a pixel or less, round 14's fine turrets made a
-  flight differ from a still at the place reached by more than the
-  `flight` check allows: 1.53 against 1.26.) With the Worley billows of
-  the sheet
-  near, close heaps were smooth cream, like whipped cream or wax: large
-  soft lobes. On the body the cloud is at least
-  0.9 rough (`q.w`): older, smoother cloud left some heaps without relief
-  (rough 0.45). At 1 (round 14), the heads were smooth lobes, like putty; at 4,
-  ragged, with shreds round them; at 1.6 and more, a flight differed from a
-  still at the place reached by more than the `flight` check allows.
-- The extinction in the body grows with the height over its base
-  (`cloudExtinction`), as the water does in air that rises and cools
-  without mixing (adiabatic), with its 2/3 power: `clamp(wet (h - base /
-  1 km)^(2/3), 0.3, 1.2)` of `SIGMA`; elsewhere `0.45` at the base to 1 at
-  1.1 km. Deeper than `MIXED` = 100 m under the body's surface `wet` is
-  `WET` = 3 (about 260 (h / 1 km)^(2/3) per km: 2 g of water per m³ and
-  km of height, 300 drops per cm³), so the core is at 1.2 `SIGMA` from
-  some 230 m over its base; towards the surface it falls smoothly to 1, a
-  third of that, as air mixed in from outside dries a cloud's edge. So an
-  ordinary heap seen towards the sun from 0.3 km is 12 to 22 deep through
-  its body (the median of its visible points within 30° of the sun, `g1`,
-  `g4` and `m15`, a 20 m march towards the sun; 30 to 40 at the deepest
-  tenth), and grey with bright rims, as in photographs. In linear light
-  against the sky 8° to 40° from the sun, those clouds' darkest twentieth
-  is 0.3 to 0.6, their median 0.9 to 1.6, their brightest twentieth 1.6
-  to 2.5 (a photograph of cumulus before the sun: bodies 0.6 to 0.9, rims
-  1.8 to 2.7); the darker parts slate blue-grey (sRGB about (107, 119,
-  143), saturation 0.26, where that photograph has (111, 129, 153), 0.27).
-  Until 9f326f9 `wet` was 1 throughout (air with four fifths of it mixed
-  in), and the same heaps were 7 to 11 deep: grey-white masses lit
-  through (0.6 to 1.1, 1.2 to 2.0 and 1.9 to 2.9; the darker parts (157,
-  160, 170), saturation 0.08). Dense to 40 m under the surface, the tops
-  seen from above had darker pits between their heads, and the `flight`
-  check failed (cruise 1.15 against main's 0.97). The lower parts of
-  towers (up to 1.3 km over their base) are denser too; their faces were
-  already deep, and their lit faces came out a little brighter (the
-  exposure 0.1 to 0.2 stops lower).
-- `body` (how dense the cloud is) is at least 0.7 of the heap's top over
-  the whole body: from the column under them, the heads that overhang a
-  heap's thin foot were translucent, and the cloud behind showed through
-  them as patches with sharp outlines. The heads of big heaps do not fray
-  (`thin`).
-- The edge (`cloudField`) is 6 m deep on the upper part of a heap (its
-  rising heads) and 35 m on its lower sides, by `heapUp`, the height over
-  the base against the envelope's top there, and halfway to 35 m high on
-  the side the shear leans over (`upshear`) (12 and 70 m until round 17:
-  photographs of towers have crisper outlines; then, with the fine heads
-  read out to 8 km, 4 m failed the `flight` check). From 15 to 45 km
-  away on, every edge of the body becomes a veil 150 m deep: from 11 km,
-  small cumulus were cut out of the sea with hard outlines.
-- The early ways out of `cloudShape` take the field as if the bumps were
-  at their highest there (`bodyMax`; before the slope is read, with the
-  envelope at the steepest or the gentlest slope it may have).
-- `uSlope` is read through the GPU's filter. (Its bends drew upright bands
-  on the body's sides as long as the light took normals of the field;
-  eased everywhere, it cost 9 ms of the frame at 2 km.)
-- Everything that reads the field reads the body: the march, the light's
-  steps (so bumps shade the clefts beside them), the depth maps (the
-  shadows, the columns, the sea's shadows).
-
-Where the cover breaks into heaps, two more things shape the map's heaps
-(weighed by `1 - sheet`, so the sheet and the deck are as they were):
-
-- **Their outlines** (`WARP` = 5): the map is read at a place moved by up
-  to some 1.5 km, by the map's own cover and height of heaps (R, G) far
-  from here, at mip level 2.5 (texels of 1.4 km). The heaps of the map are
-  round domes, and from above the clouds were discs; moved, their outlines
-  are lobed and drawn out. (The noise's Worley cells, eased, did the same
-  at 3 ms more.) The moved map and its slope there are made once for each
-  amount of cloud, 2048 texels square (`uWarped`, `uSlopeW`; see
-  [Textures made at start](#textures-made-at-start)): read in the field,
-  the place moved first needed a read of the map that the next two
-  waited for, on every step of every ray; made once, it saved 1.2 ms of
-  the frame at 1440p in cruise and 2.8 ms among the heaps. Read on a grid
-  twice as fine as the map's, the moved map keeps its shapes (outlines
-  move by a few metres).
-- **Clumps and gaps** come from the map's heaps themselves (see
-  [Textures made at start](#textures-made-at-start)): rafts of heaps with
-  clear lanes of tens of km between them. (Until round 16, `CLUMP` added
-  the cover of `far`, the map elsewhere, to heaps on three lattices, and
-  from 11 km they still looked strewn evenly.) Over 100 by 100 km at
-  `cloud` 0.3 and 0.5, the clouds' number falls as the -2.5th and -2.1st
-  power of their width (round 16: -2.2, -2.1), and 24 and 17 % of the sea
-  lies more than 5 km from any cloud (round 16: 2 and 0 %).
-
-The light once took normals of the field, and on the body it needed
-special cases (a cleft's shade, the column above, the shadows of the
-heads' small billows). It takes none now: see the light, below.
-
-**The sheet.** With much cloud the heaps stand on a sheet
-(stratocumulus): from below a closed deck, from above cells. How much
-sheet (`sheet`) follows `uCloud` and the cover over some 20 km (the
-weather map's mip 6.5, `region`), from 0.6 to 0.85, so that it breaks up
-first where the cover is less; at 0.78 most of the sky is closed from
-below. Its top is 250 to 720 m over the bases. Its surface is packed heads
-(`SHEET_H`): the turrets of `uBody` of 2 km and 1 km raise it (0.8 of
-its depth times their value less `BODY_C`), and meet in seams that go
-down to 40 % of its depth (deeper, they cut it through, and under a deck
-the march met many clouds in one ray: 4 ms more); the heads of `uBody` (500 m to 125 m) carve them as they carve the body
-(seams up to 400 m deep in all, `SHEET_H.z`, fading `SKIN` deeper; in
-round 17 turrets of 500 m and 250 m, 300 and 170 m deep), and the fine
-heads of `cloudDetail` carve it too (`carved`). All of this only where the sheet is whole (`whole`,
-`sheet` from 0.2 to 0.6): at its first edges the crowns alone stood out
-of it, a speckle of small dots that shimmered in flight. The heaps that flatten into a deck (`deck`) have the
-same heads and seams. (Until round 17 the top was domes of the noise's
-1 and 2 km Worley cells: from above, a smooth cream with the heaps poking
-through it.) Over more than half of it (`far.a`) rows of
-rolls 1.2 km apart across the wind (whole numbers of them across the map,
-bent over tens of km), each swelling and thinning every 2 km along its
-length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. Each roll swells more
-in some places than in others (0.35 to 1 of its depth, by the noise's 2
-km cells): rolls of one depth over tens of km were straight, regular
-stripes from 13 km. The heaps on the sheet
-stand in the same ranks, with smaller billows (`rank`); with rolls in a
-few places only, the sheet from above was lumps without order. The
-billows of the tile lie on top. Sheet and
-heaps merge by a smooth max. Near the top of the slider (`level1`, 0.85
-to 1) the heaps on the sheet flatten to 40 % and few towers rise out of
-it: at `cloud=1` the domes stood up to 1.9 km over 1 to 3 km and looked
-like a range of mountains. Towers (G over 0.48) are a little more common
-than before among fields of cumulus. The early way out of `cloudShape`
-allows for the sheet's cells and billows (`fsMax`): with a fixed margin
-they were cut flat, as mesas with a hatch on them.
-
-**One top.** Where the sheet is whole (`whole`), the sheet and the heaps
-on it are one top: what is said above holds only at its first edges
-(`whole` under 1). Each is taken as a height in units of the shell's
-depth: the sheet's level, and the heaps' field over the rate at which it
-rises over their top (`gF`, by `steep`), mixed with the body's (over
-`BODY_G`) by `solid`. A smooth max joins them (`TOP_K` = 0.04, some 180
-m). A heap with no body keeps half its rise over the sheet (`TOP_S`), and
-on the whole top stand the noise's Worley domes of 2 km, 1 km and 500 m
-(`TOP_W` = 0.3, 0.2 and 0.12 km), up to twice as high on a heap that
-rises 300 m or more over the sheet, and 60 m higher on the whole
-(`TOP_O`: one top stood lower than the higher of two fields, and from
-under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve them
-`TOP_E` = 1.5 times as deep as on the sheet's first edges, and the fine
-noise carves them as on the sheet. A heap with a body keeps its form
-(`free`: none from `solid` 0.8 on); the sheet round it has the cells.
-The rows of rolls keep the sheet above. Until #64 B2 the sheet and the
-heaps were two fields that crossed: from 4 to 5 km the turrets of the
-sheet stood out of the heaps' smooth domes as plateaus with cliffs, the
-domes lay between them as flat grey floors, like frozen lakes, their
-shadows drew long winding valleys, and the tops read as snowy mountains.
-The turrets of `uBody` stand apart, and between them the sheet was flat;
-the Worley domes fill the plane and meet in creases. With the whole rise
-kept, the heaps were smooth hills with long shadows. The early ways out
-and the map of the tops allow for what the cells, heads and rolls add
-over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
-
-The base is a field of its own (`base`: twice the height over `level`,
-in km, so that it is dense 15 to 30 m in),
-up to 120 m lower under the thick middle of a cloud and under the swells
-of a deck (`e`, from the smooth weather map), and a little higher or
-lower from place to place (`n.r`, `lump`: little, since the noise of the
-tile is read through the GPU's filter, and its facets would show on a
-surface as smooth as a base). The cloud is the lesser of the two fields.
-
-`cloudDetail` gives the fine noise: `DETAIL` = 7 tiles per tile, billows
-of 300 m down to about 20 m, weighed by `RELIEF` = 0.85 (1 made the
-small lumps stand out like a cauliflower in photographs' place of soft
-domes). The 300 m billows stand out about a third of
-their width, the smaller ones up to a half, so that small billows sit on
-large ones: a cauliflower (equal weights made a foam). Near the eye the
-same noise, 8 and 64 times finer (billows of 36 m down to 1 m), adds
-smaller billows still, each only where a pixel is fine enough to show it
-(`MICRO`; turned about the vertical by whole numbers, so that it repeats in
-the tile). The weights fall by about 0.26 for each eighth of the size.
-Without them, clouds 0.3 to 3 km away had nothing smaller than 20 m, a
-texture blown up 20 to 60 times: soft mounds. `cloudField` adds it near the
-surface only (`min(f, base) > -0.25 * RELIEF * steep`), scaled by `steep`
-on the sides and tops as the billows are, more strongly on thin
-cloud:
-
-- on the sides and tops; not on the base, which is flat and shows its
-  broad mottling only;
-- under the base where the noise swells most: shreds that hang below it,
-  with a deep, faint fringe (`edge` 100 m), so that they are ragged and
-  thin.
-
-Fine noise carved into a base (Worley creases cut by a plane) looks like
-veined marble from under it; one height for every base makes a straight
-line of them, seen from their own height.
-
-`cloudExtinction` turns the field into extinction: `SIGMA` = 90 per km
-once the field is past the edge, with more water higher up and in thicker
-clouds (in a heap's 3D body 1.2 `SIGMA` from some 230 m over its base:
-see above). The edge (`edge`, from `cloudField`) is 10 m deep on hard,
-growing turrets and `EDGE` = 30 m on older, softer cloud; the extinction
-rises with the square of the depth there, so the outer part is a thin,
-translucent fringe. Billows smaller than the edge melt into it: with
-edges of 25 to 60 m every near top looked like cotton wool. Thin cloud
-(`thin`: the edge of a heap's foot, and the fragments beside it) frays: its
-edge is up to 0.4 of the field deep, some 100 m on a small heap's side,
-from 4 to 10 km away on (nearer, a fringe that deep is many pixels wide,
-the march and the light crossed it in many steps, 18 ms of the frame among
-the heaps at 2 km, and near heaps in photographs have crisp edges). From
-11 km, scattered cumulus were cut out of the sea with hard outlines; in
-photographs their edges are thin and ragged. (On the 3D body the fringe
-is 30 m deep: deeper, small heaps from 5 km were a grainy fog.) Where the field is
-smoothed over a pixel wider than the edge, the smoothing sets the width
-and the rise is linear.
+- **A layer** (`cloudLayer`, a record): the level of its bases, its depth,
+  its amount, its form and how much of a tower it is, at a place on the
+  weather map. From `uWeather` read over 1 km at least (R: amount, G:
+  depth, B: the gusts' map, A: where the air rises) and the Clouds slider:
+  - `level`: 150 to 300 m over `CB`, higher or lower across tens of km
+    (B elsewhere on the map, smoothed: `far`).
+  - `form`: 1 for heaps (cumulus), 0 for a sheet of cells (stratocumulus);
+    it falls as the slider and the cover over some 20 km (`region`, the
+    map's mip 6.5) go from 0.5 to 0.85.
+  - `amount`: `0.44 + 0.44 uCloud`, a little less from 0.5 to 0.7, 0.09
+    more from 0.6 to 0.8 and 0.04 less again to the top, plus the map:
+    2.2 times its R about 0.5 with few clouds (they stand in fields, the
+    map's clumps and streets, with clear sea between), 0.6 times from 0.8
+    on, and a seventh of that at the top of the slider (the cover is whole
+    everywhere). At most 0.72 for heaps: clear air between them inside a
+    field. Set so that the share of the sea covered, seen straight down
+    from 11 km, is 0.25, 0.46, 0.60, 0.87, 0.92 and 1 at `cloud` 0.25, 0.5,
+    0.65, 0.8, 0.9 and 1 (measured on stills).
+  - `tower`: where A is over 0.75 to 0.95, from `uCloud` 0.15 to 0.4, for
+    heaps.
+  - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
+    before the sun was two lobes one on the other); a
+    tower's 2.8 to 4.2 km.
+- **The profile**: `1 - t^k`, `t` the height over the level as a share of
+  the depth: flat under, round over. `k` = 2, and 3 for a tower, which
+  keeps its width higher up.
+- **The base shape**, from `uNoise` (128^3; R Perlin-Worley, G, B, A Worley
+  cells of 2 km, 1 km and 500 m in a tile of `BASE_KM` = 8 km), read at a
+  depth that drifts from place to place (`far`) so that no two tiles look
+  alike, and at a place that leans with the wind's shear (`CF_LEAN`, 0.25
+  km per km of height). For heaps: the Perlin-Worley remapped by its
+  Worley cells, mixed `CF_BIG` = 0.25 with the same read 4 times larger
+  (which gathers heaps), stretched from `CF_LO` to `CF_HI`, plus `CF_SMALL`
+  = 0.35 of the 1 km cells by themselves (small heaps between the large).
+  A tower's shape is read 0.45 as fast upwards: turrets on one stem. For a
+  sheet: the Worley cells themselves at every size from 8 km to 500 m,
+  which meet in creases; the small ones are read through a matrix that
+  draws them out across the wind (whole 32nds, so the pattern still wraps
+  with the map), here more and there less (`far.g`).
+- **The amount**: the density is `(shape profile - (1 - am)) / am`, with
+  `am` the amount, at most `CF_CLOSE` = 0.68. So no cloud stands over
+  `tTop = (am (1 + 0.2 CF_KNOB form))^(1/k)` of the depth: the bound of the
+  early way out, and of the map of the tops (`uTops`, exact but for a
+  margin of 30 m and 6 % of the depth). Over `CF_CLOSE` (to 0.86) a floor
+  `CF_FLOOR` = 0.6 under the shape closes the cover instead: the amount
+  takes no more, and a closed sheet keeps the relief of its top. A veil
+  lies at the base of a closed sheet (`CF_VEIL`: density 0.4, fading over
+  the lowest 0.3 of the depth), which the fine noise does not erode:
+  through the thinnest places one sees grey cloud, not the sea. (Pits
+  through a sheet were dark specks from far above.) The top of a sheet
+  stands higher over the largest of its cells of 4 km to 1 km, by up to
+  0.7 `CF_RELIEF` = 0.35 of its height (some 100 m; the profile is read at
+  `t / (1 + rise)`): relief without holes, which a low sun shows and a
+  high one hardly.
+- **The fine noise** (`cloudField`): `uNoise` again, 7 times finer
+  (`DETAIL`: Worley cells of 285, 143 and 71 m), read at the pixel's own
+  mip level (from far, cells of a few pixels thin the cloud evenly and do
+  not speckle it), at a place moved by the base shape's noise (`CF_SWIRL`,
+  in place of the talks' curl noise), and 8 times finer again near the
+  eye (`Q_MICRO`). Low in a cloud the cells' middles go (wisps); from 5 to
+  30 % of the depth up, their seams (billows).
+  - A sheet is eroded: a remap that takes up to `CF_ERODE` = 0.5 of
+    density, the thin places first, less half of `CF_CUT`, and what is
+    left is twice as dense (half a heap's sharpness). Reads without the
+    fine noise (the light's long steps, the depth maps) take its mean,
+    0.45: with none taken, the map of the clouds' shadow held a sheet's top
+    some 50 m over the top drawn, and with the sun at 3 degrees no crest
+    of a deck was lit. The fine noise is not read where a sheet is dense
+    whatever it takes (over 0.6 of density: it was half the cost of the
+    clouds' pass).
+  - A heap is carved about its surface, by the fine noise and half by the
+    base shape's own cells of 1 km and 500 m: `CF_KNOB` = 0.8 of density
+    times the noise less 0.2 (heads stand out where it is lower, creases
+    go in elsewhere; reads without the fine noise take its mean, 0.54).
+    Less `CF_CUT` = 0.1 (the thinnest of it, specks smaller than a step,
+    was a grain round a tower, and thin fragments grey ghosts), and what
+    is left is `CF_SHARP` = 4 times as dense, up to 1: a hard, knobbly
+    outline, dense right behind the surface. Where a pixel is wider than
+    that edge, only as sharp as a pixel and a half, for the view's own
+    reads; the light's take the full sharpness (thinner, they let the sun
+    through a heap, which glowed evenly from behind). On heaps the small
+    cells of the fine noise weigh more (0.4, 0.33, 0.27), and the read 8
+    times finer twice as much: grain down to some 10 m near the eye.
+- **The base**: `min` with the field of a flat floor at the level, 8 per
+  km: only the lowest 60 m count as a base (`fb`, for the light under a
+  deck).
+- **The extinction** (`cloudExtinction`): `SIGMA` = 90 per km times the
+  density over `CF_FULL` = 0.18 (at most 1), times the water for the
+  height over the base, its 2/3 power per km: 0.3 to 1.2 in a sheet, 1.6
+  times that in a heap (0.6 to 1.2).
 
 **The march** (`clouds`) runs from where the ray enters the shell (`ta`) to
 where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
@@ -1330,9 +1033,8 @@ clouds.
   km of it; a ray above those tops strides until it has come down to them
   or gone that far sideways, less a share of a stride new for each pixel
   and frame (landing in the same places, the steps after it drew
-  ripples). The tops are those of `cloudShape`'s second early way out
-  (after the slope; the first allows walls six times as steep everywhere,
-  and its tops stood so high that hardly a step was saved), found at four
+  ripples). The tops are the layer's own bound (see the amount, above),
+  found at four
   places in each texel by halving the height between the base and `CT`
   eleven times, 50 m higher, rounded up, then the highest round each.
   Only where the map is read at its own level (`lod` under 2: within some
@@ -1368,8 +1070,7 @@ depth towards the light past its first two steps with the long shadows,
 the depth straight up (`above`), how much of the sky the place sees, the
 sky's lean towards the sun's side, the depth towards the light over its
 first two steps, and over its own steps past those without the map of the
-clouds' shadow, `tauN`, and over those of them within 175 m, `tauNn`), taken where the ray entered the cloud (marching on to the point
-where stage 1 lights it cost 0.4 ms under a deck). Stage 1 draws the picture and, at a cloud's
+clouds' shadow, `tauN`, and over those of them within 175 m, `tauNn`), taken an optical depth of 1 into the cloud. (Until #77, where the ray entered it: for a cloud with a soft edge that is its faint fringe, the light there was that of a wisp or of a crease behind one, and stage 1 drew thin dark lines along the lobes of near tops.) A ray that leaves a cloud before the depth its light was to be taken at takes it at the middle, by weight, of what it met there: at the place it left, a ray that grazed a lobe took the light of the lobe's far side. Stage 1 draws the picture and, at a cloud's
 light, takes those from those of the four nearest texels whose ray entered
 the cloud at the same distance (within 4 % plus 30 m: a bilateral
 upsampling, after Kopf et al. 2007), by their weights, however small. It
@@ -1605,11 +1306,8 @@ each cloud, not on its surface; no normal of the field enters it.
   the map of the columns (`columnDepth`, see [The clouds'
   shadow](#the-clouds-shadow)), the mean of two columns up to `SPREAD` =
   150 m to either side at angles new each frame (light spreads sideways on
-  its way down through a deck); each step of a column counts `(1 +
-  relief)^2` of its depth, where `relief` is how far the sheet's cells and
-  rolls raise it (the water grows with the height over the base). (Until
-  round 20 of #33 each point marched its columns, seven steps each, and
-  took the relief's mean 60 to 500 m over it for the whole column.) From below, a deck also shows its cells: Worley cells of
+  its way down through a deck). (Until
+  round 20 of #33 each point marched its columns, seven steps each.) From below, a deck also shows its cells: Worley cells of
   the noise read at 3.5 and 10 times the tile's frequency (some 600 m and
   100 m across), darker in the thick middle of a cell and lighter at its
   thin rim, by up to half and 60 % more, fading beyond 2 to 6 km (so far
@@ -1638,150 +1336,6 @@ The clouds' own light is worked out inside them, as above; past its own
 steps it reads their shadow from the same map as everything outside them
 (the air, the sea, the glare): the next section.
 
-## Towers in grids that move with the eye
-
-A test switch, `?grid=1`, off by default (step 1 of issue #76): the
-towers of the low clouds are grown as trees of lobes and kept in
-distance grids round the eye, mixed with the present field. Off, nothing
-of it is compiled, made or uploaded. Only at the levels with a `grid`
-size in `QUALITY` (`max` 512, `high` 384 texels a side).
-
-**The levels.** Three, of 31.25, 62.5 and 125 m voxels (`,v62` after the
-switch: 62.5, 125 and 250 m), each N x N columns from `CB` to `CT` (141,
-71 and 36 slices): windows of 16, 32 and 64 km at N = 512. One R8 3D
-texture of N x N x 260 holds them one over another (unit 30, `uGrid`):
-each level's slices of the distance under the towers' surface,
-+-`GRID_R` = 250 m, 0.5 at it, then four slices of its columns: how much
-the present field's heap gives way there (`own`), the highest top within
-0.8 km, the base, and how much of it is shown. One
-sampler only, and only in the programs that draw the low clouds (their
-pass, the depth maps, the sky's light): Direct3D 11 allows 16 textures to
-a program, and the scene's own `fs` reads 16. That program reads the low
-clouds from their pass. No mipmaps: a coarser read takes the next level. 68 MB of
-the GPU at `max`, 38 MB at `high` (36 MB at `max` with `,v62`).
-
-**Addressing.** Each level is cut into tiles of 32 x 32 columns (1, 2
-and 4 km). The tile t of the way flown (counted unwrapped, so that the
-wrap of the map at 256 km moves nothing) lies at the texel tile t mod
-N / 32: toroidal. The window, N / 32 tiles a side, moves by whole tiles
-when the eye is 1.5 tiles off its middle; only the tiles that enter are
-made again. The shader gets the middle of each window on the map and its
-texel (`uGridO`) and reads a point at `(texel + wrap(x - middle) / V) /
-N`; a point outside a window does not read that level.
-
-**What is shown.** The main thread fades a tile in, in eighths, over
-`GRID_FADE` = 600 ms when it comes. A column is shown as much as its
-tile, and less towards a neighbour that is not shown, over half a tile;
-the window's edge counts as such a neighbour. So a tile that has entered
-but not yet come (its texels still hold an old tile) is never read, and
-the levels meet without a seam. The main thread keeps a copy of the
-columns and uploads the rows of tiles that changed, once a frame.
-`cloudShape` reads the levels front to back, finest first, each with the
-weight left times how much it is shown; a level finer than the read's smoothing (`lod`:
-level 0's voxels are texels of the noise at lod `GRID_LV`, -1 for 31 m)
-gives way to the next, so the light's long steps and the depth maps read
-the coarse levels. A level is read up to the highest top within 0.8 km
-of the column and `GRID_OUT` over it (the reach of the detail below): by
-the column's own top, the crowns that the detail pushes out of a wall
-were cut off over the columns beside it, as upright curtains. The present
-field's towers fade out by the weight the grid has there (`gridCut`), and
-its heaps lose up to `GRID_OWN` = 0.7 of their height round a tower
-(`gridOwn`, read from the coarsest level, whose window holds the others);
-what no level covers keeps the present look. Then, as in the prototype,
-the grid's distance joins the present field by a smooth maximum and takes
-over its facts there (solid, heap, base).
-
-**The detail at render time** (from the prototype's round 2), on the
-distance, less of it low on a body (`GRID_LOW` = 0.4 of it below a fifth
-of its height, none at its foot): the heads of `uBody` (500 m to 125 m,
-read `GRID_HK` = 2 times finer, `GRID_HW` = 120 m deep at most) carve it as
-on main's body; the grid's own creases are cut in, `GRID_CR` = 1.5 times
-`cav`, the distance two levels coarser (smoothed over four voxels) less
-its own: positive between lobes, so the valleys between bulges are sharp
-and deep; packed billows (the A of `uBody`, `GRID_BK` = 2.33 times finer:
-214 m down to 54 m, `GRID_BW` = 120 m deep at most) on that, read at the
-pixel's level. In a crease (`gridCrease`, from `cav` and the heads), the
-light scattered many times and the sky's light are less by up to `GRID_AO`
-= 0.6, however the light falls: with the sun behind the eye the walls were
-flat cream, and from straight above at noon a tower was one white blob.
-After the switch, `,KEY=value` sets any of these for a test
-(`?grid=1,AO=0,BW=0`).
-
-**Where the towers stand.** After each map of the tops (each cloud
-amount), the warped weather map at 250 m (its mip level of 1024 texels)
-and the map of the tops are read back without a stall (pixel buffers and
-a fence) and sent to a worker. The worker (the script `towers`, made into
-a Worker from its text through a Blob: no file, no build; made at the
-first frame) finds the towers of the whole map, with the present field's
-formulas: per world cell of 2 km, the place where the field's heap stands
-highest over the sheet, if no place within 1.5 km stands higher; only
-where the heap stands `H_MIN` = 0.8 km high or more, or the field draws a
-tower (where its tower is strong, it counts `TOWER_H` = 1.5 km per unit).
-(Seeded at the field's towers only and sized as them, the towers were no
-higher than the field's heaps round them, which hid them: posts with round
-heads standing out of those heaps. With a body in every heap from 0.5 km
-up, 1900 on the map at cloud 0.5, the frame under them at 0.3 km took 5 ms
-more than main's grid.) Its base is 80 m over
-the level of the bases there. Its height is the heap's or more, by a law
-of sizes: `u = rnd^2`, times a smooth random field of 12.8 km (the big
-ones in groups) and the strength of the field's tower round it; `H = 0.6 +
-3.4 u` km. It is at least as wide as the heap (the place within 2.5 km
-where the heap stands over 0.4 of its height here) and 1.25 times its
-height, 1.3 to 5 km, and at least 0.45 of its width high (flat bodies
-were a sheet of stratocumulus from below). A smaller tower within the foot
-of a bigger one gives way. The seed of its lobes comes from the cell: a
-cell gives the same tower whenever it comes into a window. About 800 on
-the map at cloud 0.5 (width 1.3 to 2.8 km, height 0.8 to 1.8 km, 10th to
-90th percentile; the highest 4.6 km), 700 at 0.8. Round its middle, the
-field's heap gives way
-(`own`: 1 within 0.3 of its width, none beyond 0.55 of it and 300 m).
-
-**The shape rule.** `lobesOf(seed, P, LEAN)` grows a tower as a tree of
-lobes (the rule of the shape prototype, round 2, kept apart from the plumbing:
-the plumbing only passes the seed, the knobs `P` with `rmin` at least 0.6 of
-the finest voxel, and the lean). Its lobes are made once, for all levels
-(with fewer of them for a coarse level, its random numbers would change).
-Each level's brick of a tower holds the lobes of at least 0.6 of its
-voxels, joined by a smooth minimum, cut flat at the base, with an exact
-distance transform within 250 m. A tile is the union of the bricks that
-touch it (the most of their bytes) and its columns. Lobes (48 MB) and
-bricks (96 MB) are kept, the least recently used dropped. The worker
-makes the tiles the main thread wants, nearest to the eye first, and
-transfers them; the main thread uploads at most `GRID_BUDGET` = 1.2 MB a
-frame (`texSubImage3D`; a tile of level 0 is 144 kB). Each map, its
-wanted tiles and its tiles carry the number of the cloud amount they were
-made for (`gen`): a new amount asks for its tiles at once, the worker
-holds that list until the map read back for it comes, and the main thread
-drops a tile of an older amount. If the worker fails (its `error` event),
-the page logs it and turns the grids off for good: nothing is shown in
-them, and the clouds are the present field's.
-
-**The march's strides.** The map of the tops (`uTops`) is made from the
-present field, and a tower's lobes may stand higher than its tops: the
-strides over the tops would cut them. When a tower's lobes are made, the
-worker raises its copy of the map over them (each lobe's top and 170 m,
-the reach of the detail,
-within 1, 2, 4 and 8 texels as the map's channels) and sends the part
-back, before any tile that shows the tower; the main thread uploads it
-into `uTops`.
-
-**First seconds and cost** (measured 2026-11-21, flying at 900 km/h).
-On GL (the RTX 3090, 1280 x 720): the first picture comes as without the
-grid, and the map is read back with it; the three levels are shown whole
-3.3 to 4.2 s later (the worker's first fill is about 5 s of one thread):
-the towers fade in from the eye outwards over the present look. Then the
-worker spends 45 to 65 ms of a thread per km flown, and keeps up (its
-queue stays empty but for a moment when a window moves). The main thread
-spends 0.1 to 0.3 ms a frame (about 2 ms, and once up to 150 ms, while
-the levels fill). The GPU's frame (all draws) is 17.0 ms at 0.3 km under
-the clouds (11.6 without the grid), 11.3 ms at 4 km (8.3 to 8.7) and 11.7
-to 12.7 ms at 11 km (10.0); the rule of round 2 of the plumbing, with its
-fewer and smaller towers and no detail, took 14.7, 10.3 and 10.5 to 11.8
-ms. On Direct3D 11 (the same GPU, 1898 x 982, 4 km): the first picture as
-without the grid, the levels whole 2.6 to 3.7 s after it, and the GPU's
-frame 25.2 ms against 18.9 ms without the grid (22.9 ms with the earlier
-rule).
-
 ## The clouds' shadow
 
 Two maps hold the optical depth of the clouds along straight lines, up to
@@ -1796,7 +1350,7 @@ Neumann (2001). The air, the sea and the glare read the light's map, and
 so does the clouds' own light: past its own steps towards the light (the
 long shadows of heaps on one another) and away from it (`tauB`). The
 clouds' light from below and inside reads the column's (see the light,
-above). They read the warped map (`uWarped`, `uSlopeW`) as the march does.
+above).
 
 - **The plane.** A map lies on a plane across its lines, through the
   eye, with axes from `mapAxes` (the light's are `shX` and `shY`,
@@ -2714,7 +2268,10 @@ on the map.
   (see [Exposure](#exposure-and-the-tone-curve)). The aureole follows the ice in front by
   0.4 (0.25 before).
 - The cirrus's shadow dims the direct light on the low clouds and the sea
-  (half the depth counts: ice scatters mostly forward). It reads the mean
+  (half the depth counts: ice scatters mostly forward). On the low clouds
+  it is taken where the ray crosses 1.1 km, not at the mean place it met
+  them: with the sun at 3 degrees a place 50 m higher takes the shadow of
+  cirrus 1 km farther off, and on a soft deck its edge stood in steps. It reads the mean
   of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
   over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
   `ciGlare`), as each call is a copy for the compiler. These calls leave
@@ -3707,11 +3264,10 @@ asks which level it is.
   the aircraft flies before a layer of a depth map is drawn again (see
   [The clouds' shadow](#the-clouds-shadow)): work a frame does now and
   then, which a slow GPU feels as a long frame.
-- `body`, `ice`, `shadow`, `column` and `warped` are the sides of the
-  heaps' body (`uBody`), the cirrus's ice (`uIce`, and with it `uIcePhase`
-  and `uIceWay`), the clouds' depth maps (`uShadow`, `uColumn`) and the
-  moved weather map (`uWarped`, `uSlopeW`) (see [Textures made at start](#textures-made-at-start)).
-  A renderer without a GPU still takes the smaller body and ice whatever
+- `ice`, `shadow` and `column` are the sides of the cirrus's ice (`uIce`,
+  and with it `uIcePhase` and `uIceWay`) and of the clouds' depth maps
+  (`uShadow`, `uColumn`) (see [Textures made at start](#textures-made-at-start)).
+  A renderer without a GPU still takes the smaller ice whatever
   the level, and no texture is larger than `MAX_TEXTURE_SIZE`.
 - `pass`: the passes before the scene (the low clouds' and the cirrus's)
   draw one pixel for `pass` by `pass` of the frame's, and the scene reads
@@ -3936,12 +3492,9 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uMS` | 0 | 512 x 272, RGBA32F, or RGBA16F without float filtering | JS: `buildMultiScatter` (y 0 to 143, 40 wide), `makeSky` (y 144 to 271) | The air's tables in one texture (Direct3D 11 gives a program 16): multiple scattering, the sky's light on the clouds and its lean; then the depth to the top of the air (`depthToTop`) |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile (G and B rounded at their points) |
-| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
-| `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
+| `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | The layer of low cloud (see `cloudLayer`). R: its amount; G: its depth; B: gusts on the sea (and the level of the bases); A: where the air rises (towers) |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 `LUT_N` + 2), RGBA16F, linear: 128 x 128 x 912 (`high`, `max`; 119.5 MB), 64 x 48 x 288 (`low`; 7.1 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
-| `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
-| `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
@@ -3952,8 +3505,6 @@ changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
 
 | Texture | Unit | Size and format | Holds |
 |---|---|---|---|
-| `uWarped` | 25 | the level's `warped`: 2048^2 (1024^2 at `low` and `mid`) over 256 km, RGBA8, mipmapped, repeating | `uWeather` read where the cover breaks into heaps, at a place moved by up to `WARP` (see Low clouds) |
-| `uSlopeW` | 26 | as `uWarped` | `uSlope` read at the same moved place |
 | `uTops` | 23 | 1024^2, RGBA8, nearest | How high the march may meet cloud within 1, 2, 4 and 8 texels (250 m to 2 km), rounded up (see the march) |
 
 The moved maps take a draw each (`uTopsPass` -2 and -1: one target a
@@ -3978,65 +3529,14 @@ floats), drawn while the page runs (see [The clouds' shadow](#the-clouds-shadow)
 RGBA8 at a quarter, linear), drawn by `fs` (`SKY_LIGHT`) before a frame
 whose sun or haze has changed (see Low clouds); it too is off its unit
 while the draw writes it.
-With `?grid=1`, unit 30 holds the towers' grids (`uGrid`; see
-[Towers in grids that move with the eye](#towers-in-grids-that-move-with-the-eye)).
 
-The weather map draws, on 256 km: systems of some 80 km, open cells of
-30 km with cloud along their walls, streets 5 km apart, clumps from 6 km
-down to 1 km, and heaps (`heaps`): single clouds of seven sizes, 250 m to
-2 km in radius in steps of a square root of 2. For each size a lattice
-of cells twice as wide as the heap holds a heap at a random place in a
-cell, or none; how many cells hold one follows a law of size (published
-fields of cumulus have numbers per size that fall as the -1.7th to
--2.3rd power of the size up to a break near 1 km, and faster beyond it:
-Neggers et al. 2003, Wood and Field 2011), so that the share of the map
-each size covers rises with the size to 700 m and falls beyond (as the
--0.5th power: with more large heaps, the `flight` check's low view, a
-dense raft with a tower, differed from its still by more than the limit).
-That share is times a map drawn first (`uPop`, 256 texels square, one
-per km, on unit 28 until the weather map is drawn): rafts of some 25 km,
-the walls of the open cells, the streets and the systems, nought in the
-lanes between them. It is read at the heap's own middle, so that a heap
-is whole or none. Each heap from 1 km up has six small ones round its
-foot. Where two meet, a smooth max merges them, smooth only where both
-stand. Cover (R) takes the heaps (and half as much of the fields as
-before); G is the heap's height, wider heaps higher, times the old map of
-towers. Then gusts on the sea.
+The weather map draws, on 256 km, the layer of low cloud: its amount (R:
+systems of some 80 km, open cells of 30 km with cloud along their walls,
+streets 5 km apart, clumps from 6 km down to 1 km), its depth (G: deeper
+and shallower over some 40 km), the gusts on the sea (B), and where the
+air rises (A: patches of some 10 km in regions of 50 km).
 The cirrus's map is drawn by the `ice` shader (see [Cirrus](#cirrus)). The wave map is a sum of plane waves, each
 a whole number of times across the map.
-
-The turrets of `uBody` (and of its heads) are cells of a jittered lattice (each point kept
-0.15 of a cell off the cell's sides), each a round head of a radius of
-0.45 to 0.75 of a cell, a little flatter than wide (its height over the
-point counts 1 / 0.85). A cell holds the height of a sphere of that
-shape (`sqrt(1 - d^2)`; outside it, `1 - d^2`, below nought), so that two
-heads meet in a sharp crease; where two meet the higher wins, rounded over
-0.2 (`SOFT`): a cleft between them. (As domes, `1 - d^2`, the heads melted
-into smooth lobes, like putty; heads on stems, longer below than above,
-drew upright fins and streaks on the body's sides, like ice.) B holds the heads that cover the body (`heads`): turrets of 500, 250 and
-125 m (16, 32 and 64 cells per tile), each carving seams into the surface
-(1 - the turret's value, weighed `HEADS_W` = 0.4, 0.33 and 0.27), so that
-B is 0 on a crown of every size and 1 in the deepest seam. Each size
-carves the crowns and flanks of the size above it fully and its seams
-less (`HEADS_GATE` = 0.6 there, by `smoothstep(0, 0.5, t)` of the size
-above, from the 1 km turret down): a seam between two large heads stays
-one clean crease. (Heads that fill their cells, from the distances to
-the nearest two lattice points, left the surface all crowns with narrow
-cracks between, smooth from a few km.) The texture is 256 texels a side
-(31 m: the 125 m heads need it) on the GPU, 67 MB (77 MB with its mips,
-against 9.6 MB for round 17's 128^3); a renderer on the CPU
-(`WEBGL_debug_renderer_info` says SwiftShader, llvmpipe or software)
-draws it at 128, as before, where the 125 m heads are blurred.
-A holds the billows of the fine noise (`billows`): lattices of heads of
-16, 32 and 64 cells per tile, each a sphere's height (radius 0.55 to 0.85
-of a cell, as high as 0.75 to 1), where two meet the higher one wins in a
-sharp crease (no `SOFT`); each size weighed 0.45, 0.33 and 0.22 and gated
-by the size above, as the heads are (`BILLOW_W`). Their mean is 0.43. `fs` is
-compiled with `BODY_LOD`, the level of its texels as a level of the noise
-(1 or 0). Drawn with `noise` slice by slice after the noise texture, in
-the same batches, it holds the first picture back by about 0.6 s on the
-test GPU (0.2 to 1.2 s; 7.9 against 7.3 s after the navigation at 1280 x
-720, four runs each, measured in round 18).
 
 The Worley noise of the noise texture's G and B is rounded at each
 feature point over a quarter of a cell (`1 + r0 / 4 - sqrt(d^2 + r0^2)`,
