@@ -46,13 +46,20 @@ out of the same window), and a bank tilts the horizon; the sun stays where
 it is in the sky. At speed 0 the aircraft stands still: the bank and the
 climb only tilt it, and the rudder turns it on the spot.
 
-The HUD (head-up display) shows the flight in green, as in a flight
-simulator. It is off at first; **H** or the switch in the panel turns it on,
-and the browser remembers the choice. It is fixed to the aircraft, in the
-direction of flight, about 28 degrees across: you see it when you look
-ahead. The page starts looking out of a window to the right, where the HUD
-is out of view: turn the view 60 degrees to the left (drag to the right)
-to look ahead. It shows:
+The HUD (head-up display) shows the flight in green, as the display in a
+pilot's helmet does. It is off at first; **H** or the switch in the panel
+turns it on, and the browser remembers the choice. It has two parts.
+
+Fixed to the screen, always in view wherever you look:
+
+- the speed (km/h) on the left;
+- the altitude and the vertical speed on the right;
+- the aircraft's heading at the top (a compass bearing, 0 north): where
+  the aircraft flies, not where you look.
+
+Fixed to the aircraft, in the direction of flight, so that you see it when
+you look ahead (about 20 degrees across), and it slides out of view as you
+look aside:
 
 - the flight path marker (a circle with wings): where the aircraft goes,
   which is where its nose points;
@@ -60,9 +67,11 @@ to look ahead. It shows:
   horizon, dashed below). They lie on the true directions: the horizon
   line is the level of your eye. The sea's horizon lies a little below it,
   more so the higher you fly (0.6 degrees at 300 m, 3.4 degrees at 11 km).
-- the bank around the marker (marks at 10, 20, 30, 45 and 60 degrees), the
-  heading above it (a compass bearing, 0 north), the speed on the left, the
-  altitude and the vertical speed on the right.
+- the bank around the marker (marks at 10, 20, 30, 45 and 60 degrees).
+
+Looking ahead, the two parts make one display. The page starts looking out
+of a window to the right, where only the first part is in view: turn the
+view 60 degrees to the left (drag to the right) to look ahead.
 
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).
