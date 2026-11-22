@@ -907,8 +907,11 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     before the sun was two lobes one on the other); a
     tower's 2.8 to 4.2 km.
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
-  the depth: flat under, round over. `k` = 2, and 3 for a tower, which
-  keeps its width higher up.
+  the depth: flat under, round over, `k` = 2. A tower's `t` is divided
+  by 0.55 to 1 (`smoothstep(0.5, 0.9)` of the larger read of the base
+  shape, below): it stands highest over the middle of its large cell and
+  lower towards its sides, a dome of turrets and not a block with a flat
+  top.
 - **The base shape**, from `uNoise` (128^3; R Perlin-Worley, G, B, A Worley
   cells of 2 km, 1 km and 500 m in a tile of `BASE_KM` = 8 km), read at a
   depth that drifts from place to place (`far`) so that no two tiles look
@@ -917,7 +920,10 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   Worley cells, mixed `CF_BIG` = 0.25 with the same read 4 times larger
   (which gathers heaps), stretched from `CF_LO` to `CF_HI`, plus `CF_SMALL`
   = 0.35 of the 1 km cells by themselves (small heaps between the large).
-  A tower's shape is read 0.45 as fast upwards: turrets on one stem. For a
+  A tower is a larger heap: the larger read weighs 0.55 there, not
+  `CF_BIG`. (Its shape was read 0.45 as fast upwards, with `k` = 3: its
+  cells became columns, which the carving fluted into bundles of needles,
+  like a ridge of rock.) For a
   sheet: the Worley cells themselves at every size from 8 km to 500 m,
   which meet in creases; the small ones are read through a matrix that
   draws them out across the wind (whole 32nds, so the pattern still wraps
@@ -1161,7 +1167,12 @@ each cloud, not on its surface; no normal of the field enters it.
   it holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low. With the
   light under 15 degrees it reads the map's height above the place alone,
-  and between the two by degrees up to 27 degrees: read between two
+  and between the two by degrees up to 27 degrees. That height lies up to
+  5 km farther along a low light (275 m of height at 3 degrees): the way
+  to it is marched in 8 more steps, at about the map's own level, by the
+  same degrees. (Without them, the cloud on that way was left out, the
+  more the lower in each height of the map: lit slabs with flat tops
+  across the shaded sides of heaps at dusk.) Read between two
   heights, which lie kilometres apart along a low light, the depth from
   the one below took in the cloud itself behind the place and drew a band
   across the lit walls of towers for each height of the map (#63; a few
@@ -2269,9 +2280,16 @@ on the map.
   0.4 (0.25 before).
 - The cirrus's shadow dims the direct light on the low clouds and the sea
   (half the depth counts: ice scatters mostly forward). On the low clouds
-  it is taken where the ray crosses 1.1 km, not at the mean place it met
-  them: with the sun at 3 degrees a place 50 m higher takes the shadow of
-  cirrus 1 km farther off, and on a soft deck its edge stood in steps. It reads the mean
+  it is taken near where the ray crosses 1.1 km, not at the mean place it
+  met them: with the sun at 3 degrees a place 50 m higher takes the shadow
+  of cirrus 1 km farther off, and on a soft deck its edge stood in steps.
+  The way along the ray is the height to go over the ray's slope `s`
+  there, with `s^2 + 0.03^2` for `s^2` (less where the ray is nearly
+  level), and at most 10 km. (Taken at that crossing itself, when within
+  30 km of the mean place, with the eye near the clouds' height the place
+  jumped across one row and raced along the ray where it grazes 1.1 km: a
+  thin dark line and flat lit slabs across the clouds a degree under the
+  eye's level.) It reads the mean
   of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
   over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
   `ciGlare`), as each call is a copy for the compiler. These calls leave
