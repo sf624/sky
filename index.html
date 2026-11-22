@@ -854,7 +854,7 @@ void main() {
     float clumps = fbm(p, vec3(40.0, 40.0, 1.0), 4, 0.75, 60.0);
     float heap, high;
     heaps(uv, heap, high);
-    float cover = 0.4 + 0.09 * systems + 0.075 * (walls - 0.5) + 0.15 * streets + 0.1 * clumps + 0.6 * heap;
+    float cover = clamp(0.5 + 0.45 * systems + 0.2 * (walls - 0.5) + 0.35 * streets + 0.25 * clumps, 0.0, 1.0);
     // Towers: the widest heaps, where the weather lets them grow; some
     // grow taller than others.
     float tall = smoothstep(0.4, 0.55, 0.45 + 0.7 * perlinFbm(p, vec3(5.0, 5.0, 1.0), 4, 70.0))
@@ -862,7 +862,7 @@ void main() {
                * (0.7 + 0.6 * perlin(p, vec3(11.0, 11.0, 1.0), 75.0));
     // G: how high the heap stands here (a dome over each heap), taller
     // where towers grow.
-    tall = high * mix(0.55, 1.0, clamp(tall, 0.0, 1.0));
+    tall = clamp(0.4 + 0.9 * perlinFbm(p, vec3(6.0, 6.0, 1.0), 4, 70.0) + 0.3 * tall, 0.0, 1.0);
     // Wind on the sea, which blows towards (2, 1): gusts and calms some
     // 7 km across and twice as long down the wind, with finer ones inside
     // them.
@@ -2591,14 +2591,34 @@ const float GRID_OUT = 0.06 + ERO_C * GRID_HW + 0.45 * GRID_BW;   // how far the
 float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 #define cloudShape cloudShape0
 #endif
+// ONE density for every low cloud, after Schneider (2015, 2017): a base
+// shape from the Perlin-Worley noise at two sizes, times a profile over the
+// height of the layer there, less what the weather's cover takes away
+// (remap), all of it in 3D. Finer Worley noise erodes its edge (cloudField).
+// The field is CF_K times that density before it is clamped: nought at the
+// surface, negative outside (about the distance in km, for the strides).
+const float CF_K = 0.5;             // the field per unit of density
+const float CF_FULL = 0.18;         // the density (0 to 1) at which a cloud is as dense as SIGMA
+const float CF_ERODE = 0.5;         // how much density the fine noise takes off at most
+const float CF_TOP = 0.75;          // the share of a layer's depth over which the profile falls to its top
+const float CF_LO = 0.45, CF_HI = 0.95; // the base shape's range
+const float CF_BIG = 0.45;          // the weight of the base shape read 4 times larger (cells of 8 km)
+// The cover (0 to 1) and the depth of the layer (km) from the weather map's
+// values there (R: cover, G: height) and the Clouds slider. sc: how much of
+// it is a sheet (stratocumulus) rather than heaps (cumulus).
+void cloudLayer(vec4 w, float region, out float cov, out float depth, out float sc) {
+  sc = smoothstep(0.5, 0.85, uCloud + 0.4 * (region - 0.5));
+  cov = clamp(0.16 + 0.72 * uCloud + mix(0.8, 0.6, uCloud) * (w.r - 0.5), 0.0, 0.97) * smoothstep(0.0, 0.05, uCloud);
+  depth = mix(0.9 + 2.2 * w.g * smoothstep(0.1, 0.5, uCloud), (0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), sc);
+}
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
   float h = topsH;
 #else
   float h = heightAt(p);
 #endif
-  q = vec4(0.0);
-  body = 0.0;
+  q = vec4(0.0, 0.0, 0.0, 1.0);
+  body = 1.0;
   lump = 0.0;
   base = -9.0;
   relief = 0.0;
@@ -2606,6 +2626,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   upshear = 0.5;
   solidAt = 0.0;
   carved = 0.0;
+  steep = 1.0;
+  heapUp = 0.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
 #ifdef TOPS_MAP
@@ -2614,367 +2636,40 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   vec2 x = p.xz + uDrift;
 #endif
   float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
-  float sheet = smoothstep(0.57, 0.82, uCloud + 0.6 * (region - 0.5));
-  // Where the cover breaks into heaps, the map is read at a place moved by
-  // up to WARP km: by the map's own cover and height of heaps (R, G) far
-  // from here, smoothed over 1.4 km (mip level 2.5): the heaps of the map
-  // are round domes, and from above the clouds were discs; moved, their
-  // outlines are lobed and drawn out. The noise repeats every few km, and
-  // a depth into it that drifts from place to place (far) keeps two tiles
-  // from showing the same clouds. (The map's heaps gather in clusters by
-  // themselves: see heaps in the noise shader. Before, the cover of far
-  // gathered heaps on lattices, and they still looked strewn evenly.)
   vec4 far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
-  // (Both are made with the clouds' amount, into uWarped: see there.)
-  // Heaps lean with the wind's shear, their tops downwind: the map is read
-  // LEAN km upwind for each km of height.
-  vec2 xl = x - LEAN * (h - CB);
-  vec4 w = weather(p, xl, lod, fine);
-  // The level of the bases, where rising air condenses: 150 to 300 m over
-  // CB, higher or lower across tens of km (the gusts' map, w.b, serves as
-  // a slow pattern). The clouds stand on it; a base is a little higher or
-  // lower still from place to place (below).
-  float level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, w.b);
-  y = (h - level) / (CT - CB);
-  base = 2.0 * (h - level);
-  // The cloud amount sets the level of the map above which clouds stand.
-  // Each heap of the map is a dome: its top stands as high as the map's G
-  // says (higher in the middle of a heap, and on some heaps more than on
-  // others), so that a field of cloud is a field of domes even where the
-  // cover is whole. The tallest heaps are towers, unless the clouds are few.
-  // With much cloud, the heaps stand on a sheet (stratocumulus): from
-  // below a closed deck, from above cells some 1 to 2 km across with thin
-  // creases between them, or rows of rolls where the air waves. Where the
-  // sheet lies follows the cover over some 20 km (the map's mip), so that
-  // it breaks up first where the cover is less.
-  // Near the top of the slider the heaps on it flatten, and few towers
-  // stand out of it (they looked like mountains).
-  float level1 = smoothstep(0.85, 1.0, uCloud + 0.3 * (region - 0.5));
-  // A tower stands on the whole of its heap's middle, and some stand higher
-  // than others: as the heap's height rose over the tower's width, its top
-  // did, and towers were cones, like mountains.
-  float towers = smoothstep(0.1, 0.5, uCloud) * (1.0 - 0.8 * level1);
-#if defined(TGRID) && !defined(TOPS_MAP)
-  towers *= 1.0 - gridCut;
-#endif
-  float tg = clamp((w.g - TOWER.x) / TOWER.y, 0.0, 1.0), tw = tg * (2.0 - tg);
-  float tower = tw * towers;
-  // (With few clouds, the level stands 0.1 higher: the heaps of the map
-  // are many, and from 13 km 3 % of the sea was cloud at 0.1, where it
-  // was 0.5 %.)
-  float e = 3.0 * (w.r - 0.936 + uCloud * (1.181 - uCloud * (2.197 - 2.102 * uCloud)) - 0.1 * (1.0 - smoothstep(0.1, 0.35, uCloud))) + 1.5 * tower;
-  // A dome over a flat base, with steep sides: a height costs its cube.
-  // Wider clouds are thicker, up to a point; a deck swells where the map
-  // is high.
-  // Where the cover is thick all round, the heaps flatten into a deck of
-  // small cells (stratocumulus).
-  // (Not by the tower's own rise: with it, towers in a thick cover became
-  // decks, and at cloud 0.7 to 0.8 hardly one stood.)
-  float deck = smoothstep(2.6, 3.6, e - 1.5 * tower);
-  float sheetTop = (0.25 + 0.35 * sheet) * (0.8 + 0.4 * smoothstep(0.3, 0.7, w.r)) / (CT - CB);
-  float top = 0.12 + 0.32 * w.g * (1.0 - 0.6 * max(deck, level1)) + 0.25 * tower * mix(0.7, 1.0, smoothstep(0.6, 0.9, w.g));
-#if defined(TGRID) && !defined(TOPS_MAP)
-  top *= 1.0 - GRID_OWN * gridOwn;
-#endif
-  float thick = 1.0 - exp(-e / 1.6);
-  float cube = top * top * top;
-  float swell = 0.25 * clamp(e - 1.0, 0.0, 1.0 - 0.6 * sheet);
-  float f = 1.6 * (thick + swell - y * y * y / cube) - 4.0 * max(y - 0.85, 0.0);
-  // The cube costs nothing near the base: there the thin edge of a cloud,
-  // where the map is barely over its level, would reach out sideways as a
-  // wide, flat sheet. Round off the lowest 180 m, so that a base ends under
-  // the side of its cloud.
-  float rim = max(1.0 - y / 0.04, 0.0);
-  f -= 0.2 * rim * rim;
-  // A thicker cloud has bigger lumps, and a tower bigger still.
-  float lumps = LUMPS * (0.7 + 1.3 * w.g) * (1.0 - 0.2 * deck) * (1.0 + 0.3 * swell) * (1.0 + sqrt(tower));
-  float fs = sheet > 0.0 ? 13.0 * (sheetTop - y) - 3.0 * (1.0 - sheet) : -9.0;
-  // (The cells and billows on the sheet raise it by 0.9 of its depth at most.)
-  float fsMax = 14.0 * sheetTop;
-  // The heaps' 3D body (solid: how much of it; the rest is the field above,
-  // which the deck and the top of the slider keep): a broad envelope with
-  // turrets (uBody) on its surface. The envelope (env) is how deep a place
-  // lies in its heap: 1 at the foot of a heap's middle, 0 where the top of
-  // its dome would stand, less outside; divided by how fast it rises
-  // across its surface (below), a distance in km. The turrets of 2 km and
-  // 1 km move that surface out by up to BODY_K (in by less), and the heads
-  // baked on them (500 m to 125 m) carve it: a cauliflower. (Turrets
-  // alone made the surface in round 11, inside an envelope that rose
-  // slowly across a heap's side: a cluster of free balls, with more
-  // standing off it.) On a sheet, towers and heaps that stand up to 250 m
-  // out of it (stand) have the 3D body (in a deck too); the sheet and the
-  // low swells on it keep the field above
-  // (with the body there, the decks from above were a rubble of lumps with
-  // dark gaps; with it on towers only, the heaps on a sheet were pillars
-  // and fins with smooth, upright curtains where the two met).
-  float stand = smoothstep(0.0, 0.25, (top * pow(max(thick + swell, 0.0), 1.0 / 3.0) - sheetTop) * (CT - CB));
-  // (Heaps that stand out of a deck too: as the field above, with its
-  // dome's smooth walls, they were pyramids with flat faces.)
-  float solid = max((1.0 - max(deck, level1)) * (1.0 - sheet), (1.0 - level1) * max(stand, smoothstep(0.1, 0.5, tower)));
-  solidAt = solid;
-  carved = solid;
+  // (The map's texels are 250 m; the cover is read over 1 km at least.)
+  vec4 w = textureLod(uWeather, x / WEATHER_KM, max(lod - 2.0, 2.0));
+  float level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, far.b);
   overBase = h - level;
-  // (The same dome as the field's. Round 12 shrank it where the body gave
-  // way to the field, on a sheet where towers ended; now the body ends where
-  // the heap sinks into the sheet, and the shrinking only drew curtains.)
-  // A tower is thermals stacked one on another (PILE: how far each swells,
-  // every 0.9 km of height), wider towards its top: with one envelope from
-  // base to top, its walls were pillars.
-  float riseB = (thick + swell) * (1.0 + tower * (PILE * sin(6.98 * (h - level) + 19.0 * far.r) + 0.25 * clamp(y / top, 0.0, 1.0)));
-  float env = riseB - y * y * y / cube - 4.0 * max(y - 0.85, 0.0) - 0.2 * rim * rim;
-  // The sizes of turrets that the heap's dome may hold (half its height and
-  // more); on a sheet as if it were up to twice as high, with fewer small
-  // ones (the low heaps that stand out of it were a rubble of small heads).
-  vec3 bw = BODY_K * smoothstep(vec3(0.5), vec3(1.5), top * (CT - CB) * (1.0 + sheet) / vec3(2.0, 1.0, 0.5)) * vec3(1.0, 1.0, 1.0 - 0.45 * sheet);
-  // (shift: with more cloud, less inward, so that the slider's cover stays;
-  // with few, less inward too: the heads ate the smallest heaps.)
-  float bumpMax = (bw.x + bw.y) * (1.0 - BODY_C) + ERO_C * bw.z, shift = BODY_B + 0.09 * smoothstep(0.4, 0.7, uCloud) + 0.05 * (1.0 - smoothstep(0.15, 0.4, uCloud));
-  // Over a dome's top, env rises by gTop per km; before the slope is known,
-  // the envelope's bounds: it rises 0.7 to 6 times as fast as that.
-  float gTop = 3.0 / (top * (CT - CB));
-  float bodyMax = BODY_G * (env / (gTop * (env > 0.0 ? 0.7 : 6.0)) + bumpMax + shift);
-  // No noise could make a cloud here, even on the steepest wall (below).
-  steep = 1.0;
-  thin = 1.0 - smoothstep(0.05, 0.4, thick + swell);
-  // (On a sheet, the heaps without a body are part of its top, and its
-  // cells stand on them: see below.)
-  // (topR: what the cells, heads and rolls may add over the heaps, in
-  // units of y; the heaps' bound as a height, with their field rising 0.7
-  // to 6 times as fast as over a dome's top, mixed with the body's.)
-  float topR = (TOP_R + 0.2) / (CT - CB) + 1.2 * sheetTop * smoothstep(0.3, 0.6, far.a) * sheet, fUp = f + 3.6 * lumps;
-  bool clear = sheet <= 0.0 || mix(fUp > 0.0 ? fUp * top / 3.36 : fUp * top / 28.8, bodyMax / (BODY_G * (CT - CB)), solid) + topR < 0.0;
-  if (mix(f + (coarse ? 0.6 : 3.6) * lumps, bodyMax, solid) < 0.0 && fs < -fsMax && clear) return max(mix(f, bodyMax, solid), fs);
-  // How steep this field is where its surface over this place stands (yt),
-  // against the top of a whole dome (where it rises by 4.8 / top per unit
-  // of y): over the top of a heap about 1, on its walls up to 6. The
-  // billows are scaled by it, so that they move the surface by as many
-  // metres on a steep wall as on a top: added to the field alone, they
-  // moved the walls of towers and big heaps, where the field is four to
-  // eight times as steep, by a few metres, and those were smooth pillars.
-  // The slope of the map (uSlope) gives the slope across; the derivatives
-  // of the terms above follow it. (Taken at this place's own height, the
-  // slope grew with the height over a wall's foot, and billows scaled by
-  // it stood above the walls as spikes.) The 3D body needs it too: its
-  // envelope is a distance by it (coarse reads take it as over a top: it
-  // cost 1.5 to 3 ms of the frame at 1440p, and they smooth the bumps on a
-  // wall anyway).
-  float stB = 1.0;
-  if (!coarse) {
-  vec4 sl = ((solid > 0.0 ? mapAt(uSlopeW, p, xl, lod, fine, 1.0) : textureLod(uSlope, xl / WEATHER_KM, lod - 2.0)) * 2.0 - 1.0) * uSlopeMax;
-  float dTower = towers * 2.0 * (1.0 - tg) / TOWER.y * smoothstep(0.0, 0.15, tg);
-  float rise = max(thick + swell, 0.01);
-  // (Across: thick and the top's cube follow R and G, a tower G. The rise
-  // per unit of y at yt = top rise^(1/3) is 4.8 rise^(2/3) / top.)
-  vec2 across = (1.0 - thick) * (3.0 * sl.xy + 1.5 * dTower * sl.zw)
-              + 4.8 * rise / top * (0.32 * (1.0 - 0.6 * max(deck, level1)) + 0.21 * dTower) * sl.zw;
-  float acrossT = length(across) * (CT - CB) * top / 4.8;
-  if (!coarse && solid < 1.0) steep = clamp(length(vec2(acrossT, pow(rise, 2.0 / 3.0))), 0.7, 6.0);
-  stB = clamp(length(vec2(acrossT, pow(max(riseB, 0.01), 2.0 / 3.0))), 0.7, 6.0);
-  // Which side of the heap this is: the map's cover rises inwards, so on
-  // the side that faces upshear it rises along the lean.
-  float gs = length(sl.xy);
-  upshear = gs > 1e-3 ? smoothstep(-0.6, 0.6, dot(sl.xy / gs, normalize(LEAN))) : 0.5;
-  }
-  float dEnv = env / (gTop * stB);
-  // How fast the heaps' field rises over their top, per unit of y.
-  float gF = 4.8 * max(steep, 0.7) / top;
-  float hUp = mix((f + 0.9 * lumps * steep) / gF, bodyMax / (BODY_G * (CT - CB)), solid) + topR;
-  bodyMax = BODY_G * (dEnv + bumpMax + shift);
+  y = overBase / (CT - CB);
+  base = 2.0 * overBase;
+  float cov, depth, sc;
+  cloudLayer(w, region, cov, depth, sc);
+  float t = overBase / depth;
+  heapUp = clamp(t, 0.0, 1.0);
+  // No cloud above this: the profile there is under what the cover takes.
+  float tTop = sqrt(cov);
 #ifdef TOPS_MAP
-  // (The map of the tops wants the bound of this way out.)
-  return max(max(mix(f + 0.6 * lumps * steep, bodyMax, solid), fs + fsMax), sheet > 0.0 ? 13.0 * hUp : -9.0);
+  return cov > 0.0 ? level + depth * tTop + 0.03 - h : -9.0;
 #endif
-  if (mix(f + 0.6 * lumps * steep, bodyMax, solid) < 0.0 && fs < -fsMax && (sheet <= 0.0 || hUp < 0.0)) return max(mix(f, bodyMax, solid), fs);
-  heapUp = clamp(y / (top * pow(max(riseB, 0.01), 1.0 / 3.0)), 0.0, 1.0);
+  if (cov <= 0.0) return -9.0;
+  if (t >= tTop) return -(t - tTop) * depth - 0.02;
+  if (overBase <= -0.3) return base;
+  float prof = 1.0 - t * t;
   q.xyz = vec3(x.x, h, x.y) / BASE_KM + vec3(far.b, 2.5 * far.r, far.g);
-  // Near the eye (a pixel finer than 16 m) the read moves by up to half a
-  // texel each frame (shake), so that the mean over the frames smooths the
-  // bends of the GPU's filter; the distance decides, as in weather. Only
-  // where the fine noise is wanted too: the surface and the march, not the
-  // shadows. (A
-  // cubic B-spline, eight filtered reads, did the same at 7 ms more near
-  // the tops.)
-  // (The march, only where a pixel is finer than 1 m: shaken out to 16 m, it
-  // cost 2.4 ms more at 2 km, and the facets show from near only.)
-  // (The march by half a texel within 100 m only, and by 30 % of that from
-  // 300 m on: shaken by 31 m there, heaps a few hundred metres off were a
-  // soft, grainy white blob without relief.)
-  float shaken = fine ? clamp(-6.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) * mix(1.0, 0.3, smoothstep(0.1, 0.3, length(p))) : 0.0;
-  vec4 n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
-  // Hard, growing turrets stand beside older, smoother cloud.
-  q.w = mix(0.45, 1.3, smoothstep(0.35, 0.65, n.g));
-  // Billows of 2 km down to 125 m, rounded into domes (see cloudDetail;
-  // the numbers are the means of the noise). lump: how far this place
-  // stands out of them. The big ones weigh most: with the 500 m ones
-  // first, the tops from above were a carpet of lumps of one size, where
-  // photographs show smooth billows of a kilometre or more.
-  n.gba *= 2.0 - n.gba;
-  lump = 0.9 * (n.g - 0.712) + 0.7 * (n.b - 0.715) + 0.35 * (n.a - 0.715);
-  // On a wall, and on heaps that stand alone, smaller billows weigh more:
-  // in photographs a heap is turrets on turrets, a third of its width and
-  // less (with the big ones first there too, they were smooth domes, like
-  // balls of putty).
-  lump = mix(lump, 0.35 * (n.g - 0.712) + 0.75 * (n.b - 0.715) + 0.9 * (n.a - 0.715), max(smoothstep(1.3, 3.0, steep), 1.0 - sheet));
-  lump = mix(lump, 0.4 * (n.b - 0.715) + 1.4 * (n.a - 0.715), deck);
-  // Billows bulge out more than they dent in (smoothly: a kink where
-  // lump is nought showed as a ridge along it), and they shape the outside
-  // of a cloud: deep in a body they fade, so that they cannot punch holes
-  // through it.
-  float billows = lumps * (0.8 * lump + 0.2 * sqrt(lump * lump + 0.004)) * mix(1.0, 0.3, smoothstep(0.0, 0.6, f / steep));
-  // How high the top stands over this place, as the field has it here.
-  body = pow(max(thick + swell + billows / 1.6, 0.0), 1.0 / 3.0) * top / 0.28;
-  billows *= steep;
-  // The base is up to 120 m lower under the thick middle of a cloud and
-  // under the swells of a deck (e, smooth: from the weather map) and a little
-  // higher or lower from place to place (n.r, lump: the noise of the tile
-  // is read through the GPU's filter, whose facets show on a surface as
-  // smooth as a base, so they move it little). It stays clear of the
-  // shell's own cut at CB even where shreds hang below it (cloudField).
-  // Its field rises by 2 per km: a base is dense 15 to 30 m in, soft but
-  // not deep (a deeper one cost more steps than it showed).
-  base += 2.0 * (0.05 * clamp(e, 0.0, 2.4) - 0.04 * (n.r - 0.571) + 0.15 * lump);
-  f += billows;
-  float lumpOld = lump;
-  vec4 t = vec4(BODY_C);
-  // (The heaps' field before their body takes over, and the body's.)
-  float fField = f, fBody = -9.0;
-  if (solid > 0.0) {
-    // The turrets as bumps on the envelope (km): each size moves the
-    // surface by up to about a third of its width, so that a bump rises
-    // about as fast as the envelope falls and none stands alone over it.
-    // (body: the heads that overhang a heap's thin foot are as dense as its
-    // middle: from the column under them they were translucent, and the
-    // cloud behind showed through as patches with sharp outlines. lump: how
-    // far the bumps stand out here, for the light: low in a cleft. The fine
-    // noise weighs BODY_D on it, against a dome's top.)
-    t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
-    // The 2 km and 1 km turrets shape the body (its lobes). The heads on
-    // them only carve it: their seams go in by up to their weight, their
-    // crowns stay where the body's surface is (ERO_C of their weight out of
-    // it, so that the cover stays), and deep in the body they carve
-    // nothing. So no head stands off the body as a ball, and heads meet in
-    // narrow seams.
-    // (Not on the lowest part of a heap: seen from below, its base and the
-    // foot of its sides were a rubble of heads; in photographs a base is
-    // flat.)
-    float hw = bw.z * smoothstep(0.03, 0.25, heapUp);
-    float u = dEnv + bw.x * (t.x - BODY_C) + bw.y * (t.y - BODY_C) + shift + ERO_C * hw;
-    float disp = u - dEnv - shift - hw * t.z * (1.0 - smoothstep(0.0, SKIN, u - hw));
-    float fb = BODY_G * (dEnv + disp + shift);
-    fBody = fb;
-    f = mix(f, fb, solid);
-    float big = smoothstep(0.2, 0.7, w.g + 0.5 * tower);
-    body = mix(body, max(pow(max(thick + swell, 0.0), 1.0 / 3.0), 0.7) * top / 0.28, solid);
-    thin *= 1.0 - solid * big;
-    lump = mix(lump, clamp(disp / max(bumpMax, 0.01), -0.3, 0.3), solid);
-    billows *= 1.0 - solid;
-    steep = mix(steep, BODY_D, solid);
-    // (At least 0.9 rough: older, smoother cloud, 0.45, left some heaps
-    // smooth white blobs without relief.)
-    q.w = mix(q.w, max(q.w, 0.9), solid);
-  }
-  // Where the heaps flatten into a deck, it has the sheet's heads and
-  // seams (below), in km over the field's own slope near a top.
-  if (deck * (1.0 - solid) > 0.0) {
-    if (solid <= 0.0) t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
-    float hk = 0.35 * (SHEET_H.x * (t.x - BODY_C) + SHEET_H.y * (t.y - BODY_C)) + SHEET_H.z * (ERO_C - t.z);
-    f += deck * (1.0 - solid) * steep * 4.8 / (top * (CT - CB)) * hk;
-    carved = max(carved, deck * (1.0 - solid));
-    q.w = mix(q.w, max(q.w, 0.9), deck * (1.0 - solid));
-  }
-  if (fs > -fsMax || (sheet > 0.0 && hUp > 0.0)) {
-    // The cells: domes of the noise's 1 and 2 km Worley cells, which meet
-    // in creases; rows of rolls 1.2 km apart across the wind (whole
-    // numbers of them across the map), bent over tens of km, where the
-    // slow map says, over more than half of a sheet. Each roll swells and
-    // thins every 2 km along its length, half a step on from the roll
-    // beside it: cells in ranks, as photographs of stratocumulus from above
-    // show them (with rolls only in a few places, the sheet was lumps
-    // without order).
-    float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
-    float rows = smoothstep(0.3, 0.6, far.a) * sheet;
-    float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571);
-    float roll = sin(ph);
-    float along = sin(2.0 * PI * dot(x, vec2(-57.0, 114.0)) / WEATHER_KM + 0.5 * ph + 7.0 * far.g);
-    // (Each roll swells more in some places than in others, by the noise's
-    // 2 km cells: rolls of one depth over tens of km were straight stripes
-    // from above, as no photograph shows them.)
-    float rank = rows * (0.6 * (roll - 0.25) + 0.35 * max(roll + 0.3, 0.0) * along) * mix(0.35, 1.0, smoothstep(0.5, 0.85, n.g));
-    if (solid <= 0.0 && deck <= 0.0) t = textureLod(uBody, q.xyz + shake * (shaken / 128.0), max(lod + BODY_LOD, 0.0));
-    // Packed heads: the turrets of 2 km and 1 km raise the sheet, and meet
-    // in seams that go down to 40 % of its depth (deeper, they cut it
-    // through, and the march met many clouds in one: 4 ms more under a
-    // deck). The heads of uBody (500 m to 125 m) carve them as they carve
-    // the body, to SKIN deep.
-    // (Only where the sheet is whole: at its first edges the crowns alone
-    // stood out of it, a speckle of small dots that shimmered in flight.)
-    float whole = smoothstep(0.2, 0.6, sheet);
-    float heads = whole * max(SHEET_H.x * (t.x - BODY_C) + SHEET_H.y * (t.y - BODY_C), -0.4);
-    float raise = mix(heads, 0.12 * cells, rows) + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS;
-    // The heaps on the sheet stand in its ranks too, with smaller billows.
-    f += 0.8 * rank - 0.5 * rows * billows;
-    fs += 13.0 * sheetTop * raise;
-    float carve = SHEET_H.z * (ERO_C - t.z * (1.0 - smoothstep(0.0, 2.95 * SKIN, fs - 2.95 * SHEET_H.z)));
-    fs += 2.95 * carve * (1.0 - rows) * whole;
-    relief = clamp(raise, -0.6, 0.9) * sheet;
-    body = max(body, sheet * sheetTop * max(1.0 + 0.5 * cells, 0.2) / 0.28);
-    // The heaps and the sheet merge without a crease (a smooth max).
-    float k = clamp(0.5 + (fs - f) / 0.4, 0.0, 1.0);
-    thin *= 1.0 - k;
-    // The fine turrets carve the sheet's heads too, as much as on the body
-    // in km (the sheet's field is steeper).
-    float kc = k * (1.0 - rows) * whole;
-    steep = mix(steep, 1.9, kc);
-    carved = max(carved, kc);
-    q.w = mix(q.w, max(q.w, 0.9), kc);
-    f = mix(f, fs, k) + 0.2 * k * (1.0 - k);
-    // Where the sheet is whole, the heaps on it that have no 3D body and
-    // the sheet are one top: each as a height (units of y), joined by a
-    // smooth max (TOP_K), with the cells and heads on the whole of it.
-    // As two fields that crossed (above), the sheet's heads stood out of
-    // the heaps' smooth domes as plateaus with cliffs, and the domes lay
-    // between them as flat floors, like frozen lakes: from 4 to 5 km the
-    // tops were a snowy mountain range. Each heap keeps half its rise over
-    // the sheet (TOP_S), and its cells are as much larger as it rises
-    // higher, up to twice (a heap 300 m over the sheet): with the whole
-    // rise, heaps were smooth hills with long shadows. The cells are the
-    // noise's Worley domes (2 km, 1 km, 500 m), which fill the plane and
-    // meet in creases; the turrets of uBody stand apart, and between them
-    // the sheet was flat. The heads of uBody carve them, TOP_E as deep as
-    // on the sheet above, so that the top is heads on cells, as
-    // photographs of stratocumulus and of cumulus from above show it.
-    // They raise it by TOP_O on the whole: the two fields' higher surface
-    // stood higher than one top, and without it a deck let more light
-    // through (0.1 stops brighter from under it at 0.3 km).
-    // (Not in the rows of rolls, which keep the sheet above.)
-    if (whole > 0.0) {
-      // The heaps as heights: their field over its rise at their top, and
-      // the body's over its own (BODY_G per km), mixed as main mixes the
-      // fields (solid).
-      float hN = (fField + 0.8 * rank - 0.5 * rows * billows) / gF;
-      float hH = mix(hN, fBody / (BODY_G * (CT - CB)), solid);
-      float hs = (13.0 * (sheetTop - y) - 3.0 * (1.0 - sheet)) / 13.0;
-      float sN = clamp(0.5 + (hH - hs) / (2.0 * TOP_K), 0.0, 1.0);
-      float hTop = mix(hs, hH, sN) + TOP_K * sN * (1.0 - sN);
-      // (free: how much of the heap there has no body. Bodies keep their
-      // own form; the sheet round them has cells.)
-      float free = 1.0 - smoothstep(0.3, 0.8, solid);
-      float up = free * clamp((hTop - hs) * (CT - CB) / 0.3, 0.0, 1.0);
-      hTop = hs + (1.0 - TOP_S * free) * (hTop - hs);
-      float wc = whole * (1.0 - rows) * (1.0 - (1.0 - free) * sN);
-      float rk = (1.0 + up) * (TOP_W.x * (n.g - 0.712) + TOP_W.y * (n.b - 0.715) + TOP_W.z * (n.a - 0.715));
-      float raiseN = rows * 0.12 * cells + rank + 0.5 * (1.0 - 0.5 * rows) * lumps * lumpOld / LUMPS * (1.0 - sN) * (1.0 - wc);
-      hTop += sheetTop * raiseN + wc * (rk + TOP_O) / (CT - CB);
-      hTop += TOP_E * wc * SHEET_H.z / (CT - CB) * (ERO_C - t.z * (1.0 - smoothstep(0.0, SKIN, hTop * (CT - CB) - SHEET_H.z)));
-      f = mix(f, hTop * mix(13.0, BODY_G * (CT - CB), solid * sN), whole);
-      relief = mix(relief, clamp(raiseN + wc * rk / (sheetTop * (CT - CB)), -0.6, 0.9) * sheet, whole);
-      steep = mix(steep, 1.9, wc);
-      carved = max(carved, wc);
-      q.w = mix(q.w, max(q.w, 0.9), wc);
-      thin *= 1.0 - whole * (1.0 - solid * sN);
-    }
-  }
-  return f;
+  vec4 n = textureLod(uNoise, q.xyz, max(lod, 0.0));
+  vec4 m = textureLod(uNoise, q.xyz * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
+  float wn = 0.625 * n.g + 0.25 * n.b + 0.125 * n.a, wm = 0.625 * m.g + 0.25 * m.b + 0.125 * m.a;
+  float sn = clamp((n.r + 1.0 - wn) / (2.0 - wn), 0.0, 1.0), sm = clamp((m.r + 1.0 - wm) / (2.0 - wm), 0.0, 1.0);
+  // (The noise's values lie between about 0.45 and 0.95. Near the top of
+  // the slider no place is empty: the cover is whole, and its top has relief.)
+  float shape = clamp((mix(sn, sm, CF_BIG * mix(0.5, 1.3, sc)) - CF_LO) / (CF_HI - CF_LO), 0.0, 1.0);
+  // A closed deck is packed cells of 1 km and 500 m (the Worley cells
+  // themselves, which meet in creases), larger and smaller with the shape.
+  float cell = clamp((0.65 * n.b + 0.35 * n.a - 0.25) / 0.45, 0.0, 1.0);
+  shape = mix(shape, cell * (0.5 + 0.5 * shape), 0.75 * smoothstep(0.8, 1.0, uCloud + 0.4 * (region - 0.5)));
+  shape = mix(0.45 * smoothstep(0.75, 1.0, uCloud), 1.0, shape);
+  return CF_K * (shape * prof - (1.0 - cov)) / cov;
 }
 #if defined(TGRID) && !defined(TOPS_MAP)
 #undef cloudShape
@@ -3118,121 +2813,34 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 // How near the last place cloudField read is, for cloudDetail (1 where a
 // pixel there is under GEO_PIX wide, 0 where it is twice that).
 float geoNear = 1.0;
-// How billowy the fine noise is there (1) rather than wispy (0): billows on
-// the growing heads, high on a heap and on its side that faces upshear;
-// wisps low on its sides and on the side the shear leans over, where it
-// decays (after Schneider's Nubis, 2022: the kind of detail follows where
-// in the cloud a place is). See cloudField.
 float billowy = 1.0;
-float cloudDetail(vec3 q, float lod, float rough) {
-  // Worley noise rises in cones to its points; v (2 - v) rounds them into
-  // domes with creases between them, as the billows of a cloud.
-  // On the heaps' 3D body, the billows of uBody (A, 71 m to 18 m): round
-  // heads in sharp creases, the same form as its heads all the way down, a
-  // cauliflower. (The Worley billows there made close heaps smooth cream,
-  // like wax; its heads again, whose clefts are rounded, soft lumps.)
-  // Only where a pixel is under 5 to 10 m wide (GEO_PIX): farther, where
-  // they are a pixel or less, a flight differed from a still at the place
-  // reached by more than the flight check allows (round 14's turrets of
-  // 290 m to 36 m read out to 8 km: 1.53 against a limit of 1.26).
-  // Farther, the body has no fine noise: its heads of 125 m and more come
-  // from uBody itself, read at the pixel's level.
-  // (Until round 17 the Worley billows took over there, and blurred them.)
-  float f = 0.0, sg = carved * geoNear;
-  if (carved < 1.0) {
-    vec4 d = textureLod(uNoise, q * DETAIL, lod + 1.7);
-    d.gba *= 2.0 - d.gba;
-    f = (1.0 - carved) * (0.15 * (d.r - 0.571) + 0.4 * (d.g - 0.712) + 0.3 * (d.b - 0.715) + 0.2 * (d.a - 0.715));
-  }
-  if (sg > 0.0) {
-    // They only carve (see cloudField): seams in, crowns where the surface
-    // is. Where the cloud is less billowy (low on a heap's sides, and on
-    // the side the shear leans over), they carve the heads' middles
-    // instead, leaving the seams as ragged wisps.
-    float tb = textureLod(uBody, q * DETAIL, lod + 1.7 + BODY_LOD).w;
-    tb = mix(tb, 1.0 - tb, WISP * (1.0 - billowy));
-    f -= sg * GEO_S * tb;
-  }
-  // Near the eye, smaller billows on those: the same noise 8 times finer
-  // (billows of 36 m down to 2 m), and 8 times finer again, each turned
-  // about the vertical (whole numbers keep it repeating in the tile), and
-  // each only where a pixel is fine enough to show it.
-#if Q_MICRO
-  float l1 = lod + 4.7;
-  if (l1 < 1.5) {
-    vec3 u = vec3(fract(q.x), q.y, fract(q.z));
-    vec4 m = textureLod(uNoise, vec3(50.0 * u.x + 25.0 * u.z, 56.0 * u.y, 50.0 * u.z - 25.0 * u.x), l1);
-    m.gba *= 2.0 - m.gba;
-    f += (1.0 - smoothstep(0.5, 1.5, l1)) * (MICRO.x * (m.g - 0.712) + MICRO.y * (m.b - 0.715) + MICRO.z * (m.a - 0.715));
-    float l2 = l1 + 3.0;
-    if (l2 < 1.5) {
-      m = textureLod(uNoise, vec3(156.0 * u.x + 420.0 * u.z, 448.0 * u.y, 156.0 * u.z - 420.0 * u.x), l2);
-      m.gba *= 2.0 - m.gba;
-      f += (1.0 - smoothstep(0.5, 1.5, l2)) * MICRO.w * (0.5 * (m.g - 0.712) + 0.3 * (m.b - 0.715) + 0.2 * (m.a - 0.715));
-    }
-  }
-#endif
-  return RELIEF * rough * f;
-}
-
-// The field at p; fine: with the fine noise, which also comes out by
-// itself (bump: positive on a billow, negative in a crease). lump: see
-// cloudShape. A thin cloud is rougher: its edge frays. Also gives the
-// depth at which the cloud there is dense (edge, km).
+// The field at p; fine: with the fine noise, which erodes it (after
+// Schneider 2015: remap by Worley noise of 285 m to 71 m, wisps low in a
+// cloud and billows higher up; near the eye the same noise 8 times finer).
 float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body, out float edge, out float lump,
                  out vec4 q, out float fb) {
   float base;
   float f = cloudShape(p, lod, fine, y, q, body, lump, base);
   float c = min(f, base);
   fb = f - base;
-  billowy = smoothstep(0.15, 0.45, heapUp) * mix(0.5, 1.0, upshear);
-  geoNear = 1.0 - smoothstep(GEO_PIX, 2.0 * GEO_PIX, 2.0 * uTan / uRes.y * PASS_PIX * CLOUD_FRAME * length(p));
-  // Hard, growing turrets have a crisp edge (10 m); older cloud a deeper
-  // fringe. Billows smaller than the edge melt into it: a deeper one made
-  // every top look like cotton wool.
-  edge = mix(EDGE, 0.01, smoothstep(0.45, 1.3, q.w));
-  // On the 3D body, crisp on the rising heads of its upper part (6 m: the
-  // body's field rises by BODY_G per km), and softer on its lower sides
-  // (35 m). (Until round 17, 12 and 70 m, and photographs of towers showed
-  // crisper outlines; then a flight differed from a still by more than the
-  // flight check allows with 4 m, with the fine heads read out to 8 km.)
-  edge = mix(edge, mix(0.035, 0.006, smoothstep(0.35, 0.8, heapUp) * mix(0.5, 1.0, upshear)), solidAt);
-  // Thin cloud (the edge of a heap's foot, and the fragments beside it)
-  // frays: its fringe is deeper, some 100 m (the field rises by about 4
-  // per km on a small heap's side). From 11 km, scattered cumulus were cut
-  // out of the sea with hard outlines; in photographs their edges are thin
-  // and ragged. Only from 4 to 10 km on: nearer, a fringe that deep is
-  // many pixels wide, the march and the light crossed it in many steps
-  // (it cost 18 ms of the frame at 1440p among the heaps at 2 km), and
-  // near heaps in photographs have crisp edges. (On the 3D body, 30 m:
-  // deeper, small heaps from 5 km were a grainy fog.)
-  edge = mix(edge, mix(0.4, 0.06, solidAt), thin * smoothstep(4.0, 10.0, length(p)));
-  // From far off (15 to 45 km), every edge of the body is a veil 150 m
-  // deep: from 11 km, small cumulus were cut out of the sea, hard.
-  edge = max(edge, 0.15 * solidAt * smoothstep(15.0, 45.0, length(p)));
-  // Shreds under a base are thin and ragged: a deep, faint fringe.
-  edge = mix(edge, 0.1, 1.0 - smoothstep(-0.06, 0.0, base));
+  edge = CF_K * CF_FULL;
   bump = 0.0;
-  // (Scaled as the billows are: see steep.) On the heaps' 3D body the fine
-  // billows only carve: its surface stands out by fat for them (a little
-  // more than their mean, so that the cover stays: by their deepest seam,
-  // the heaps grew), their seams go in from there, and they fade within
-  // SKIN_F deeper than their weight. (Round 18's seams went in twice as deep,
-  // some 150 m for heads of 71 m and less, and up to 90 m below the body's
-  // surface: near towers had flat patches with stepped outlines in their
-  // sides, where the seams cut through the skin of heads to the smooth body
-  // under it.)
-  float rough = q.w * mix(1.5, 1.0, smoothstep(0.1, 0.6, body)), sg = carved * geoNear;
-  float fat = steep * RELIEF * rough * sg * ERO_F;
-  if (fine && q.w > 0.0 && (sg > 0.0 || carved < 1.0) && c > -0.25 * RELIEF * steep * (1.0 - sg) - fat) {
-    float d = cloudDetail(q.xyz, lod, rough), fo = f + fat;
-    // The sides and tops have billows; a base is flat, and only its broad
-    // mottling shows. Here and there a shred hangs below it.
-    // (On the heaps' 3D body, whose turrets reach higher values, only the
-    // highest: with 0.12 there, small heaps seen from under them had flat,
-    // bright shreds with sharp outlines round their bases.)
-    bump = min(fo + steep * d * (1.0 - sg * smoothstep(fat / ERO_F, fat / ERO_F + BODY_G * SKIN_F, fo)),
-               base + 0.8 * max(d + fat / steep - mix(0.12, 0.3, solidAt), 0.0)) - c;
+  if (fine && c > -0.02 && c < CF_K) {
+    vec4 d = textureLod(uNoise, q.xyz * DETAIL, lod + 1.7);
+    float hf = 0.625 * d.g + 0.25 * d.b + 0.125 * d.a;
+    float e = mix(hf, 1.0 - hf, smoothstep(0.05, 0.3, heapUp));
+#if Q_MICRO
+    float l1 = lod + 4.7;
+    if (l1 < 1.5) {
+      vec3 u = vec3(fract(q.x), q.y, fract(q.z));
+      vec4 mm = textureLod(uNoise, vec3(50.0 * u.x + 25.0 * u.z, 56.0 * u.y, 50.0 * u.z - 25.0 * u.x), l1);
+      e += 0.3 * (1.0 - smoothstep(0.5, 1.5, l1)) * (1.0 - (0.625 * mm.g + 0.25 * mm.b + 0.125 * mm.a) - 0.4);
+    }
+#endif
+    float er = CF_ERODE * clamp(e, 0.0, 1.0);
+    float dn = (max(c, 0.0) / CF_K - er) / (1.0 - er);
+    bump = CF_K * dn - c;
+    if (c <= 0.0) bump = 0.0;
   }
   return c + bump;
 }
@@ -3243,30 +2851,12 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   return cloudField(p, lod, fine, y, bump, body, edge, lump, q, fb);
 }
 
-// Extinction (per km) for a value of the field at height y, in a cloud of
-// that body: dense a little way in (a cloud has a surface), with more water
-// higher up and in thicker clouds. A smoothed field (lod) has a wider edge.
+// Extinction (per km) for a value of the field at height y: it grows with
+// the density up to CF_FULL, and with the height over the base (more water
+// higher up).
 float cloudExtinction(float f, float lod, float y, float body, float edge) {
-  // The edge thins slowly at first, as a fringe of wisps; seen from afar it
-  // is smoothed over the pixel, and the smoothing sets its width.
-  float s = 1.5 * TEXEL_KM * exp2(lod), x = clamp(f / max(edge, s), 0.0, 1.0);
-  // In a heap's 3D body the water grows with the height over its base, as
-  // in air that rises and cools without mixing (adiabatic), and the
-  // extinction with its 2/3 power: about 260 (h / 1 km)^(2/3) per km with
-  // 2 g of water per m3 and km and 300 drops per cm3 (WET of SIGMA), up to
-  // 1.2 SIGMA from some 230 m over the base. Its outer MIXED km are thinner,
-  // down to a third of that at the surface, as air mixed in from outside
-  // dries a cloud's edge. So an ordinary heap seen towards the sun from
-  // under it is 12 to 22 deep through its body (30 to 40 through its
-  // deepest tenth), grey with bright rims, as in photographs. (At a third
-  // of that throughout, until 9f326f9, such heaps were 7 to 11 deep:
-  // grey-white masses lit through, nearly as white as their rims. Dense up
-  // to 40 m under the surface, the tops seen from above had darker pits
-  // between their heads, and a flight drew them farther from a still than
-  // the check allows.)
-  float wet = mix(1.0, WET, smoothstep(0.0, MIXED, f / BODY_G));
-  float up = mix(mix(0.45, 1.0, clamp(4.0 * y, 0.0, 1.0)), clamp(wet * pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2), solidAt);
-  return SIGMA * x * mix(x, 1.0, min(s / edge, 1.0)) * up * mix(0.2, 1.0, clamp(5.0 * body - 0.5, 0.0, 1.0));
+  float x = clamp(f / edge, 0.0, 1.0);
+  return SIGMA * x * clamp(pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2);
 }
 
 // Extinction (per km) at p. fine: with the fine noise and the slope (else
