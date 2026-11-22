@@ -93,7 +93,7 @@ The last line is the one to paste into a pull request: `look: 9 PASS, 5 KNOWN, 0
 
 The limits are absolute: no base is needed, and a flaw that was merged is still flagged after. They are set from the stills of the bad and the fixed commits, with a margin both ways; they change only on purpose, in a commit that says why. `--page REV` renders a commit (exported like a base): `look --page 9041c58 --only overcast-rows-11km` shows the proof of an entry. `--from DIR` measures the stills of an earlier run again, without Chrome (to try a limit). `--sheet` writes `sheet.png`, the stills of every entry in one picture; with `--base REV`, each row is base | page (`look --sheet --base origin/main` for a pull request).
 
-It takes about 90 s on the GPU for the 14 entries (13 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
+It takes about 90 s on the GPU for the 17 entries (16 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
 
 The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of the picture), in 8-bit sRGB levels as shown:
 
@@ -113,6 +113,7 @@ The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of
 | `clumping` | The cover of the cloud mask in the windows of a grid (`nx` by `ny`, 8 by 5) over the region: the standard deviation over the windows, over their mean. An even sprinkle of heaps: low; clusters and clear lanes: high. | The same rough mask. Perspective: far windows hold more sea per pixel, so compare one view with itself. A single large cloud also gives a high value: use it with views from far above. |
 | `detailScale` | The lag at which the autocorrelation falls to 0.5, over the picture's width: the size of the detail. | It is dominated by the finest grain; it did not separate the cumulus before and after #104. |
 | `lineDip` | A thin dark line across the region: per row, the dip of rows y, y + 1 below the rows on both sides, the median over `cols` strips, the largest over rows. | A line across less than half the strips; a line that is not darker than both sides. |
+| `stars` | The points of light per 10 000 px: pixels at least `t` levels (default 12) over the mean of their surroundings (`k` px, default 4) and the brightest in 5 x 5 px. Levels as shown, so a darker night that hides the stars lowers it. | Which points are stars: glints and sparkles on the sea count too, so use it on the sky. Like `speckDensity`, it depends on the picture's size. |
 
 ## The fake clock
 

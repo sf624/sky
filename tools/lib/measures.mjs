@@ -418,4 +418,27 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };
+// stars: the points of light the region shows, per 10 000 px: pixels at least opt.t levels (default 12) of luma
+// above the mean of their surroundings ((2k+1)^2 px, opt.k default 4), and the brightest in their 5 x 5 px. In
+// levels as shown, not relative to the region: a star the screen shows 12 levels over a black sky is seen, one
+// 3 levels over it is not.
+export function stars(img, { region: box, k = 4, t = 12 } = {}) {
+  const R = region(img, box), { w, h, l } = R, I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) I[(y + 1) * (w + 1) + x + 1] = l[y * w + x] + I[y * (w + 1) + x + 1] + I[(y + 1) * (w + 1) + x] - I[y * (w + 1) + x];
+  let n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = l[y * w + x];
+    const x0 = Math.max(0, x - k), x1 = Math.min(w, x + k + 1), y0 = Math.max(0, y - k), y1 = Math.min(h, y + k + 1);
+    const s = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+    if (v - s / ((x1 - x0) * (y1 - y0)) < t) continue;
+    let top = true;
+    for (let dy = -2; dy <= 2 && top; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if ((dx || dy) && xx >= 0 && yy >= 0 && xx < w && yy < h && (l[yy * w + xx] > v || (l[yy * w + xx] === v && yy * w + xx < y * w + x))) { top = false; break; }
+    }
+    if (top) n++;
+  }
+  return n / (w * h) * 1e4;
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars };

@@ -1617,6 +1617,7 @@ uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
 uniform float uNightEye;    // how far the eye's night vision has come in, from its adaptation: 0 by day to 1 (nightEyeFor)
 uniform float uNightGrey;   // how far the night's wider grey has come in, from its adaptation: 0 to 1 (nightGreyFor)
+uniform float uNightDark;   // how far the night's steeper curve has come in, from its adaptation: 0 to 1 (nightDarkFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -1778,9 +1779,8 @@ const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the con
 const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
 const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
 const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
-const float DARK_LOOK = 2.0;    // ...and as the eye adapts to a darker night (DARK_EYE), steeper...
+const float DARK_LOOK = 2.0;    // ...and as the eye adapts to a darker night (uNightDark), steeper...
 const float DARK_PIVOT = 0.07;  // ...about this level
-const vec2 DARK_EYE = vec2(15.5, 17.5);   // the exposure (log2) over which the night's curve turns to DARK_LOOK
 const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)...
 const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
 const vec2 SKY_BLUE = vec2(0.001, 0.01);
@@ -5991,7 +5991,7 @@ void main() {
     // Way, the zodiacal light and the stars stand out as the dark-adapted
     // eye sees them; under a moon, with the gentler curve, the moonlit sky
     // lies over them. One curve for everything, set by the adaptation.
-    float dark = smoothstep(DARK_EYE.x, DARK_EYE.y, log2(uExposure));
+    float dark = uNightDark;
     float n = mix(uLook, mix(NIGHT_LOOK, DARK_LOOK, dark), rodShare);
     float pivot = LOOK_PIVOT * pow(DARK_PIVOT / LOOK_PIVOT, dark);
     looked = mix(looked, col * pow(yl, n - 1.0) * pow(pivot, uLook - n), rodShare);
@@ -7622,6 +7622,30 @@ const SkySound = (() => {
   // degrees down.
   const NIGHT_GREY = [12, 15];
   const nightGreyFor = e => smooth01((e - NIGHT_GREY[0]) / (NIGHT_GREY[1] - NIGHT_GREY[0]));
+  // The night's steeper curve (DARK_LOOK in fs) comes in as the exposure
+  // goes from DARK_EYE[0] (about a full moon's) to DARK_EYE[1] (a moonless
+  // night from cruise).
+  const DARK_EYE = [15.5, 17.5];
+  const nightDarkFor = e => smooth01((e - DARK_EYE[0]) / (DARK_EYE[1] - DARK_EYE[0]));
+  // The night's key: the screen shows a moonlit night darker than the
+  // eye's adaptation (the exposure, which sets the rods' grey and the
+  // curves above) holds it. Lit by the moon the brightest clouds are some
+  // 0.02 to 0.06 cd/m2, far below the cones' white, and the eye sees them
+  // dim; shown at the meter's grey they read as dusk. Tone mapping for low
+  // light maps such a scene into a reduced range (Kirk and O'Brien, 2011),
+  // as film underexposes "day for night" by about two stops. The shown
+  // exposure is the adaptation less NIGHT_DIM stops at NIGHT_KEY[1] (a full
+  // moon's clouds from cruise), coming in from NIGHT_KEY[0] (the end of
+  // nautical twilight) and going again by NIGHT_KEY[2] (a moonless night
+  // from cruise), where the picture is the stars, the Milky Way and the
+  // zodiacal light over a near-black sky, as before. It changes by at most
+  // 0.6 stops for each stop of the adaptation, which itself opens by half a
+  // stop for each stop the night darkens (NIGHT_RATE): a darker night is
+  // still shown darker, and no light switches on or off.
+  const NIGHT_KEY = [12, 14.5, 17.5], NIGHT_DIM = 1.0;
+  const nightDimFor = e => NIGHT_DIM * (e < NIGHT_KEY[1] ? smooth01((e - NIGHT_KEY[0]) / (NIGHT_KEY[1] - NIGHT_KEY[0]))
+                                                       : 1 - smooth01((e - NIGHT_KEY[1]) / (NIGHT_KEY[2] - NIGHT_KEY[1])));
+  const shownFor = e => e - nightDimFor(e);
 
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
@@ -8551,12 +8575,13 @@ const SkySound = (() => {
         ['uniform1f', 'uMoonI', state.moonI * moonAirFor()],
         ['uniformMatrix3fv', 'uSky', false, state.sky],
         ['uniform1f', 'uHaze', state.haze],
-        ['uniform1f', 'uExposure', 2 ** (logE ?? firstE)],
+        ['uniform1f', 'uExposure', 2 ** shownFor(logE ?? firstE)],
         ['uniform1f', 'uLook', v.look],
         ['uniform3fv', 'uBalance', balanceFor()],
         ['uniform1f', 'uSaturation', saturationFor()],
         ['uniform1f', 'uNightEye', nightEyeFor(logE ?? firstE)],
         ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? firstE)],
+        ['uniform1f', 'uNightDark', nightDarkFor(logE ?? firstE)],
         ['uniform1f', 'uAlt', v.alt],
         ['uniform1f', 'uCloud', v.cloud],
         ['uniform1f', 'uWind', state.wind],

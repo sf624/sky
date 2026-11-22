@@ -180,11 +180,124 @@
     {
      "measure": "lumaPct",
      "p": 50,
-     "max": 20
+     "max": 24
+    },
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "min": 12
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.6,
+      1,
+      0.4
+     ],
+     "p": 95,
+     "max": 42
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.6,
+      1,
+      0.4
+     ],
+     "p": 95,
+     "min": 24
     }
    ],
-   "expected": "fail",
-   "note": "Open. The limit is provisional (8582b03: 31); set it with the fix."
+   "bad": "f605245",
+   "note": "Limits from the eye under a full moon: the scene's median (some 0.013 cd/m2) comes out at about 16 to 23 with Ward's contrast scale factor (1994; a display adapted to 50 cd/m2), and Kirk and O'Brien (2011) map low light into a quarter to a half of the display's range; the moonlit tops stay in sight (p95 of the lower part at least 24). f605245: p50 31.2, p95 53.8; the fix: 18.6, 32.9."
+  },
+  {
+   "name": "night-half-moon-8.9km",
+   "q": "date=328&time=21&lat=35&lon=135&alt=8.88&at=168.127,91.019&yaw=63.98&pitch=-1.61&heading=62.77&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=7&quality=high",
+   "reported": "2026-11-23",
+   "wrong": "a night under a half moon nearly as bright as dusk (with the full moon's report)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 17
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.6,
+      1,
+      0.4
+     ],
+     "p": 95,
+     "min": 14
+    }
+   ],
+   "bad": "f605245",
+   "note": "The owner's view at 21:00 (at 23.87 a half moon has set). f605245: p50 18.7, p95 26.8; the fix: 14.9, 21.0. The lower bound keeps the moonlit clouds in sight."
+  },
+  {
+   "name": "night-full-moon-up-11km",
+   "q": "date=328&time=20&lat=35&lon=135&alt=11&yaw=0&pitch=55&heading=0&cloud=0.3&cirrus=0&haze=1&wind=6&quality=high&moon=14.288",
+   "reported": "2026-11-23",
+   "wrong": "a full moon's sky as a grey veil (with the full moon's report); the stars to about magnitude 4 must stay",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 17
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 2
+    }
+   ],
+   "bad": "f605245",
+   "note": "f605245: p50 18.8, stars 4.49 per 10 000 px (414 points 12 levels over their surroundings); the fix: 14.9, 2.87 (264). Under a full moon the eye sees stars to about magnitude 4 (a bright sky of some 18 mag/arcsec2): the bound keeps some 180."
+  },
+  {
+   "name": "night-new-moon-up-11km",
+   "q": "date=328&time=20&lat=35&lon=135&alt=11&yaw=0&pitch=55&heading=0&cloud=0.3&cirrus=0&haze=1&wind=6&quality=high&moon=0",
+   "reported": "2026-11-23",
+   "wrong": "a guard: a darker night must not hide the stars or the Milky Way of a moonless night, nor lift its sky",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 10
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 8
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "t": 40,
+     "min": 3.5
+    }
+   ],
+   "note": "A guard, not a flaw: f605245 and the fix both give p50 7.8, stars 9.13 (840) and 4.30 at 40 levels (396)."
   },
   {
    "name": "sky-40km-day",
