@@ -36,6 +36,7 @@ panel has the focus):
 - **Q E**: turn with the rudder, 3 degrees a second, without banking.
 - **L**: back to straight and level flight.
 - **H**: shows or hides the HUD (below).
+- **I**: shows or hides a debug box with the build and the address that draws this view again (`?debug=1` too), to report a flaw with a screenshot.
 
 A key held keeps rolling or pitching; let go, the aircraft keeps its bank
 and its climb. On a touch screen, a stick at the bottom left does the same
