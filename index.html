@@ -2289,8 +2289,8 @@ Layer cloudLayer(vec2 x, float lod) {
   a.amount = 0.44 + 0.44 * uCloud - 0.03 * smoothstep(0.5, 0.7, uCloud) + 0.09 * smoothstep(0.6, 0.8, uCloud) - 0.04 * smoothstep(0.8, 1.0, uCloud) + mix(2.2, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
   a.amount = clamp(a.amount, 0.0, mix(1.0, 0.72, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // Towers, where the air rises (A) and the slider lets heaps grow.
-  a.tower = smoothstep(0.4, 0.9, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(1.5 + 1.5 * w.g, 2.8 + 1.4 * w.g, a.tower), a.form);
+  a.tower = smoothstep(0.75, 0.95, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
+  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.6 + 1.2 * w.g * w.g, 2.8 + 1.4 * w.g, a.tower), a.form);
   return a;
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
@@ -2438,7 +2438,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       if (l1 < 1.5) {
         vec3 u = vec3(fract(q.x), q.y, fract(q.z));
         vec4 mm = textureLod(uNoise, vec3(50.0 * u.x + 25.0 * u.z, 56.0 * u.y, 50.0 * u.z - 25.0 * u.x), l1);
-        e += mix(0.3, 0.6, formAt) * (1.0 - smoothstep(0.5, 1.5, l1)) * (1.0 - (0.5 * mm.g + 0.3 * mm.b + 0.2 * mm.a) - 0.4);
+        e += mix(0.3, 0.6, formAt) * (1.0 - smoothstep(0.5, 1.5, l1)) * (1.0 - dot(mm.gba, mix(vec3(0.5, 0.3, 0.2), vec3(0.34, 0.33, 0.33), formAt)) - 0.4);
       }
 #endif
     }
