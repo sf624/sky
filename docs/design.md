@@ -719,17 +719,19 @@ scene reads the air from a table made ahead instead, as Hillaire (2020) makes hi
 aerial-perspective tables (written here from the paper's ideas): `fs`
 compiled with `AIR_LUT` marches the air (as above, with the level's own
 samples but at least 14, 6 and 10: 20, 8 and 16 at `high` and `max`, 14, 6
-and 10 at `low`; and without the clouds' shadows) for `LUT_AZ` x `LUT_EL`
+and 10 at `low`; up to 4 times as many on a ray longer than 150 km, so
+that its first step is some 0.4 km; and without the clouds' shadows) for
+`LUT_AZ` x `LUT_EL`
 directions round the eye and `LUT_S` distances along each (the level's
-`airLut`: 64 x 48 and 16 at `low`, 128 x 96 and 64 at `high` and `max`), from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
+`airLut`: 64 x 48 and 16 at `low`, 128 x 128 and 64 at `high` and `max`), from `LUT_T0` (0.05 km) to `LUT_T1` (1200 km),
 evenly in their log; a ray that ends sooner (at the sea) keeps its end's
 values beyond. The directions are the azimuth from the stronger light's (the sun's,
 or the moon's at night: `uLutLight`; from the sun's, the moonlit sky
 stepped at the table's seam behind it), squeezed towards it (a square
 root: its glow), and the elevation from the horizon,
 squeezed towards the horizon (a square root on either side), which lies at
-40 rows of 96 (`LUT_VH`: the 8 rows below it that it had at the middle
-serve above it), with some 5 more rows where the rays above the horizon
+5/12 of the rows (`LUT_VH`: 53 of 128, 20 of 48; the rows below it that
+it had at the middle serve above it), with some 5 more rows where the rays above the horizon
 graze the top of the boundary layer, seen from above 1.6 km (`lutWarp`,
 an arctangent step; `lutUV`, `lutDir`). Along such a ray the haze ends
 within some 0.6 km of height, and its depth and light change several
@@ -737,7 +739,16 @@ times over within a degree; with the square root alone a row spanned 0.8
 km of that height at 4 km and 1.5 km at 11 km, the table mixed rays on
 either side of the top, and the sky at the horizon in twilight showed a
 band a few levels deep, the lower edge of a setting sun a red row (the
-depth from the table some 50 % too deep in the haze there). Two more slices hold the sky as the sea sees it, from
+depth from the table some 50 % too deep in the haze there). With 96 rows
+at `high` and `max`, the sunset's colour along rays that graze 5 to 10 km
+up, seen from 11 km and higher, still showed rows 1 to 2 levels deep: 128
+halve them, for 28 MB and some 1 ms a frame of a time-lapse on GL. The
+whole ray's light (`LUT_END`, and `LUT_SEA`) once came from 20 samples
+over the 1000 km or so of a ray along the horizon, its first steps 2.5,
+7.5 and 12.5 km long, where a slice of 150 km had steps of 0.4 to 3 km:
+in haze, whose light comes from the first km, the whole ray came out
+darker than a slice, and clouds at the horizon, whose air comes from the
+slices, stood out pale against the haze beside them. Two more slices hold the sky as the sea sees it, from
 its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
 ray from the eye, to the sea or out of the air (`LUT_END`). The table is
 one 3D texture of half floats on unit 29, thirteen times as deep
@@ -3610,7 +3621,7 @@ asks which level it is.
 | `frame` | 0.5 | 0.5 | 1 | 1 |
 | `minScale` | 0.35 | 0.35 | 0.35 | 1 |
 | `keys` | no | no | yes | yes |
-| `airLut` | 64 x 48, 16 | none (march) | 128 x 96, 64 | 128 x 96, 64 |
+| `airLut` | 64 x 48, 16 | none (march) | 128 x 128, 64 | 128 x 128, 64 |
 | `Q_LUT_SHADE` | 4 | | 16 | 16 |
 | `meterMs`, `stale` | 200, 1 | 100, 0.5 | 100, 0.5 | 100, 0.5 |
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
@@ -3912,7 +3923,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 (`LUT_S` + 2) + 2), RGBA16F, linear: 128 x 96 x 860 (`high`, `max`; 84.5 MB), 64 x 48 x 236 (`low`; 5.8 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 (`LUT_S` + 2) + 2), RGBA16F, linear: 128 x 128 x 860 (`high`, `max`; 112.7 MB), 64 x 48 x 236 (`low`; 5.8 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
