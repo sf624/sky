@@ -3924,8 +3924,7 @@ const vec2 CI2_HEAD = vec2(1.0, 0.25);      // the weight of the large sizes and
 const float CI2_HEADS = 0.7;               // how much denser the top of a streak is than its tail
 const float CI2_SUN = 1.2;                 // the depth towards the light, a factor
 const float CI2_FEW = 0.9;                 // how much the noise's forms fall back at small amounts
-const vec3 CI2_FORM = vec3(4.0, 0.7, 0.6);
-// the drawn forms: their depth for an ice of 1; their share at large amounts; how much fibres and noise fray them
+const vec3 CI2_FORM = vec3(4.0, 0.7, 0.6);  // the drawn forms: their depth for an ice of 1 (as on the two decks before); their share at large amounts; how much the fibres fray them
 const vec2 ET = vec2(0.9487, 0.3162), EN = vec2(-0.3162, 0.9487);   // along the shear (the way the drawn forms run), across it
 // A region's shear over the fall speed, first drift and turn, from the
 // cirrus's map there, times the layer's `ice`.
@@ -3972,8 +3971,11 @@ float ci2FormIce(vec4 si, vec4 cm, float gate) {
 // at dusk a comb of like streaks where photographs show a few broad lit
 // sweeps.)
 const mat2 CI2_MB = mat2(1.0, 1.0, -3.0, 1.0) / 256.0;
-const vec3 CI2_LANE = vec3(-0.4, 0.9, 0.08);
-const vec2 CI2_BAND0 = vec2(0.12, 0.0);   // (shifted so that the place where the page starts lies at a band's edge: a band to the north, a lane to the south)   // the bands' level: x + y * uCirrus over the noise; what is left in a lane
+const vec3 CI2_LANE = vec3(-0.4, 0.9, 0.08);   // the bands' level: x + y * uCirrus over the noise; what is left in a lane
+// (Shifted so that the place where the page starts lies at a band's edge: a
+// band to the north, a lane to the south.)
+const vec2 CI2_BAND0 = vec2(0.12, 0.0);
+// lod: 6 for the bands themselves; more for their mean over a wide place.
 float ci2Lane(vec2 w, float lod) {
   float c = uCirrus, k = smoothstep(0.3, 0.6, c) * (1.0 - smoothstep(0.8, 0.98, c));
   if (k <= 0.0) return 1.0;
