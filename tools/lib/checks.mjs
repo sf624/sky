@@ -56,12 +56,22 @@ const sunIn = (img, near, r = 60) => {
   }
   return n ? [sx / n, sy / n] : null;
 };
-// Detail: the mean difference of neighbouring pixels (grey levels) inside box, a measure of sharpness.
-const detailOf = (img, [x0, y0, bw, bh]) => {
+// Detail: the mean difference of neighbouring pixels (grey levels) inside box, a measure of sharpness. With the
+// camera cam (column-major: right, up, forward), rolled about its eye's axis, the box is the one of the same
+// camera unrolled, turned with the picture: the same part of the view. (A fixed box saw the near clouds of a
+// banked view and the far ones of a level view.)
+const detailOf = (img, [x0, y0, bw, bh], cam = null) => {
   let sum = 0, n = 0;
   const g = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
-  for (let y = y0; y < y0 + bh - 1; y++) {
-    for (let x = x0; x < x0 + bw - 1; x++) { sum += Math.abs(g(x + 1, y) - g(x, y)) + Math.abs(g(x, y + 1) - g(x, y)); n++; }
+  // The roll: the right axis leaves the horizontal plane by sin(roll) times the cosine of the eye's pitch.
+  const r = cam ? Math.asin(Math.max(-1, Math.min(1, cam[1] / Math.hypot(cam[6], cam[8])))) : 0;
+  const c = Math.cos(r), s = Math.sin(r), cx = img.w / 2, cy = img.h / 2;
+  for (let y = 0; y < img.h - 1; y++) {
+    for (let x = 0; x < img.w - 1; x++) {
+      const u = cx + (x - cx) * c + (y - cy) * s, v = cy - (x - cx) * s + (y - cy) * c;
+      if (u < x0 || u >= x0 + bw - 1 || v < y0 || v >= y0 + bh - 1) continue;
+      sum += Math.abs(g(x + 1, y) - g(x, y)) + Math.abs(g(x, y + 1) - g(x, y)); n++;
+    }
   }
   return sum / n / 3;
 };
@@ -449,7 +459,7 @@ export const CHECKS = {
       await stillThere(fl.name, 'date=172&time=15&cirrus=0.4', got, fl.e ?? e);
       const d = diffPng(f(`${fl.name}-still`), f(fl.name), { out: f(`${fl.name}-diff`) });
       const sa = readPng(f(`${fl.name}-still`)), fa = readPng(f(fl.name));
-      const sharp = detailOf(fa, box(fa)) / detailOf(sa, box(sa));
+      const sharp = detailOf(fa, box(fa), got.cam) / detailOf(sa, box(sa), got.cam);
       result[fl.name] = { d, sharp };
       const miss = apart(got.at, want.at) * 1e6, turned = got.heading - fl.hd;
       lines.push(`${fl.name}: heading ${fl.hd} -> ${got.heading.toFixed(3)} (sum ${want.heading.toFixed(3)}), place off the sum by ${miss.toFixed(1)} mm` +
@@ -460,7 +470,7 @@ export const CHECKS = {
       if (fl.name === 'circle') expect(Math.abs(turned - 360) < 0.6 && apart(got.at, [40, 60]) < 0.01, 'the circle closes');
     }
     // The bank adds nothing to a turn's own cost: against the level turn over the same view, the banked one is
-    // as close to its still and as sharp. (Any turn, a drag of the view too, keeps less detail than a straight
+    // as close to its still and as sharp (its detail measured over the same part of the view, see detailOf). (Any turn, a drag of the view too, keeps less detail than a straight
     // flight: about 0.90 of the still's, against 0.96 to 0.99.)
     const tb = result['turn-45'], tr = result.rudder;
     expect(tb.d.mean <= LIMITS.turn(tr.d.mean), `the banked turn within ${LIMITS.turn(tr.d.mean).toFixed(3)} of its still (the level turn's ${tr.d.mean}, times 1.15, plus 0.1)`);
