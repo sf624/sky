@@ -309,7 +309,6 @@
      "max": 0.063
     }
    ],
-   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.0351,
@@ -320,7 +319,7 @@
      "blobSize": 0.1633
     }
    },
-   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times. Relief passes since the heaps have domes and heads; blobSize is still over: in the core of a cluster the heaps merge into masses larger than the old page's."
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
   },
   {
    "name": "cumulus-half-4km-down",
@@ -440,6 +439,64 @@
     }
    },
    "bad": "f605245"
+  },
+  {
+   "name": "cumulus-not-heavy-0.3km-sun",
+   "q": "date=172&time=15.5&cirrus=0.3&alt=0.3&cloud=0.5&yaw=90&pitch=10",
+   "reported": "2026-11-23",
+   "wrong": "from 0.3 km the frame dominated by huge heavy dark-grey masses (merged heaps in a cluster's core); before #104 (c551f8a) separate white cumulus with modest grey bases",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 25,
+     "region": [
+      0,
+      0,
+      1,
+      0.55
+     ],
+     "min": 121
+    }
+   ],
+   "bad": "60c08b4",
+   "reference": {
+    "c551f8a": {
+     "lumaPct p25": 135
+    },
+    "60c08b4": {
+     "lumaPct p25": 96
+    }
+   },
+   "note": "The darkest quarter of the sky's part of the frame: heavy dark masses pull it down. Limit: 0.9 times the value of c551f8a."
+  },
+  {
+   "name": "cumulus-not-heavy-0.3km-away",
+   "q": "date=172&time=15.5&cirrus=0.3&alt=0.3&cloud=0.5&yaw=-90&pitch=10",
+   "reported": "2026-11-23",
+   "wrong": "from 0.3 km the frame dominated by huge heavy dark-grey masses (merged heaps in a cluster's core); before #104 (c551f8a) separate white cumulus with modest grey bases",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 25,
+     "region": [
+      0,
+      0,
+      1,
+      0.55
+     ],
+     "min": 129
+    }
+   ],
+   "bad": "60c08b4",
+   "reference": {
+    "c551f8a": {
+     "lumaPct p25": 144
+    },
+    "60c08b4": {
+     "lumaPct p25": 122
+    }
+   },
+   "note": "The darkest quarter of the sky's part of the frame: heavy dark masses pull it down. Limit: 0.9 times the value of c551f8a."
   }
  ]
 }
