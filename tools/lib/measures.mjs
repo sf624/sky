@@ -58,6 +58,23 @@ export function cover(img, opt = {}) {
   return mean(m);
 }
 
+// clumping: how unevenly the clouds lie over the region: the cover of the cloud mask in each window of a grid of
+// opt.nx by opt.ny (default 8 by 5), the standard deviation over the windows, over their mean. An even sprinkle of
+// heaps: low; clusters with clear lanes between: high.
+export function clumping(img, opt = {}) {
+  const R = region(img, opt.region), m = cloudMask(R, opt), nx = opt.nx || 8, ny = opt.ny || 5, c = [];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x0 = Math.floor(i * R.w / nx), x1 = Math.floor((i + 1) * R.w / nx), y0 = Math.floor(j * R.h / ny), y1 = Math.floor((j + 1) * R.h / ny);
+      let s = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) s += m[y * R.w + x];
+      c.push(s / Math.max(1, (x1 - x0) * (y1 - y0)));
+    }
+  }
+  const mu = mean(c);
+  return mu > 0 ? Math.sqrt(mean(c.map(v => (v - mu) * (v - mu)))) / mu : 0;
+}
+
 // The luma of a window with its plane (a linear slope of brightness) taken out, as a zero-mean field.
 function detrend(R, x0, y0, n) {
   const f = new Float64Array(n * n);
@@ -349,4 +366,4 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };
+export const MEASURES = { lumaPct, brightColour, cover, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };

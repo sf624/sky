@@ -384,6 +384,62 @@
    "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085).",
    "bad": "8582b03",
    "fixed": "efd2b2f"
+  },
+  {
+   "name": "heaps-clustered-40km-half",
+   "q": "date=172&time=15.5&alt=40&cloud=0.5&yaw=0&pitch=-35&cirrus=0",
+   "reported": "2026-11-23",
+   "wrong": "heaps from 40 km an even sprinkle of small clouds over the whole sea; before #104 (c551f8a) clusters, lanes and empty areas",
+   "measures": [
+    {
+     "measure": "clumping",
+     "region": [
+      0,
+      0.2,
+      1,
+      0.8
+     ],
+     "min": 0.729
+    }
+   ],
+   "note": "Limit: 0.9 times the value of c551f8a, the page before #104. Fails on main f605245 (the even field that #104 brought).",
+   "reference": {
+    "c551f8a": {
+     "clumping": 0.81
+    },
+    "f605245": {
+     "clumping": 0.425
+    }
+   },
+   "bad": "f605245"
+  },
+  {
+   "name": "heaps-clustered-40km-few",
+   "q": "date=172&time=15.5&alt=40&cloud=0.25&yaw=0&pitch=-35&cirrus=0",
+   "reported": "2026-11-23",
+   "wrong": "heaps from 40 km an even sprinkle of small clouds over the whole sea; before #104 (c551f8a) clusters, lanes and empty areas",
+   "measures": [
+    {
+     "measure": "clumping",
+     "region": [
+      0,
+      0.2,
+      1,
+      0.8
+     ],
+     "min": 0.8
+    }
+   ],
+   "note": "Limit: 0.9 times the value of c551f8a, the page before #104. Fails on main f605245 (the even field that #104 brought).",
+   "reference": {
+    "c551f8a": {
+     "clumping": 0.889
+    },
+    "f605245": {
+     "clumping": 0.662
+    }
+   },
+   "bad": "f605245"
   }
  ]
 }

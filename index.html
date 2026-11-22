@@ -2304,8 +2304,13 @@ const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's 
 // moving its surface by a share of its own size (see cloudShape, cloudField).
 // The discs' thresholds, for the cells of 2 km, 1 km and 500 m: at no amount; what the amount takes off; what the weather
 // map's amount does (it gathers the large heaps most); and the least (clear air stays between heaps).
-const vec3 CF_DISC = vec3(1.0, 1.08, 1.28), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
-const float CF_DISC_MIN = 0.45;
+const vec3 CF_DISC = vec3(1.02, 1.1, 1.3), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
+const float CF_DISC_MIN = 0.38;
+// The clusters: the mark of the map's amount over 10 km and more under which there are no heaps, with few clouds and
+// from half on, and half the width of the clusters' edge; how much the lanes raise the discs' thresholds; and how much
+// lower the largest discs' is deep in a cluster.
+const vec3 CF_MESO = vec3(0.53, 0.46, 0.05);
+const float CF_LANE = 0.4, CF_CORE = 0.2;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
@@ -2325,7 +2330,7 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 // stratocumulus; 1: heaps, cumulus; tower: how much of a heap is a tower). From the weather map (R: amount, G: depth, B: the gusts' map,
 // which also moves the bases, A: where the air rises, towers) and the Clouds
 // slider. (One record per layer: a stack of layers is this, once each.)
-struct Layer { float level, depth, amount, form, tower, fair, gather; vec4 far; };
+struct Layer { float level, depth, amount, form, tower, fair, gather, lane, core; vec4 far; };
 Layer cloudLayer(vec2 x, float lod) {
   Layer a;
   float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
@@ -2345,6 +2350,13 @@ Layer cloudLayer(vec2 x, float lod) {
   // (Heaps: the slider says how many there are, and the map where they gather, at every amount alike.)
   a.fair = (0.55 + 0.6 * uCloud) * smoothstep(0.0, 0.05, uCloud);
   a.gather = w.r - 0.5;
+  // Heaps stand in clusters, streets and the walls of open cells, with clear lanes between: where the map's amount
+  // over some 10 km and more is under a mark, which falls as the slider rises, there are none (lane); deep in a
+  // cluster the heaps are larger (core).
+  // (Less most of the map's largest systems: no place is all cluster or all lane for a hundred km.)
+  float meso = textureLod(uWeather, x / WEATHER_KM, 3.5).r - 0.6 * (region - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
+  a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
+  a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
   // Towers, where the air rises (A) and the slider lets heaps grow.
   a.tower = smoothstep(0.75, 0.95, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
   a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.6 + 1.2 * w.g * w.g, 2.8 + 1.4 * w.g, a.tower), a.form);
@@ -2498,7 +2510,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // sets how much of a cell is disc: the weather map gathers the heaps and clears lanes between them.
     // (Never smoother than that by much: read from afar or for the depth maps, the discs would melt away.)
     vec4 c = textureLod(uNoise, vec3(q.x, off.y + 0.11, q.z), clamp(lod, 1.5, 2.5));
-    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather, CF_DISC_MIN);
+    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane;
     const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
     // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
     // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
