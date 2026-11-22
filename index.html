@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="eead3c9 main">
+<meta name="build" content="354c671 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -8136,6 +8136,8 @@ const SkySound = (() => {
   const WHITE = 0.3;             // ...end at this level after exposure (just below white)...
   const DAY_HIGH = 0.5;          // ...when they are this bright or more (daylight),
   const DIM = 0.6;               // ...and DIM stops lower for each stop dimmer
+  const SUNLIT_TOPS = 2;         // by day the key stops down no further than to show at WHITE a level SUNLIT_TOPS stops
+                                 // below a white surface facing the sun (sunlitLevel): sunlit cloud tops are white
   const BAND = 0.1;              // each share is read as a mean over shares this far on either side (HIGH_BAND for HIGH_SHARE)
   const HIGH_BAND = 0.025;
   const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
@@ -8689,6 +8691,11 @@ const SkySound = (() => {
   //   for each stop of the darker quarter), and no further than for a
   //   moonless night sky: a night is darker than a day, dusk is in between,
   //   and black sea at night is not lifted into noise;
+  //   but by day it stops down no further than to show at WHITE a level
+  //   SUNLIT_TOPS stops below a white surface facing the sun: a view filled
+  //   with sunlit cloud has the darker quarter near its highlights, and the
+  //   key alone showed it as a grey card (sRGB 160 to 180, beige under a
+  //   low sun) where photographs show white tops;
   // - white: it stops down so that the brightest HIGH_SHARE of the picture
   //   ends at WHITE in daylight, and DIM stops lower for each stop that
   //   they are dimmer: the brightest parts of a dim view (the moonlit
@@ -8794,7 +8801,13 @@ const SkySound = (() => {
   }
   function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
-    const key = KEY - EYE * low;
+    // By day the key holds the exposure down no further than to show at
+    // WHITE what is SUNLIT_TOPS stops below a white surface facing the sun: a
+    // view of sunlit cloud alone has its highlights at white, not its mean
+    // at the key's grey (none where the sun is hidden: sunlitLevel is
+    // -Infinity there).
+    const tops = WHITE + SUNLIT_TOPS - sunlitLevel(state.alt, elev);
+    const key = Math.max(KEY - EYE * low, Number.isFinite(tops) ? tops : -Infinity);
     // By day, the highlights near the sun count for less (st.lit), and
     // as twilight's exposure takes over, in full again.
     const day = 1 - smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1]));

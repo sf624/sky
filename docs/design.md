@@ -2936,6 +2936,28 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   the eye opens up `EYE` = 0.85 stops for each stop, not all the way. So
   a night is darker than a day and dusk is in between, and black sea at night is exposed as
   the night sky, not lifted into noise;
+  but by day the key stops down no further than to show at `WHITE` a
+  level `SUNLIT_TOPS` = 2 stops below a white surface facing the sun
+  (`sunlitLevel`, the same light as the day's eye below), at the sun's
+  height it is evaluated for. Sunlit cloud is that bright: the brightest
+  3 % of a deck seen from above stand 1 to 1.7 stops below it, with the
+  sun from 12 to 61 degrees up. A view filled with sunlit cloud has its
+  darker quarter close to its highlights, and the key alone exposed it
+  as a grey card, about a stop short: from 11 km looking down on an
+  overcast deck the tops came out at sRGB 160 to 180, beige under a sun
+  21 degrees up, where photographs show white tops (about 200 to 230 of
+  luma) and a camera is given one or two stops more, as for snow. Now
+  `white` decides there, as it did already where dark sea or sky shared
+  the view, so the same cloud is as white alone as beside the sea: tops
+  about 220, a stop brighter (11 to 40 km looking down by day, +0.9 to
+  1.2 stops; towards the sun, with the sky in view, +0.2 to 0.3; inside
+  a sunlit cloud +0.3 to 0.9). Views whose highlights are dimmer than
+  that keep their key: the clear sky, haze, the deck from below, the
+  sea, the night (where the sun is hidden, `sunlitLevel` is -Infinity
+  and the limit does nothing). It fades out with the day's exposure in
+  twilight (`DUSK`): from 11 km over a deck the exposure rises smoothly
+  as the sun goes down, the change +0.4 stops at 9 degrees and none from
+  1.3 degrees down;
 - `white` brings `lit` to `WHITE` (2^0.3 before the tone curve: at the
   start of its shoulder, about 218 of 255) in daylight (`lit` at
   `DAY_HIGH` = 0.5 or more), and `DIM` = 0.6 stops lower for each stop
