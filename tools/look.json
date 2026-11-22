@@ -406,7 +406,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "aeda58f"
+   "fixed": "1799ea2"
   },
   {
    "name": "cirrus-crumbs-3km-zenith",
@@ -426,7 +426,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "aeda58f"
+   "fixed": "1799ea2"
   },
   {
    "name": "cirrus-crumbs-3km-sun",
@@ -446,7 +446,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "aeda58f"
+   "fixed": "1799ea2"
   },
   {
    "name": "cirrus-dusk-fan-3km",
@@ -477,7 +477,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "aeda58f",
+   "fixed": "1799ea2",
    "note": "fibrousness fails on 76fd6c6 (0.587); the luma of the sky high above the sun fails on e788502 (109; main 127)"
   },
   {
@@ -499,7 +499,7 @@
     }
    ],
    "bad": "e788502",
-   "fixed": "aeda58f",
+   "fixed": "1799ea2",
    "note": "99 on e788502; main 128"
   },
   {
@@ -520,7 +520,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "aeda58f"
+   "fixed": "1799ea2"
   }
  ]
 }
