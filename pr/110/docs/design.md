@@ -1541,8 +1541,9 @@ light on the water; the light that a cloud lets through diffusely
 ## Cirrus
 
 `highCloud`. The cirrus is one layer of ice with a base and a depth
-(10.8 km and 2 km), marched in its own pass. Two sources put ice into it;
-one set of fibres frays both; the light is summed along the march.
+(11.3 km and 2 km), marched in its own pass. Two sources put ice into it;
+one set of fibres frays both; where there is much of it, both gather in
+bands; the light is summed along the march.
 
 (Up to PR #110 it was two decks of 0.4 km in a shell from 12.2 to
 12.8 km, each a drawn field of column ice read flat, with hairs along a
@@ -1554,7 +1555,8 @@ passed the eye. Its forms are kept, as the first source below.)
 its base and depth (km), its form (0 a sheet, 1 figures and fibres, 2
 small cells), a size (km), `thick` (a factor on the optical depth) and
 `ice` (how far falling ice is drawn out, 0 to 1). The slider is its
-amount. The page uses 10.8, 2, 1, 0.6, 1, 1; forms 0 and 2 (cirrostratus,
+amount. The page uses 11.3, 2, 1, 0.6, 1, 1 (the default height, 11 km,
+lies just under the base, and 12.5 km in the layer's upper part); forms 0 and 2 (cirrostratus,
 cirrocumulus) are in the code but not on the slider: they wait for the
 weather's layers (issue #84), and are reached with the test parameter
 `ci` (see [development.md](development.md#url-parameters)).
@@ -1578,11 +1580,11 @@ shows.
   height of its ice (from the age where the ray crosses the layer's
   middle: one step of parallax mapping), and the steps take their shares
   of that column.
-- The forms are frayed by the fibres and by the generating field's small
-  sizes (the more the thinner the ice), and those small sizes eat a little
-  ice off their edges (`CI2_ERODE`), so that a form has no outline. Near
-  the eye, where their own texels (10 m) are soft, they take the fibres in
-  full.
+- The forms are frayed by the fibres alone (`CI2_FORM.z`): along the
+  streaks, never by anything round. (Frayed and eaten by the field's round
+  sizes, they stood as clots and crumbs, like broken altocumulus.)
+- Their depth for an ice of 1 is 4 (`CI2_FORM.x`, as on the two decks
+  before), and 0.7 of that at large amounts (`CI2_FORM.y`).
 
 **The generating field** (`uG2`): fBm with a spectral slope of -5/3
 (each size 2^(-1/3) of the one twice as large), 2048 x 2048 over a tile
@@ -1602,17 +1604,38 @@ and go along its streak. After Hogan and Kew (2005), who build cirrus for
 radiative transfer this way: a fractal field, displaced level by level
 along the fall streak.
 
-The field falls back at small amounts (`CI2_FEW`) and leads at large
-ones, where the drawn forms weigh half (`CI2_FORM.y`).
+The field falls back at small amounts (`CI2_FEW`). The heads' own field
+(`burst`) is read over the step's segment like the rest, and weighs little
+(`CI2_HEAD.y`): read at one point of each long step, it summed to crumbs.
+
+**Bands and lanes** (`ci2Lane`). From 0.3 of the slider the cirrus
+gathers in broad bands along the wind, some 20 to 40 km wide and 50 to
+100 km long, with lanes of clear or thinly veiled sky between; by the top
+of the slider they have joined. It is the field's large sizes read in a
+frame drawn out along the shear (`CI2_MB`), over a level that falls with
+the slider (`CI2_LANE`). The forms weigh by it, the field's level rises in
+the lanes, and the thin veil thins there by less (`ci2Veil`). The page
+starts at a band's edge (`CI2_BAND0`): a band to the north, a lane to the
+south. Without bands, much cirrus was ice in every direction: from inside
+the layer a white sky. Straight up from 3 km at four places, the share of
+sky deeper than 0.1, 0.3 and 1 at 0.7 of the slider is 49, 19 and 3 %
+(the two decks before: 54, 16 and 1 %); at 0.4, 21, 9 and 1 % (6, 3 and
+0 %); at 1, 90, 66 and 17 % (100, 62 and 13 %).
 
 Every read of the field repeats with the map: its frame is turned by
 (4, 3) with whole tiles to 256 km (`CI2_R`), and so are the fibres'
 frames.
 
-**Fibres.** The field's small sizes read drawn out along the shear, 12
-times as long as wide (`CI2_MF`), and a second set some 8 degrees off
-(`CI2_MG`); a place has the one or the other, wanders (`CI2_WANDER`), and
-is more or less fibrous. They are read on four sheets at fixed depths,
+**Fibres.** The field's small sizes read drawn out along the shear
+(`CI2_MF`): a tile of 20 km across it (texels of 10 m) and 270 km along
+it, and near the eye (a pixel under 30 m) a second size a third of that
+(`CI2_FINE`). The frame repeats with the map without being square: one row
+of whole numbers constant along the shear, the other any row that keeps
+the determinant small. (A square frame that repeats, 81 by 6.7 km, has
+fibres of 3 m: under a pixel from below the layer.) They wander by the
+field's large sizes (`CI2_WANDER`, over some 3 km: by smaller ones they
+read as waves), and a place is more or less fibrous. They are read on four
+sheets at fixed depths,
 where the ray crosses each, over a pixel: the steps are long and move
 from frame to frame, the sheets do not, so the fibres stay crisp near the
 eye and do not crawl. A step takes them from the sheets above and below
@@ -1622,10 +1645,12 @@ blurred by motion: near the eye a ray crosses many fibres in one step.)
 
 **The march.** `Q_CI_STEPS` steps (12 at `max`) where the ray enters the
 layer within 3 km, 5 by 10 km; crowded towards the eye where it is in the
-layer and the way is long; their bounds move from frame to frame. A thin
-even veil (`ciThin`) lies in the whole layer, for the halo. The depth
-over some 5 km (`wideT`), for the glow round the light, is read once per
-pixel.
+layer and the way is long; their bounds move from frame to frame near the
+eye and stand beyond some 7 km. A thin veil (`ciThin`, `ci2Veil`) lies
+under the layer's top, half of it in the first 0.35 km, for the halo. The
+depth over some 5 km (`wideT`), for the glow round the light, is read once
+per pixel, with the bands read over 40 km: the glow and the moon's ring do
+not go out in a lane.
 
 **Forms 0 and 2.** A sheet is the same field with little contrast, over
 its level nearly everywhere: a milky veil with faint striation. Small
@@ -1695,10 +1720,12 @@ programs compile (`g2Field`), so that it does not hold the first picture
 back.
 
 **What still differs from photographs**: the dense hooked tuft of an
-uncinus is softer than in photographs; at a low sun little cirrus can
-still show a drawn form's pad; the eye inside the layer sees bands and
-passing fibres but seldom a milky veil all round; thick ice does not grey
-at its core; the fine ripples across a sheet are missing.
+uncinus is softer than in photographs; at a low sun the lit fan is a
+bright mass near the sun with finer streaks above it, where photographs
+(and the two decks before) show broad lit sweeps high up; a form next to
+the moon glows as a plume; inside a band the sky towards the sun is still
+white; thick ice does not grey at its core; the fine ripples across a
+sheet are missing; from 40 km the plumes are soft.
 
 ## Sun, moon, stars
 
@@ -2373,7 +2400,7 @@ minimum and maximum). A past that had to change much was something else:
 its count drops to 1. The same check holds the light that stays put in a
 pixel that moves: the past is in doubt as far as `astray` times the
 pixel's own parallax slips. Under a thin sheet near the eye (just below
-its base at 10.8 km), the pixels round the sun move with the sheet by
+its base at 11.3 km), the pixels round the sun move with the sheet by
 their share, pixels a frame, while the glare and the sun's disc stay.
 Without the check they took their past from where the sheet had been: in
 flight the disc drew a streak and the glow banded copies of its edge,
