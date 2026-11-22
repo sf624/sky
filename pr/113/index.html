@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="7102fe0 PR #113">
+<meta name="build" content="60c08b4 PR #113">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2304,15 +2304,20 @@ const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's 
 // moving its surface by a share of its own size (see cloudShape, cloudField).
 // The discs' thresholds, for the cells of 2 km, 1 km and 500 m: at no amount; what the amount takes off; what the weather
 // map's amount does (it gathers the large heaps most); and the least (clear air stays between heaps).
-const vec3 CF_DISC = vec3(1.0, 1.08, 1.28), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
-const float CF_DISC_MIN = 0.45;
+const vec3 CF_DISC = vec3(1.02, 1.1, 1.3), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
+const float CF_DISC_MIN = 0.42;
+// The clusters: the mark of the map's amount over 10 km and more under which there are no heaps, with few clouds and
+// from half on, and half the width of the clusters' edge; how much the lanes raise the discs' thresholds; and how much
+// lower the largest discs' is deep in a cluster.
+const vec3 CF_MESO = vec3(0.54, 0.52, 0.05);
+const float CF_LANE = 0.4, CF_CORE = 0.12;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
 // near the eye of 38, 19, 9 and 5 m.
 const vec4 CF_HEAD = vec4(0.15, 0.4, 0.3, 0.2), CF_HEAD1 = vec4(0.16, 0.12, 0.08, 0.05), CF_HEAD2 = vec4(0.02, 0.011, 0.006, 0.003);
 const float CF_SEAM = 0.3;
-const float CF_RAG = 0.12;          // how far the seams between heads reach up into a heap's base, km
+const float CF_RAG = 0.08;          // how far the seams between heads reach up into a heap's base, km
 const float CF_HEAD0 = 0.36;         // the heads' height that moves nothing (about their mean)
 const float CF_GATE = 0.6;          // how much a head carves in the seams of the size above it
 
@@ -2325,7 +2330,7 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 // stratocumulus; 1: heaps, cumulus; tower: how much of a heap is a tower). From the weather map (R: amount, G: depth, B: the gusts' map,
 // which also moves the bases, A: where the air rises, towers) and the Clouds
 // slider. (One record per layer: a stack of layers is this, once each.)
-struct Layer { float level, depth, amount, form, tower, fair, gather; vec4 far; };
+struct Layer { float level, depth, amount, form, tower, fair, gather, lane, core; vec4 far; };
 Layer cloudLayer(vec2 x, float lod) {
   Layer a;
   float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
@@ -2345,6 +2350,16 @@ Layer cloudLayer(vec2 x, float lod) {
   // (Heaps: the slider says how many there are, and the map where they gather, at every amount alike.)
   a.fair = (0.55 + 0.6 * uCloud) * smoothstep(0.0, 0.05, uCloud);
   a.gather = w.r - 0.5;
+  // Heaps stand in clusters, streets and the walls of open cells, with clear lanes between: where the map's amount
+  // over some 10 km and more is under a mark, which falls as the slider rises, there are none (lane); deep in a
+  // cluster the heaps are larger (core).
+  // (Less most of the map's largest systems: no place is all cluster or all lane for a hundred km.)
+  // (Read elsewhere on the map, as far: the clusters lie apart from the sheets' systems, and the place where the
+  // page opens has heaps about it.)
+  vec2 xm = x / WEATHER_KM + vec2(-0.3125, 0.469);
+  float meso = textureLod(uWeather, xm, 3.5).r - 0.6 * (textureLod(uWeather, xm, 6.5).r - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
+  a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
+  a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
   // Towers, where the air rises (A) and the slider lets heaps grow.
   a.tower = smoothstep(0.75, 0.95, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
   a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.6 + 1.2 * w.g * w.g, 2.8 + 1.4 * w.g, a.tower), a.form);
@@ -2353,18 +2368,21 @@ Layer cloudLayer(vec2 x, float lod) {
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
 // carves the crowns of the size above it fully and its seams less (gate: of the size above the largest; left as that of the
 // smallest for the next read).
-float headsKm(vec4 h, vec4 km, inout float gate) {
+vec4 headsEach(vec4 h, vec4 km, inout float gate) {
   // (A seam between heads goes no deeper than CF_SEAM of a head: it has a floor, the surface that bears the heads.)
   vec4 s = max(2.0 * h - 1.0, -CF_SEAM);
   vec4 g = vec4(gate, CF_GATE + (1.0 - CF_GATE) * smoothstep(0.0, 0.5, s.rgb));
   gate = mix(CF_GATE, 1.0, smoothstep(0.0, 0.5, s.a));
-  return dot(g * (s - CF_HEAD0), km);
+  return g * (s - CF_HEAD0) * km;
+}
+float headsKm(vec4 h, vec4 km, inout float gate) {
+  vec4 e = headsEach(h, km, gate);
+  return e.r + e.g + e.b + e.a;
 }
 // The same, for the heads of 2 km to 250 m: the two largest (x) and the two smaller (y) apart.
 vec2 headsKm2(vec4 h, vec4 km, inout float gate) {
-  vec4 k0 = vec4(km.rg, 0.0, 0.0), k1 = vec4(0.0, 0.0, km.ba);
-  float g0 = gate, g1 = gate;
-  return vec2(headsKm(h, k0, g0), headsKm(h, k1, gate));
+  vec4 e = headsEach(h, km, gate);
+  return vec2(e.r + e.g, e.b + e.a);
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
@@ -2441,7 +2459,13 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float shaken = fine ? clamp(-6.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) * mix(1.0, 0.3, smoothstep(0.1, 0.3, length(p))) : 0.0;
   // (Where all is heaps, the noise is read for their discs only, below.)
   vec4 n = vec4(0.5), m = vec4(0.5);
-  if (!all) {
+#ifndef TOPS_MAP
+  if (!all)
+#else
+  // (The map of the tops takes the heaps' domes below and the layer's bound above: no noise.)
+  if (false)
+#endif
+  {
     n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
     m = textureLod(uNoise, q.xyz * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
   }
@@ -2498,7 +2522,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // sets how much of a cell is disc: the weather map gathers the heaps and clears lanes between them.
     // (Never smoother than that by much: read from afar or for the depth maps, the discs would melt away.)
     vec4 c = textureLod(uNoise, vec3(q.x, off.y + 0.11, q.z), clamp(lod, 1.5, 2.5));
-    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather, CF_DISC_MIN);
+    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane;
     const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
     // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
     // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
@@ -2623,8 +2647,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       // (Nor do they stand out farther than they are high over the base: a heap widens upwards from a flat base, and
       // no head hangs free beside it.)
       // (The base is level but not smooth: the heads' seams reach up into it by up to CF_RAG, lighter ragged gaps
-      // under a large heap; as a plane it was a featureless slab from below.)
-      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase + clamp(heads, -CF_RAG, 0.0)) / CF_EDGE;
+      // under a large heap; as a plane it was a featureless slab from below. Eased in and out: cut off at CF_RAG,
+      // the hollows had flat roofs with hard edges, angular patches from below.)
+      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase - CF_RAG * (1.0 - exp(-min(heads, 0.0) * min(heads, 0.0) / (CF_RAG * CF_RAG)))) / CF_EDGE;
       dn = max(dn, km < 0.0 ? 0.8 * km : km);
     }
     // (Where a pixel is wider than that edge, only as sharp as a pixel and
@@ -8281,8 +8306,7 @@ const SkySound = (() => {
             gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, noise, 0, z);
             gl.uniform1f(uZ, (z + 0.5) / n);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-          }]);
-          parts.push([1, () => {
+            // (The heads' slice with it: a part of its own made the batches as many again, and each waits a frame.)
             gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, heads, 0, z);
             gl.uniform1f(uZ, 2 + (z + 0.5) / n);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
