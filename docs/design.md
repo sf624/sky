@@ -2891,6 +2891,51 @@ to 0.011 stops over 20 frames from place to place. The band of glow
 
 `exposureFor` returns the exposure.
 
+**The night's key.** The exposure above is the eye's adaptation: it sets
+the rods' grey (`uNightEye`, `uNightGrey`), the night's steeper curve
+(`uNightDark`, `DARK_EYE`), the moon's sparkles, and it is what
+`window.__exposure` reads and `?expo=` pins. The screen shows a moonlit
+night darker than that: the exposure drawn (`uExposure`, `shownFor`) is the
+adaptation less `nightDimFor`, up to `NIGHT_DIM` = 1 stop at
+`NIGHT_KEY[1]` = 14.5 (a full moon's clouds from cruise), along a
+smoothstep in from 12 (the end of nautical twilight) and out again by 17.5
+(a moonless night from cruise). By day and through most of twilight it is
+0. It changes by at most 0.6 stops for each stop of the adaptation, which
+itself opens half a stop for each stop the night darkens (`NIGHT_RATE`):
+a darker night is still shown darker, and nothing switches.
+
+Under a full moon the brightest clouds are some 0.02 to 0.06 cd/m2 (0.05
+to 0.3 lux of moonlight on a white surface), at the foot of the mesopic
+range: the eye sees them clearly but dim, far from the cones' white. At
+the adaptation alone the owner's view from 8.9 km came out as deep dusk:
+a frame median of 31 of 255, tops 49 to 57, the sea between them 27, the
+sky 17. Tone mapping for low light maps such a scene into a reduced range
+(Kirk and O'Brien, 2011: a quarter to a half of the display's; Ferwerda et
+al., 1996: "a dim appearance on the display"), and film underexposes "day
+for night" by about two stops. Now: median 19, tops 30 to 35, sea 16, sky
+10; under a half moon 15 (19 before); the overcast deck from 11 km under a
+full moon 28 (41). The rule did not change since the night was set up
+(the exposure there was 14.43 on 18 November and 14.53 before this);
+lower clouds (#104) had already dimmed the tops from 84 to 57 (p95).
+
+It fades out on a moonless night because there the picture is the stars,
+the Milky Way and the zodiacal light over a near-black sky (luma 6 to 8),
+drawn at the eye's thresholds, and dimmed with the rest they fade: with
+the dimming going out by 18 instead of 17.5 (0.1 stops left at a moonless
+night's 17.6), the Milky Way in a view up from cruise went from 15 to 12
+of luma at its median. For the eye the dimming would grow on into the
+dark; the stars are why it does not. Under a full moon the stars 12
+levels over their surroundings went from 279 to 180 in a view up from
+cruise: about magnitude 4.5, where the eye sees down to about 4 under a
+bright sky.
+
+The dimming follows the adaptation, not the moon: late twilight with the
+same light is dimmed the same. From 11 km away from the sun on a moonless
+evening, the median at 11.7 degrees down went from 40 to 24, and towards
+the sun under a full moon the night no longer brightens after twilight
+(the median rose from 23 to 40 as the moon took over; now by at most 5
+levels, as at main near -3 degrees).
+
 **Adaptation.** Each frame the exposure moves
 towards its target by the page's clock (`now`, at most 0.1 s a frame): exponentially in stops, with
 a time constant of `ADAPT_FAST` = 0.2 s towards less exposure (a brighter
@@ -2958,7 +3003,8 @@ At the end of `main`:
    on the way back from the far clouds, made tan clouds, a golden glitter
    and an orange-brown rim
    along the far cloud tops at the horizon. The level for the meter is
-   taken here; then times `uExposure`.
+   taken here; then times `uExposure` (the adaptation less the night's
+   key, above).
    No shoulder keeps the hue: each channel meets the curve of steps 4 to
    6 on its own, as on a camera's sensor.
 2. The white balance `uBalance` (`balanceFor`). By day a camera's for
@@ -2998,8 +3044,8 @@ At the end of `main`:
    the whole picture (sky 17 and sea 5 to 6 of 255 under clouds at 60;
    now about 9 and 4). As the eye adapts to a darker night it grows
    steeper still: from `NIGHT_LOOK` to `DARK_LOOK` = 2.0, and its pivot
-   from `LOOK_PIVOT` down to `DARK_PIVOT` = 0.07, as the exposure (log2)
-   goes from 15.5 (about a full moon's) to 17.5 (a moonless night from
+   from `LOOK_PIVOT` down to `DARK_PIVOT` = 0.07, as the adaptation (log2,
+   the exposure before the night's key) goes from 15.5 (about a full moon's) to 17.5 (a moonless night from
    cruise; `DARK_EYE`). That is the eye's contrast on a dark night, for
    everything alike: the Milky Way, the zodiacal light and the stars stand
    out of a moonless sky, and fade under a moon because the moonlit sky
