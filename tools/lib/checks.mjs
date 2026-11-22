@@ -434,19 +434,21 @@ export const CHECKS = {
     // The turns are flown at the exposure of their first view, held (`?expo=`), and so are their stills: while
     // the view turns past the sun the meter moves (0.14 stops in the last 20 frames of the circle), and the mean
     // over frames, which lags it, would count as a difference of the picture.
-    const turn = 'date=172&time=15&cirrus=0.4&heading=30&yaw=50&pitch=-12&bank=45&at=40,60';
+    // (At a place among heaps: the detail kept is the clouds'. At 40,60, since #113 a clear lane between clusters,
+    // it was the sea's glitter's, which a banked view keeps less of.)
+    const turn = 'date=172&time=15&cirrus=0.4&heading=30&yaw=50&pitch=-12&bank=45&at=0,0';
     const t0 = await settled(turn);
     // The control of the turn: the same first view, level (the eye's direction of the banked camera, no roll),
     // turned by the rudder at the same rate (700 km/h at 45 degrees: 2.9 degrees a second; the rudder's 3).
     const fwd = t0.fl.cam.slice(6, 9), deg = 180 / Math.PI;
-    const level = `date=172&time=15&cirrus=0.4&heading=30&yaw=${Math.atan2(fwd[0], fwd[2]) * deg}&pitch=${Math.asin(fwd[1]) * deg}&at=40,60`;
+    const level = `date=172&time=15&cirrus=0.4&heading=30&yaw=${Math.atan2(fwd[0], fwd[2]) * deg}&pitch=${Math.asin(fwd[1]) * deg}&at=0,0`;
     const circle = 'date=172&time=15&cirrus=0.4&heading=0&yaw=20&pitch=-12&bank=60&at=40,60';
     const c0 = await settled(circle);
     // (a) and (c).
     const flights = [
       ...[0, 90, 180, 270].map((hd) => ({ name: `heading-${hd}`, q: `${base}&heading=${hd}&yaw=${hd + 20}&at=40,60`, hd, kmh: 900, frames: 61, ms: 16 })),
-      { name: 'turn-45', q: `${turn}&expo=${t0.e}`, hd: 30, bank: 45, kmh: 700, frames: 121, ms: 16, two: true, e: t0.e },
-      { name: 'rudder', q: `${level}&expo=${t0.e}`, hd: 30, rudder: 1, kmh: 700, frames: 121, ms: 16, e: t0.e,
+      { name: 'turn-45', q: `${turn}&expo=${t0.e}`, from: [0, 0], hd: 30, bank: 45, kmh: 700, frames: 121, ms: 16, two: true, e: t0.e },
+      { name: 'rudder', q: `${level}&expo=${t0.e}`, from: [0, 0], hd: 30, rudder: 1, kmh: 700, frames: 121, ms: 16, e: t0.e,
         before: "window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))" },
       // A whole circle: 200 km/h at 60 degrees turns at 17.5 degrees a second.
       { name: 'circle', q: `${circle}&expo=${c0.e}`, hd: 0, bank: 60, kmh: 200, ms: 32, e: c0.e,
@@ -455,7 +457,7 @@ export const CHECKS = {
     const result = {};
     for (const fl of flights) {
       const { fl: got, e } = await fly(fl.name, `${fl.q}&speed=${fl.kmh}`, fl.frames, fl.ms, fl.two, fl.before);
-      const want = flownPath({ x: 40, z: 60, heading: fl.hd, bank: fl.bank, rudder: fl.rudder, kmh: fl.kmh, frames: fl.frames, ms: fl.ms });
+      const want = flownPath({ x: fl.from ? fl.from[0] : 40, z: fl.from ? fl.from[1] : 60, heading: fl.hd, bank: fl.bank, rudder: fl.rudder, kmh: fl.kmh, frames: fl.frames, ms: fl.ms });
       await stillThere(fl.name, 'date=172&time=15&cirrus=0.4', got, fl.e ?? e);
       const d = diffPng(f(`${fl.name}-still`), f(fl.name), { out: f(`${fl.name}-diff`) });
       const sa = readPng(f(`${fl.name}-still`)), fa = readPng(f(fl.name));
