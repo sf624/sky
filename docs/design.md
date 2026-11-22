@@ -1605,8 +1605,9 @@ radiative transfer this way: a fractal field, displaced level by level
 along the fall streak.
 
 The field falls back at small amounts (`CI2_FEW`). The heads' own field
-(`burst`) is read over the step's segment like the rest, and weighs little
-(`CI2_HEAD.y`): read at one point of each long step, it summed to crumbs.
+(`burst`), read at one point of each step, weighs little (`CI2_HEAD.y`):
+at 0.7 each of a few long steps took one round patch of it, and their sum
+was crumbs.
 
 **Bands and lanes** (`ci2Lane`). From 0.15 of the slider the cirrus
 gathers in broad bands along the wind, some 20 to 40 km wide and 50 to
@@ -1615,7 +1616,8 @@ they have joined. It is the field's large sizes read in a frame drawn out
 along the shear (`CI2_MB`), over a level that falls with the slider
 (`CI2_LANE`). The forms weigh by it (0.3 in a lane), the field's level
 rises in the lanes, and the thin veil thins there by less (`ci2Veil`).
-The page starts at a band's edge (`CI2_BAND0`). Without bands, much cirrus
+The page starts at a band's edge (`CI2_BAND0`). Far off the bands are read
+once a pixel, near the eye at every step. Without bands, much cirrus
 was ice in every direction: from inside the layer a white sky.
 
 **Sheets.** The drawn sheets and streets (the ice's G) come in from 0.25
@@ -1683,8 +1685,12 @@ their tails, and a low sun crosses more ice than a high one, with no
 constant for dusk.
 
 The cirrus's shadow on the low clouds and the sea, and the glare, read
-the layer's vertical depth over some 0.5 km (`ci2Column`: four depths of
-the field's large sizes and the drawn forms, no fibres).
+the layer's vertical depth (`ci2Column`: four depths of the field's large
+sizes and the drawn forms, no fibres) over a footprint: for the shadow,
+the sun's disc at the light's distance plus a quarter of the layer's depth
+drawn out along the light, 0.5 to 8 km. (Over 0.5 km at any sun, the
+streaks' shadows at a low sun stood as a thin dark level line across the
+low clouds near the eye's level.)
 
 **Its own pass.** `highCloud` runs in a program of its own (`fs` with
 `CIRRUS_PASS`), drawn before the scene into one target of the frame's
