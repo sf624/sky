@@ -892,12 +892,15 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   - `form`: 1 for heaps (cumulus), 0 for a sheet of cells (stratocumulus);
     it falls as the slider and the cover over some 20 km (`region`, the
     map's mip 6.5) go from 0.5 to 0.85.
-  - `amount`: `0.16 + 0.72 uCloud` (0.08 more below 0.5), plus the map:
+  - `amount`: `0.44 + 0.44 uCloud`, a little less from 0.5 to 0.7, 0.09
+    more from 0.6 to 0.8 and 0.04 less again to the top, plus the map:
     2.2 times its R about 0.5 with few clouds (they stand in fields, the
     map's clumps and streets, with clear sea between), 0.6 times from 0.8
     on, and a seventh of that at the top of the slider (the cover is whole
-    everywhere). At most 0.55 for heaps: clear air between them inside a
-    field.
+    everywhere). At most 0.72 for heaps: clear air between them inside a
+    field. Set so that the share of the sea covered, seen straight down
+    from 11 km, is 0.25, 0.46, 0.60, 0.87, 0.92 and 1 at `cloud` 0.25, 0.5,
+    0.65, 0.8, 0.9 and 1 (measured on stills).
   - `tower`: where A is over 0.4 to 0.9, from `uCloud` 0.15 to 0.4, for
     heaps.
   - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 1.5 to 3 km (G); a
@@ -928,7 +931,11 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   lies at the base of a closed sheet (`CF_VEIL`: density 0.4, fading over
   the lowest 0.3 of the depth), which the fine noise does not erode:
   through the thinnest places one sees grey cloud, not the sea. (Pits
-  through a sheet were dark specks from far above.)
+  through a sheet were dark specks from far above.) The top of a sheet
+  stands higher over the largest of its cells of 4 km to 1 km, by up to
+  0.7 `CF_RELIEF` = 0.35 of its height (some 100 m; the profile is read at
+  `t / (1 + rise)`): relief without holes, which a low sun shows and a
+  high one hardly.
 - **The fine noise** (`cloudField`): `uNoise` again, 7 times finer
   (`DETAIL`: Worley cells of 285, 143 and 71 m), read at the pixel's own
   mip level (from far, cells of a few pixels thin the cloud evenly and do
@@ -937,8 +944,14 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   eye (`Q_MICRO`). Low in a cloud the cells' middles go (wisps); from 5 to
   30 % of the depth up, their seams (billows).
   - A sheet is eroded: a remap that takes up to `CF_ERODE` = 0.5 of
-    density, the thin places first. Reads without the fine noise (the
-    light's long steps, the depth maps) take none.
+    density, the thin places first, less half of `CF_CUT`, and what is
+    left is twice as dense (half a heap's sharpness). Reads without the
+    fine noise (the light's long steps, the depth maps) take its mean,
+    0.45: with none taken, the map of the clouds' shadow held a sheet's top
+    some 50 m over the top drawn, and with the sun at 3 degrees no crest
+    of a deck was lit. The fine noise is not read where a sheet is dense
+    whatever it takes (over 0.6 of density: it was half the cost of the
+    clouds' pass).
   - A heap is carved about its surface, by the fine noise and half by the
     base shape's own cells of 1 km and 500 m: `CF_KNOB` = 0.8 of density
     times the noise less 0.2 (heads stand out where it is lower, creases
@@ -947,7 +960,11 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     was a grain round a tower, and thin fragments grey ghosts), and what
     is left is `CF_SHARP` = 4 times as dense, up to 1: a hard, knobbly
     outline, dense right behind the surface. Where a pixel is wider than
-    that edge, only as sharp as a pixel and a half.
+    that edge, only as sharp as a pixel and a half, for the view's own
+    reads; the light's take the full sharpness (thinner, they let the sun
+    through a heap, which glowed evenly from behind). On heaps the small
+    cells of the fine noise weigh more (0.4, 0.33, 0.27), and the read 8
+    times finer twice as much: grain down to some 10 m near the eye.
 - **The base**: `min` with the field of a flat floor at the level, 8 per
   km: only the lowest 60 m count as a base (`fb`, for the light under a
   deck).
@@ -955,9 +972,6 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   density over `CF_FULL` = 0.18 (at most 1), times the water for the
   height over the base, its 2/3 power per km: 0.3 to 1.2 in a sheet, 1.6
   times that in a heap (0.6 to 1.2).
-
-The cover of the slider was judged by eye on stills from 11 km; it has
-not been measured.
 
 **The march** (`clouds`) runs from where the ray enters the shell (`ta`) to
 where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
@@ -2253,7 +2267,10 @@ on the map.
   (see [Exposure](#exposure-and-the-tone-curve)). The aureole follows the ice in front by
   0.4 (0.25 before).
 - The cirrus's shadow dims the direct light on the low clouds and the sea
-  (half the depth counts: ice scatters mostly forward). It reads the mean
+  (half the depth counts: ice scatters mostly forward). On the low clouds
+  it is taken where the ray crosses 1.1 km, not at the mean place it met
+  them: with the sun at 3 degrees a place 50 m higher takes the shadow of
+  cirrus 1 km farther off, and on a soft deck its edge stood in steps. It reads the mean
   of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
   over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
   `ciGlare`), as each call is a copy for the compiler. These calls leave
