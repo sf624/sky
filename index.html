@@ -2188,7 +2188,7 @@ void addSharp(vec3 p, vec3 od, vec4 dens, float scM, float extM, vec3 dir, float
 // sky-view and aerial-perspective tables, and the scene reads them where
 // each layer and the end of its ray lie. Directions: the azimuth from the
 // sun's, squeezed towards it (the glow), and the elevation from the
-// horizon, squeezed towards it (the horizon at v = 0.5). Distances: from
+// horizon, squeezed towards it (the horizon at v = LUT_VH). Distances: from
 // LUT_T0 to LUT_T1, evenly in their log. Two more slices hold the sky as the
 // sea sees it (from its surface, the whole way: skyAt; LUT_SEA) and the
 // whole ray, to the sea or out of the air (LUT_END). All in one 3D
@@ -2227,20 +2227,50 @@ void lutAxes(vec3 up, out vec3 sh, out vec3 side) {
 }
 // The horizon's elevation (radians, negative) at a height of alt km.
 float lutHorizon(float alt) { return -acos(clamp(RG / (RG + max(alt, 0.0)), 0.0, 1.0)); }
+// Above the horizon, v's share of the rows above it for x, the
+// elevation's share of the way from the horizon to the zenith: its square
+// root (dense near the horizon), and from above 1.6 km more rows where the
+// rays graze the boundary layer's top (BL.x): along such a ray the haze
+// ends within some 0.6 km of height, and the ray's depth and light change
+// several times over within a degree. With the square root alone a row
+// spanned 0.8 km of that height at 4 km, 1.5 km at 11 km: the table mixed
+// rays on either side of the top, and the sky at the horizon in twilight
+// showed a band, the lower edge of a setting sun a red row (its depth from
+// the table some 50 % too deep in the haze). An arctangent step adds some
+// 5 rows there (LUT_WARP); 8 rows come from below the horizon, where the
+// sky changes slowly but near the horizon (LUT_VH: the horizon at 40 rows
+// of 96, not 48).
+const float LUT_VH = floor(LUT_EL * 5.0 / 12.0 + 0.5) / LUT_EL, LUT_WARP = 0.05;
+float lutWarp(float x, float alt) {
+  float c = LUT_WARP * smoothstep(1.6, 2.6, alt);
+  float r0 = RG + alt, hor = lutHorizon(alt), span = 0.5 * PI - hor;
+  float el0 = -acos(min((RG + BL.x) / r0, 1.0));     // the ray that grazes the top
+  float x0 = (el0 - hor) / span, w = 0.6 / (r0 * max(sin(-el0), 1e-3) * span);
+  return (sqrt(x) + c * (atan((x - x0) / w) - atan(-x0 / w))) / (1.0 + c * (atan((1.0 - x0) / w) - atan(-x0 / w)));
+}
 vec2 lutUV(vec3 d, vec3 up, float alt) {
   vec3 sh, side;
   lutAxes(up, sh, side);
   float phi = atan(dot(d, side), dot(d, sh));
   float el = asin(clamp(dot(d, up), -1.0, 1.0)), hor = lutHorizon(alt);
-  float v = el >= hor ? 0.5 + 0.5 * sqrt((el - hor) / (0.5 * PI - hor)) : 0.5 - 0.5 * sqrt((hor - el) / (hor + 0.5 * PI));
+  float v = el >= hor ? LUT_VH + (1.0 - LUT_VH) * lutWarp((el - hor) / (0.5 * PI - hor), alt) : LUT_VH * (1.0 - sqrt((hor - el) / (hor + 0.5 * PI)));
   return vec2(0.5 + 0.5 * sign(phi) * sqrt(abs(phi) / PI), v);
 }
 vec3 lutDir(vec2 uv, vec3 up, float alt) {
   vec3 sh, side;
   lutAxes(up, sh, side);
-  float s = uv.x - 0.5, q = uv.y - 0.5, hor = lutHorizon(alt);
+  float s = uv.x - 0.5, hor = lutHorizon(alt);
   float phi = PI * sign(s) * 4.0 * s * s;
-  float el = q >= 0.0 ? hor + (0.5 * PI - hor) * 4.0 * q * q : hor - (hor + 0.5 * PI) * 4.0 * q * q;
+  float q = 1.0 - uv.y / LUT_VH, el = hor - (hor + 0.5 * PI) * q * q;
+  if (uv.y >= LUT_VH) {
+    // (lutWarp turned back, by halving.)
+    float lo = 0.0, hi = 1.0, t = (uv.y - LUT_VH) / (1.0 - LUT_VH);
+    for (int i = 0; i < 24; i++) {
+      float m = 0.5 * (lo + hi);
+      if (lutWarp(m, alt) < t) lo = m; else hi = m;
+    }
+    el = hor + (0.5 * PI - hor) * 0.5 * (lo + hi);
+  }
   return cos(el) * (cos(phi) * sh + sin(phi) * side) + sin(el) * up;
 }
 #endif
