@@ -798,9 +798,10 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     field. Set so that the share of the sea covered, seen straight down
     from 11 km, is 0.25, 0.46, 0.60, 0.87, 0.92 and 1 at `cloud` 0.25, 0.5,
     0.65, 0.8, 0.9 and 1 (measured on stills).
-  - `tower`: where A is over 0.4 to 0.9, from `uCloud` 0.15 to 0.4, for
+  - `tower`: where A is over 0.75 to 0.95, from `uCloud` 0.15 to 0.4, for
     heaps.
-  - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 1.5 to 3 km (G); a
+  - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
+    before the sun was two lobes one on the other); a
     tower's 2.8 to 4.2 km.
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
   the depth: flat under, round over. `k` = 2, and 3 for a tower, which
