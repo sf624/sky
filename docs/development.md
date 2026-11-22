@@ -65,6 +65,8 @@ These are read directly.
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
+| `ci` | none | A test: the cirrus's layer, `base,depth,form,size,thick,ice` (km, km, 0 a sheet / 1 figures and fibres / 2 small cells, km, a factor on the optical depth, 0 to 1); an empty place keeps the page's value (`ci=11.3,2`, `ci=,,0,,2` for a cirrostratus veil, `ci=9.5,0.3,2,0.15,3,0` for cirrocumulus). See [design.md](design.md#cirrus) |
+| `cidbg` | none | A test: `cidbg=X` draws no cirrus but blacks out where its optical depth along the ray is over X (to measure how thick it is) |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
 | `debug` | stored choice, else off | `1`: shows the debug overlay, `0`: hides it (see [Reporting a flaw](#reporting-a-flaw-with-the-debug-overlay)). Not stored; the `I` key stores its choice |
@@ -520,6 +522,12 @@ was part of the `noise` program, which every page draws. A renderer
 without a GPU builds the textures a quarter as wide (see
 [design.md](design.md#cirrus)). Views with `cirrus=0` build nothing.
 
+All of the above was measured on the two decks that the layer of PR #110
+replaced (see [design.md](design.md#cirrus)). The layer's pass, measured on
+2026-11-23 at 1280 x 720 against those decks, in flight, in turns: 0.75 ms
+against 0.78 to 0.84 from 3 km looking up, 1.5 to 1.8 against 1.84 at
+11 km towards the sun, 1.33 against 1.67 inside the layer.
+
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
 to 0.35 of the canvas per side (see
@@ -614,7 +622,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
     the way as the gradient at twice its angle, and the ice's mean age
     with its weight; the map's channels):
     `iceField`, `iceWay`, `iceFibres` and `ciMap` in the `ice` shader,
-    `ciDensity` in `fs`.
+    `ci2FormIce` in `fs`.
   - `WEATHER_KM` and `ICE_KM`: in the `ice` shader too.
   - erf after Winitzki: `iceErf` in the `ice` shader, `ciPhi` in `fs`.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
@@ -668,7 +676,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   cirrus of round 19 162 s, of 7d1a635 165 s; that scene without the
   cirrus 11.8 s, the cirrus alone (its pass, as below) 27.3 s. So the
   cirrus is a program of its own (`CIRRUS_PASS`), compiled beside the
-  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciHair`,
+  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ci2Column`,
   `cirrusDepth`) in either program shows as seconds there: make it in a
   loop that already makes it (as the scene reads the clouds' and the
   sea's shadows and the glare's depth in one loop: 13.7 s with three
