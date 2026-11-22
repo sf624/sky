@@ -43,6 +43,8 @@ time (see the next section).
   a larger `yaw` turns the view to the right (clockwise seen from above),
   and a drag to the right lowers it. `pitch` is positive upwards.
   `camera(yaw, pitch)` gives the column-major `uCam`: right, up, forward.
+  With the aircraft banked or climbing, `cameraOf(view)` turns it by the
+  aircraft's attitude (see [Steering](#steering)).
   `uTan` is the tangent of half the vertical field of view (`FOV` = 62
   degrees for the hero).
 - **Spectra** are twelve wavelengths, 405 to 680 nm in steps of 25 (`WL`),
@@ -83,8 +85,8 @@ The JS then runs once, at load, and does little:
    value (the browser clamps it to the slider's range and step). Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
-   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`,
-   `at`, `pixels` and `res` are read directly (see
+   time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`, `bank`,
+   `climb`, `at`, `pixels` and `res` are read directly (see
    [development.md](development.md#url-parameters)). Without `yaw`, the view
    starts 65 degrees to the side of the sun; without `heading`, the
    aircraft flies 60 degrees to the left of the view.
@@ -200,12 +202,14 @@ which asks for one `requestAnimationFrame(frame)`.
   once, with `finish`; it takes about a quarter of a second: while the haze
   slider moves, it is built `HAZE_WAIT` = 250 ms after the last move), runs
   `celestial()` and sets the panel's labels;
-- moves the aircraft: `state.drift` grows by `speed / 3600 * dt` along
-  `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
+- flies the aircraft (`fly`, see [Steering](#steering)): the controls,
+  the turn, the climb, and `state.drift` grows by `speed / 3600 * dt`
+  along `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
   aircraft never jumps);
 - calls the renderer, which draws the clouds' depth maps first when they
   are out of date (see [The clouds' shadow](#the-clouds-shadow));
-- asks for another frame only if the renderer returned true.
+- asks for another frame only if the renderer returned true, or a
+  control of the steering is held.
 
 The renderer returns true while the aircraft flies, while its picture is
 still settling, or while the exposure moves. So the page draws nothing at rest once the picture is
@@ -259,6 +263,138 @@ heights in km end below 300, those in metres start there), or as `m` or
 `km` after it says. The state keeps the height itself, not the slider's
 place: `?alt=11` draws at 11 km exactly, as before; a height set by the
 slider is rounded to 10 m.
+
+## Steering
+
+The aircraft is steered (`fly`, in the wiring of the script, once a frame
+before the renderer). A simple model, not a simulator:
+
+- **State.** `state.heading` (radians, the `yaw` convention), `state.climb`
+  (the angle of the flight path, nose up positive) and `state.bank` (right
+  wing down positive). The eye's `state.yaw` and `state.pitch` stay in the
+  world as before; when the aircraft turns by d (`turnBy`), the eye turns
+  by d too, so one keeps looking out of the same window. The sun, the moon
+  and the stars do not move.
+- **The camera.** Level (`bank` and `climb` both 0), `cameraOf` is
+  `camera(yaw, pitch)`, to the last bit: a view without steering draws as
+  before. Otherwise it is the aircraft's frame (`basis(heading, climb)`,
+  rolled by the bank about the nose) times the eye's direction within it
+  (`basis(yaw - heading, pitch)`). Looking ahead the horizon tilts by the
+  bank; out of the side window the bank also raises or lowers the view.
+  Every reader of `uCam` (the frame, the light pass, the meter's weights
+  near the sun, the lens glare, `whence`) takes any rotation; the glare
+  lies along the picture's axes, as in a photograph.
+- **The turn.** A coordinated turn: the heading changes at g tan(bank) / v
+  (`G`, v the speed in km/s), plus the rudder's `YAW_RATE` (3 degrees a
+  second), at most `TURN_MAX` (30 degrees a second). The way of a frame
+  follows the heading of its middle (the chord of the arc flown), at
+  `v cos(climb)`; the altitude changes at `v sin(climb)`, through
+  `climbTo` (the sound) and `setAltitude` (the state, the slider, the field,
+  the limits `ALT_MIN` and `ALT_MAX`; the one path of every altitude),
+  within 0.3 to 40 km. At the top or the bottom of the range the
+  climb eases back to 0 at `PITCH_RATE`.
+- **The controls** give rates from -1 to 1: the keys (by `code`, so WASD
+  sits in the same place on every layout; not while the focus is in a
+  control, and they do not wake the panel) and the stick (its deflection
+  to the rim; shown on a touch screen or with `?stick=1`, and where the
+  panel would cover it, only while the panel has faded; held, it keeps
+  the panel away). Roll at `ROLL_RATE` (30 degrees a second) up to
+  `BANK_MAX` (60), pitch at `PITCH_RATE` (5) up to `CLIMB_MAX` (15). Let
+  go, the attitude stays. Level (`L`, the panel's button, the stick's)
+  moves both back to 0 at those rates. The panel has no slider for the
+  attitude: the HUD shows it.
+- **Speed 0.** The aircraft stands: bank and climb only tilt the view, the
+  rudder turns it on the spot. `fly` returns true
+  while a control acts, and `frame` then asks for the next frame even when
+  the renderer has settled.
+- **What follows the place, not the heading:** the clouds, the sea, the
+  cirrus (read at `p.xz + uDrift`), the towers' grids (`state.drift`), the
+  clouds' depth maps. The sea's wind is fixed in the world. The sound
+  follows the speed and the altitude only.
+
+## The HUD
+
+A head-up display over the picture (`drawHud`, `paintHud`, after Steering
+in the script), on a 2D canvas of its own (`.hud`) between the picture and
+the overlays; it takes no pointer, so a drag on it turns the eye.
+
+- **On and off.** Off at first: the page's aim is a picture like a
+  photograph. `?hud=1` / `?hud=0`, else the stored choice (`sky.hud`, as
+  `sky.lang`), else off. The panel's switch and `H` (a steering key: the
+  same focus rule, it does not wake the panel) turn it over and store the
+  choice. Off, the canvas is hidden and never gets a context: no pixels,
+  no drawing, and every other picture as before.
+- **When it draws.** `frame` calls `drawHud` after the renderer; it draws
+  only when its key (the CSS size, the device pixel ratio, `cameraOf(view())`,
+  heading, bank, climb, speed, altitude) has changed. At rest nothing is
+  drawn; in flight, once a frame (2D lines and text).
+- **Two parts, as a helmet's display.** The readouts are fixed to the
+  screen (to the eye), so they are always in view; the attitude is drawn
+  on a glass fixed to the airframe, so it is seen only where the view
+  takes in the direction of flight. Both are laid out in degrees
+  (`HUD_DEG`, about 28 degrees across and 25 high): the readouts from the
+  middle of the screen, the glass from the nose, at the same size. Looking
+  ahead the nose is in the middle of the screen, and the two make one HUD.
+- **The helmet's readouts**, upright on the screen (they bank with a view
+  from the aircraft, as the head does): the speed (km/h) in a box on the
+  left; the altitude (`altText`, the panel's unit) in a box on the right,
+  with the vertical speed (m/s) under it; the aircraft's heading (compass
+  bearing, `bearing`; not the direction of view) in a box at the top. The
+  heading is a number, not a tape: a tape fixed to the screen would put
+  bearings where the world shows other ones whenever the eye looks aside.
+  On a narrow screen (a phone upright) the side boxes come in to stay
+  `HUD_SIDE_PX` from the edges.
+- **A glass fixed to the airframe.** A plane square to the nose at a
+  distance of 1, with the aircraft's right and up as its axes
+  (`airframe`, which `cameraOf` uses too); every point of it is projected
+  with the picture's own camera (`cameraOf`, the vertical field `FOV`, the
+  canvas's CSS size). So it sits round the nose wherever the eye looks:
+  ahead it fills the middle of the view, with the eye 20 degrees aside it
+  is seen 20 degrees aside (a little askew, as a glass seen at a slant),
+  and out of the side window it is out of view. Lines are cut where they
+  would pass behind the eye; the canvas's edge and the ladder's area clip
+  the rest, so nothing pops in or out. Where the glass passes under a
+  readout it is wiped out (`destination-out`), at full in the readout's
+  zone and fading over 0.8 of a degree round it, so the readouts stay
+  readable and nothing is shown twice.
+- **True to the world.** The horizon line and the pitch ladder (every 5
+  degrees, solid above, dashed below, numbered, their tips towards the
+  horizon) lie on the glass where the world's directions cross it: the
+  horizon line is the plane of zero pitch through the eye, the rungs are
+  the elevations on the vertical through the nose, each along its circle
+  of elevation. They are clipped to the ladder's area of the glass; a
+  rung's number is drawn only where it fits in the area whole, never cut.
+  The sea's horizon lies below the line by the dip of the altitude (0.56
+  degrees at 0.3 km, 3.4 at 11 km): that is right, not an error.
+- **Upright on the glass:** the flight path marker at the nose (the model
+  has no angle of attack nor sideslip: the aircraft flies where the nose
+  points) and the bank scale round it (10, 20, 30, 45, 60 degrees; its
+  pointer at minus the bank, square to the horizon). They bank with the
+  airframe; the eye, which turns with the aircraft, sees them upright
+  when it looks ahead. Text takes the glass's local transform.
+- **Look.** Green (`HUD_GREEN`) over a thin dark edge (each layer is
+  stroked dark first, then green), so it reads on a bright cloud deck,
+  the blue sky, at dusk and at night. Numbers 1 degree high (12 CSS px on
+  a phone upright, 16 at 1080 lines, 21 at 1440), but never smaller than
+  `HUD_MIN_PX` (10 CSS px): on a short screen (a phone on its side) the
+  whole layout, the glass's too, grows to that, while the ladder's rungs
+  stay at their true elevations. Lines of whole device pixels; the canvas
+  holds the screen's pixels (`devicePixelRatio`). System fonts only,
+  numbers and units only: no language.
+- **The panel**, while it is shown, lies over the middle of the screen on
+  most screens (on a phone, over nearly all of it), and so over the HUD;
+  it fades a few seconds after the last touch, and the HUD is clear. The
+  HUD does not move out of its way: no place would be clear of it on a
+  phone, and readouts that jump as the panel comes and goes read worse.
+- **The default view** looks 60 degrees right of the nose: the glass is
+  then out of view (its right edge may touch the left of a wide screen),
+  and only the readouts show. A drag to the right (the view turns left),
+  or `?yaw=` equal to `?heading=`, looks ahead; the page has no control of
+  its own for that.
+- `window.__hud()` gives the glass's anchor (the nose on the screen), its
+  horizon line as drawn, whether any of it is on the screen (`airframe`),
+  the scale of the glass and of a degree of the layout, and the zones of
+  the readouts (`helmet`), for the tools (`check steer`).
 
 ## Sun, moon and sky in the JS
 
@@ -3242,7 +3378,7 @@ count, capped by `uTrust`, which the JS sets per frame:
 | Situation | `uTrust` | New frame weighs |
 |---|---|---|
 | First frame, canvas resized, or a jump of more than 1 km | 0 | 1 |
-| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames | 1 | 1/2 |
+| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames. A climb in flight, less than `CLIMB_STEP` = 50 m a frame, is motion, not a change: the past is moved along (`uWay.y`) | 1 | 1/2 |
 | The view moves, the aircraft flies, or the exposure moves | `IN_MOTION - 1` = 9 | 1/10 |
 | At rest | 63 | 1/(n + 1): the plain mean |
 
