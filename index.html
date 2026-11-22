@@ -2232,7 +2232,7 @@ vec3 shake = vec3(0.0);
 // What cloudShape last found: its layer's form (formAt), how high over the base of its layer the
 // place is (km), and as a share of the layer's depth (0 to 1); and how
 // far the fine noise is read from its own place there (cloudField).
-float overBase = 0.0, heapUp = 0.0, formAt = 0.0, veil = 0.0;
+float overBase = 0.0, heapUp = 0.0, formAt = 0.0, veil = 0.0, knob = 0.5;
 vec3 swirl = vec3(0.0);
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -2253,7 +2253,10 @@ float topsH;
 // (roughly the distance in km, for the strides).
 const float CF_K = 0.5;             // the field per unit of density
 const float CF_FULL = 0.18;         // the density (0 to 1) at which a cloud is as dense as SIGMA
-const float CF_ERODE = 0.5;         // how much density the fine noise takes off at most
+const float CF_ERODE = 0.5;         // how much density the fine noise takes off a sheet at most
+const float CF_KNOB = 0.5;          // heaps: how much density the fine noise moves their surface by, in and out
+const float CF_CUT = 0.1;           // heaps: the density left that counts as none
+const float CF_SHARP = 4.0;         // heaps: how much denser what is left is (a hard edge)
 const float CF_LO = 0.45, CF_HI = 0.95; // the range of the heaps' base shape (Perlin-Worley)
 const vec2 CF_VEIL = vec2(0.4, 0.3); // the veil at the base of a closed sheet: its density, and the share of the depth it fades over
 const float CF_CLOSE = 0.68, CF_FLOOR = 0.6;  // the amount over which the cover closes, and the floor under the shape that closes it
@@ -2279,8 +2282,8 @@ Layer cloudLayer(vec2 x, float lod) {
   // and thickens the cover. Heaps keep clear air between them inside a
   // field.
   // (At the top of the slider the cover is whole everywhere.)
-  a.amount = 0.16 + 0.72 * uCloud + mix(3.0, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
-  a.amount = clamp(a.amount, 0.0, mix(1.0, 0.6, a.form)) * smoothstep(0.0, 0.05, uCloud);
+  a.amount = 0.16 + 0.72 * uCloud + 0.08 * (1.0 - smoothstep(0.2, 0.7, uCloud)) + mix(2.2, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
+  a.amount = clamp(a.amount, 0.0, mix(1.0, 0.55, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // Towers, where the air rises (A) and the slider lets heaps grow.
   a.tower = smoothstep(0.4, 0.9, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
   a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.9 + 2.2 * w.g * smoothstep(0.1, 0.5, uCloud), 2.8 + 1.4 * w.g, a.tower), a.form);
@@ -2349,6 +2352,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float sn = (n.r + 1.0 - wn) / (2.0 - wn), sm = (m.r + 1.0 - wm) / (2.0 - wm);
   float shape = clamp((mix(sn, sm, CF_BIG) - CF_LO) / (CF_HI - CF_LO), 0.0, 1.0);
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
+  knob = 1.0 - (0.6 * n.b + 0.4 * n.a);
   if (a.form < 1.0) {
     // A sheet: packed cells at every size from 8 km to 500 m (the Worley
     // cells themselves, which meet in creases: thin lines where two large
@@ -2391,24 +2395,50 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float c = min(f, base);
   fb = f - base;
   float under = min(CF_K * veil, base);
-  // (Heaps are denser at their edge than a sheet: crisp outlines.)
-  edge = CF_K * CF_FULL * mix(1.0, 0.6, formAt);
+  edge = CF_K * CF_FULL;
   bump = 0.0;
-  if (fine && c > 0.0 && c < CF_K) {
-    vec3 qd = q.xyz * DETAIL + swirl;
-    vec4 d = textureLod(uNoise, qd, lod + 2.8);
-    float hf = 0.625 * d.g + 0.25 * d.b + 0.125 * d.a;
-    float e = mix(hf, 1.0 - hf, smoothstep(0.05, 0.3, heapUp));
+  if (c > -0.2 * CF_KNOB * CF_K * formAt) {
+    // How much the fine noise takes, of the most it may (e). A read without
+    // it takes none from a sheet, and its mean from heaps.
+    float e = 0.0;
+    bool carve = fine && c < CF_K;
+    if (carve) {
+      vec3 qd = q.xyz * DETAIL + swirl;
+      vec4 d = textureLod(uNoise, qd, lod + 2.8);
+      float hf = 0.625 * d.g + 0.25 * d.b + 0.125 * d.a;
+      // Wisps low in a cloud (the Worley cells' middles go), billows higher
+      // up (their seams go: round heads in creases). On heaps the base
+      // shape's own cells of 1 km and 500 m carve too: knobs on knobs.
+      e = mix(hf, mix(1.0 - hf, 0.5 * (1.0 - hf) + 0.5 * knob, formAt), smoothstep(0.05, 0.3, heapUp));
 #if Q_MICRO
-    float l1 = lod + 4.7;
-    if (l1 < 1.5) {
-      vec3 u = vec3(fract(q.x), q.y, fract(q.z));
-      vec4 mm = textureLod(uNoise, vec3(50.0 * u.x + 25.0 * u.z, 56.0 * u.y, 50.0 * u.z - 25.0 * u.x), l1);
-      e += 0.3 * (1.0 - smoothstep(0.5, 1.5, l1)) * (1.0 - (0.625 * mm.g + 0.25 * mm.b + 0.125 * mm.a) - 0.4);
-    }
+      float l1 = lod + 4.7;
+      if (l1 < 1.5) {
+        vec3 u = vec3(fract(q.x), q.y, fract(q.z));
+        vec4 mm = textureLod(uNoise, vec3(50.0 * u.x + 25.0 * u.z, 56.0 * u.y, 50.0 * u.z - 25.0 * u.x), l1);
+        e += 0.3 * (1.0 - smoothstep(0.5, 1.5, l1)) * (1.0 - (0.625 * mm.g + 0.25 * mm.b + 0.125 * mm.a) - 0.4);
+      }
 #endif
-    float er = CF_ERODE * clamp(e, 0.0, 1.0);
-    bump = CF_K * (c / CF_K - er) / (1.0 - er) - c;
+    }
+    // A sheet is eroded (a remap: its thin places go first). A heap is
+    // carved about its surface by CF_KNOB of density, some 120 m from the
+    // deepest crease to the highest head (heads stand out where the noise is
+    // under 0.2, creases go in elsewhere; its mean is 0.54): billows on its
+    // whole outside, a cauliflower.
+    e = clamp(e, 0.0, 1.0);
+    float er = CF_ERODE * e;
+    float dn = mix((max(c, 0.0) / CF_K - er) / (1.0 - er), c / CF_K - CF_KNOB * ((carve ? e : 0.54) - 0.2), formAt);
+    // A heap is dense right behind its surface (a sheet thickens slowly):
+    // what is left after the carving is CF_SHARP times as dense, up to 1.
+    // So its outline is hard and knobbly, and a fragment too thin to
+    // outlast the carving is gone, not a grey ghost.
+    // (Less CF_CUT first: the thinnest of it, a skirt of specks smaller
+    // than a step of the march, was a grain in the air round a tower.)
+    dn -= CF_CUT * formAt;
+    // (Where a pixel is wider than that edge, only as sharp as a pixel and
+    // a half: a harder edge stood in steps, and fragments of a few texels
+    // of the noise were small squares.)
+    if (dn > 0.0) dn = min(dn * mix(1.0, clamp(0.39 * exp2(-lod), 1.0, CF_SHARP), formAt), 1.0);
+    bump = CF_K * dn - c;
   }
   return veil > 0.0 ? max(c + bump, under) : c + bump;
 }
@@ -2424,7 +2454,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
 // higher up).
 float cloudExtinction(float f, float lod, float y, float body, float edge) {
   float x = clamp(f / edge, 0.0, 1.0);
-  return SIGMA * x * clamp(pow(max(y * (CT - CB), 0.0), 2.0 / 3.0), 0.3, 1.2);
+  float up = pow(max(y * (CT - CB), 0.0), 2.0 / 3.0);
+  // (Heaps are denser than a sheet: the air in them rises faster.)
+  return SIGMA * x * mix(clamp(up, 0.3, 1.2), clamp(1.6 * up, 0.6, 1.2), formAt);
 }
 
 // Extinction (per km) at p. fine: with the fine noise.
@@ -2853,7 +2885,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         }
         lit = false;
         fog = false;
-        next = clamp(-0.5 * f, FINE * dsIn, COARSE * dsAir);
+        next = clamp(-0.35 * f, FINE * dsIn, COARSE * dsAir);
         // Over the tops round here (uTops), the ray meets no cloud before it
         // has come down to them or gone as far sideways as they hold: it
         // strides there, less a share of a stride new for each pixel and
