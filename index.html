@@ -8074,6 +8074,9 @@ const SkySound = (() => {
                                               // band stands more than GLOW_FREE stops above the sky
   const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
                                        // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
+  const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // by day the eye opens up at most DAY_OPEN[0] stops past the exposure
+                                       // that shows a white surface facing the sun, in the sun's light at the eye, at
+                                       // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
   const MONO_DEEP = [-3, -6];                 // the first in civil twilight, the second from the sun MONO_DEEP[1] down
@@ -8543,16 +8546,25 @@ const SkySound = (() => {
   // Unchanged by day and by night.
   const DAY_BALANCE = [0.932, 1.013, 1.074];
   const BALANCE_ADAPT = 0.5, BALANCE_IN = [2.5, -0.5], BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
+  // The sun's light at height alt, with the sine of its elevation mus,
+  // through the air, by wavelength (relative to the bare sun's), into out:
+  // none where the planet hides it.
+  const sunThrough = (alt, mus, out) => {
+    const ds = [0, 0, 0], sun = sunDepth(RG + alt, mus, ds), bMe = BETA_M * MIE_EXT * state.haze;
+    for (let w = 0; w < NW; w++) out[w] = sun ? Math.exp(-(BR[w] * ds[0] + bMe * MA[w] * ds[1] + BO[w] * ds[2])) : 0;
+    return out;
+  };
+  const sunScratch = new Float64Array(NW);
   const lightOn = (alt, mus, out) => {
     const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
     const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
     const k00 = (j0 * NMU + i0) * NW, k01 = k00 + NW, k10 = k00 + NMU * NW, k11 = k10 + NW;
-    const ds = [0, 0, 0], sun = mus > 0 && sunDepth(RG + alt, mus, ds), bMe = BETA_M * MIE_EXT * state.haze;
+    const sun = sunThrough(alt, mus, sunScratch);
     for (let w = 0; w < NW; w++) {
       out[w] = upData[k00 + w] * (1 - fx) * (1 - fy) + upData[k01 + w] * fx * (1 - fy)
              + upData[k10 + w] * (1 - fx) * fy + upData[k11 + w] * fx * fy
-             + (sun ? Math.exp(-(BR[w] * ds[0] + bMe * MA[w] * ds[1] + BO[w] * ds[2])) * mus / (4 * Math.PI) : 0);
+             + (mus > 0 ? sun[w] * mus / (4 * Math.PI) : 0);
     }
     const c = W.map(row => row.reduce((a, v, w) => a + v * out[w], 0));
     const y0 = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
@@ -8657,10 +8669,45 @@ const SkySound = (() => {
   //   floor held the median at the same shown level from dusk down to a
   //   moonless night: a half moon's clouds came out nearly as light as by
   //   day, as in a long exposure, yet with the stars of a short one.
+  // - and by day the eye opens up no further than daylight lets it: the
+  //   day's exposure (byDay) is at most DAY_OPEN[0] stops past the one
+  //   that shows a white surface facing the sun, in the sun's light at the
+  //   eye (sunlitLevel), at WHITE. It hangs on the light where the eye is,
+  //   not on the view, so turning the view does not move it; it goes with
+  //   the day's exposure as twilight's takes over, and where the planet
+  //   hides the sun. Up to the cruise heights no view by day comes near
+  //   it: the darkest, the deep blue zenith from 11 km, stays 0.26 stops
+  //   below or more. From DAY_KM[0] km up it closes to DAY_OPEN[1] at
+  //   DAY_KM[1] km, a little above where a view with the sunlit Earth in it
+  //   stands: above the cruise heights the sky over the eye is near space,
+  //   and the eye, adapted to the sun and the sunlit Earth round it, sees
+  //   it near black. Without it a view of the sky alone opened up 4.4 to 5
+  //   stops further at 40 km and 1.2 to 1.6 at 20 km, and came out a clear
+  //   dark blue, where photographs from the stratosphere show it near
+  //   black. It bounds the exposure of the sun as it is (dayEye), not the
+  //   envelope of the sun higher: there, at 0.8 stops for each stop the
+  //   air darkens, it held deep twilight and the night down by up to 6
+  //   stops at 40 km and 0.9 at 11 km.
   // Of the picture only its levels at five shares are needed: they are
   // sorted once, and the same view a stop brighter is the same shares a
   // stop higher.
-  function exposureAt(st, elev, d) {
+  // The level (log2, as the meter reads it) of a white surface facing the
+  // sun at height alt, the sun at elevation e (degrees), in the sun's light
+  // alone (sunThrough): ISUN / pi times its luminance; -Infinity where the
+  // planet hides the sun.
+  const ISUN = 20;   // the bare sun's luminance, as in the shader (ISUN in fs)
+  const sunlit = new Float64Array(NW);
+  function sunlitLevel(alt, e) {
+    sunThrough(alt, Math.sin(e * RAD), sunlit);
+    return Math.log2(ISUN / Math.PI * WY.reduce((a, y, w) => a + y * sunlit[w], 0));
+  }
+  // The day's eye (see DAY_OPEN): the most the day's exposure may be,
+  // from the sun's light where the eye is now.
+  function dayEye() {
+    const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
+    return WHITE + open - sunlitLevel(state.alt, state.elev);
+  }
+  function exposureAt(st, elev, d, cap = Infinity) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     const key = KEY - EYE * low;
     // By day, the highlights near the sun count for less (st.lit), and
@@ -8669,7 +8716,7 @@ const SkySound = (() => {
     const lit = high + day * (st.lit - st.high);
     const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
-    const byDay = Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit)));
+    const byDay = Math.min(Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit))), cap);
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
     const eye = NIGHT_OPEN - NIGHT_RATE * (Math.max(st.sky + d, LOG_RANGE[0]) - NIGHT_SKY);
     const dusk = smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1])) * state.sunOn;
@@ -8738,7 +8785,7 @@ const SkySound = (() => {
     const lit = Float64Array.from(v, (x, i) => x + near[i]).sort();
     const st = { low: share(LOW_SHARE), high: bandOf(q, 1 - HIGH_SHARE, HIGH_BAND), mid: share(0.5), sky: share(DUSK_SHARE),
                  peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND) };
-    let E = exposureAt(st, state.elev, 0);
+    let E = exposureAt(st, state.elev, 0, dayEye());
     if (state.elev < DUSK[0]) {
       const here = airLevel(state.alt, state.elev);
       const rate = MONO_RATE[1] + (MONO_RATE[0] - MONO_RATE[1]) * smooth01((state.elev - MONO_DEEP[1]) / (MONO_DEEP[0] - MONO_DEEP[1]));
