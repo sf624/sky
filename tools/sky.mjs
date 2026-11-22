@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { which } from './lib/browser.mjs';
 
 const TOOLS = import.meta.dirname;
@@ -18,8 +18,10 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
               stills of the fixed views (tools/views.json); with --base, compared with the base's
   img-diff    A.png B.png [--out D.png] [--gain G] [--box x,y,w,h]
               differences of two pictures
+  look        [--only a,b] [--size WxH] [--out DIR] [--from DIR] [--sheet [--base DIR|REV]]
+              the views of the reported flaws (tools/look.json), measured against absolute limits
   check       [NAME...] [--base DIR|REV] [--size WxH] [--out DIR] [--ignore CLASSES]
-              runs the checks (all of: trace stills wrap loop res flight steer); one line each
+              runs look, then the checks (all of: trace stills wrap loop res flight steer); one line each
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
@@ -29,10 +31,10 @@ common:       --page DIR (the page to test; default: this repository)
 environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
 
 // Commands that start Chrome, and their time limits (s).
-const LIMITS = { trace: 900, stills: 2400, check: 5400, drive: 900, perf: 300 };
+const LIMITS = { trace: 900, stills: 2400, look: 1200, check: 5400, drive: 900, perf: 300 };
 
 // The options that take no value: `--mobile --dpr 2.6` took '--dpr' as the value of --mobile, and the DPR stayed 1.
-const FLAGS = new Set(['mobile', 'no-gpu']);
+const FLAGS = new Set(['mobile', 'no-gpu', 'sheet']);
 function parseArgs(argv) {
   const opt = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -72,20 +74,36 @@ function wrapped(cmd) {
   process.on('exit', () => { if (child.exitCode === null && child.signalCode === null) pass('SIGTERM'); });
   return new Promise((resolve) => child.on('exit', (code, sig) => resolve(code ?? (sig ? 128 : 1))));
 }
+// The commit a page is at, for look's summary: a revision's short SHA; this repository's HEAD, with
+// '+changes' when index.html differs from it; nothing for another directory.
+function commitOf(spec) {
+  const git = (...a) => spawnSync('git', ['-C', REPO, ...a], { encoding: 'utf8' });
+  if (spec !== REPO) { const r = git('rev-parse', '--short', '--verify', '--quiet', spec + '^{commit}'); return r.status === 0 ? r.stdout.trim() : ''; }
+  const head = git('rev-parse', '--short', 'HEAD').stdout.trim();
+  return head + (git('status', '--porcelain', '--', 'index.html').stdout.trim() ? '+changes' : '');
+}
+const lookOptions = (opt) => ({ only: opt.only });
 const limit = (cmd) => +(process.env.SKY_TIMEOUT || LIMITS[cmd]);
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (!cmd || cmd === 'help' || cmd === '--help') { console.log(USAGE); return 0; }
   const opt = parseArgs(rest);
-  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'check', 'drive', 'perf', 'd3d'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
+  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'look', 'check', 'drive', 'perf', 'd3d'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
+  // look --from DIR measures stills already made: no Chrome, no queue.
+  if (cmd === 'look' && opt.from && !('sheet' in opt)) {
+    const { look } = await import('./lib/look.mjs');
+    return (await look(null, { ...lookOptions(opt), from: path.resolve(opt.from) })) ? 0 : 1;
+  }
   const queued = wrapped(cmd);
   if (queued) return await queued;
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(130));
   if (LIMITS[cmd]) {
     setTimeout(() => { console.error(`${cmd}: time limit of ${limit(cmd)} s reached`); process.exit(124); }, limit(cmd) * 1000).unref();
   }
-  const page = path.resolve(opt.page || REPO);
+  // --page: a directory, or (for look) a git revision exported like a base.
+  const rev = cmd === 'look' && opt.page && !fs.existsSync(opt.page);
+  const page = rev ? (await import('./lib/run.mjs')).resolveBase(opt.page, REPO) : path.resolve(opt.page || REPO);
   const gpu = !!process.env.SKY_GPU && process.env.SKY_GPU !== '0';
   // Without --out, each run writes to a folder of its own, so that two runs do not mix their files.
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15) + '-' + process.pid;
@@ -125,6 +143,7 @@ async function main() {
   const { Session } = await import('./lib/page.mjs');
   const run = await import('./lib/run.mjs');
   const session = await Session.start();
+  let lookOk = true;
   try {
     console.log(`chrome: ${session.chrome.version} (${session.chrome.renderer}: ${await session.renderer()})`);
     const size = run.parseSize(opt.size || (gpu ? '1280x720' : '480x270'));
@@ -150,13 +169,29 @@ async function main() {
       return status;
     }
     if (cmd === 'perf') return await run.perf(session, page, { q: opt.q || '', size, seconds: +(opt.seconds || 5), dpr: +(opt.dpr || 1), mobile: 'mobile' in opt, cpu: +(opt.cpu || 1), noGpu: 'no-gpu' in opt });
+    const base = opt.base && run.resolveBase(opt.base, REPO);
+    // check runs look first (unless names are given without look): the flaws reported stay fixed. Its limits
+    // were set on the GPU, and its stills take minutes each on SwiftShader: there check skips it.
+    const wantLook = cmd === 'check' && (!opt._.length || opt._.includes('look'));
+    const onlyLook = opt._.length > 0 && opt._.every((n) => n === 'look');
+    if (wantLook && !gpu) console.log('SKIP look: it needs the GPU (SKY_GPU=1)');
+    if (cmd === 'look' || (wantLook && gpu)) {
+      const { look } = await import('./lib/look.mjs');
+      const ok = await look(session, { ...lookOptions(opt), page, size: opt.size && size, dir: cmd === 'look' ? out('look') : path.join(out('check'), 'look'),
+        base, baseName: opt.base, sheet: cmd === 'look' && 'sheet' in opt, from: opt.from && path.resolve(opt.from), at: commitOf(rev ? opt.page : page) });
+      if (cmd === 'look') return ok ? 0 : 1;
+      console.log(`${ok ? 'PASS' : 'FAIL'} look (above)`);
+      lookOk = ok;
+    }
+    if (onlyLook) return lookOk ? 0 : 1;
+    opt._ = opt._.filter((n) => n !== 'look');
     if (cmd === 'check') {
       const { runChecks } = await import('./lib/checks.mjs');
       const ok = await runChecks(session, {
-        names: opt._, page, base: opt.base && run.resolveBase(opt.base, REPO), size, gpu, dir: out('check'),
+        names: opt._, page, base, size, gpu, dir: out('check'),
         ignore: opt.ignore || '',
       });
-      return ok ? 0 : 1;
+      return ok && lookOk ? 0 : 1;
     }
   } finally {
     session.close();

@@ -1,0 +1,392 @@
+{
+ "about": "Look invariants: one entry per flaw the owner reported, each a view (q, a still: speed=0 is added) with absolute measures and limits (tools/lib/measures.mjs). Fields: reported (the date), wrong (what was wrong, in one line), measures (each: measure, region [x, y, w, h] as fractions of the picture, its options, and min and/or max), bad and fixed (commits where it was bad and where it was fixed: the proof), expected ('fail': a known open flaw; it is reported as KNOWN, and passing fails the run so that the mark is removed), reference (values measured on other commits, for reading only). The stills are of size (unless --size; the limits hold at this size). A limit changes only on purpose, in a commit that says why.",
+ "size": "1280x720",
+ "frames": 46,
+ "ms": 50,
+ "entries": [
+  {
+   "name": "overcast-rows-11km",
+   "q": "date=319&time=15&cloud=1&alt=11&yaw=-134&pitch=-25",
+   "reported": "2026-11-20, 2026-11-22",
+   "wrong": "the overcast deck in parallel rows, a regular lattice; fields of dark specks",
+   "measures": [
+    {
+     "measure": "regularity",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "max": 0.7
+    },
+    {
+     "measure": "speckDensity",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "max": 15
+    }
+   ],
+   "bad": "9041c58",
+   "fixed": "b5e1760"
+  },
+  {
+   "name": "overcast-lattice-40km",
+   "q": "date=319&time=15&cloud=1&alt=40&yaw=111&pitch=-35",
+   "reported": "2026-11-22",
+   "wrong": "a perforated sheet: a lattice of dark cells; fields of equal specks",
+   "measures": [
+    {
+     "measure": "regularity",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "max": 0.7
+    },
+    {
+     "measure": "speckDensity",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "max": 15
+    }
+   ],
+   "bad": "9041c58",
+   "fixed": "b5e1760"
+  },
+  {
+   "name": "many-clouds-3km",
+   "q": "date=326&time=15.3&cloud=0.8&alt=3.14&yaw=50&pitch=-20&cirrus=0.4",
+   "reported": "2026-11-22",
+   "wrong": "cylinders with vertical walls, a popcorn floor of one size, beige colour",
+   "measures": [
+    {
+     "measure": "speckDensity",
+     "region": [
+      0,
+      0.3,
+      1,
+      0.7
+     ],
+     "max": 22
+    }
+   ],
+   "bad": "9041c58",
+   "fixed": "b5e1760",
+   "note": "Only the popcorn floor is measured (its dark specks). No measure separated the walls or the colour: they stay on the contact sheet."
+  },
+  {
+   "name": "needle-tower-11km",
+   "q": "date=327&time=15&lat=35&lon=135&alt=11&at=9.535,8.12&yaw=131.09&pitch=-19.16&heading=49.58&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=13&quality=max",
+   "reported": "2026-11-23",
+   "wrong": "a cluster of tall pointed spikes, about 45 % across and 36 % down",
+   "measures": [
+    {
+     "measure": "verticalWalls",
+     "region": [
+      0.375,
+      0.278,
+      0.156,
+      0.153
+     ],
+     "run": 8,
+     "p": 80,
+     "max": 0.009
+    }
+   ],
+   "bad": "b5e1760",
+   "fixed": "8582b03"
+  },
+  {
+   "name": "deck-white-11km",
+   "q": "date=319&time=15&cloud=1&alt=11&yaw=-134&pitch=-25",
+   "reported": "2026-11-22",
+   "wrong": "sunlit cloud tops grey-beige, not white",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "p": 95,
+     "min": 200
+    },
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "of": "sat",
+     "max": 0.09
+    }
+   ],
+   "bad": "eead3c9",
+   "fixed": "354c671"
+  },
+  {
+   "name": "deck-white-down-11km",
+   "q": "date=319&time=15&cloud=1&alt=11&yaw=-134&pitch=-90",
+   "reported": "2026-11-22",
+   "wrong": "sunlit cloud tops grey-beige, not white (straight down)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "p": 95,
+     "min": 200
+    },
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0.45,
+      1,
+      0.55
+     ],
+     "of": "sat",
+     "max": 0.09
+    }
+   ],
+   "bad": "eead3c9",
+   "fixed": "354c671"
+  },
+  {
+   "name": "night-full-moon-8.9km",
+   "q": "date=328&time=23.87&lat=35&lon=135&alt=8.88&at=168.127,91.019&yaw=63.98&pitch=-1.61&heading=62.77&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=14.288&quality=high",
+   "reported": "2026-11-23",
+   "wrong": "a night under a full moon as bright as deep dusk",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 20
+    }
+   ],
+   "expected": "fail",
+   "note": "Open. The limit is provisional (8582b03: 31); set it with the fix."
+  },
+  {
+   "name": "sky-40km-day",
+   "q": "date=325&time=16.6256&alt=40&yaw=241.5&pitch=60&cirrus=0",
+   "reported": "2026-11-21",
+   "wrong": "the sky at 40 km by day (sun +4 degrees) grey, not near black",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 15
+    },
+    {
+     "measure": "lumaPct",
+     "p": 95,
+     "max": 30
+    }
+   ],
+   "bad": "c3fe1fa",
+   "fixed": "1acb653"
+  },
+  {
+   "name": "sky-40km-dusk",
+   "q": "date=325&time=17.3463&alt=40&yaw=247.7&pitch=60&cirrus=0",
+   "reported": "2026-11-22",
+   "wrong": "the sky at 40 km at dusk (sun -4 degrees) grey, not near black",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "max": 15
+    },
+    {
+     "measure": "lumaPct",
+     "p": 95,
+     "max": 30
+    }
+   ],
+   "bad": "c3fe1fa",
+   "fixed": "1acb653"
+  },
+  {
+   "name": "cumulus-few-0.3km-sun",
+   "q": "date=326&time=15&cloud=0.25&alt=0.3&yaw=45&pitch=5",
+   "reported": "2026-11-23",
+   "wrong": "cumulus less cloud-like than before #104 (c551f8a): smoother, larger heaps",
+   "measures": [
+    {
+     "measure": "relief",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.031
+    }
+   ],
+   "expected": "fail",
+   "reference": {
+    "c551f8a": {
+     "relief": 0.0342
+    },
+    "8582b03": {
+     "relief": 0.0164
+    }
+   },
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
+  },
+  {
+   "name": "cumulus-half-0.3km-sun",
+   "q": "date=326&time=15&cloud=0.5&alt=0.3&yaw=45&pitch=5",
+   "reported": "2026-11-23",
+   "wrong": "cumulus less cloud-like than before #104 (c551f8a): smoother, larger heaps",
+   "measures": [
+    {
+     "measure": "relief",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.033
+    }
+   ],
+   "expected": "fail",
+   "reference": {
+    "c551f8a": {
+     "relief": 0.0366
+    },
+    "8582b03": {
+     "relief": 0.0301
+    }
+   },
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
+  },
+  {
+   "name": "cumulus-few-4km-down",
+   "q": "date=326&time=13&cloud=0.25&alt=4&yaw=0&pitch=-60",
+   "reported": "2026-11-23",
+   "wrong": "cumulus less cloud-like than before #104 (c551f8a): smoother, larger heaps",
+   "measures": [
+    {
+     "measure": "relief",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "cloudLuma": 150,
+     "min": 0.0316
+    },
+    {
+     "measure": "blobSize",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "cloudLuma": 150,
+     "max": 0.063
+    }
+   ],
+   "expected": "fail",
+   "reference": {
+    "c551f8a": {
+     "relief": 0.0351,
+     "blobSize": 0.0503
+    },
+    "8582b03": {
+     "relief": 0.025,
+     "blobSize": 0.1633
+    }
+   },
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
+  },
+  {
+   "name": "cumulus-half-4km-down",
+   "q": "date=326&time=13&cloud=0.5&alt=4&yaw=0&pitch=-60",
+   "reported": "2026-11-23",
+   "wrong": "cumulus less cloud-like than before #104 (c551f8a): smoother, larger heaps",
+   "measures": [
+    {
+     "measure": "relief",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "cloudLuma": 150,
+     "min": 0.0333
+    },
+    {
+     "measure": "blobSize",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "cloudLuma": 150,
+     "max": 0.154
+    }
+   ],
+   "expected": "fail",
+   "reference": {
+    "c551f8a": {
+     "relief": 0.037,
+     "blobSize": 0.1232
+    },
+    "8582b03": {
+     "relief": 0.0278,
+     "blobSize": 0.1907
+    }
+   },
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
+  },
+  {
+   "name": "dusk-eye-line-1.5km",
+   "q": "date=327&time=16.75&alt=1.5&at=46.18,-22.87&yaw=100&pitch=6&cloud=0.5",
+   "reported": "2026-11-23",
+   "wrong": "a thin dark horizontal line at the eye level across the clouds",
+   "measures": [
+    {
+     "measure": "lineDip",
+     "region": [
+      0.4,
+      0.55,
+      0.6,
+      0.15
+     ],
+     "cols": 4,
+     "max": 0.03
+    }
+   ],
+   "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085).",
+   "bad": "8582b03",
+   "fixed": "efd2b2f"
+  }
+ ]
+}
