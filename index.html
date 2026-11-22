@@ -2237,9 +2237,9 @@ float lutHorizon(float alt) { return -acos(clamp(RG / (RG + max(alt, 0.0)), 0.0,
 // rays on either side of the top, and the sky at the horizon in twilight
 // showed a band, the lower edge of a setting sun a red row (its depth from
 // the table some 50 % too deep in the haze). An arctangent step adds some
-// 5 rows there (LUT_WARP); 8 rows come from below the horizon, where the
-// sky changes slowly but near the horizon (LUT_VH: the horizon at 40 rows
-// of 96, not 48).
+// 5 rows there (LUT_WARP); a twelfth of the rows comes from below the
+// horizon, where the sky changes slowly but near the horizon (LUT_VH: the
+// horizon at 5/12 of the rows, not half).
 const float LUT_VH = floor(LUT_EL * 5.0 / 12.0 + 0.5) / LUT_EL, LUT_WARP = 0.05;
 float lutWarp(float x, float alt) {
   float c = LUT_WARP * smoothstep(1.6, 2.6, alt);
@@ -5801,24 +5801,34 @@ void main() {
   vec4 L[3], Tv[3], S[3], M[3];   // S, M: the sharp lobe's light from the sun, the moon
   for (int k = 0; k < 3; k++) { L[k] = vec4(0.0); S[k] = vec4(0.0); M[k] = vec4(0.0); }
   float sa = tmax, sb = tmax, prev = 0.0;
-  int n = LUT_NV, j = 0;
+  // A long ray has more samples, up to 4 times the level's: with 20 from
+  // the eye to the end of a ray that runs 1000 km to the top along the
+  // horizon, the first steps were 2.5, 7.5 and 12.5 km long, where a
+  // slice of 150 km had steps of 0.4 to 3 km. In haze the light of the air
+  // comes from those first km: the whole ray's light (LUT_END) came out
+  // darker than a slice's, and clouds at the horizon, whose air is read
+  // from the slices, stood out pale against the haze beside them. The
+  // first step is now some 0.4 km on every ray.
+  float more = clamp(sqrt(tmax / 150.0), 1.0, 4.0);
+  int nv = int(ceil(float(LUT_NV) * more)), ns = int(ceil(float(LUT_NSHADE) * more)), nf = int(ceil(float(LUT_NFAR) * more));
+  int n = nv, j = 0;
   if (uSunI > 0.0 && shadowSpan(o, d, tmax, uSun, sa, sb)) {
-    n = sb < tmax ? LUT_NV + LUT_NSHADE + LUT_NFAR : LUT_NV + LUT_NSHADE;
-    if (sa <= 0.0) j = LUT_NV;
+    n = sb < tmax ? nv + ns + nf : nv + ns;
+    if (sa <= 0.0) j = nv;
   }
   float gain = 1.0 / max(uLutScale, 1e-30);
   bool sunLight = dot(uLight, uSun) > 0.999;
-  for (int i = 0; i < LONG_N(LUT_NV + LUT_NSHADE + LUT_NFAR); i++) {
+  for (int i = 0; i < LONG_N(4 * (LUT_NV + LUT_NSHADE + LUT_NFAR)); i++) {
     if (j >= n) break;
     float t1;
-    if (j < LUT_NV) {
-      float f = (float(j) + 1.0) / float(LUT_NV);
+    if (j < nv) {
+      float f = (float(j) + 1.0) / float(nv);
       t1 = sa * f * f;
-    } else if (j < LUT_NV + LUT_NSHADE) {
-      float f = (float(j - LUT_NV) + 1.0) / float(LUT_NSHADE);
+    } else if (j < nv + ns) {
+      float f = (float(j - nv) + 1.0) / float(ns);
       t1 = sa + (sb - sa) * f * f;
     } else {
-      float f = (float(j - LUT_NV - LUT_NSHADE) + 1.0) / float(LUT_NFAR);
+      float f = (float(j - nv - ns) + 1.0) / float(nf);
       t1 = sb + (tmax - sb) * f * f;
     }
     j++;
@@ -8199,9 +8209,9 @@ const SkySound = (() => {
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_WARP_MIP: '2.0', Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1, Q_LUT_SHADE: 4 } },
     mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, body: 128, ice: 2048, shadow: 512, column: 256, warped: 1024, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_WARP_MIP: '2.0', Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, airLut: [128, 96, 64], pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 384, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, enlarge: true, airLut: [128, 96, 64], pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, body: 256, ice: 4096, shadow: 1024, column: 512, warped: 2048, grid: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The size in pixels the picture is drawn at, for a place of cw by ch CSS
