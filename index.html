@@ -706,121 +706,65 @@ float fbm(vec3 p, vec3 freq, int octaves, float gain, float seed) {
 
 #ifdef DECK_BAKE
 // The top of the overcast layer (the deck: see deckTop in fs), baked once
-// on a tile of DECK_KM km (uZ -3), after a map of where its puffs gather
-// (uZ -4, uDeckCtl). Puffs of four sizes, each on a jittered lattice (710,
-// 305, 237 and 152 m), each drawn out along the local run of the trains
-// and lobed. The clumps and the large cells meet in a soft maximum
-// (log-sum-exp over 25 m: crisp creases, a fillet where they merge); the
-// smaller puffs stand on them as bumps (a cauliflower), and alone between
-// them. Whether a puff is there is decided at its middle (the trains, the
-// cover: uDeckCtl read there), so that a puff is whole or none. R, G, B:
-// the height over the sheet (of DECK_H) for closed, middling and open
-// cover (the puffs of each a subset of the one before, smaller); A: how
+// on a tile of DECK_KM km (uZ -3): one continuous surface of shallow relief,
+// with uDeckCtl (uZ -4) for how thick the layer is. R, G, B: the height
+// over the sheet (of DECK_H) for closed, middling and open cover; A: how
 // thick the layer is (uDeckCtl's A, see deckTop in fs).
-const float DECK_KM = 32.0, DECK_H = 0.5, DECK_K = 40.0;
+const float DECK_KM = 32.0, DECK_H = 0.5;
 uniform sampler2D uDeckCtl;
-float deckPhase(vec2 uv) { return 6.2831853 * (dot(uv, vec2(20.0, 8.0)) + 0.5 * perlin(vec3(uv, 0.3), vec3(4.0, 4.0, 1.0), 500.0)); }
-// The map of where the puffs gather: R, how much the trains rule there; G,
-// a third of how many puffs stand there against the mean: in the trains
-// more on the rows, fewer between; and more or fewer by patches of some 4
-// km. (Read at each puff's middle: three Perlin noises for each of the
-// hundred puffs round a texel made the bake take 0.3 s on this machine's
-// GPU, seconds on a phone.)
-// B: the size of the cells (0.5 the mean), by patches of 3 to 8 km: larger
-// cells and fewer small puffs where it is high. A: how thick the layer is
-// (0.5 the mean), by patches of 4 to 10 km (see deckTop in fs).
+// The map of how thick the layer is (A; 0.5 the mean, mostly 0.2 to 0.8),
+// soft over 2 to 8 km (see deckTop in fs), read at each texel of the top.
+// (Through a smoothstep of two octaves, 0 to 1, the thinner patches were
+// dark blots of one size with firm edges, from 20 to 40 km a field of
+// them.)
 vec4 deckControl(vec2 uv) {
-  float train = smoothstep(-0.1, 0.35, perlin(vec3(uv, 0.7), vec3(3.0, 3.0, 1.0), 510.0));
-  float dens = 1.0 + 0.6 * perlin(vec3(uv, 0.9), vec3(8.0, 8.0, 1.0), 520.0);
-  float pm = dens * mix(1.0, 0.2 + 1.6 * smoothstep(-0.3, 0.6, cos(deckPhase(uv))), train);
-  float size = smoothstep(-0.45, 0.45, perlinFbm(vec3(uv, 0.4), vec3(5.0, 5.0, 1.0), 2, 525.0));
-  float thick = smoothstep(-0.45, 0.45, perlinFbm(vec3(uv, 0.6), vec3(4.0, 4.0, 1.0), 2, 535.0));
-  return vec4(train, pm / 3.0, size, thick);
+  return vec4(0.0, 0.0, 0.0, clamp(0.5 + 0.6 * perlinFbm(vec3(uv, 0.6), vec3(4.0, 4.0, 1.0), 3, 535.0), 0.0, 1.0));
 }
-// One class: the log-sum-exp of its puffs for the three covers (s). big:
-// how the size of the cells (uDeckCtl's B) moves its puffs: 1, larger,
-// higher and more where the cells are large; -1, fewer there.
-vec3 deckClass(vec2 x, float N, float seed, vec3 pres, float rad, float hgt, float elong, float flt, float big, vec2 tng) {
-  float sp = DECK_KM / N;
-  vec2 g = x / sp, ic = floor(g);
-  vec3 S = vec3(0.0);
-  // (The 25 cells round x in one loop, its bound from uZ, -3 here: with
-  // constant bounds Direct3D's compiler unrolled the four classes' loops,
-  // and linking the noise program took twice as long.)
-  int n = 1 - 8 * int(uZ);
-  for (int k = 0; k < n; k++) {
-    vec2 cell = ic + vec2(float(k % 5 - 2), float(k / 5 - 2));
-    vec3 r = rnd(vec3(cell, 0.0), vec3(N, N, 1.0), seed), r2 = rnd(vec3(cell, 1.0), vec3(N, N, 2.0), seed + 7.0);
-    vec2 c = (cell + 0.5 + 0.8 * (r.xy - 0.5)) * sp;
-    vec3 ctl = textureLod(uDeckCtl, c / DECK_KM, 0.0).rgb;
-    float train = ctl.x, pm = 3.0 * ctl.y, sz = big * (2.0 * ctl.z - 1.0);
-    // (Closed cover fills the gaps between the trains more.)
-    vec3 th = pres * mix(vec3(1.0), vec3(pm), vec3(0.4, 0.8, 1.0)) * (1.0 + 0.3 * sz);
-    float rk = r.z;
-    if (rk > max(th.x, max(th.y, th.z))) continue;
-    vec2 o = x - c;
-    float an = 0.5 * (r2.x - 0.5);
-    vec2 e = cos(an) * tng + sin(an) * vec2(-tng.y, tng.x);
-    float el = 1.0 + (elong - 1.0) * (0.4 + 0.6 * r2.y) * mix(0.6, 1.0, train);
-    vec2 v = vec2(dot(o, e) / pow(el, 0.6), dot(o, vec2(-e.y, e.x)) * pow(el, 0.4));
-    float psi = atan(o.y, o.x);
-    float R = rad * sp * (0.8 + 0.4 * r2.z) * (1.0 + 0.25 * max(sz, 0.0))
-            * (1.0 + 0.12 * cos(2.0 * psi + 6.28 * r.x) + 0.09 * cos(3.0 * psi + 6.28 * r2.x) + 0.06 * cos(5.0 * psi + 6.28 * r.y));
-    float hk = hgt * (0.5 + fract(r2.z * 7.31 + r.z * 3.7)) * (1.0 + 0.3 * max(sz, 0.0));
-    float d2 = dot(v, v) / (R * R);
-    vec3 sc = vec3(1.0 / 1.2, 1.0, 1.0 / 0.75);   // closed puffs wider, open ones smaller
-    vec3 s = 1.0 - d2 * sc * sc;
-    // (A dome, or by flt a cap with a flat top whose flank meets the
-    // sheet at a finite slope: with powers under 0.5 the flanks stood as
-    // cliffs at their foot, and their rims glittered.)
-    vec3 sp3 = max(s, 0.0);
-    vec3 h = hk * mix(pow(sp3, vec3(0.65)), sp3 * (2.0 - sp3), flt) + min(s, 0.0) * hk;
-    vec3 on = step(vec3(rk), th);
-    S += on * exp(DECK_K * h);
-  }
-  return S;
-}
+// The relief: one continuous surface of packed, rounded swellings of many
+// sizes (gradient noise of 290, 145 and 70 m along one way and 0.6 of
+// that across, and of 1 km for how high they stand), bent so that its tops are
+// broad and its clefts narrow (negative skew, as lidar finds on
+// stratocumulus tops; less bent and with more of the finest size, from 3
+// km the swellings stood as pointed hills), with a swell of 4.5 km. No wave, lattice or warp
+// with a period of its own: the noise's depth moves from place to place,
+// so that no lattice of the stretched noise lines up into rows. (Lumps on
+// a sheet, packed cushions and cells cut by a partition stood apart on a
+// dark floor; ridges of noise drawn out 3.5 to 1 and waved by a warp were
+// zig-zag ripples with one kink, like sand.)
+const float DK_MEAN = 0.12, DK_RIDGE = 0.04, DK_SKEW = 0.9, DK_ALONG = 50.0, DK_ACROSS = 80.0, DK_WARP = 0.3;
+const float DK_R2 = 0.4, DK_R3 = 0.12, DK_MID = 0.5, DK_FINE = 0.008, DK_BIG = 0.06, DK_VARY = 0.3;
+const float DK_CUT = 6.0, DK_HOLE_M = 0.06, DK_HOLE_O = 0.165, DK_FLOOR = 0.05, DK_SOFT = 0.015;
 vec4 deckBake(vec2 uv) {
-  vec2 x = uv * DECK_KM;
-  // The rows the puffs gather in run across the phase's slope (about 1.5
-  // km apart, bent by slow noise): the puffs are drawn out along them.
-  float e = 1.0 / 2048.0, ph = deckPhase(uv);
-  vec2 gph = vec2(deckPhase(uv + vec2(e, 0.0)) - ph, deckPhase(uv + vec2(0.0, e)) - ph);
-  vec2 tng = normalize(vec2(-gph.y, gph.x));
-  float hv = 1.0 + 0.45 * perlinFbm(vec3(uv, 0.5), vec3(6.0, 6.0, 1.0), 2, 530.0);
-  // Ragged outlines: the puffs are drawn at a place moved by up to some 40
-  // m, by noise of 250 and 125 m (with lobes of three harmonics alone, the
-  // cells were smooth pillows with round outlines, where photographs show
-  // ragged, crisp edges).
   vec3 wq = vec3(uv, 0.15);
-  x += 0.035 * vec2(perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 580.0), perlinFbm(wq, vec3(128.0, 128.0, 1.0), 2, 590.0));
-  // (The cells are packed caps some two to three times as wide as they
-  // are high, meeting in narrow creases; the puffs on them lower and
-  // round. Three times as high and apart, from 4 km they stood as round
-  // bulbs over dark gaps, where photographs show a packed surface of
-  // shallow relief; lower and apart, from above they were a grey blanket.
-  // A fifth wider and a quarter lower, from 6.4 km their light varied
-  // by 0.20 to 0.34 of its mean at the scale of the cells, and their
-  // period was 1.4 to 1.8 times a photograph's; now 0.25 to 0.39, the
-  // photograph's 0.39 to 0.47. Their period was still 1.3 to 2 times the
-  // photograph's, the cells smooth pillows where it shows small ones packed
-  // tight: now a third smaller, as high, so their flanks are steeper.)
-  vec3 cl = log(1.0 + deckClass(x, 45.0, 540.0, vec3(0.6, 0.35, 0.12), 0.5, 0.05 * hv, 1.5, 0.6, 1.0, tng)) / DECK_K;
-  vec3 lg = log(1.0 + deckClass(x, 105.0, 550.0, vec3(0.95, 0.65, 0.3), 0.6, 0.16 * hv, 1.8, 1.0, 1.0, tng)) / DECK_K;
-  vec3 md = log(1.0 + deckClass(x, 135.0, 560.0, vec3(0.95, 0.7, 0.35), 0.5, 0.07 * hv, 1.7, 1.0, -1.0, tng)) / DECK_K;
-  vec3 sm = log(1.0 + deckClass(x, 210.0, 570.0, vec3(0.85, 0.55, 0.3), 0.5, 0.05 * hv, 1.5, 1.0, -1.0, tng)) / DECK_K;
-  // The cells (clumps and large ones), the smaller puffs as bumps on them,
-  // and alone where no cell is.
-  vec3 b0 = log(exp(DECK_K * cl) + exp(DECK_K * lg) - 1.0) / DECK_K;
-  vec3 g = smoothstep(0.0, 0.06, b0);
-  vec3 top = b0 + g * (0.7 * md + 0.6 * sm);
-  vec3 t = log(exp(DECK_K * top) + exp(DECK_K * md) + exp(DECK_K * sm) - 2.0) / DECK_K;
-  // And a fine relief on them, of 125 and 62 m, some 8 m high: from near,
-  // their tops have a texture of their own.
-  t += 0.008 * perlinFbm(vec3(uv, 0.35), vec3(256.0, 256.0, 1.0), 2, 600.0) * smoothstep(0.0, 0.03, t);
-  // (Thicker, the puffs stand higher too.)
+  vec2 w = vec2(perlin(wq, vec3(24.0, 24.0, 1.0), 580.0), perlin(wq, vec3(24.0, 24.0, 1.0), 590.0));
+  vec2 r = mat2(2.0, -1.0, 1.0, 2.0) * uv + DK_WARP * vec2(w.y / DK_ALONG, w.x / DK_ACROSS);
+  float z = 0.5 * perlin(vec3(uv, 0.95), vec3(16.0, 16.0, 1.0), 605.0);
+  float n = perlin(vec3(r, 0.25 + z), vec3(DK_ALONG, DK_ACROSS, 1.0), 610.0)
+          + DK_R2 * perlin(vec3(r, 0.35 - z), vec3(2.0 * DK_ALONG, 2.0 * DK_ACROSS, 1.0), 620.0)
+          + DK_R3 * perlin(vec3(r, 0.45 + z), vec3(4.0 * DK_ALONG, 4.0 * DK_ACROSS, 1.0), 625.0)
+          + DK_MID * perlin(vec3(uv, 0.45), vec3(32.0, 32.0, 1.0), 630.0);
+  n /= 0.195 * sqrt(1.0 + DK_R2 * DK_R2 + DK_R3 * DK_R3 + DK_MID * DK_MID);
+  // (Higher in some places than in others, over some 3 km.)
+  float amp = DK_RIDGE * (1.0 + DK_VARY * perlin(vec3(uv, 0.75), vec3(10.0, 10.0, 1.0), 670.0) / 0.195);
+  float t = DK_MEAN + amp * (1.0 - exp(-DK_SKEW * n)) / DK_SKEW;
+  // (The clefts end softly some DK_FLOOR over the sheet: deeper, down to
+  // it and through it, they were thin cloud over the sea, dark pits from
+  // above even with the sun at 60 degrees and at noon.)
+  t = DK_FLOOR + DK_SOFT * log(1.0 + exp((t - DK_FLOOR) / DK_SOFT));
+  t += DK_FINE * perlinFbm(vec3(uv, 0.35), vec3(256.0, 256.0, 1.0), 2, 600.0);
+  t += DK_BIG * perlinFbm(vec3(uv, 0.55), vec3(7.0, 7.0, 1.0), 2, 640.0);
+  // Middling and open cover (C 0.5 and 0: the sheet's top in fs lower by
+  // 90 and 180 m): the same surface where it is high, raised by as much,
+  // so that it stands as high as when closed; for open cover its lower
+  // half cut away (holes where it is lower than some 120 m over the
+  // sheet), for middling cover almost none (with holes there, the cover map's patches of middling cover at full cloud
+  // were darker blots with straight edges).
+  // (Lowered with the sheet, the overcast at full cloud, where the cover
+  // map says less than closed over patches of 4 km, had darker patches
+  // with straight edges, from 40 km a field of blotches.)
+  vec3 ts = max(vec3(t) + vec3(0.0, 0.09, 0.18) - DK_CUT * max(vec3(0.0, DK_HOLE_M, DK_HOLE_O) - t, 0.0), 0.0);
   float thick = textureLod(uDeckCtl, uv, 0.0).a;
-  return vec4(clamp(t * (0.8 + 0.4 * thick) / DECK_H, 0.0, 1.0), thick);
+  return vec4(clamp(ts * (0.8 + 0.4 * thick) / DECK_H, 0.0, 1.0), thick);
 }
 
 // (A program of its own, DECK_BAKE, made only when the deck is first
@@ -2515,13 +2459,13 @@ float gridCut = 0.0, gridOwn = 0.0, gridCrease = 0.0;
 #define cloudShape cloudShape0
 #endif
 #ifdef DECK
-// The overcast (the deck): stratocumulus as one layer, puffs standing on a
-// thin sheet, whose top comes from a map baked at start (uDeck: see
+// The overcast (the deck): stratocumulus as one layer, a continuous relief
+// of packed swellings over a thin sheet, whose top comes from a map baked at start (uDeck: see
 // deckBake in the noise shader). It takes over from the heaps' field above
 // about 0.85 of cloud (deckShare): there the heaps flattened into rows of
 // rolls, which from above looked like a ploughed field.
 uniform sampler2D uDeck;
-const float DECK_KM = 32.0, DECK_H = 0.5, DECK_SHEET = 0.15;
+const float DECK_KM = 32.0, DECK_H = 0.5, DECK_SHEET = 0.15, DECK_LOD_FAR = 2.0;
 // The share of the deck in the field: none at 0.85 of cloud (DECK_FROM),
 // all of it at 1; between, more where the cover over some 20 km is more
 // (region, as for the sheet), so that it comes in by patches tens of km
@@ -2546,7 +2490,7 @@ float deckCover(vec2 x, float region) {
   float r4 = textureLod(uWeather, x / WEATHER_KM, 4.0).r;
   return 0.75 + 1.5 * (region - 0.5) + 1.5 * (r4 - region) + 3.0 * (uCloud - 1.0);
 }
-// The puffs' height at x for the cover C, as a share of DECK_H: one read
+// The relief's height at x for the cover C, as a share of DECK_H: one read
 // of uDeck, lod levels of its own coarser (its texels are 15.6 m). (The
 // tile is moved by a slow offset of up to 16 km: it does not repeat.)
 // It also sets deckThick: how thick the layer is there, -1 to 1 (uDeck's A,
@@ -2584,7 +2528,12 @@ float deckTop(vec2 x, float region, float lod, out float ts, out float C) {
   // higher, with fewer puffs. (Its edge is ragged too: read at the map's
   // texels of 11 km alone, it stood as a plateau with straight cliffs.)
   float S = smoothstep(0.6, 0.8, sl.r + 0.3 * rag);
-  float P = deckPuffs(x, C, lod + 2.0);
+  // (Read coarser than the pixel asks, by up to DECK_LOD_FAR levels as the
+  // pixel grows from some 8 to 45 m: the relief of 70 to 290 m fades towards
+  // its mean with distance, where from 20 to 40 km it stood as a field of
+  // dots of one size. A steeper fade, 4 levels from 8 to 16 m, drew rings
+  // and stepped edges from 40 km.)
+  float P = deckPuffs(x, C, lod + 2.0 + DECK_LOD_FAR * smoothstep(-3.0, -0.5, lod));
   // (Where it is thicker, its sheet lies a little higher.) Closed, the
   // sheet under the puffs is 100 to 200 m thick: with 10 to 150 m, the
   // gaps between the cells were holes onto the sea from above, where in
@@ -2623,6 +2572,9 @@ float deckField(vec2 x, float z, float region, float lod, out float ts) {
 #else
 #define HEAPS_OUT(v) return (v)
 #endif
+// The rows of rolls of a sheet (below) go as the cloud rises from
+// ROLLS_FROM to ROLLS_TO.
+const float ROLLS_FROM = 0.8, ROLLS_TO = 0.9;
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
   float h = topsH;
@@ -2964,7 +2916,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // show them (with rolls only in a few places, the sheet was lumps
     // without order).
     float cells = (0.6 * (n.b - 0.715) + 0.4 * (n.g - 0.712)) / 0.12;
-    float rows = smoothstep(0.3, 0.6, far.a) * sheet;
+    // (None at the top of the slider, where the deck takes over: from 11
+    // km the rolls were parallel waves of one spacing with one kink, from
+    // 40 km their ranks a lattice of dots over tens of km.)
+    float rows = smoothstep(0.3, 0.6, far.a) * sheet * (1.0 - smoothstep(ROLLS_FROM, ROLLS_TO, uCloud));
     float ph = 2.0 * PI * dot(x, vec2(190.0, 95.0)) / WEATHER_KM + 9.0 * far.b + 3.0 * (n.r - 0.571);
     float roll = sin(ph);
     float along = sin(2.0 * PI * dot(x, vec2(-57.0, 114.0)) / WEATHER_KM + 0.5 * ph + 7.0 * far.g);
@@ -9410,7 +9365,7 @@ const SkySound = (() => {
 
     // The top of the overcast's deck (uDeck, see deckBake in noise), on
     // unit 19, DECK texels a side, drawn by the program `bake`, in parts
-    // (for batches): first the map of where its puffs gather (DECK_CTL
+    // (for batches): first the map of how thick the layer is (DECK_CTL
     // texels a side, on unit 26 while the top reads it), then the top in
     // strips of 64 rows (a strip costs some 4 slices of the noise per
     // texel), then its mipmaps. Half floats where the GPU can draw to them
