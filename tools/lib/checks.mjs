@@ -382,7 +382,8 @@ export const CHECKS = {
   // flown frame keeps the detail of a level flight (against their stills). (d) The sun stays put in the world: a
   // turn of the heading by the rudder key, and a bank by the bank key, move it on the screen where the camera says.
   // (e) A bank tilts the sea's horizon by the bank, looking ahead; the stills at bank 0, 30 and 60 are for looking
-  // at. (f) A climb. (g) The HUD, fixed to the airframe, agrees with the camera and the picture.
+  // at. (f) A climb. (g) The HUD's glass, fixed to the airframe, agrees with the camera and the picture;
+  // looking out of the side, only the helmet's readouts are drawn.
   async steer(ctx) {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
@@ -593,7 +594,9 @@ export const CHECKS = {
     // horizon beside the marker). Looking ahead at 0.3 km over a clear sea, the sea's horizon in a still without the
     // HUD lies below the HUD's line by the dip of the altitude (0.56 degrees) within 2 px. The flight path marker
     // drawn (the middle of its green) is at the anchor within 1 px, looking ahead and with the eye 20 degrees to the
-    // right, where it has moved by the camera's shift of the nose. Looking 90 degrees aside the HUD's canvas is empty.
+    // right, where it has moved by the camera's shift of the nose. In each of these views the glass is in view
+    // (window.__hud().airframe). Looking 90 degrees aside it is not, and the HUD's canvas holds the helmet's readouts
+    // alone: pixels are painted, and none outside the readouts' zones (window.__hud().helmet).
     {
       const R = Math.PI / 180;
       const states = [
@@ -607,7 +610,11 @@ export const CHECKS = {
         ['phone-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, { size: { w: 411, h: 781, dpr: 2.625, mobile: true } }],
       ];
       const sea = 'date=172&time=11&alt=0.3&cloud=0&cirrus=0';
-      const painted = "(() => { const c = document.querySelector('.hud'); if (!c.width) return 0; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; })()";
+      // The pixels painted on the HUD's canvas, and those of them outside the helmet's zones.
+      const painted = "(() => { const c = document.querySelector('.hud'), h = window.__hud(); if (!c.width || !h) return [0, 0]; " +
+        "const r = c.width / h.w, z = Object.values(h.helmet), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0, out = 0; " +
+        "for (let i = 3; i < d.length; i += 4) { if (!d[i]) continue; n++; const p = (i - 3) / 4, x = (p % c.width + 0.5) / r, y = (Math.floor(p / c.width) + 0.5) / r; " +
+        "if (!z.some(([zx, zy, zw, zh]) => x >= zx && x <= zx + zw && y >= zy && y <= zy + zh)) out++; } return [n, out]; })()";
       const markers = {};
       for (const [name, st, opt] of states) {
         const q = `${sea}&${flightQuery({ ...st, at: [40, 60] })}`;
@@ -626,8 +633,9 @@ export const CHECKS = {
         const img = readPng(f(`hud-${name}`)), dpr = (opt.size || {}).dpr || 1, w = img.w / dpr, h = img.h / dpr;
         const nose = onScreen(fl.cam, [Math.cos(fl.climb * R) * Math.sin(fl.heading * R), Math.sin(fl.climb * R), Math.cos(fl.climb * R) * Math.cos(fl.heading * R)], w, h);
         if (opt.empty) {
-          lines.push(`hud-${name}: the nose at ${nose ? nose.map((v) => v.toFixed(0)).join(',') : 'behind the eye'}; ${count} pixels painted on the HUD's canvas`);
-          expect(hud && count === 0, `hud-${name}: nothing of the HUD in view`);
+          lines.push(`hud-${name}: the nose at ${nose ? nose.map((v) => v.toFixed(0)).join(',') : 'behind the eye'}; ${count[0]} pixels painted on the HUD's canvas, ` +
+            `${count[1]} outside the helmet's readouts; the glass ${hud && hud.airframe ? 'in view' : 'out of view'}`);
+          expect(hud && !hud.airframe && count[0] > 0 && count[1] === 0, `hud-${name}: the helmet's readouts alone in view`);
           continue;
         }
         if (!hud || !hud.anchor || !hud.horizon) {
@@ -650,7 +658,8 @@ export const CHECKS = {
         const ends = [Math.min(...xs), Math.max(...xs)];
         const drawn = Math.max(...ends.map((x) => Math.abs(green.at(x) - camAt(x))));
         lines.push(`hud-${name}: the anchor off the camera's nose by ${anchorOff.toFixed(3)} px; the horizon at ${hud.horizon.angle.toFixed(3)} degrees, ` +
-          `off the camera's zero pitch by ${off.toFixed(3)} px; the green drawn (${green.n} columns) off by ${drawn.toFixed(2)} px; ${count} pixels painted`);
+          `off the camera's zero pitch by ${off.toFixed(3)} px; the green drawn (${green.n} columns) off by ${drawn.toFixed(2)} px; ${count[0]} pixels painted`);
+        expect(hud.airframe, `hud-${name}: the glass in view`);
         expect(anchorOff <= 1, `hud-${name}: the HUD anchored at the nose`);
         expect(off <= 1, `hud-${name}: the HUD's horizon on the camera's zero pitch`);
         expect(green.n > 20 && drawn <= 1, `hud-${name}: the green line drawn there`);

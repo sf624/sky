@@ -328,48 +328,73 @@ the overlays; it takes no pointer, so a drag on it turns the eye.
   only when its key (the CSS size, the device pixel ratio, `cameraOf(view())`,
   heading, bank, climb, speed, altitude) has changed. At rest nothing is
   drawn; in flight, once a frame (2D lines and text).
-- **A glass fixed to the airframe.** The HUD is a plane square to the nose
-  at a distance of 1, with the aircraft's right and up as its axes
-  (`airframe`, which `cameraOf` uses too). Its layout is in degrees from
-  the nose (`HUD_DEG`, about 28 degrees across and 26 high), and every
-  point of it is projected with the picture's own camera (`cameraOf`, the
-  vertical field `FOV`, the canvas's CSS size). So the HUD has a fixed
-  angular size whatever the screen, and it sits round the nose wherever
-  the eye looks: ahead it fills the middle of the view, with the eye 20
-  degrees aside it is seen 20 degrees aside (a little askew, as a glass
-  seen at a slant), and out of the side window it is out of view. Lines
-  are cut where they would pass behind the eye; the canvas's edge and the
-  ladder's area clip the rest, so nothing pops in or out.
+- **Two parts, as a helmet's display.** The readouts are fixed to the
+  screen (to the eye), so they are always in view; the attitude is drawn
+  on a glass fixed to the airframe, so it is seen only where the view
+  takes in the direction of flight. Both are laid out in degrees
+  (`HUD_DEG`, about 28 degrees across and 25 high): the readouts from the
+  middle of the screen, the glass from the nose, at the same size. Looking
+  ahead the nose is in the middle of the screen, and the two make one HUD.
+- **The helmet's readouts**, upright on the screen (they bank with a view
+  from the aircraft, as the head does): the speed (km/h) in a box on the
+  left; the altitude (`altText`, the panel's unit) in a box on the right,
+  with the vertical speed (m/s) under it; the aircraft's heading (compass
+  bearing, `bearing`; not the direction of view) in a box at the top. The
+  heading is a number, not a tape: a tape fixed to the screen would put
+  bearings where the world shows other ones whenever the eye looks aside.
+  On a narrow screen (a phone upright) the side boxes come in to stay
+  `HUD_SIDE_PX` from the edges.
+- **A glass fixed to the airframe.** A plane square to the nose at a
+  distance of 1, with the aircraft's right and up as its axes
+  (`airframe`, which `cameraOf` uses too); every point of it is projected
+  with the picture's own camera (`cameraOf`, the vertical field `FOV`, the
+  canvas's CSS size). So it sits round the nose wherever the eye looks:
+  ahead it fills the middle of the view, with the eye 20 degrees aside it
+  is seen 20 degrees aside (a little askew, as a glass seen at a slant),
+  and out of the side window it is out of view. Lines are cut where they
+  would pass behind the eye; the canvas's edge and the ladder's area clip
+  the rest, so nothing pops in or out. Where the glass passes under a
+  readout it is wiped out (`destination-out`), at full in the readout's
+  zone and fading over 0.8 of a degree round it, so the readouts stay
+  readable and nothing is shown twice.
 - **True to the world.** The horizon line and the pitch ladder (every 5
   degrees, solid above, dashed below, numbered, their tips towards the
   horizon) lie on the glass where the world's directions cross it: the
   horizon line is the plane of zero pitch through the eye, the rungs are
   the elevations on the vertical through the nose, each along its circle
-  of elevation. They are clipped to the ladder's area of the glass. The
-  sea's horizon lies below the line by the dip of the altitude (0.56
+  of elevation. They are clipped to the ladder's area of the glass; a
+  rung's number is drawn only where it fits in the area whole, never cut.
+  The sea's horizon lies below the line by the dip of the altitude (0.56
   degrees at 0.3 km, 3.4 at 11 km): that is right, not an error.
 - **Upright on the glass:** the flight path marker at the nose (the model
   has no angle of attack nor sideslip: the aircraft flies where the nose
-  points); the bank scale round it (10, 20, 30, 45, 60 degrees; its
-  pointer at minus the bank, square to the horizon); the heading tape
-  above (compass bearing, `bearing`, 45 degrees of heading) under the
-  heading's box; the speed (km/h) on the left; the altitude (`altText`,
-  the panel's unit) and the vertical speed (m/s) on the right. They bank
-  with the airframe; the eye, which turns with the aircraft, sees them
-  upright when it looks ahead. Text takes the glass's local transform.
+  points) and the bank scale round it (10, 20, 30, 45, 60 degrees; its
+  pointer at minus the bank, square to the horizon). They bank with the
+  airframe; the eye, which turns with the aircraft, sees them upright
+  when it looks ahead. Text takes the glass's local transform.
 - **Look.** Green (`HUD_GREEN`) over a thin dark edge (each layer is
   stroked dark first, then green), so it reads on a bright cloud deck,
-  the blue sky, at dusk and at night. Numbers 1 degree high (11 CSS px on
-  a phone, 16 at 1080 lines, 21 at 1440), lines of whole device pixels;
-  the canvas holds the screen's pixels (`devicePixelRatio`). System fonts
-  only, numbers and units only: no language.
-- **The default view** looks 60 degrees right of the nose: the HUD is then
-  out of view (its right edge may touch the left of a wide screen). A drag
-  to the right (the view turns left), or `?yaw=` equal to `?heading=`,
-  looks ahead; the page has no control of its own for that.
-- `window.__hud()` gives the anchor (the nose on the screen), the horizon
-  line as drawn and the scale of the glass, for the tools (`check steer`).
-  the numbers and the ladder's area, for the tools (`check steer`).
+  the blue sky, at dusk and at night. Numbers 1 degree high (12 CSS px on
+  a phone upright, 16 at 1080 lines, 21 at 1440), but never smaller than
+  `HUD_MIN_PX` (10 CSS px): on a short screen (a phone on its side) the
+  whole layout, the glass's too, grows to that, while the ladder's rungs
+  stay at their true elevations. Lines of whole device pixels; the canvas
+  holds the screen's pixels (`devicePixelRatio`). System fonts only,
+  numbers and units only: no language.
+- **The panel**, while it is shown, lies over the middle of the screen on
+  most screens (on a phone, over nearly all of it), and so over the HUD;
+  it fades a few seconds after the last touch, and the HUD is clear. The
+  HUD does not move out of its way: no place would be clear of it on a
+  phone, and readouts that jump as the panel comes and goes read worse.
+- **The default view** looks 60 degrees right of the nose: the glass is
+  then out of view (its right edge may touch the left of a wide screen),
+  and only the readouts show. A drag to the right (the view turns left),
+  or `?yaw=` equal to `?heading=`, looks ahead; the page has no control of
+  its own for that.
+- `window.__hud()` gives the glass's anchor (the nose on the screen), its
+  horizon line as drawn, whether any of it is on the screen (`airframe`),
+  the scale of the glass and of a degree of the layout, and the zones of
+  the readouts (`helmet`), for the tools (`check steer`).
 
 ## Sun, moon and sky in the JS
 
