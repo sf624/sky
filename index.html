@@ -2229,10 +2229,10 @@ float heightAt(vec3 p) {
 // Near the eye, the reads of the noise of the tile move by this much of a
 // texel, a new amount each frame (-0.5 to 0.5; see cloudShape).
 vec3 shake = vec3(0.0);
-// What cloudShape last found: how high over the base of its layer the
+// What cloudShape last found: its layer's form (formAt), how high over the base of its layer the
 // place is (km), and as a share of the layer's depth (0 to 1); and how
 // far the fine noise is read from its own place there (cloudField).
-float overBase = 0.0, heapUp = 0.0;
+float overBase = 0.0, heapUp = 0.0, formAt = 0.0, veil = 0.0;
 vec3 swirl = vec3(0.0);
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -2255,16 +2255,18 @@ const float CF_K = 0.5;             // the field per unit of density
 const float CF_FULL = 0.18;         // the density (0 to 1) at which a cloud is as dense as SIGMA
 const float CF_ERODE = 0.5;         // how much density the fine noise takes off at most
 const float CF_LO = 0.45, CF_HI = 0.95; // the range of the heaps' base shape (Perlin-Worley)
+const vec2 CF_VEIL = vec2(0.4, 0.3); // the veil at the base of a closed sheet: its density, and the share of the depth it fades over
+const float CF_CLOSE = 0.68, CF_FLOOR = 0.6;  // the amount over which the cover closes, and the floor under the shape that closes it
 const float CF_BIG = 0.25;          // heaps: the weight of the base shape read 4 times larger (8 km)
 const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's shear, km per km of height
 const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the fine noise's place, in its tiles (low in a cloud)
 // A layer of cloud at x (km on the weather map): the level of its bases
 // (km), its depth (km), its amount (0 to 1: how much of the base shape is
-// kept) and its form (0: a sheet of cells, stratocumulus; 1: heaps,
-// cumulus). From the weather map (R: amount, G: depth, B: the gusts' map,
+// kept; over CF_CLOSE the cover closes) and its form (0: a sheet of cells,
+// stratocumulus; 1: heaps, cumulus; tower: how much of a heap is a tower). From the weather map (R: amount, G: depth, B: the gusts' map,
 // which also moves the bases, A: where the air rises, towers) and the Clouds
 // slider. (One record per layer: a stack of layers is this, once each.)
-struct Layer { float level, depth, amount, form; };
+struct Layer { float level, depth, amount, form, tower; };
 Layer cloudLayer(vec2 x, float lod) {
   Layer a;
   float region = textureLod(uWeather, x / WEATHER_KM, 6.5).r;
@@ -2274,11 +2276,14 @@ Layer cloudLayer(vec2 x, float lod) {
   a.form = 1.0 - smoothstep(0.5, 0.85, uCloud + 0.4 * (region - 0.5));
   // Few clouds stand in fields (the map's clumps and streets), with clear
   // sea between: the map decides where, steeply; with more, it only thins
-  // and thickens the cover.
-  a.amount = clamp(0.16 + 0.72 * uCloud + mix(3.0, 0.6, smoothstep(0.1, 0.8, uCloud)) * (w.r - 0.5), 0.0, 0.97) * smoothstep(0.0, 0.05, uCloud);
+  // and thickens the cover. Heaps keep clear air between them inside a
+  // field.
+  // (At the top of the slider the cover is whole everywhere.)
+  a.amount = 0.16 + 0.72 * uCloud + mix(3.0, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
+  a.amount = clamp(a.amount, 0.0, mix(1.0, 0.6, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // Towers, where the air rises (A) and the slider lets heaps grow.
-  float tower = smoothstep(0.5, 0.8, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.9 + 2.2 * w.g * smoothstep(0.1, 0.5, uCloud), 2.6 + 1.6 * w.g, tower), a.form);
+  a.tower = smoothstep(0.4, 0.9, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
+  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.9 + 2.2 * w.g * smoothstep(0.1, 0.5, uCloud), 2.8 + 1.4 * w.g, a.tower), a.form);
   return a;
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
@@ -2294,26 +2299,34 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   lump = 0.0;
   base = -9.0;
   heapUp = 0.0;
+  veil = 0.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
   Layer a = cloudLayer(x, lod);
   overBase = h - a.level;
+  formAt = a.form;
   y = overBase / (CT - CB);
   // (The base: the field of a flat floor, steep, so that only the lowest
   // 60 m count as a base.)
   base = 8.0 * overBase;
   float t = overBase / a.depth;
   heapUp = clamp(t, 0.0, 1.0);
-  // The profile 1 - t^2: flat under, round over. No cloud above tTop: the
-  // profile there is under what the amount takes.
-  float tTop = sqrt(a.amount);
+  // The profile 1 - t^k: flat under, round over; k = 2, and 3 for a tower,
+  // which keeps its width higher up. The amount takes 1 - am of the shape;
+  // no cloud above tTop: the profile there is under that. Over CF_CLOSE the
+  // amount takes no more, and a floor under the shape closes the cover
+  // instead (below): so a closed sheet keeps the relief of its top.
+  float am = min(a.amount, CF_CLOSE), k = 2.0 + a.tower;
+  float tTop = pow(am, 1.0 / k);
 #ifdef TOPS_MAP
-  return a.amount > 0.0 ? a.level + a.depth * tTop + 0.03 - h : -9.0;
+  // (A margin: the map of the tops reads four places in each texel, and a
+  // tower's depth rises steeply across one.)
+  return am > 0.0 ? a.level + a.depth * tTop + 0.03 + 0.06 * a.depth - h : -9.0;
 #endif
-  if (a.amount <= 0.0) return -9.0;
+  if (am <= 0.0) return -9.0;
   if (t >= tTop) return -(t - tTop) * a.depth - 0.02;
   if (overBase <= -0.1) return base;
-  float prof = 1.0 - t * t;
+  float prof = 1.0 - pow(max(t, 0.0), k);
   // The place in the noise: its tile is BASE_KM wide; a depth into it that
   // drifts from place to place (far) keeps two tiles from showing the same
   // clouds; and it leans with the wind's shear.
@@ -2321,12 +2334,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   vec2 xs = x - CF_LEAN * overBase;
   vec3 off = vec3(far.b, 2.5 * far.r, far.g);
   q.xyz = vec3(xs.x, h, xs.y) / BASE_KM + off;
+  // (A tower's shape is drawn out upwards: turrets on one stem, not heaps
+  // one over another.)
+  vec3 qs = vec3(xs.x, h * mix(1.0, 0.45, a.tower), xs.y) / BASE_KM + off;
   // (Near the eye, where a pixel is finer than 1 m, the read moves by up to
   // half a texel each frame: the mean over the frames smooths the facets of
   // the GPU's filter.)
   float shaken = fine ? clamp(-6.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) * mix(1.0, 0.3, smoothstep(0.1, 0.3, length(p))) : 0.0;
-  vec4 n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
-  vec4 m = textureLod(uNoise, q.xyz * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
+  vec4 n = textureLod(uNoise, qs + shake * (shaken / 128.0), max(lod, 0.0));
+  vec4 m = textureLod(uNoise, qs * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
   // Heaps: Perlin-Worley, swollen by its Worley cells (2 km to 500 m), and
   // the same 4 times larger, which gathers them.
   float wn = 0.625 * n.g + 0.25 * n.b + 0.125 * n.a, wm = 0.625 * m.g + 0.25 * m.b + 0.125 * m.a;
@@ -2346,9 +2362,19 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float cells = 0.4 * (0.6 * m.g + 0.4 * m.b) + 0.6 * (0.45 * c.g + 0.35 * c.b + 0.2 * c.a);
     shape = mix(clamp((cells - 0.2) / 0.5, 0.0, 1.0), shape, a.form);
   }
-  // (Near the top of the slider the cover closes: no place is quite empty.)
-  shape = mix(0.2 * smoothstep(0.75, 1.0, uCloud), 1.0, shape);
-  return CF_K * (shape * prof - (1.0 - a.amount)) / a.amount;
+  // (Where the amount is over CF_CLOSE the cover closes: no place is quite
+  // empty.)
+  float closed = smoothstep(CF_CLOSE + 0.1, CF_CLOSE + 0.18, a.amount);
+  shape = mix(CF_FLOOR * closed, 1.0, shape);
+  // And a veil lies at the base of a closed sheet, which the fine noise
+  // does not erode: through the thinnest places between cells one sees
+  // grey cloud, not the sea (pits through a sheet were dark specks from far
+  // above).
+  veil = CF_VEIL.x * closed * clamp(1.0 - t / CF_VEIL.y, 0.0, 1.0);
+  // (Outside, the field falls about as fast as the shape does per km: the
+  // march strides by it.)
+  float d = shape * prof - (1.0 - am);
+  return CF_K * (d > 0.0 ? d / am : d);
 }
 
 // The field at p; fine: with the fine noise, which erodes it (after
@@ -2364,7 +2390,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
   float f = cloudShape(p, lod, fine, y, q, body, lump, base);
   float c = min(f, base);
   fb = f - base;
-  edge = CF_K * CF_FULL;
+  float under = min(CF_K * veil, base);
+  // (Heaps are denser at their edge than a sheet: crisp outlines.)
+  edge = CF_K * CF_FULL * mix(1.0, 0.6, formAt);
   bump = 0.0;
   if (fine && c > 0.0 && c < CF_K) {
     vec3 qd = q.xyz * DETAIL + swirl;
@@ -2382,7 +2410,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     float er = CF_ERODE * clamp(e, 0.0, 1.0);
     bump = CF_K * (c / CF_K - er) / (1.0 - er) - c;
   }
-  return c + bump;
+  return veil > 0.0 ? max(c + bump, under) : c + bump;
 }
 
 float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out float body, out float edge) {
@@ -2708,7 +2736,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   // the heaps.)
   float one = 0.0, many = 0.0, amb = 0.0, lean = 0.0, pend = 0.0;
   bool lit = false, fog = true, waiting = false;
-  float under = 0.0, TcLit = 1.0, TcIn = 1.0, tIn = 0.0, tauStar = 0.0, TcStar = 0.0, tE = 0.0, tauAt = 0.0;
+  float under = 0.0, TcLit = 1.0, TcIn = 1.0, tIn = 0.0, tauStar = 0.0, TcStar = 0.0, tE = 0.0, tauAt = 0.0, wIn = 0.0, tsIn = 0.0;
   float above = 0.0;
   // The march stops at each point that needs the light worked out, and
   // works it out after its loop: the pixels that the GPU runs together
@@ -2768,6 +2796,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             waiting = true;
             TcIn = Tc;
             tIn = t0;
+            wIn = pend;
+            tsIn = tsum;
 #if Q_GOLD
             // (By the plastic number's step, so that it runs apart from the
             // start's jitter.)
@@ -2778,7 +2808,11 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             // (The first stage keeps only the slow parts, which change
             // little over those metres: it takes them at the entry, and
             // marches no deeper. Deeper, it cost 0.4 ms under a deck.)
-            if (uStage == 0.0) tauStar = 0.0;
+            // (The first stage takes the light a depth of 1 in: at the place
+            // the ray came in, the faint fringe of a soft cloud, it was the
+            // light of a wisp, or of a crease behind one, and the second
+            // stage drew thin dark lines along the lobes of near tops.)
+            if (uStage == 0.0) tauStar = 1.0;
             TcStar = TcIn * exp(-tauStar);
           }
         }
@@ -2809,12 +2843,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         // thin one) takes the light where the ray left it.
         if (waiting) {
           need = true;
-          tE = t - came * f / (f - fPrev);
+          // (The ray left the cloud before the depth chosen: the light is
+          // worked out at the middle of what it met there, by weight. At the
+          // place it left, a ray that grazed a lobe took the light of the
+          // lobe's far side for the whole of its way through it: with the
+          // sun behind the eye every lobe before another had a dark outline.)
+          tE = pend > wIn ? (tsum - tsIn) / (pend - wIn) : t - came * f / (f - fPrev);
           tauAt = log(TcIn / max(Tc, 1e-30));
         }
         lit = false;
         fog = false;
-        next = clamp(-0.6 * f, FINE * dsIn, COARSE * dsAir);
+        next = clamp(-0.5 * f, FINE * dsIn, COARSE * dsAir);
         // Over the tops round here (uTops), the ray meets no cloud before it
         // has come down to them or gone as far sideways as they hold: it
         // strides there, less a share of a stride new for each pixel and
