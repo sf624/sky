@@ -121,3 +121,27 @@ test('sheet: rows of scaled pictures with labels', () => {
   assert.equal(s.w, 2 * 32 + 3 * 2);
   assert.equal(s.h, 2 + 18 + 16 + 2);
 });
+
+test('fibrousness: parallel streaks score high, round clots and grain low, clear sky 1', () => {
+  const n = noise(7);
+  // (Streaks: the noise read 12 times as long as wide, along a slant. Clots: the same noise, round.)
+  const streaks = pic(W, H, (x, y) => { const u = x * 0.8 + y * 0.6, v = -x * 0.6 + y * 0.8; return 120 + 220 * (n(u / 12, v * 3) - 0.5); });
+  const clots = pic(W, H, (x, y) => 120 + 220 * (n(x * 3, y * 3) - 0.5));
+  const clear = pic(W, H, (x, y) => 90 + y * 0.2);
+  const s = M.fibrousness(streaks), c = M.fibrousness(clots);
+  assert.ok(s > 0.8, `streaks ${s}`);
+  assert.ok(c < 0.5, `clots ${c}`);
+  assert.equal(M.fibrousness(clear), 1);
+  // Grain on the streaks (a photograph's) lowers it little.
+  let seed = 5;
+  const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) | 0; return ((seed >>> 8) & 0xffff) / 65536; };
+  const grainy = pic(W, H, (x, y) => { const u = x * 0.8 + y * 0.6, v = -x * 0.6 + y * 0.8; return 120 + 220 * (n(u / 12, v * 3) - 0.5) + 20 * (rnd() - 0.5); });
+  assert.ok(M.fibrousness(grainy) > 0.7, `grainy ${M.fibrousness(grainy)}`);
+});
+
+test('whiteShare: the share of near-white pixels, not of bright blue ones', () => {
+  const half = pic(W, H, (x, y) => (y < H / 2 ? 240 : [120, 150, 230]));
+  assert.ok(Math.abs(M.whiteShare(half) - 0.5) < 0.01);
+  assert.ok(Math.abs(M.whiteShare(half, { region: [0, 0, 1, 0.5] }) - 1) < 0.01);
+  assert.equal(M.whiteShare(pic(W, H, () => [200, 220, 255])), 0);
+});

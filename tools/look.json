@@ -387,6 +387,117 @@
    "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085).",
    "bad": "8582b03",
    "fixed": "efd2b2f"
+  },
+  {
+   "name": "cirrus-crumbs-3km-away",
+   "q": "time=12&date=319&alt=3&pitch=30&yaw=180&cloud=0&cirrus=0.7",
+   "reported": "2026-11-23",
+   "wrong": "much cirrus seen from below as clots and crumbs, like broken altocumulus, not as fibres and sweeps",
+   "measures": [
+    {
+     "measure": "fibrousness",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.74
+    }
+   ],
+   "bad": "76fd6c6",
+   "fixed": "6853eae"
+  },
+  {
+   "name": "cirrus-crumbs-3km-zenith",
+   "q": "time=12&date=319&alt=3&pitch=75&yaw=180&cloud=0&cirrus=0.7",
+   "reported": "2026-11-23",
+   "wrong": "the same near the zenith",
+   "measures": [
+    {
+     "measure": "fibrousness",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.74
+    }
+   ],
+   "bad": "76fd6c6",
+   "fixed": "6853eae"
+  },
+  {
+   "name": "cirrus-crumbs-3km-sun",
+   "q": "time=12&date=319&alt=3&pitch=30&yaw=0&cloud=0&cirrus=0.7",
+   "reported": "2026-11-23",
+   "wrong": "the same towards the sun",
+   "measures": [
+    {
+     "measure": "fibrousness",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.76
+    }
+   ],
+   "bad": "76fd6c6",
+   "fixed": "6853eae"
+  },
+  {
+   "name": "cirrus-dusk-fan-3km",
+   "q": "time=16.8&date=319&alt=3&pitch=12&yaw=50&cloud=0.1&cirrus=0.7",
+   "reported": "2026-11-23",
+   "wrong": "at a sun 3 degrees up, the lit fan of cirrus was grey crumbs (main: broad lit sweeps)",
+   "measures": [
+    {
+     "measure": "fibrousness",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.7
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.25,
+      0.3,
+      0.5,
+      0.3
+     ],
+     "p": 50,
+     "min": 140
+    }
+   ],
+   "bad": "76fd6c6",
+   "fixed": "6853eae"
+  },
+  {
+   "name": "cirrus-whiteout-11km",
+   "q": "time=12&date=319&alt=11&pitch=15&yaw=0&cloud=0&cirrus=0.7",
+   "reported": "2026-11-23",
+   "wrong": "from 11 km towards the sun, much cirrus was a white sky (main: a grey veil with the sun's glow)",
+   "measures": [
+    {
+     "measure": "whiteShare",
+     "region": [
+      0,
+      0,
+      1,
+      0.5
+     ],
+     "max": 0.07
+    }
+   ],
+   "bad": "76fd6c6",
+   "fixed": "6853eae"
   }
  ]
 }

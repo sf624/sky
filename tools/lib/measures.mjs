@@ -349,4 +349,57 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };
+// fibrousness: how far the structure of the region runs one way, place by place: the coherence of the
+// structure tensor of the luma (the gradients' second moments summed over a window of opt.n px, default 48):
+// |l1 - l2| / (l1 + l2) of its eigenvalues, 1 where every gradient in the window lies along one line (parallel
+// fibres, a straight edge) and 0 where they point every way (clots, crumbs, grain). The mean over the windows,
+// weighted by their gradient energy; windows whose mean squared gradient is under opt.floor (default 0.5, in
+// levels squared: clear sky, a smooth veil) do not count, and with none that counts it is 1. The luma is
+// smoothed first (a box of radius opt.smooth, default 3) and the gradient taken over opt.d px (default 4), so
+// that a photograph's grain does not count as crumbs.
+export function fibrousness(img, { region: box, n = 48, floor = 0.5, d = 4, smooth = 3 } = {}) {
+  const R = region(img, box), { w, h } = R;
+  let l = R.l;
+  if (smooth > 0) {
+    const I = new Float64Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) I[(y + 1) * (w + 1) + x + 1] = l[y * w + x] + I[y * (w + 1) + x + 1] + I[(y + 1) * (w + 1) + x] - I[y * (w + 1) + x];
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - smooth), x1 = Math.min(w, x + smooth + 1), y0 = Math.max(0, y - smooth), y1 = Math.min(h, y + smooth + 1);
+      out[y * w + x] = (I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+    }
+    l = out;
+  }
+  let sum = 0, weight = 0;
+  for (let y0 = d; y0 + n <= h - d; y0 += n >> 1) {
+    for (let x0 = d; x0 + n <= w - d; x0 += n >> 1) {
+      let xx = 0, yy = 0, xy = 0;
+      for (let y = y0; y < y0 + n; y++) {
+        for (let x = x0; x < x0 + n; x++) {
+          const i = y * w + x, gx = (l[i + d] - l[i - d]) / (2 * d), gy = (l[i + d * w] - l[i - d * w]) / (2 * d);
+          xx += gx * gx; yy += gy * gy; xy += gx * gy;
+        }
+      }
+      const e = (xx + yy) / (n * n);
+      if (e < floor) continue;
+      sum += Math.hypot(xx - yy, 2 * xy) / (xx + yy) * e;
+      weight += e;
+    }
+  }
+  return weight ? sum / weight : 1;
+}
+
+// whiteShare: the share of the region's pixels that are near white: luma at least opt.luma (default 225) and
+// saturation ((max - min) / max) at most opt.sat (default 0.08). A sky whited out by ice, where a veil with blue
+// in it should be.
+export function whiteShare(img, { region: box, luma: min = 225, sat = 0.08 } = {}) {
+  const R = region(img, box);
+  let n = 0;
+  for (let i = 0; i < R.l.length; i++) {
+    const hi = Math.max(R.r[i], R.g[i], R.b[i]), lo = Math.min(R.r[i], R.g[i], R.b[i]);
+    if (R.l[i] >= min && hi > 0 && (hi - lo) / hi <= sat) n++;
+  }
+  return n / R.l.length;
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, fibrousness, whiteShare, relief, blobSize, lineDip };

@@ -65,7 +65,7 @@ These are read directly.
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
-| `ci` | none | A test: the cirrus's layer, `base,depth,form,size,thick,ice` (km, km, 0 a sheet / 1 figures and fibres / 2 small cells, km, a factor on the optical depth, 0 to 1); an empty place keeps the page's value (`ci=11.3,2`, `ci=,,0,,2` for a cirrostratus veil, `ci=9.5,0.3,2,0.15,3,0` for cirrocumulus). See [design.md](design.md#cirrus) |
+| `ci` | none | A test: the cirrus's layer, `base,depth,form,size,thick,ice` (km, km, 0 a sheet / 1 figures and fibres / 2 small cells, km, a factor on the optical depth, 0 to 1); an empty place keeps the page's value (`ci=10.8,2`, `ci=,,0,,2` for a cirrostratus veil, `ci=9.5,0.3,2,0.15,3,0` for cirrocumulus). See [design.md](design.md#cirrus) |
 | `cidbg` | none | A test: `cidbg=X` draws no cirrus but blacks out where its optical depth along the ray is over X (to measure how thick it is) |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
