@@ -2318,12 +2318,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   base = 8.0 * overBase;
   float t = overBase / a.depth;
   heapUp = clamp(t, 0.0, 1.0);
-  // The profile 1 - t^k: flat under, round over; k = 2, and 3 for a tower,
-  // which keeps its width higher up. The amount takes 1 - am of the shape;
+  // The profile 1 - t^k: flat under, round over (k = 2; a tower's is
+  // lower towards its sides, below). The amount takes 1 - am of the shape;
   // no cloud above tTop: the profile there is under that. Over CF_CLOSE the
   // amount takes no more, and a floor under the shape closes the cover
   // instead (below): so a closed sheet keeps the relief of its top.
-  float am = min(a.amount, CF_CLOSE), k = 2.0 + a.tower;
+  float am = min(a.amount, CF_CLOSE), k = 2.0;
   // (A heap's heads stand out of it by up to 0.2 CF_KNOB of density, see
   // cloudField: cut off at the bound without them, distant tops had flat,
   // stepped outlines.)
@@ -2347,21 +2347,21 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   vec2 xs = x - CF_LEAN * overBase;
   vec3 off = vec3(far.b, 2.5 * far.r, far.g);
   q.xyz = vec3(xs.x, h, xs.y) / BASE_KM + off;
-  // (A tower's shape is drawn out upwards: turrets on one stem, not heaps
-  // one over another.)
-  vec3 qs = vec3(xs.x, h * mix(1.0, 0.45, a.tower), xs.y) / BASE_KM + off;
   // (Near the eye, where a pixel is finer than 1 m, the read moves by up to
   // half a texel each frame: the mean over the frames smooths the facets of
   // the GPU's filter.)
   float shaken = fine ? clamp(-6.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) * mix(1.0, 0.3, smoothstep(0.1, 0.3, length(p))) : 0.0;
-  vec4 n = textureLod(uNoise, qs + shake * (shaken / 128.0), max(lod, 0.0));
-  vec4 m = textureLod(uNoise, qs * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
+  vec4 n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
+  vec4 m = textureLod(uNoise, q.xyz * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
   // Heaps: Perlin-Worley, swollen by its Worley cells (2 km to 500 m), and
-  // the same 4 times larger, which gathers them.
+  // the same 4 times larger, which gathers them. A tower is a larger heap:
+  // the larger cells weigh more there (broad masses, not stems). (A shape
+  // drawn out upwards made stems: its cells became columns, and the carving
+  // fluted them into bundles of needles, like a ridge of rock.)
   float wn = 0.625 * n.g + 0.25 * n.b + 0.125 * n.a, wm = 0.625 * m.g + 0.25 * m.b + 0.125 * m.a;
   float sn = (n.r + 1.0 - wn) / (2.0 - wn), sm = (m.r + 1.0 - wm) / (2.0 - wm);
   // (And its cells of 1 km by themselves: small heaps between the large.)
-  float shape = clamp((mix(sn, sm, CF_BIG) - CF_LO) / (CF_HI - CF_LO) + CF_SMALL * (n.b - 0.46), 0.0, 1.0);
+  float shape = clamp((mix(sn, sm, mix(CF_BIG, 0.55, a.tower)) - CF_LO) / (CF_HI - CF_LO) + CF_SMALL * (n.b - 0.46), 0.0, 1.0);
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
   knob = 1.0 - (0.6 * n.b + 0.4 * n.a);
   if (a.form < 1.0) {
@@ -2382,7 +2382,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // floor under the shape gave relief too, and pits: specks from 40 km.)
     rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form);
   }
-  float prof = 1.0 - pow(max(t / (1.0 + rise), 0.0), k);
+  // (A tower stands highest over the middle of its large cell and lower
+  // towards its sides: a dome of turrets, not a block with a flat top.)
+  float prof = 1.0 - pow(max(t / (1.0 + rise) / mix(1.0, 0.55 + 0.45 * smoothstep(0.5, 0.9, sm), a.tower), 0.0), k);
   // (Where the amount is over CF_CLOSE the cover closes: no place is quite
   // empty.)
   float closed = smoothstep(CF_CLOSE + 0.1, CF_CLOSE + 0.18, a.amount);
