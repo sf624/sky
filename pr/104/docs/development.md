@@ -27,7 +27,9 @@ slider's range and rounds it to its step. A value that is not a number
 becomes the middle of the range (`time=abc` gives 12). `alt` is the
 exception: its slider is not even in km (see below), so the page reads it
 itself, clamps it to the range and keeps it as given (to the metre); a
-value that is not a number gives the default.
+value that is not a number gives the default. `time` and `moon` are also
+kept as given when they are in range (they run unrounded while playing, and the
+debug overlay shows them so).
 
 | Parameter | Range, step | Default | Meaning |
 |---|---|---|---|
@@ -65,6 +67,7 @@ These are read directly.
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
+| `debug` | stored choice, else off | `1`: shows the debug overlay, `0`: hides it (see [Reporting a flaw](#reporting-a-flaw-with-the-debug-overlay)). Not stored; the `I` key stores its choice |
 | `stats` | none | Present (`?stats`, or `stats=1`): a small overlay of what the hero costs on the device (frames a second, the GPU's time, the script's time by part of the frame, the level, the canvas and the sizes drawn, the first picture and when each part of the start ended, GPU memory, failures, the GPU's name), to read off a phone (see [design.md](design.md#quality-levels)). `stats=bench` also holds the drawing scale at 1, 0.71, 0.5 and 0.35 in turn and shows the frames a second at each; `stats=bench3` measures the frame with each part taken away and with each candidate cut, at full scale, by the frames a second (some 40 to 60 s after the first picture; touch nothing). `stats=0` is none |
 | `timing` | none | Present (`?timing`): the loading prints its parts to the console as each ends, and every 5 s the programs it still waits for (see [design.md](design.md#from-the-address-bar-to-the-first-frame)) |
 | `grid` | none (off) | `1`: the low clouds' towers are grown as trees of lobes by a worker and kept in grids that move with the eye (see [design.md](design.md#towers-in-grids-that-move-with-the-eye)). Only at `quality=max` and `high`; elsewhere it does nothing. `1,v62.5` (or `1,v62`): the finest voxels 62.5 m, not 31.25 m (the levels 62.5, 125 and 250 m); any other value of `v` keeps 31.25 m. `1,hK:W`: the heads of `uBody`, read K times finer (K over 0), also carve the towers' surface, seams W km deep. The two may be given together (`1,v62.5,h2:0.05`). A test switch: off, the page is main's |
@@ -73,11 +76,12 @@ These are read directly.
 
 With `date` and no `moon`, the moon's age follows the given date.
 
-The page keeps six choices in `localStorage`: `sky.pixels` (the drawing
+The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
 it is automatic), `sky.lang` (the language, set by the panel's language
 select), `sky.sound` and `sky.volume` (the sound and its volume), and
-`sky.hud` (`1` or `0`: the HUD, set by its switch and `H`). The
+`sky.hud` (`1` or `0`: the HUD, set by its switch and `H`) and `sky.debug`
+(`1` or `0`: the debug overlay, set by `I`). The
 address wins over all of them. With the automatic level it also keeps
 `sky.qualityAuto`: the level reached and the highest it may step up to,
 as JSON (`{"level":"mid","ceiling":"high"}`), and `sky.qualityTrying`:
@@ -92,7 +96,32 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 climb in degrees, altitude and place in km, the sun's direction and the
 camera), for the tools; `window.__hud()` the HUD's anchor and horizon line as drawn, whether its
 glass is in view and where its readouts are
-(see [design.md](design.md#the-hud)).
+(see [design.md](design.md#the-hud)). `window.__debug()` returns what the debug overlay shows
+(below), on or off.
+
+## Reporting a flaw with the debug overlay
+
+A screenshot of a flaw does not say where the aircraft was, which way it looked or what the
+sliders said. With `?debug=1` (or the `I` key, which keeps its choice like `H`), a block of
+monospace text appears at the top left, over a dark backing, and the title is hidden. It shows:
+
+- the build: the commit, and on a pull request's preview its number (`9041c58 PR #12`; `dev` on a
+  local copy). The Pages workflow replaces the `dev` of `<meta name="build">` when it publishes;
+- the GPU's name, the canvas's size in pixels and in CSS px, the device pixel ratio, the quality level
+  drawn, the time between frames (smoothed; `at rest` when nothing is drawn) and the exposure (log2);
+- the query line: every parameter that shapes the picture, with the values now (date, time, clock,
+  `lat`, `lon`, `alt`, the place `at`, `yaw`, `pitch`, `heading`, `bank`, `climb`, `speed`, `cloud`,
+  `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
+- a `Copy URL` button, which puts the whole address on the clipboard.
+
+To see what a screenshot showed, type its query line after `?`, add `speed=0` (the line has the
+speed flown at), and let the picture settle. The picture then matches the one that was flown to
+within a few levels: the clouds' lighting of a settled flight and of a fresh load differ a little (see the `flight` check).
+The exposure is metered afresh; the overlay shows the one in use, and `expo=` pins it. The size of the
+canvas comes from the window and the device pixel ratio, which an address cannot set. While time
+plays (`play=1`), the time shown is the one at that moment. `window.__debug()` returns `{ build, query,
+url, renderer, canvas, css, dpr, quality, choice, frameMs, exposure }` for the tools. Off, the overlay
+holds no element and does no work: the picture is the same.
 
 ## Judging a change
 
