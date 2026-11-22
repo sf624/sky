@@ -406,7 +406,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "6853eae"
+   "fixed": "aeda58f"
   },
   {
    "name": "cirrus-crumbs-3km-zenith",
@@ -426,7 +426,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "6853eae"
+   "fixed": "aeda58f"
   },
   {
    "name": "cirrus-crumbs-3km-sun",
@@ -446,13 +446,13 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "6853eae"
+   "fixed": "aeda58f"
   },
   {
    "name": "cirrus-dusk-fan-3km",
    "q": "time=16.8&date=319&alt=3&pitch=12&yaw=50&cloud=0.1&cirrus=0.7",
    "reported": "2026-11-23",
-   "wrong": "at a sun 3 degrees up, the lit fan of cirrus was grey crumbs (main: broad lit sweeps)",
+   "wrong": "at a sun 3 degrees up, the lit fan of cirrus was grey crumbs (76fd6c6), then fibrous but without main's broad lit sweeps high in the sky (e788502)",
    "measures": [
     {
      "measure": "fibrousness",
@@ -468,16 +468,39 @@
      "measure": "lumaPct",
      "region": [
       0.25,
-      0.3,
+      0.05,
       0.5,
       0.3
      ],
-     "p": 50,
-     "min": 140
+     "p": 75,
+     "min": 112
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "6853eae"
+   "fixed": "aeda58f",
+   "note": "fibrousness fails on 76fd6c6 (0.587); the luma of the sky high above the sun fails on e788502 (109; main 127)"
+  },
+  {
+   "name": "cirrus-dusk-fan-3km-b",
+   "q": "time=16.8&date=319&alt=3&pitch=12&yaw=50&cloud=0.1&cirrus=0.7&at=60,40",
+   "reported": "2026-11-23",
+   "wrong": "the same at another place",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.25,
+      0.05,
+      0.5,
+      0.3
+     ],
+     "p": 75,
+     "min": 112
+    }
+   ],
+   "bad": "e788502",
+   "fixed": "aeda58f",
+   "note": "99 on e788502; main 128"
   },
   {
    "name": "cirrus-whiteout-11km",
@@ -497,7 +520,7 @@
     }
    ],
    "bad": "76fd6c6",
-   "fixed": "6853eae"
+   "fixed": "aeda58f"
   }
  ]
 }

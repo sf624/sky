@@ -4157,6 +4157,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
     // that column in closed form. Near the eye the steps read the forms
     // themselves (wNear), so that they change along a ray in the layer.
     float wNear = 1.0 - smoothstep(2.5, 4.5, t0);
+    // (The bands, far off: read once, at the middle of the way through the
+    // layer; near the eye each step reads them where it is.)
+    float lnP = wNear < 1.0 ? ci2Lane(ciWarp(pmid.xz + uDrift)) : 1.0;
     vec2 flCol = vec2(0.0), flIce = vec2(0.0), flHc = vec2(0.5 * DEPTH), flSg = vec2(0.1 * DEPTH);
     if (fm.y > 0.0 && wNear < 1.0) {
       for (int k = 0; k < CI_N(2); k++) {
@@ -4183,7 +4186,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
         tf = ci2FormAt(wk, k, JF);
         vec2 f1 = dk * max(fq / max(ck, 1e-3) + 0.08 * L * lk2, CI_MINF), f2 = vec2(-dk.y, dk.x) * max(fq, CI_MINF);
         float ice = (k == 0 ? 0.8 : 1.0) * ci2FormIce(textureGrad(uIce, tf, JF * f1, JF * f2) * (k == 0 ? CI2_SET0 : vec4(1.0)), ck4, gk);
-        flCol[k] = fm.y * ci2FormTau(gk) * ci2Lane(wk) / max(ck, 0.05);
+        flCol[k] = fm.y * ci2FormTau(gk) * lnP / max(ck, 0.05);
         flIce[k] = ice;
         flHc[k] = hc;
         flSg[k] = DEPTH * (0.06 + 0.13 * age);
@@ -4239,10 +4242,10 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       // The head over the time of the fall: G read farther on as the ice
       // has fallen farther, so that a head comes and goes along its streak.
       float sm = smoothstep(0.0, 0.5, max(h - CI2_H0, 0.0));
-      // (Over the step's segment, as the field: read at a point, each of a
-      // few long steps took one round patch of it, and their sum was crumbs.)
-      float mb = max(minor, 0.133);
-      float burst = (textureGrad(uG2, 3.0 * tc + CI2_BURST.y * h * vec2(0.37, 0.23), 3.0 * (R * (e * max(major, mb))), 3.0 * (R * (en * mb))).b - 0.5) * 6.0;
+      // (One read at a point: it weighs little now. At 0.7, each of a few
+      // long steps took one round patch of it, and their sum was crumbs;
+      // read over the step's segment it cost a tenth of the pass.)
+      float burst = (textureLod(uG2, 3.0 * tc + CI2_BURST.y * h * vec2(0.37, 0.23), 5.0).b - 0.5) * 6.0;
       float fib = 0.0;
       if (wS < 1.0 && fm.z < 1.0) {
         vec2 xf = x0 + CI2_WANDER * (textureLod(uG2, tc, 8.0).rb - 0.5) * 6.0, nf = en * max(foot, 0.5 * CI2_TEX);
@@ -4250,7 +4253,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       }
       float us = clamp(hn * 4.0 - 0.5, 0.0, 3.0), k0 = floor(us);
       fib = mix(fib, mix(FS[int(k0)], FS[int(min(k0 + 1.0, 3.0))], us - k0), wS);
-      float ln = ci2Lane(wm);
+      float ln = wNear > 0.0 ? mix(lnP, ci2Lane(wm), wNear) : lnP;
       float off = thr + CI2_GATE * (1.0 - gate * ln);
       // Cirrus: the noise's forms (the large sizes, where they gather;
       // tufts; the heads' own field, which comes and goes), which fall back
