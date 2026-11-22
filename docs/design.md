@@ -2908,40 +2908,55 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   Now they are at about 40 to 70 under a quarter moon and 110 under a
   full moon, and a moonless night is darker still: black sky, stars, the
   clouds below barely seen;
-- and by day the eye opens up no further than daylight lets it: the
-  day's exposure (the one above, before twilight's is blended in) is at
+- and while the sun shines on the eye, the eye opens up no further than
+  the sun's light lets it: the exposure, after all of the above, is at
   most `DAY_OPEN[0]` = 3.5 stops past the exposure that shows a white
   surface facing the sun, in the sun's light at the eye, at `WHITE`
   (`dayEye`; `sunlitLevel`: the bare sun's light through the air to the
-  eye, `sunThrough`, times `ISUN` / pi). It hangs on the light where the
-  eye is, not on the view: turning the view does not move it, so a turn
-  from the Earth to the sky has no step in it. It goes with the day's
-  exposure as twilight's takes over, and where the planet hides the sun.
-  Up to the cruise heights no view by day comes near it: the darkest, the
-  deep blue zenith from 11 km, stays 0.26 to 0.74 stops below (least
-  with the sun 15 to 28 degrees up); the sea below from 0.3 km at noon in
-  summer, 0.45; under an overcast, 0.75 or more. Above `DAY_KM[0]` = 12
-  km it closes, along a smoothstep, to `DAY_OPEN[1]` = 2.8 at 20 km and
-  above, a little over where a view with the sunlit Earth in it stands
-  there (1.3 to 2.5 at 20 and 40 km): above the cruise heights the sky over the eye is near
-  space, and the eye, adapted to the sun and the sunlit Earth round it,
-  sees it near black, as photographs from the stratosphere show it. A
-  view of the sky alone now shows it about as dark as a view with the
+  eye, `sunThrough`, with the ozone, times `ISUN` / pi). It hangs on the
+  light where the eye is, not on the view: turning the view does not
+  move it, so a turn from the Earth to the sky has no step in it. And it
+  hangs on the sun as the eye sees it, not on the sun's height over the
+  ground's horizon, which sets the twilight's exposure (`DUSK`): from 40
+  km the sun sets some 6.4 degrees below the horizontal, from 20 km 4.5,
+  from 11 km 3.4, and until then it shines on the eye. In the model's
+  air its light at 40 km is 0.97 of the bare sun's with the sun 0
+  degrees up, 0.8 at 2 down, a fifth at 4 down, and gone by 6 down; at
+  20 km 0.4 at 0 degrees, 0.18 at 2 down, gone by 4. So the limit lifts
+  by itself as the sun's light at the eye fades into the limb, and
+  twilight's exposure then comes in as before.
+  Up to the cruise heights no view comes near it, by day or at dusk: the
+  darkest, the deep blue zenith from 11 km, stays 0.26 to 0.74 stops
+  below by day (least with the sun 15 to 28 degrees up) and 0.3 at
+  sunset; the sea below from 0.3 km at noon in summer, 0.45; under an
+  overcast, 0.75 or more. Above `DAY_KM[0]` = 12 km it closes, along a
+  smoothstep, to `DAY_OPEN[1]` = 2.8 at 20 km and above, a little over
+  where a view with the sunlit Earth in it stands there by day (1.3 to
+  2.5 at 20 and 40 km): above the cruise heights the sky over the eye is
+  near space, and the eye, adapted to the sun and the sunlit Earth round
+  it, sees it near black, as photographs from the stratosphere show it.
+  Simons, from the balloon Manhigh II at 30 km, saw the sky black or a
+  dark violet by day and through the hour before sunset, with no
+  brightening overhead, while the ground below went slate-grey first.
+  A view of the sky alone now shows it about as dark as a view with the
   Earth in it. Before, such a view opened up until the sky's faint blue
   filled the frame: from 40 km it stood 4.4 to 5 stops above what it gets
   now, a clear dark blue (about 22, 43, 89 in sRGB, now 3, 5, 11), where
   a view with the Earth in it showed the same sky black; from 20 km 1.2
   to 1.6 stops (26, 50, 103, now 14, 27, 57), from 15 km 0.7, from 13 km
-  0.4. Views of the Earth from 20 and 40 km, and every view up to 11 km
-  by day, at dusk and at night, are as before (214 views at 0.3, 3, 11,
-  20 and 40 km, the sun from 78 degrees up to the night).
+  0.4. Through sunset from 40 km the sky alone stays near black (median
+  luma 5 from 8 degrees up to 2 down, 8 at 4 down) and turns the dark
+  blue of before only as the sun sets at the eye (40 at 6 down); the
+  Earth below goes dark first (luma 51 at 0 degrees, 19 at 4 down, where
+  it was 109 and 64). From 20 km the sky alone stays dark navy down to 2
+  degrees below (luma 26 to 35) and takes twilight's exposure from 4
+  down, as before. Every view up to 11 km, by day, at dusk and at night,
+  is as before (216 views at 0.3, 3 and 11 km, the sun from 78 degrees up
+  to the night), and so is the night at every height.
   The limit bounds the exposure of the sun as it is, not the envelope of
   the sun higher (above): there, at 0.8 stops for each stop that the air
   darkens, it held deep twilight and the night down by up to 6 stops at
-  40 km and 0.9 at 11 km. So from 40 km the sky alone grows from near
-  black to its dark blue of before as the sun goes from 8 to 4 degrees
-  up and twilight's exposure takes over (luma 5, 10, 19, 37 at 8, 6, 5
-  and 4 degrees); views with the Earth in them do not change.
+  40 km.
 
 `exposureFor` returns the exposure.
 
