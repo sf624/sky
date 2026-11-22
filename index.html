@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
+<meta name="build" content="dev">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -250,6 +252,21 @@
     font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
     text-align: left; opacity: .7; user-select: text; -webkit-user-select: text;
   }
+  /* ?debug=1 (or the I key): the build and the address that reproduces the view, over everything, to read off a screenshot. */
+  .debug {
+    position: fixed; z-index: 101; top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left));
+    margin: 0; padding: 6px 8px; width: max-content; max-width: min(560px, calc(100vw - 16px)); box-sizing: border-box;
+    pointer-events: none; font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+    color: #fff; background: rgba(0, 0, 0, .74); border-radius: 4px; text-align: left; user-select: text; -webkit-user-select: text;
+  }
+  .debug[hidden] { display: none; }
+  .debug .q { display: block; margin-top: 3px; color: #cfe8ff; }
+  .debug button {
+    pointer-events: auto; margin-top: 4px; padding: 2px 8px; font: inherit; color: #fff; cursor: pointer;
+    background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .5); border-radius: 3px;
+  }
+  /* (The title would lie under it for its first seconds.) */
+  body.debugging .title { display: none; }
   /* ?stats: what the hero costs, over everything, to read off a screenshot. */
   .stats {
     position: fixed; z-index: 100; top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left));
@@ -11008,6 +11025,8 @@ const SkySound = (() => {
   // Then the drawing stops; and nothing is drawn in a hidden tab, nor
   // before the loading has ended.
   let queued = false, changed = false, running = false, lastFrame = 0;
+  // ?debug=1: the smoothed time between frames (ms) while they run, and when it was last updated.
+  const debug = { on: false, ms: 0, at: 0 };
   // The table of multiple scattering takes about a quarter of a second to
   // build: while the haze slider moves it waits, and is built HAZE_WAIT ms
   // after the last move (the first frame builds it at once).
@@ -11040,6 +11059,10 @@ const SkySound = (() => {
     // The aircraft flies on, in real time: the clouds and the sea come
     // towards it. After a pause it does not jump.
     const dt = running ? Math.min(Math.max(now - lastFrame, 0) / 1000, 0.1) : 0;
+    if (debug.on && running && now > lastFrame) {
+      debug.ms = debug.at && now - debug.at < 1000 ? debug.ms + (now - lastFrame - debug.ms) * 0.1 : now - lastFrame;
+      debug.at = now;
+    }
     lastFrame = now;
     const steering = fly(dt);
     let more = false;
@@ -11446,7 +11469,7 @@ const SkySound = (() => {
   // text field, no arrow on a slider (a letter there steers). They do not
   // bring the panel back (see wake below): it would cover the view.
   const steers = e => {
-    if (e.ctrlKey || e.metaKey || e.altKey || !(STEER_KEYS[e.code] || e.code === 'KeyL' || e.code === 'KeyH')) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey || !(STEER_KEYS[e.code] || e.code === 'KeyL' || e.code === 'KeyH' || e.code === 'KeyI')) return false;
     const el = e.target instanceof Element ? e.target : null;
     if (!el) return true;
     if (el.closest('select, textarea, [contenteditable]') || el.tagName === 'INPUT' && el.type !== 'range' && el.type !== 'checkbox') return false;
@@ -11457,6 +11480,10 @@ const SkySound = (() => {
     e.preventDefault();
     if (e.code === 'KeyH') {
       if (!e.repeat) setHud(!hudOn, true);
+      return;
+    }
+    if (e.code === 'KeyI') {
+      if (!e.repeat) setDebug(!debug.on, true);
       return;
     }
     if (e.code === 'KeyL') levelling = true;
@@ -11953,6 +11980,12 @@ const SkySound = (() => {
   new ResizeObserver(update).observe(document.body);
   window.addEventListener('resize', update);
   readInputs();
+  // The time and the moon's age run unrounded while playing: ?debug=1 gives them so, and they are taken as given
+  // (a slider would round them to its step), when in range.
+  for (const id of ['time', 'moon']) {
+    const x = params.has(id) && params.get(id) !== '' ? +params.get(id) : NaN, el = document.getElementById(id);
+    if (x >= +el.min && x <= +el.max) { state[sliders[id]] = x; update(); }
+  }
   // ?now=1 is the button; ?rate= (one of the select's) and ?play=1 are the
   // select and the play button.
   if (params.get('now') === '1') toNow();
@@ -12551,6 +12584,102 @@ const SkySound = (() => {
     // (A level chosen in the panel meanwhile.)
     if (render && choice !== asked && named(choice) && choice !== level) restart(choice);
   }
+  // ---------- Debug ----------
+  // ?debug=1 (or the I key, remembered like the HUD): the build, the address
+  // that draws this view again, the renderer, the canvas and the frame time,
+  // in a corner, so that a screenshot says how to see the same. Off, nothing
+  // of it exists in the page but window.__debug and the key. window.__debug()
+  // gives it all for the tools, on or off.
+  const rounded = (x, n) => +(+x).toFixed(n);
+  // The address of the view now, as the page reads it: every parameter that
+  // shapes the picture. (Not ?expo: the page meters its own; it is shown.)
+  function debugQuery() {
+    const deg = x => rounded(((x / RAD) % 360 + 540) % 360 - 180, 2);
+    const q = {
+      date: rounded(state.day, 0), time: rounded(state.time, 3), clock: state.clock,
+      lat: rounded(state.lat, 2), lon: rounded(state.lon, 2), alt: rounded(state.alt, 4),
+      at: rounded(wrap(state.drift[0]), 3) + ',' + rounded(wrap(state.drift[1]), 3),
+      yaw: deg(state.yaw), pitch: rounded(state.pitch / RAD, 2),
+      heading: deg(state.heading), bank: rounded(state.bank / RAD, 2), climb: rounded(state.climb / RAD, 2),
+      speed: rounded(state.speed, 1), cloud: rounded(state.cloud, 3), cirrus: rounded(state.cirrus, 3),
+      haze: rounded(state.haze, 2), wind: rounded(state.wind, 1), moon: rounded(state.moonAge, 3),
+      quality: level || (named(choice) ? choice : 'auto'), pixels: pixels.value,
+      hud: hudOn ? 1 : 0, lang: LANG,
+    };
+    if (params.has('res')) q.res = params.get('res');
+    return Object.entries(q).map(([k, v]) => k + '=' + v);
+  }
+  function debugData() {
+    const gl = render ? heroCanvas.getContext('webgl2') : null;
+    const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    const query = debugQuery().join('&'), E = window.__exposure;
+    const meta = document.querySelector('meta[name="build"]');
+    return {
+      build: meta ? meta.content : 'dev', query, url: location.origin + location.pathname + '?' + query,
+      renderer: gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : null,
+      canvas: [heroCanvas.width, heroCanvas.height], css: [heroCanvas.clientWidth, heroCanvas.clientHeight],
+      dpr: window.devicePixelRatio || 1, quality: level, choice,
+      frameMs: debug.at && performance.now() - debug.at < 1000 ? rounded(debug.ms, 1) : null,
+      exposure: typeof E === 'number' ? rounded(E, 3) : null,
+    };
+  }
+  window.__debug = debugData;
+  let debugBox = null, debugTimer = 0;
+  function showDebug() {
+    const d = debugData(), box = debugBox;
+    box.head.textContent = `build ${d.build}\n${d.renderer || 'no renderer yet'}\n` +
+      `canvas ${d.canvas.join('x')}, CSS ${d.css.join('x')}, DPR ${rounded(d.dpr, 2)}\n` +
+      `quality ${d.quality || '-'}${d.choice === 'auto' ? ' (auto)' : ''}, ${d.frameMs === null ? 'at rest' : d.frameMs + ' ms a frame'}, ` +
+      `exposure ${d.exposure === null ? '-' : d.exposure + ' (log2)'}`;
+    // The line breaks after each &, not inside a number.
+    box.line.replaceChildren(...d.query.split('&').flatMap((p, i) => [document.createTextNode((i ? '&' : '?') + p), document.createElement('wbr')]));
+    box.url = d.url;
+  }
+  function copyDebugUrl() {
+    const text = debugData().url, done = () => { debugBox.button.textContent = 'Copied'; setTimeout(() => { if (debugBox) debugBox.button.textContent = 'Copy URL'; }, 1500); };
+    const old = () => {
+      const t = document.createElement('textarea');
+      t.value = text;
+      t.style.cssText = 'position:fixed;opacity:0';
+      document.body.append(t);
+      t.select();
+      try { if (document.execCommand('copy')) done(); } catch (err) {}
+      t.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, old);
+    else old();
+  }
+  function setDebug(on, keep) {
+    debug.on = on;
+    document.body.classList.toggle('debugging', on);
+    if (on && !debugBox) {
+      const el = document.createElement('div');
+      el.className = 'debug';
+      const head = document.createElement('div'), line = document.createElement('span'), button = document.createElement('button');
+      line.className = 'q';
+      button.type = 'button';
+      button.textContent = 'Copy URL';
+      button.addEventListener('click', copyDebugUrl);
+      el.append(head, line, button);
+      document.body.append(el);
+      debugBox = { el, head, line, button, url: '' };
+    }
+    if (debugBox) debugBox.el.hidden = !on;
+    clearInterval(debugTimer);
+    debug.at = 0;
+    if (on) {
+      showDebug();
+      debugTimer = setInterval(showDebug, 300);
+    }
+    if (keep) try { localStorage.setItem('sky.debug', on ? '1' : '0'); } catch (err) {}
+  }
+  {
+    const asked = params.get('debug');
+    let stored = null;
+    try { stored = localStorage.getItem('sky.debug'); } catch (err) {}
+    if (asked === '1' || asked === '0' ? asked === '1' : stored === '1') setDebug(true, false);
+  }
+
   // After the first paint: an animation frame runs before it, a message after.
   nextFrame()
     .then(nextFrame)

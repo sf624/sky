@@ -64,6 +64,16 @@ jobs:
             rsync -a --delete --exclude=/.git --exclude=/.github --filter='-s /tools' src/ "site/pr/$PR/"
             what="Preview of #$PR at $HEAD_SHA"
           fi
+          # Stamp the page with what it was built from (?debug=1 shows it). Only
+          # a commit and a number are put in: nothing from the pull request's text.
+          if [ "$ACTION" != closed ]; then
+            if [ -z "$PR" ]; then stamp="$(echo "$GITHUB_SHA" | cut -c1-7) main"; page=site/index.html
+            else stamp="$(echo "$HEAD_SHA" | cut -c1-7) PR #$PR"; page="site/pr/$PR/index.html"; fi
+            # (A branch from before the page had the line is left as it is.)
+            if grep -q '<meta name="build" content="dev">' "$page"; then
+              sed -i "s|<meta name=\"build\" content=\"dev\">|<meta name=\"build\" content=\"$stamp\">|" "$page"
+            fi
+          fi
           cd site
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
