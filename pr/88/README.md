@@ -35,6 +35,7 @@ panel has the focus):
   degrees, and the altitude follows. At 300 m and at 40 km it levels off.
 - **Q E**: turn with the rudder, 3 degrees a second, without banking.
 - **L**: back to straight and level flight.
+- **H**: shows or hides the HUD (below).
 
 A key held keeps rolling or pitching; let go, the aircraft keeps its bank
 and its climb. On a touch screen, a stick at the bottom left does the same
@@ -44,6 +45,23 @@ button levels the wings. The view turns with the aircraft (you keep looking
 out of the same window), and a bank tilts the horizon; the sun stays where
 it is in the sky. At speed 0 the aircraft stands still: the bank and the
 climb only tilt it, and the rudder turns it on the spot.
+
+The HUD (head-up display) shows the flight over the view, in green, as in a
+flight simulator. It is off at first; **H** or the switch in the panel turns
+it on, and the browser remembers the choice. It shows:
+
+- the horizon line and a pitch ladder every 5 degrees (solid above the
+  horizon, dashed below). They lie on the true directions wherever you
+  look, as a helmet's display: the horizon line is the level of your eye.
+  The sea's horizon lies a little below it, more so the higher you fly
+  (0.6 degrees at 300 m, 3.4 degrees at 11 km).
+- a small aircraft symbol in the middle: where you look (looking ahead, the
+  nose);
+- the flight path marker (a circle with wings): where the aircraft goes,
+  when it is in view;
+- the bank at the top (marks at 10, 20, 30, 45 and 60 degrees), the heading
+  under it (a compass bearing, 0 north), the speed on the left, the altitude
+  and the vertical speed on the right.
 
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).
@@ -71,12 +89,11 @@ The panel at the bottom changes the time and the weather.
 - **Moon**: the age of the moon, 0 to 29.5 days.
 - **Haze**: the amount of dust and small droplets in the air, 0 to 6 (1 at first: a clear day of fair weather; 0.3 is very clean air, 3 and more a hazy day). With more, the horizon and the sky around the sun turn white, and distant clouds and sea fade into the haze.
 - **Wind at sea**: 1 to 15 m/s. Stronger wind makes the sun's glare on the sea wider and fainter, and raises whitecaps.
-- **Heading**: the direction flown, as a compass bearing (0 north, 90 east). The view turns with it. It follows the aircraft's turns.
-- **Bank**, **Climb**: the aircraft's bank, up to 60 degrees left or right, and its climb or descent, up to 15 degrees (with the rate in m/s). **Level** brings both back to 0.
 - **Altitude**: 300 m to 40 km (11,000 m at first). Above the cruise the sky overhead turns dark, the horizon curves and a thin blue band lies along it. The slider has a row of its own: up to 13 km it moves evenly, 20 m a step (a pixel is about 30 m on a desktop, 60 m on a phone), and above it moves faster, about 150 m a pixel at 40 km on a desktop. For an exact height, type it into the value beside the slider, in m or km (a number below 300 is km, from 300 on metres).
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
+- **Level** (button): back to straight and level flight, as **L**. **HUD**: shows or hides the HUD, as **H**.
 - **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
 - **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
 - **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels. At High and Max, on a screen with more pixels than that, the page enlarges the picture to the screen's own pixels itself, sharper than the browser's plain stretch.
