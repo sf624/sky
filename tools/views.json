@@ -17,6 +17,8 @@
     { "name": "clear", "q": "date=172&time=14&cloud=0&cirrus=0&pitch=-10" },
     { "name": "up-cirrus-11.5km", "q": "date=172&time=14&alt=11.5&pitch=40&cirrus=0.7&yaw=270" },
     { "name": "near-clouds-3km", "q": "date=172&time=14&alt=3&pitch=-5&yaw=60" },
+    { "name": "overcast-above-11km", "q": "date=319&time=15&cloud=1&alt=11&yaw=-134&pitch=-25" },
+    { "name": "overcast-40km", "q": "date=319&time=15&cloud=1&alt=40&yaw=111&pitch=-35" },
     { "name": "stratosphere-20km", "q": "date=172&time=10&alt=20&yaw=100&pitch=-3" },
     { "name": "limb-40km", "q": "date=172&time=10&alt=40&yaw=100&pitch=0" },
     { "name": "sunset-40km", "q": "date=172&time=19.6&alt=40&yaw=120&pitch=-3" },

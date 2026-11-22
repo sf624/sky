@@ -50,6 +50,7 @@ Every page the tools load gets `quality=max` in its query, unless the query name
 | `cirrus1`, `up-cirrus-11.5km` | thick cirrus; cirrus overhead from near its base |
 | `sea-low-sun`, `gale`, `clear` | sun glitter at 0.3 km; wind of 15 m/s; no cloud at all |
 | `near-clouds-3km` | low clouds seen from near |
+| `overcast-above-11km`, `overcast-40km` | the overcast deck from above: at 11 km, away from a sun 22 degrees high; from 40 km, aslant towards the limb (issue #77: the deck had rows and a lattice that no view caught) |
 | `at-the-wrap` | a still at 255.999 km, where the way flown wraps |
 | `dpr2-fhd` | a device pixel ratio of 2 at 1280x720 with `pixels=fhd`: the drawing-size cap applies, and the page enlarges the picture of 1920x1080 to the canvas of 2560x1440 (3 frames) |
 | `dpr1.5-fhd` | a still of the overcast deck under cirrus at a ratio of 1.5 at 1792x1008 with `pixels=fhd`: the picture of 1920x1080 enlarged 1.4 times to 2688x1512, as on a WQHD-limited 4K screen at 150 % |
@@ -223,7 +224,7 @@ Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, 
 |---|---|---|
 | `trace` of the page as it opens (12 frames, 480x270) | 4 to 5 s | 14 to 15 s |
 | `check` (all six; `ui-ja` skipped) | 6.3 min | 43 min |
-| of which `trace` and `stills` (20 views, page and base, one run each) | 4.8 min | 24 min |
+| of which `trace` and `stills` (20 views then, page and base, one run each) | 4.8 min | 24 min |
 | of which `wrap` | 39 s | 7.7 min |
 | of which `loop`, `res`, `flight` | 6 to 32 s each | 0.7 to 7 min each |
 

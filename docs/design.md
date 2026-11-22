@@ -1070,17 +1070,17 @@ heads of `cloudDetail` carve it too (`carved`). All of this only where the sheet
 of it, a speckle of small dots that shimmered in flight. The heaps that flatten into a deck (`deck`) have the
 same heads and seams. (Until round 17 the top was domes of the noise's
 1 and 2 km Worley cells: from above, a smooth cream with the heaps poking
-through it.) Over more than half of it (`far.a`) rows of
-rolls 1.2 km apart across the wind (whole numbers of them across the map,
-bent over tens of km), each swelling and thinning every 2 km along its
-length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. Each roll swells more
-in some places than in others (0.35 to 1 of its depth, by the noise's 2
-km cells): rolls of one depth over tens of km were straight, regular
-stripes from 13 km. The heaps on the sheet
-stand in the same ranks, with smaller billows (`rank`); with rolls in a
-few places only, the sheet from above was lumps without order. The
-billows of the tile lie on top. Sheet and
+through it.) The
+billows of the tile lie on top. (From the ray-marched clouds of #33 until #77, over
+more than half of the sheet (`far.a`) stood rows of rolls 1.2 km apart
+across the wind, swelling and thinning every 2 km along their length:
+two plane waves, the same everywhere, drew parallel rows at one spacing
+from 11 km and a lattice of dark cells, like a perforated sheet, from
+40 km.) From `BODY_FAR` = 25 km off, the read of `uBody` on a sheet
+fades to its mean, one mip level coarser for each 1.4 times as far, up
+to 4 (`bodyLod`): its heads are all of a size, and from 20 and 40 km the
+deck was a field of equal dots, the pits between them in shade. Heaps
+off the sheet keep their lobes at any distance. Sheet and
 heaps merge by a smooth max. Near the top of the slider (`level1`, 0.85
 to 1) the heaps on the sheet flatten to 40 % and few towers rise out of
 it: at `cloud=1` the domes stood up to 1.9 km over 1 to 3 km and looked
@@ -1104,7 +1104,7 @@ under a deck at 0.3 km it was 0.1 stops brighter). The heads of `uBody` carve th
 `TOP_E` = 1.5 times as deep as on the sheet's first edges, and the fine
 noise carves them as on the sheet. A heap with a body keeps its form
 (`free`: none from `solid` 0.8 on); the sheet round it has the cells.
-The rows of rolls keep the sheet above. Until #64 B2 the sheet and the
+Until #64 B2 the sheet and the
 heaps were two fields that crossed: from 4 to 5 km the turrets of the
 sheet stood out of the heaps' smooth domes as plateaus with cliffs, the
 domes lay between them as flat grey floors, like frozen lakes, their
@@ -1112,8 +1112,8 @@ shadows drew long winding valleys, and the tops read as snowy mountains.
 The turrets of `uBody` stand apart, and between them the sheet was flat;
 the Worley domes fill the plane and meet in creases. With the whole rise
 kept, the heaps were smooth hills with long shadows. The early ways out
-and the map of the tops allow for what the cells, heads and rolls add
-over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
+and the map of the tops allow for what the cells and heads add over the
+heaps (`topR`: `TOP_R` = 0.66 km).
 
 The base is a field of its own (`base`: twice the height over `level`,
 in km, so that it is dense 15 to 30 m in),
@@ -1498,13 +1498,13 @@ each cloud, not on its surface; no normal of the field enters it.
   overcast sky of the CIE). The sun's part has a gain of `BELOW` = 0.5, set
   against photographs; the sky's part none, plus the 6 % the sea sends
   back up. So a base follows the depth over each place: dark under thick
-  cells and rolls, light under thin parts. `above`, the depth straight up:
+  cells, light under thin parts. `above`, the depth straight up:
   the map of the columns (`columnDepth`, see [The clouds'
   shadow](#the-clouds-shadow)), the mean of two columns up to `SPREAD` =
   150 m to either side at angles new each frame (light spreads sideways on
   its way down through a deck); each step of a column counts `(1 +
   relief)^2` of its depth, where `relief` is how far the sheet's cells and
-  rolls raise it (the water grows with the height over the base). (Until
+  heads raise it (the water grows with the height over the base). (Until
   round 20 of #33 each point marched its columns, seven steps each, and
   took the relief's mean 60 to 500 m over it for the whole column.) From below, a deck also shows its cells: Worley cells of
   the noise read at 3.5 and 10 times the tile's frequency (some 600 m and
@@ -1713,7 +1713,7 @@ above). They read the warped map (`uWarped`, `uSlopeW`) as the march does.
   the shell over some 240 km; its steps are then 2.5 km long, and the
   shadows as smooth along the light. In the column, each step counts
   `(1 + relief)^2` of its depth: a deck's water is not spread evenly, there
-  is more of it where its cells and rolls stand higher (in a cloud that
+  is more of it where its cells stand higher (in a cloud that
   rises as one, the water grows with the height over the base). (As one
   mean for the whole column, at one height, the creases of its cells,
   straight lines between Worley cells, showed from below as tiles with
