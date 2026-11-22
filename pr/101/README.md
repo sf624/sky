@@ -24,6 +24,56 @@ Click a picture to open the page with that view.
 Drag the view to look around, with the mouse or a finger. You can look up
 or down by up to 89 degrees.
 
+You can also fly the aircraft. With the keyboard (while no control of the
+panel has the focus):
+
+- **← →** or **A D**: bank to the left or right. A banked aircraft turns, as
+  a real one does: at 900 km/h a bank of 30 degrees turns 1.3 degrees a
+  second, and 60 degrees (the most) 3.9 degrees a second.
+- **↑ ↓** or **W S**: lower or raise the nose, as in a flight simulator
+  (↑ pushes the nose down). The aircraft climbs or descends, up to 15
+  degrees, and the altitude follows. At 300 m and at 40 km it levels off.
+- **Q E**: turn with the rudder, 3 degrees a second, without banking.
+- **L**: back to straight and level flight.
+- **H**: shows or hides the HUD (below).
+- **I**: shows or hides a debug box with the build and the address that draws this view again (`?debug=1` too), to report a flaw with a screenshot.
+
+A key held keeps rolling or pitching; let go, the aircraft keeps its bank
+and its climb. On a touch screen, a stick at the bottom left does the same
+(on a phone it shows when the panel has faded):
+push it to the side to bank, pull it down to raise the nose; its small
+button levels the wings. The view turns with the aircraft (you keep looking
+out of the same window), and a bank tilts the horizon; the sun stays where
+it is in the sky. At speed 0 the aircraft stands still: the bank and the
+climb only tilt it, and the rudder turns it on the spot.
+
+The HUD (head-up display) shows the flight in green, as the display in a
+pilot's helmet does. It is off at first; **H** or the switch in the panel
+turns it on, and the browser remembers the choice. It has two parts.
+
+Fixed to the screen, always in view wherever you look:
+
+- the speed (km/h) on the left;
+- the altitude and the vertical speed on the right;
+- the aircraft's heading at the top (a compass bearing, 0 north): where
+  the aircraft flies, not where you look.
+
+Fixed to the aircraft, in the direction of flight, so that you see it when
+you look ahead (about 20 degrees across), and it slides out of view as you
+look aside:
+
+- the flight path marker (a circle with wings): where the aircraft goes,
+  which is where its nose points;
+- the horizon line and a pitch ladder every 5 degrees (solid above the
+  horizon, dashed below). They lie on the true directions: the horizon
+  line is the level of your eye. The sea's horizon lies a little below it,
+  more so the higher you fly (0.6 degrees at 300 m, 3.4 degrees at 11 km).
+- the bank around the marker (marks at 10, 20, 30, 45 and 60 degrees).
+
+Looking ahead, the two parts make one display. The page starts looking out
+of a window to the right, where only the first part is in view: turn the
+view 60 degrees to the left (drag to the right) to look ahead.
+
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).
 **Language / 言語** in the panel switches it, and the browser remembers the
@@ -32,7 +82,8 @@ choice.
 The title and the hint about dragging fade out after a few seconds. The panel
 and the full-screen button (top right) fade out when nothing moves for a few
 seconds; moving the mouse, touching the screen, pressing a key or tabbing
-into them brings them back. They stay while the pointer is on them. The
+into them brings them back (the steering keys and the stick do not: the
+panel would cover the view). They stay while the pointer is on them. The
 mouse cursor hides with them over the view, and comes back with them.
 
 The panel at the bottom changes the time and the weather.
@@ -53,6 +104,7 @@ The panel at the bottom changes the time and the weather.
 - **Speed**: 0 to 3,000 km/h (900 km/h at first). The clouds and the sea pass below. At 0 the aircraft stands still.
 - **Clouds**: the amount of low cloud, from none to overcast.
 - **Thin clouds**: the amount of high, thin cloud (cirrus).
+- **Level** (button): back to straight and level flight, as **L**. **HUD**: shows or hides the HUD, as **H**.
 - **Sound**: background sound, made in the browser. **Off** (at first); **Airliner**: the cabin at cruise, with the rush of air on the fuselage, the engines' low drone and the air conditioning; **Near engines**: the same cabin with more of the engines' high tones (the fan's and the compressor's whine), as in a seat near the engines; **Wind**: no engine, only the air, in gusts. The air follows the speed and the altitude; the engines keep a steady cruise. Browsers allow sound only after a click or a key press, so a sound chosen on an earlier visit starts at the first click on the page. The browser remembers the choice.
 - **Volume**: 0 to 100 % (50 % at first). The browser remembers it.
 - **Resolution**: the most pixels the view may draw: Full HD, WQHD (the default) or 4K. The browser remembers the choice. The page never draws finer than the screen's own pixels. At High and Max, on a screen with more pixels than that, the page enlarges the picture to the screen's own pixels itself, sharper than the browser's plain stretch.
