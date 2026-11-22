@@ -2203,11 +2203,11 @@ void addSharp(vec3 p, vec3 od, vec4 dens, float scM, float extM, vec3 dir, float
 // 462 copies a table that took Direct3D 11 some 2 s.)
 // That lobe's light is kept without its phase (sharpLobe), which the scene
 // applies for each pixel: it is some 4 degrees wide round the light, where
-// the table's texels are 1 to 3 degrees apart, and read from the table its
-// peak came out low and its outline the texels'. (Before, the scene marched
-// the air within 8 degrees of the sun and the moon: a second way through
-// the air that Direct3D 11 took 1.5 s longer to compile.) The rest of the
-// light, with the broad lobes and the air's phase, is the table's.
+// the table's texels lie 1 to 3 degrees apart high in the sky, too far
+// apart for its peak. (Before, the scene marched the air within 8 degrees
+// of the sun and the moon: a second way through the air, which Direct3D 11
+// took 1.5 s longer to compile.) The rest of the light, with the broad
+// lobes and the air's phase, is the table's.
 // The light is divided by uLutScale (the light of the air the stronger of
 // the sun and the moon makes) to keep half floats' range by night.
 // The sizes are the level's (`airLut` in QUALITY).
