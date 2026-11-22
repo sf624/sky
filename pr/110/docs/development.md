@@ -65,6 +65,8 @@ These are read directly.
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
 | `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
+| `ci` | none | A test: the cirrus's layer, `base,depth,form,size,thick,ice` (km, km, 0 a sheet / 1 figures and fibres / 2 small cells, km, a factor on the optical depth, 0 to 1); an empty place keeps the page's value (`ci=11.3,2`, `ci=,,0,,2` for a cirrostratus veil, `ci=9.5,0.3,2,0.15,3,0` for cirrocumulus). See [design.md](design.md#cirrus) |
+| `cidbg` | none | A test: `cidbg=X` draws no cirrus but blacks out where its optical depth along the ray is over X (to measure how thick it is) |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
 | `debug` | stored choice, else off | `1`: shows the debug overlay, `0`: hides it (see [Reporting a flaw](#reporting-a-flaw-with-the-debug-overlay)). Not stored; the `I` key stores its choice |
@@ -130,6 +132,44 @@ set of views against a base, the wrap, the loop, the drawing size, flight
 against a still, and a GL trace that shows whether a change sends the
 same commands to WebGL. For example
 `node tools/sky.mjs check --base origin/main`.
+
+**The look invariants.** `node tools/sky.mjs look` renders the views of
+the flaws the owner reported (`tools/look.json`), one still each, and
+measures each against absolute limits. No base is needed, so a flaw
+that was merged once is still flagged afterwards. It takes about a
+minute and a half on the GPU. Run it before pushing any change of
+`index.html`, and put its lines (`PASS`, `FAIL`, `KNOWN`) and its last
+line (`look: 9 PASS, 5 KNOWN, 0 FAIL at <commit>`) in the pull
+request's description. `check` runs it first. A pull request that
+changes the picture also carries the contact sheet of the registry,
+before | after (`look --sheet --base origin/main`, one picture), with
+what changed described in words, and shows it to the owner. It is a
+local test: it needs a GPU to run in that time. The measures, and what
+each cannot tell, are in
+[tools/README.md](../tools/README.md#look-invariants).
+
+**When the owner reports a flaw.** Add it to `tools/look.json` in the
+pull request that fixes it:
+- the view: the query line of the debug overlay (see above), as it was
+  reported, with the date and one line of what was wrong;
+- a measure of the flaw, on a region of the picture, with a limit;
+- the proof: the measure fails on a commit with the flaw (`look --page
+  <commit> --only <name>`) and passes on the fix, with a margin. Write
+  both commits in the entry (`bad`, `fixed`) and the numbers in the pull
+  request.
+
+Where no measure separates the two, keep the view without measures: it
+stays on the contact sheet. A flaw that is reported but not yet fixed
+gets `expected: "fail"`: `look` reports it as `KNOWN` and does not fail.
+Once it passes, `look` fails (`PASS?`) until the mark is removed. A limit
+changes only on purpose, in a commit that says why.
+
+**Reading a failure.** The line names the entry and each measure's value
+and limit; a `!` marks the measures out of their limits. The stills are
+in the folder printed at the end (`tools/out/look/…`, or `--out`).
+Compare the still with one of the commit named in the entry's `fixed`.
+`look --from DIR` measures the stills of a folder again without
+rendering them.
 
 **Stills.** The hero is a mean over frames, so one frame is noisy. For a
 still, set `speed=0` and let it settle: after the last change it draws 39
@@ -482,6 +522,12 @@ was part of the `noise` program, which every page draws. A renderer
 without a GPU builds the textures a quarter as wide (see
 [design.md](design.md#cirrus)). Views with `cirrus=0` build nothing.
 
+All of the above was measured on the two decks that the layer of PR #110
+replaced (see [design.md](design.md#cirrus)). The layer's pass, measured on
+2026-11-23 at 1280 x 720 against those decks, in flight, in turns: 0.75 ms
+against 0.78 to 0.84 from 3 km looking up, 1.5 to 1.8 against 1.84 at
+11 km towards the sun, 1.33 against 1.67 inside the layer.
+
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
 to 0.35 of the canvas per side (see
@@ -576,7 +622,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
     the way as the gradient at twice its angle, and the ice's mean age
     with its weight; the map's channels):
     `iceField`, `iceWay`, `iceFibres` and `ciMap` in the `ice` shader,
-    `ciDensity` in `fs`.
+    `ci2FormIce` in `fs`.
   - `WEATHER_KM` and `ICE_KM`: in the `ice` shader too.
   - erf after Winitzki: `iceErf` in the `ice` shader, `ciPhi` in `fs`.
   - The size of the noise, 128: `NOISE` in the JS; in `fs`, `TEXEL_KM`
@@ -630,7 +676,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   cirrus of round 19 162 s, of 7d1a635 165 s; that scene without the
   cirrus 11.8 s, the cirrus alone (its pass, as below) 27.3 s. So the
   cirrus is a program of its own (`CIRRUS_PASS`), compiled beside the
-  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciHair`,
+  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ci2Column`,
   `cirrusDepth`) in either program shows as seconds there: make it in a
   loop that already makes it (as the scene reads the clouds' and the
   sea's shadows and the glare's depth in one loop: 13.7 s with three
