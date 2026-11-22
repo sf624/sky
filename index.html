@@ -2540,9 +2540,11 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float tall = max(to.x, max(to.y, to.z));
     return max(topsOld, tall > 0.0 ? a.level + tall + CF_OUT - sink + 0.03 + 0.06 * a.depth - h : -9.0);
 #endif
-    int one = km.x >= km.y && km.x >= km.z ? 0 : km.y >= km.z ? 1 : 2;
-    heapKm = km[one] - sink;
-    heapIn = min(CF_OUT, 0.5 * top[one]);
+    // (The nearest dome and its height here, picked without indexing: Direct3D compiles an index into a vector as a
+    // loop.)
+    vec2 near = km.x >= km.y && km.x >= km.z ? vec2(km.x, top.x) : km.y >= km.z ? vec2(km.y, top.y) : vec2(km.z, top.z);
+    heapKm = near.x - sink;
+    heapIn = min(CF_OUT, 0.5 * near.y);
     // The heads of 1 km to 125 m, in 3D, where they may reach the surface.
     heapHeads = 0.0;
     heapGate = 1.0;
@@ -2552,7 +2554,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     if (heapKm > -CF_OUT && heapKm < heapIn + CF_OUT && lod < 3.5) {
       vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), CF_HEAD * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
       // (On a low dome the heads are smaller too, by heapSmall: at their full size they cut it to crumbs.)
-      heapSmall = clamp(top[one] / 0.4, 0.25, 1.0);
+      heapSmall = clamp(near.y / 0.4, 0.25, 1.0);
       heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y;
     }
     sheetF = f;
@@ -3325,7 +3327,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       vec3 w = vec3(0.0), offL = off, offB = cos(ab) * off + sin(ab) * cross(uLight, off);
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
-      for (int n = 0; n < LIGHT_STEPS; n++) {
+      // (To bounds the compiler cannot know, as the long marches: unrolled, the field's code stood 26 times here,
+      // and every line added to it made the scene's programs that much longer to compile.)
+      for (int n = 0; n < LONG_N(LIGHT_STEPS); n++) {
         int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n - 16;
         vec3 x;
         float l, wt;
@@ -3409,7 +3413,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
             float g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
             float lg = max(log2(0.04 * g / TEXEL_KM), lod);
-            for (int n = 0; n < 8; n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
+            for (int n = 0; n < LONG_N(8); n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
           }
           tauCM = tauL + (1.0 - overMap) * tauGap + cloudShadowOwn(xe + eye());
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
@@ -3958,7 +3962,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       float lodk = log2(max(2.0 * sigma * dist / ck, 0.06) / TEXEL_KM);
       vec3 xk = ps - eye() + uk * dist;
       float tv = 0.0;
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < LONG_N(4); i++) {
         vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
         float y, bump, body, edge;
         float f = cloudField(xk + n * h.x, lodk, false, y, bump, body, edge);
