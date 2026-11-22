@@ -37,6 +37,13 @@ shown to the owner. Before and after pictures alone are not enough.
   with their source noted). They never go into the repository.
 - Put the photo-against-render sheets and the list of differences in the
   pull request's description, and show them to the owner.
+- Run `node tools/sky.mjs look` before pushing any change of `index.html`
+  (`check` runs it first), and put its lines in the pull request's
+  description. Add the contact sheet of its views, before | after
+  (`look --sheet --base origin/main`), described in words. A flaw the owner
+  reports gets an entry in `tools/look.json` in the pull request that
+  fixes it, with a measure shown to fail before the fix and pass after
+  (see "Judging a change" in `docs/development.md`).
 
 See "Realism" in `docs/development.md`.
 
