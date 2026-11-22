@@ -2368,18 +2368,21 @@ Layer cloudLayer(vec2 x, float lod) {
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
 // carves the crowns of the size above it fully and its seams less (gate: of the size above the largest; left as that of the
 // smallest for the next read).
-float headsKm(vec4 h, vec4 km, inout float gate) {
+vec4 headsEach(vec4 h, vec4 km, inout float gate) {
   // (A seam between heads goes no deeper than CF_SEAM of a head: it has a floor, the surface that bears the heads.)
   vec4 s = max(2.0 * h - 1.0, -CF_SEAM);
   vec4 g = vec4(gate, CF_GATE + (1.0 - CF_GATE) * smoothstep(0.0, 0.5, s.rgb));
   gate = mix(CF_GATE, 1.0, smoothstep(0.0, 0.5, s.a));
-  return dot(g * (s - CF_HEAD0), km);
+  return g * (s - CF_HEAD0) * km;
+}
+float headsKm(vec4 h, vec4 km, inout float gate) {
+  vec4 e = headsEach(h, km, gate);
+  return e.r + e.g + e.b + e.a;
 }
 // The same, for the heads of 2 km to 250 m: the two largest (x) and the two smaller (y) apart.
 vec2 headsKm2(vec4 h, vec4 km, inout float gate) {
-  vec4 k0 = vec4(km.rg, 0.0, 0.0), k1 = vec4(0.0, 0.0, km.ba);
-  float g0 = gate, g1 = gate;
-  return vec2(headsKm(h, k0, g0), headsKm(h, k1, gate));
+  vec4 e = headsEach(h, km, gate);
+  return vec2(e.r + e.g, e.b + e.a);
 }
 float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out float body, out float lump, out float base) {
 #ifdef TOPS_MAP
@@ -2456,7 +2459,13 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float shaken = fine ? clamp(-6.0 - log2(1.6 * uTan / uRes.y * length(p) / TEXEL_KM), 0.0, 1.0) * mix(1.0, 0.3, smoothstep(0.1, 0.3, length(p))) : 0.0;
   // (Where all is heaps, the noise is read for their discs only, below.)
   vec4 n = vec4(0.5), m = vec4(0.5);
-  if (!all) {
+#ifndef TOPS_MAP
+  if (!all)
+#else
+  // (The map of the tops takes the heaps' domes below and the layer's bound above: no noise.)
+  if (false)
+#endif
+  {
     n = textureLod(uNoise, q.xyz + shake * (shaken / 128.0), max(lod, 0.0));
     m = textureLod(uNoise, q.xyz * 0.25 + vec3(0.31, 0.17, 0.73), max(lod - 2.0, 0.0));
   }
@@ -8297,8 +8306,7 @@ const SkySound = (() => {
             gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, noise, 0, z);
             gl.uniform1f(uZ, (z + 0.5) / n);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-          }]);
-          parts.push([1, () => {
+            // (The heads' slice with it: a part of its own made the batches as many again, and each waits a frame.)
             gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, heads, 0, z);
             gl.uniform1f(uZ, 2 + (z + 0.5) / n);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
