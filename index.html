@@ -41,6 +41,10 @@
       oklch(0.56 0.15 255) 70%, oklch(0.44 0.15 260) 100%);
   }
   .hero canvas:active { cursor: grabbing; }
+  /* The HUD (see HUD in the script): over the picture, under everything
+     else; it takes no pointer, so a drag on it still turns the eye. */
+  .hero canvas.hud { pointer-events: none; background: none; }
+  .hero canvas.hud[hidden] { display: none; }
   .title {
     position: absolute;
     left: clamp(20px, 6vw, 88px);
@@ -127,7 +131,10 @@
   }
   .panel select option { color: #123; }
   .panel .time select { width: auto; flex: none; margin: 0; }
-  .panel .level button { display: block; margin: 2px 0 0; width: 30px; height: 30px; }
+  /* Flight: the Level button and the HUD's switch, side by side in one cell. */
+  .panel .flight { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .panel .flight button { display: block; margin: 2px 0 0; width: 30px; height: 30px; }
+  .panel .flight input[type=checkbox] { display: block; width: 20px; height: 20px; margin: 7px 0 0; accent-color: #fff; cursor: pointer; }
   /* The stick, for steering on a touch screen (see Steering in the script):
      bottom left. It stays when the panel fades, fainter; held, it keeps the
      panel away. */
@@ -290,6 +297,7 @@
 
 <section class="hero" data-sky="loading">
   <canvas id="sky" aria-label="巡航中の航空機から見た、空と雲と海" data-t-label="canvas"></canvas>
+  <canvas class="hud" hidden aria-hidden="true"></canvas>
   <div class="loading" role="status">
     <div class="line"></div>
     <p data-t="loading">読み込み中…</p>
@@ -337,24 +345,6 @@
       <span class="ticks" aria-hidden="true"></span>
     </label>
     <label>
-      <span class="row"><span data-t="heading">機首方位</span><output id="headingOut"></output></span>
-      <input id="heading" type="range" min="0" max="359" step="1">
-    </label>
-    <label>
-      <span class="row"><span data-t="bank">バンク角</span><output id="bankOut"></output></span>
-      <input id="bank" type="range" min="-60" max="60" step="1" value="0">
-    </label>
-    <label>
-      <span class="row"><span data-t="climb">上昇・降下</span><output id="climbOut"></output></span>
-      <input id="climb" type="range" min="-15" max="15" step="0.5" value="0">
-    </label>
-    <div class="level">
-      <span class="row"><span data-t="level">水平飛行</span></span>
-      <button id="level" type="button" aria-label="水平飛行に戻す" title="水平飛行に戻す (L)" data-t-label="levelDo" data-t-title="levelKey">
-        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 9h5M11.5 9h5"/><circle cx="9" cy="9" r="2.5"/></svg>
-      </button>
-    </div>
-    <label>
       <span class="row"><span data-t="date">日付</span><output id="dateOut"></output></span>
       <input id="date" type="range" min="1" max="365" step="1">
     </label>
@@ -397,6 +387,18 @@
       <span class="row"><span data-t="cirrus">薄雲</span><output id="cirrusOut"></output></span>
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
     </label>
+    <div class="flight">
+      <div>
+        <span class="row"><span data-t="level">水平飛行</span></span>
+        <button id="level" type="button" aria-label="水平飛行に戻す" title="水平飛行に戻す (L)" data-t-label="levelDo" data-t-title="levelKey">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 9h5M11.5 9h5"/><circle cx="9" cy="9" r="2.5"/></svg>
+        </button>
+      </div>
+      <label title="計器表示 (HUD) の切り替え (H)" data-t-title="hudKey">
+        <span class="row"><span data-t="hud">計器 (HUD)</span></span>
+        <input id="hud" type="checkbox">
+      </label>
+    </div>
     <label>
       <span class="row"><span data-t="sound">音</span><output id="soundOut"></output></span>
       <select id="sound">
@@ -467,11 +469,8 @@ const TEXT = {
     lang: '言語 / Language',
     sound: '音', soundOff: 'なし', soundAirliner: '旅客機', soundWhine: 'エンジン近く', soundWind: '風',
     volume: '音量', soundWait: 'クリックで再生',
-    heading: '機首方位', bank: 'バンク角', climb: '上昇・降下', level: '水平飛行',
-    levelDo: '水平飛行に戻す', levelKey: '水平飛行に戻す (L)',
-    compass: ['北', '北東', '東', '南東', '南', '南西', '西', '北西'],
-    bankText: d => d === 0 ? '水平' : (d < 0 ? '左 ' : '右 ') + Math.abs(d) + '°',
-    climbText: (d, ms) => d === 0 ? '水平' : (d > 0 ? '+' : '') + d + '° · ' + (ms > 0 ? '+' : '') + ms + ' m/s',
+    level: '水平飛行', levelDo: '水平飛行に戻す', levelKey: '水平飛行に戻す (L)',
+    hud: '計器 (HUD)', hudKey: '計器表示 (HUD) の切り替え (H)',
     // The light of the hour, by the sun's elevation (see showLabels).
     night: '夜', astronomical: '天文薄明', nautical: '航海薄明', civil: '市民薄明',
     morning: '朝', evening: '夕方', day: '昼',
@@ -507,11 +506,8 @@ const TEXT = {
     lang: 'Language / 言語',
     sound: 'Sound', soundOff: 'Off', soundAirliner: 'Airliner', soundWhine: 'Near engines', soundWind: 'Wind',
     volume: 'Volume', soundWait: 'click to play',
-    heading: 'Heading', bank: 'Bank', climb: 'Climb', level: 'Level',
-    levelDo: 'Straight and level', levelKey: 'Straight and level (L)',
-    compass: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'],
-    bankText: d => d === 0 ? 'level' : (d < 0 ? 'left ' : 'right ') + Math.abs(d) + '°',
-    climbText: (d, ms) => d === 0 ? 'level' : (d > 0 ? '+' : '') + d + '° · ' + (ms > 0 ? '+' : '') + ms + ' m/s',
+    level: 'Level', levelDo: 'Straight and level', levelKey: 'Straight and level (L)',
+    hud: 'HUD', hudKey: 'Head-up display (H)',
     night: 'night', astronomical: 'astronomical twilight', nautical: 'nautical twilight', civil: 'civil twilight',
     morning: 'morning', evening: 'evening', day: 'day',
     dateText: (month, day) => day + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1],
@@ -11056,6 +11052,7 @@ const SkySound = (() => {
     // (While a control is held the frames go on, even at rest, where the
     // picture may have settled before the view begins to turn.)
     running = more || steering && !!render;
+    drawHud();
     if (running) kick();
   }
   function kick() {
@@ -11102,7 +11099,6 @@ const SkySound = (() => {
       : Math.abs(a - 14.8) < 1 ? T.fullMoon : Math.abs(a - 22.1) < 1 ? T.lastQuarter : T.moonAge(a.toFixed(0));
     hazeOut.textContent = T.hazes[state.haze < 0.5 ? 0 : state.haze < 1.5 ? 1 : state.haze < 3 ? 2 : 3];
     if (document.activeElement !== altOut) altOut.value = altText(state.alt);
-    showFlight();
     cloudOut.textContent = T.clouds[state.cloud < 0.02 ? 0 : state.cloud < 0.35 ? 1 : state.cloud < 0.65 ? 2 : state.cloud < 0.9 ? 3 : 4];
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
     speedOut.textContent = state.speed.toFixed(0) + ' km/h';
@@ -11367,14 +11363,12 @@ const SkySound = (() => {
   // YAW_RATE. The controls give rates (keys, the stick: -1 to 1); let go,
   // the attitude stays, and a steady turn needs nothing held. Level brings
   // the bank and the climb back to 0 at the same rates. At speed 0 the
-  // aircraft stands: bank and climb only tilt the view, the rudder and the
-  // heading slider turn it where it is.
+  // aircraft stands: bank and climb only tilt the view, the rudder turns it
+  // where it is. The HUD (below) shows the flight.
   const G = 9.81e-3;                                           // km/s²
   const ROLL_RATE = 30 * RAD, PITCH_RATE = 5 * RAD, YAW_RATE = 3 * RAD, TURN_MAX = 30 * RAD;   // a second
-  const headingIn = document.getElementById('heading'), bankIn = document.getElementById('bank'), climbIn = document.getElementById('climb');
-  const headingOut = document.getElementById('headingOut'), bankOut = document.getElementById('bankOut'), climbOut = document.getElementById('climbOut');
+  const BANK_MAX = 60 * RAD, CLIMB_MAX = 15 * RAD;                 // the limits of the attitude
   const levelButton = document.getElementById('level');
-  const BANK_MAX = +bankIn.max * RAD, CLIMB_MAX = +climbIn.max * RAD;
   const clampTo = (x, m) => Math.min(m, Math.max(-m, x));
   const toward = (x, to, by) => x > to ? Math.max(to, x - by) : Math.min(to, x + by);
   // The keys held (by code: the same keys on every layout), the stick's
@@ -11402,20 +11396,8 @@ const SkySound = (() => {
     state.heading += d;
     state.yaw += d;
   }
-  function showFlight() {
-    const T = TEXT[LANG];
-    const b = bearing(state.heading), deg = Math.round(b) % 360;
-    headingOut.textContent = String(deg).padStart(3, '0') + '° ' + T.compass[Math.round(b / 45) % 8];
-    const bank = Math.round(state.bank / RAD), climb = Math.round(state.climb / RAD * 2) / 2;
-    bankOut.textContent = T.bankText(bank);
-    climbOut.textContent = T.climbText(climb, Math.round(state.speed / 3.6 * Math.sin(state.climb)));
-    if (document.activeElement !== headingIn) headingIn.value = deg;
-    if (document.activeElement !== bankIn) bankIn.value = bank;
-    if (document.activeElement !== climbIn) climbIn.value = climb;
-  }
   // One frame of flight, dt seconds: the controls, the turn, the climb and
   // the way. Returns true while a control acts (the frames must go on).
-  let shownFlight = '';
   function fly(dt) {
     let roll = stickAt[0], pitch = stickAt[1], rudder = 0;
     for (const code of keysHeld) {
@@ -11452,26 +11434,25 @@ const SkySound = (() => {
     state.drift[0] = wrap(state.drift[0] + ahead * Math.sin(h));
     state.drift[1] = wrap(state.drift[1] + ahead * Math.cos(h));
     if (climb && step) climbTo(state.alt + step * Math.sin(climb));
-    const shown = [state.heading, bank, climb, state.alt].join();
-    if (shown !== shownFlight) {
-      shownFlight = shown;
-      showFlight();
-    }
     return !!(roll || pitch || rudder || levelling || limited);
   }
   // Keys steer, but not where the focus takes them: no key in a select or a
   // text field, no arrow on a slider (a letter there steers). They do not
   // bring the panel back (see wake below): it would cover the view.
   const steers = e => {
-    if (e.ctrlKey || e.metaKey || e.altKey || !(STEER_KEYS[e.code] || e.code === 'KeyL')) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey || !(STEER_KEYS[e.code] || e.code === 'KeyL' || e.code === 'KeyH')) return false;
     const el = e.target instanceof Element ? e.target : null;
     if (!el) return true;
-    if (el.closest('select, textarea, [contenteditable]') || el.tagName === 'INPUT' && el.type !== 'range') return false;
+    if (el.closest('select, textarea, [contenteditable]') || el.tagName === 'INPUT' && el.type !== 'range' && el.type !== 'checkbox') return false;
     return !(el.tagName === 'INPUT' && e.code.startsWith('Arrow'));
   };
   window.addEventListener('keydown', e => {
     if (!steers(e)) return;
     e.preventDefault();
+    if (e.code === 'KeyH') {
+      if (!e.repeat) setHud(!hudOn, true);
+      return;
+    }
     if (e.code === 'KeyL') levelling = true;
     else keysHeld.add(e.code);
     kick();
@@ -11483,21 +11464,6 @@ const SkySound = (() => {
     kick();
   }
   levelButton.addEventListener('click', levelOff);
-  // The panel's sliders set the attitude at once; the heading turns the eye along.
-  headingIn.addEventListener('input', () => {
-    turnBy(((+headingIn.value - bearing(state.heading) + 540) % 360 - 180) * RAD);
-    update();
-  });
-  bankIn.addEventListener('input', () => {
-    state.bank = +bankIn.value * RAD;
-    levelling = false;
-    update();
-  });
-  climbIn.addEventListener('input', () => {
-    state.climb = +climbIn.value * RAD;
-    levelling = false;
-    update();
-  });
   // The stick: on a touch screen, or with ?stick=1. Held, it hides the panel
   // (as when nothing moves); its deflection, to its rim, is the rate: to the
   // side it rolls, down it pulls the nose up, as a stick in an aircraft.
@@ -11535,6 +11501,248 @@ const SkySound = (() => {
   stickPad.addEventListener('pointercancel', letStickGo);
   stickPad.querySelector('.stick-level').addEventListener('click', levelOff);
   stickPad.hidden = !(params.get('stick') === '1' || matchMedia('(pointer: coarse)').matches);
+
+  // ---------- HUD ----------
+  // A head-up display over the picture, on a 2D canvas of its own: the
+  // flight as numbers and lines, off by default (the page's aim is a
+  // picture as a photograph). The panel's switch, H and ?hud=1 / ?hud=0
+  // turn it on and off; the choice is kept, as the language is. Off, its
+  // canvas is hidden and holds no pixels, and nothing is drawn. On, it is
+  // drawn again in a frame only when something it shows has changed (the
+  // camera, the size, the flight).
+  //
+  // What it shows. Conformal, as a helmet's display, wherever the eye
+  // looks: the horizon line and the pitch ladder (every 5 degrees, solid
+  // above the horizon, dashed below, numbered) lie on the true directions
+  // of the camera (cameraOf, the picture's own): the horizon line on the
+  // plane of zero pitch through the eye (the sea's horizon lies a little
+  // below it, by the dip of the altitude: 0.56 degrees at 0.3 km, 3.4 at
+  // 11 km), the rungs along the vertical through the middle of the view.
+  // The flight path marker (a circle with wings) is where the aircraft
+  // flies (heading and climb; it flies where its nose points), when it is
+  // in view. The aircraft symbol in the middle is where the eye looks:
+  // looking ahead, the nose. The instruments are the aircraft's, wherever
+  // the eye looks: the bank scale at the top (10, 20, 30, 45, 60 degrees),
+  // its pointer square to the horizon as seen ahead; the heading tape
+  // (compass bearing, 0 north) with the heading in a box; the speed (km/h)
+  // on the left; the altitude (in the panel's unit) and the vertical speed
+  // (m/s) on the right. Green with a thin dark edge, readable on cloud,
+  // blue sky and night; sized by the shorter side of the view, at the
+  // screen's pixels; only numbers and units, so no language.
+  const hudCanvas = document.querySelector('.hud'), hudSwitch = document.getElementById('hud');
+  let hudOn = false, hudDrawn = '', hudLines = null;
+  // (At the start it only takes the choice: the first frame draws it. A
+  // canvas never drawn holds no pixels; one drawn gives them back when off.)
+  function setHud(on, keep, draw = true) {
+    hudOn = on;
+    hudSwitch.checked = on;
+    hudCanvas.hidden = !on;
+    hudDrawn = '';
+    if (!on && hudLines) {
+      hudCanvas.width = hudCanvas.height = 0;
+      hudLines = null;
+    } else if (on && draw) drawHud();
+    if (keep) try { localStorage.setItem('sky.hud', on ? '1' : '0'); } catch (err) {}
+  }
+  hudSwitch.addEventListener('change', () => setHud(hudSwitch.checked, true));
+  // Where the camera cam (right, up, forward) puts the direction d on a
+  // view w by h CSS pixels (FOV the vertical field), or null behind the eye.
+  const projected = (cam, d, w, h) => {
+    const f = cam[6] * d[0] + cam[7] * d[1] + cam[8] * d[2];
+    if (f < 1e-3) return null;
+    const k = h / 2 / Math.tan(FOV / 2) / f;
+    return [w / 2 + k * (cam[0] * d[0] + cam[1] * d[1] + cam[2] * d[2]), h / 2 - k * (cam[3] * d[0] + cam[4] * d[1] + cam[5] * d[2])];
+  };
+  // The direction at azimuth a (the yaw convention) and elevation e.
+  const toward3 = (a, e) => [Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)];
+  // A rung of the ladder at elevation e on the vertical of azimuth a: its
+  // middle and its direction on the screen (along the circle of e), or null.
+  const rungAt = (cam, a, e, w, h) => {
+    const p = projected(cam, toward3(a, e), w, h), q = projected(cam, toward3(a + 1e-4, e), w, h);
+    if (!p || !q) return null;
+    const n = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    return n > 0 ? { p, d: [(q[0] - p[0]) / n, (q[1] - p[1]) / n] } : null;
+  };
+  function drawHud() {
+    if (!hudOn) return;
+    const box = hudCanvas.getBoundingClientRect(), w = box.width, h = box.height, dpr = window.devicePixelRatio || 1;
+    if (!w || !h) return;
+    const cam = cameraOf(view());
+    const key = [w, h, dpr, ...cam, state.heading, state.bank, state.climb, state.speed, state.alt].join();
+    if (key === hudDrawn) return;
+    hudDrawn = key;
+    const W = Math.round(w * dpr), H = Math.round(h * dpr);
+    if (hudCanvas.width !== W || hudCanvas.height !== H) {
+      hudCanvas.width = W;
+      hudCanvas.height = H;
+    }
+    const g = hudCanvas.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.setTransform(W / w, 0, 0, H / h, 0, 0);
+    paintHud(g, w, h, dpr, cam);
+  }
+  const HUD_GREEN = '#52ff8c', HUD_EDGE = 'rgba(0, 24, 8, .62)';
+  function paintHud(g, w, h, dpr, cam) {
+    const m = Math.min(w, h), cx = w / 2, cy = h / 2;
+    const fs = Math.min(19, Math.max(11, 0.011 * m + 3));            // the size of the numbers, CSS px
+    const px = 1 / dpr, lw = Math.max(1, Math.round(1.25 * dpr)) * px, edge = lw + 2 * Math.max(1, Math.round(dpr)) * px;
+    const font = `${Math.round(fs)}px ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace`;
+    const margin = Math.max(12, 0.03 * m);
+    // The layout: the heading at the top, the bank scale under it; the speed
+    // and the altitude either side of the middle; the ladder between them.
+    const tapeW = Math.min(0.5 * w, 22 * fs), tapeY = margin + 1.9 * fs, tapeEnd = tapeY + 1.9 * fs;
+    const bankR = Math.max(4 * fs, 0.14 * m), bankY = tapeEnd + 0.9 * fs + bankR;
+    const side = Math.min(0.3 * w, 0.45 * h);
+    const clip = [cx - side + 0.6 * fs, bankY - bankR / 2 + fs, cx + side - 0.6 * fs, h - margin];
+    const rungL = Math.min(0.1 * m, 7 * fs), gap = 0.35 * rungL, tip = 0.3 * fs, ladderR = 0.32 * h;
+    // Each layer: lines (solid and dashed) and texts, drawn first in the dark
+    // edge, then in green.
+    const layer = () => ({ solid: new Path2D(), dashed: new Path2D(), texts: [] });
+    const paint = (L) => {
+      for (const pass of [0, 1]) {
+        g.strokeStyle = pass ? HUD_GREEN : HUD_EDGE;
+        g.lineWidth = pass ? lw : edge;
+        g.setLineDash([]);
+        g.stroke(L.solid);
+        g.setLineDash([0.6 * fs, 0.4 * fs]);
+        g.stroke(L.dashed);
+        g.setLineDash([]);
+        g.font = font;
+        for (const t of L.texts) {
+          g.save();
+          g.translate(t.x, t.y);
+          if (t.angle) g.rotate(t.angle);
+          g.textAlign = t.align || 'center';
+          g.textBaseline = 'middle';
+          if (pass) {
+            g.fillStyle = HUD_GREEN;
+            g.fillText(t.text, 0, 0);
+          } else {
+            g.lineWidth = edge;
+            g.strokeText(t.text, 0, 0);
+          }
+          g.restore();
+        }
+      }
+    };
+    g.lineJoin = g.lineCap = 'round';
+    // The horizon and the ladder, conformal, clipped to the middle.
+    const fwd = cam.slice(6, 9);
+    const look = Math.hypot(fwd[0], fwd[2]) > 1e-6 ? Math.atan2(fwd[0], fwd[2]) : Math.atan2(-cam[3] * Math.sign(fwd[1]), -cam[5] * Math.sign(fwd[1]));
+    const ladder = layer();
+    hudLines = { w, h, fs, clip, horizon: null, path: null };
+    for (let e = -85; e <= 85; e += 5) {
+      const r = rungAt(cam, look, e * RAD, w, h);
+      if (!r) continue;
+      const { p: [x, y], d: [dx, dy] } = r;
+      // The rungs near the middle only (about 21 degrees each way); the
+      // horizon whole, wherever its point on the vertical is.
+      if (e && Math.hypot(x - cx, y - cy) > ladderR) continue;
+      // Up, away from the horizon: the normal on the sky's side.
+      const [ux, uy] = [dy, -dx];
+      if (e === 0) {
+        hudLines.horizon = { x, y, angle: -Math.atan2(dy, dx) / RAD };
+        const far = Math.hypot(w, h);
+        for (const s of [-1, 1]) {
+          ladder.solid.moveTo(x + s * gap * dx, y + s * gap * dy);
+          ladder.solid.lineTo(x + s * far * dx, y + s * far * dy);
+        }
+        continue;
+      }
+      const path = e > 0 ? ladder.solid : ladder.dashed, toH = e > 0 ? -1 : 1;
+      const angle = Math.atan2(dy, dx), upright = Math.abs(angle) > Math.PI / 2;
+      for (const s of [-1, 1]) {
+        path.moveTo(x + s * gap * dx, y + s * gap * dy);
+        path.lineTo(x + s * rungL * dx, y + s * rungL * dy);
+        // The tip, towards the horizon.
+        ladder.solid.moveTo(x + s * rungL * dx, y + s * rungL * dy);
+        ladder.solid.lineTo(x + s * rungL * dx + toH * tip * ux, y + s * rungL * dy + toH * tip * uy);
+        const at = rungL + 0.4 * fs;
+        ladder.texts.push({ x: x + s * at * dx, y: y + s * at * dy, text: String(e), angle: upright ? angle - Math.PI : angle,
+          align: (s > 0) !== upright ? 'left' : 'right' });
+      }
+    }
+    // The flight path marker: where the aircraft flies.
+    const fp = projected(cam, toward3(state.heading, state.climb), w, h);
+    if (fp) {
+      hudLines.path = fp;
+      const [x, y] = fp, r = 0.45 * fs;
+      if (x > clip[0] && x < clip[2] && y > clip[1] && y < clip[3]) {
+        ladder.solid.moveTo(x + r, y);
+        ladder.solid.arc(x, y, r, 0, 2 * Math.PI);
+        ladder.solid.moveTo(x - r, y); ladder.solid.lineTo(x - r - fs, y);
+        ladder.solid.moveTo(x + r, y); ladder.solid.lineTo(x + r + fs, y);
+        ladder.solid.moveTo(x, y - r); ladder.solid.lineTo(x, y - r - 0.6 * fs);
+      }
+    }
+    g.save();
+    g.beginPath();
+    g.rect(clip[0], clip[1], clip[2] - clip[0], clip[3] - clip[1]);
+    g.clip();
+    paint(ladder);
+    g.restore();
+    const ins = layer(), L = ins.solid;
+    // The aircraft symbol, fixed in the middle.
+    const a = 0.6 * fs;
+    L.moveTo(cx - 3.2 * a, cy); L.lineTo(cx - 1.5 * a, cy); L.lineTo(cx - 0.75 * a, cy + 0.9 * a); L.lineTo(cx, cy);
+    L.lineTo(cx + 0.75 * a, cy + 0.9 * a); L.lineTo(cx + 1.5 * a, cy); L.lineTo(cx + 3.2 * a, cy);
+    // The heading: a tape of 50 degrees under its box.
+    const hd = bearing(state.heading), perDeg = tapeW / 50;
+    for (let k = Math.ceil((hd - 25) / 5) * 5; k <= hd + 25; k += 5) {
+      const x = cx + (k - hd) * perDeg, big = k % 10 === 0;
+      L.moveTo(x, tapeY); L.lineTo(x, tapeY + (big ? 0.55 : 0.3) * fs);
+      if (big) ins.texts.push({ x, y: tapeY + 1.25 * fs, text: String(((k % 360) + 360) % 360) });
+    }
+    L.moveTo(cx - tapeW / 2, tapeY); L.lineTo(cx + tapeW / 2, tapeY);
+    L.moveTo(cx - 0.35 * fs, tapeY - 0.45 * fs); L.lineTo(cx, tapeY - 0.05 * fs); L.lineTo(cx + 0.35 * fs, tapeY - 0.45 * fs);
+    const hw = 1.6 * fs, top = tapeY - 1.75 * fs;
+    L.rect(cx - hw, top, 2 * hw, 1.25 * fs);
+    ins.texts.push({ x: cx, y: top + 0.65 * fs, text: String(Math.round(hd) % 360).padStart(3, '0') });
+    // The bank scale, its pointer square to the horizon as seen ahead.
+    for (const b of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) {
+      const t = b * RAD, s = Math.sin(t), c = Math.cos(t), long = b % 30 === 0 ? 0.8 : 0.45;
+      if (b === 0) {
+        L.moveTo(cx, bankY - bankR); L.lineTo(cx - 0.4 * fs, bankY - bankR - 0.6 * fs);
+        L.lineTo(cx + 0.4 * fs, bankY - bankR - 0.6 * fs); L.closePath();
+        continue;
+      }
+      L.moveTo(cx + bankR * s, bankY - bankR * c);
+      L.lineTo(cx + (bankR + long * fs) * s, bankY - (bankR + long * fs) * c);
+    }
+    L.moveTo(cx + bankR * Math.sin(-60 * RAD), bankY - bankR * Math.cos(60 * RAD));
+    L.arc(cx, bankY, bankR, -Math.PI / 2 - 60 * RAD, -Math.PI / 2 + 60 * RAD);
+    {
+      const t = -state.bank, s = Math.sin(t), c = Math.cos(t), r0 = bankR - 0.15 * fs, r1 = bankR - 0.95 * fs, b = 0.28 * fs;
+      L.moveTo(cx + r0 * s, bankY - r0 * c);
+      L.lineTo(cx + r1 * s + b * c, bankY - r1 * c + b * s);
+      L.lineTo(cx + r1 * s - b * c, bankY - r1 * c - b * s);
+      L.closePath();
+    }
+    // The speed on the left, the altitude and the vertical speed on the right.
+    const bw = 4.6 * fs, bh = 1.5 * fs;
+    L.rect(cx - side - bw, cy - bh / 2, bw, bh);
+    ins.texts.push({ x: cx - side - 0.4 * fs, y: cy, text: state.speed.toFixed(0), align: 'right' });
+    ins.texts.push({ x: cx - side - 0.4 * fs, y: cy + 1.4 * fs, text: 'km/h', align: 'right' });
+    const [altNum, altUnit] = altText(state.alt).split(' ');
+    L.rect(cx + side, cy - bh / 2, bw + 0.8 * fs, bh);
+    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy, text: altNum, align: 'left' });
+    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy + 1.4 * fs, text: altUnit, align: 'left' });
+    const vs = Math.round(state.speed / 3.6 * Math.sin(state.climb));
+    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy + 2.8 * fs, text: (vs > 0 ? '+' : '') + vs + ' m/s', align: 'left' });
+    paint(ins);
+  }
+  {
+    const asked = params.get('hud');
+    let stored = null;
+    try { stored = localStorage.getItem('sky.hud'); } catch (err) {}
+    setHud(asked === '1' || asked === '0' ? asked === '1' : stored === '1', false, false);
+  }
+  // For the tools: the HUD's horizon line as drawn (its point on the
+  // vertical of the view, CSS px, and its angle, degrees counter-clockwise),
+  // the flight path marker (or null behind the eye), the size of its
+  // numbers and the ladder's clip (left, top, right, bottom); false when off.
+  window.__hud = () => hudOn && hudLines;
   // For the tools: the flight as it is now (degrees, km), and the camera.
   window.__flight = () => ({ heading: state.heading / RAD, yaw: state.yaw / RAD, pitch: state.pitch / RAD,
     bank: state.bank / RAD, climb: state.climb / RAD, alt: state.alt, at: [...state.drift], sun: [...state.sun],
@@ -11677,8 +11885,8 @@ const SkySound = (() => {
   // The view starts out of a window ahead and to the right of the nose.
   state.heading = params.has('heading') ? (+params.get('heading') || 0) * RAD : state.yaw - 60 * RAD;
   // The attitude, degrees: ?bank=20 (the right wing down), ?climb=5 (the nose up).
-  state.bank = clampTo(+params.get('bank') || 0, +bankIn.max) * RAD;
-  state.climb = clampTo(+params.get('climb') || 0, +climbIn.max) * RAD;
+  state.bank = clampTo((+params.get('bank') || 0) * RAD, BANK_MAX);
+  state.climb = clampTo((+params.get('climb') || 0) * RAD, CLIMB_MAX);
   // A place to start from, in km: ?at=120,40
   if (params.has('at')) {
     const [x, z] = params.get('at').split(',');

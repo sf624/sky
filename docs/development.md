@@ -49,10 +49,11 @@ These are read directly.
 |---|---|---|
 | `yaw` | the sun's direction as a `yaw`, + 65 | Direction of view, degrees: 0 south, 90 west, -90 east. A larger `yaw` turns the view to the right (clockwise seen from above) |
 | `pitch` | -8 | Elevation of the view, degrees, up positive. Not clamped (a drag clamps to 89) |
-| `heading` | `yaw` - 60 | Direction flown at the start, degrees, as `yaw` (0 south, 90 west; the panel shows it as a compass bearing, 180 more). The aircraft can turn from it (see [design.md](design.md#steering)) |
+| `heading` | `yaw` - 60 | Direction flown at the start, degrees, as `yaw` (0 south, 90 west; the HUD shows it as a compass bearing, 180 more). The aircraft can turn from it (see [design.md](design.md#steering)) |
 | `bank` | 0 | The aircraft's bank, degrees, right wing down positive, clamped to ±60. In flight it turns; at speed 0 it only tilts the view |
 | `climb` | 0 | The aircraft's climb, degrees, nose up positive, clamped to ±15. In flight the altitude changes; at speed 0 it only tilts the view |
 | `stick` | none | `1`: shows the steering stick, which otherwise shows only on a touch screen (`pointer: coarse`) |
+| `hud` | stored choice, else off | `1`: shows the HUD, `0`: hides it (see [design.md](design.md#the-hud)). Not stored; the panel's switch and `H` store their choice |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
 | `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
@@ -72,10 +73,11 @@ These are read directly.
 
 With `date` and no `moon`, the moon's age follows the given date.
 
-The page keeps five choices in `localStorage`: `sky.pixels` (the drawing
+The page keeps six choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
 it is automatic), `sky.lang` (the language, set by the panel's language
-select), `sky.sound` and `sky.volume` (the sound and its volume). The
+select), `sky.sound` and `sky.volume` (the sound and its volume), and
+`sky.hud` (`1` or `0`: the HUD, set by its switch and `H`). The
 address wins over all of them. With the automatic level it also keeps
 `sky.qualityAuto`: the level reached and the highest it may step up to,
 as JSON (`{"level":"mid","ceiling":"high"}`), and `sky.qualityTrying`:
@@ -88,7 +90,8 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 `heading`, `bank`, `climb` and the parts of `at` fall back to 0.
 `window.__flight()` returns the flight as it is (heading, eye, bank and
 climb in degrees, altitude and place in km, the sun's direction and the
-camera), for the tools.
+camera), for the tools; `window.__hud()` the HUD's horizon line as drawn
+(see [design.md](design.md#the-hud)).
 
 ## Judging a change
 
