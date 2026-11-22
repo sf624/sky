@@ -2304,7 +2304,7 @@ const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's 
 // moving its surface by a share of its own size (see cloudShape, cloudField).
 // The discs' thresholds, for the cells of 2 km, 1 km and 500 m: at no amount; what the amount takes off; what the weather
 // map's amount does (it gathers the large heaps most); and the least (clear air stays between heaps).
-const vec3 CF_DISC = vec3(1.03, 1.12, 1.4), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.4, 0.6, 0.4);
+const vec3 CF_DISC = vec3(1.0, 1.08, 1.28), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
 const float CF_DISC_MIN = 0.45;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
@@ -2312,10 +2312,11 @@ const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km
 // near the eye of 38, 19, 9 and 5 m.
 const vec4 CF_HEAD = vec4(0.15, 0.4, 0.3, 0.2), CF_HEAD1 = vec4(0.16, 0.12, 0.08, 0.05), CF_HEAD2 = vec4(0.02, 0.011, 0.006, 0.003);
 const float CF_SEAM = 0.3;
+const float CF_RAG = 0.12;          // how far the seams between heads reach up into a heap's base, km
 const float CF_HEAD0 = 0.36;         // the heads' height that moves nothing (about their mean)
 const float CF_GATE = 0.6;          // how much a head carves in the seams of the size above it
 
-const float CF_OUT = 0.35;           // how far heads may stand out of a dome at most, km
+const float CF_OUT = 0.28;           // how far heads may stand out of a dome at most, km
 const float CF_EDGE = 0.25;         // a heap's density per km inside its surface is 1 over this (times CF_SHARP)
 const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the fine noise's place, in its tiles (low in a cloud)
 // A layer of cloud at x (km on the weather map): the level of its bases
@@ -2342,7 +2343,7 @@ Layer cloudLayer(vec2 x, float lod) {
   a.amount = 0.44 + 0.44 * uCloud - 0.03 * smoothstep(0.5, 0.7, uCloud) + 0.09 * smoothstep(0.6, 0.8, uCloud) - 0.04 * smoothstep(0.8, 1.0, uCloud) + mix(2.2, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
   a.amount = clamp(a.amount, 0.0, mix(1.0, 0.72, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // (Heaps: the slider says how many there are, and the map where they gather, at every amount alike.)
-  a.fair = (0.5 + 0.44 * uCloud) * smoothstep(0.0, 0.05, uCloud);
+  a.fair = (0.55 + 0.6 * uCloud) * smoothstep(0.0, 0.05, uCloud);
   a.gather = w.r - 0.5;
   // Towers, where the air rises (A) and the slider lets heaps grow.
   a.tower = smoothstep(0.75, 0.95, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
@@ -2410,18 +2411,22 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   bool all = a.form >= 1.0 && a.tower <= 0.0;
   heapAll = all;
   heapMix = tHeap > 0.0 ? 1.0 : 0.0;
+  float tOld = tTop;
   if (heapMix > 0.0) tTop = all ? tHeap : max(tTop, tHeap);
 #ifdef TOPS_MAP
   // (A margin: the map of the tops reads four places in each texel, and a
   // tower's depth rises steeply across one.)
-  return am > 0.0 ? a.level + a.depth * tTop * (1.0 + 0.7 * CF_RELIEF * (1.0 - a.form)) + 0.03 + 0.06 * a.depth - h : -9.0;
-#endif
-  if (am <= 0.0) return -9.0;
+  float topsOld = am > 0.0 && !all ? a.level + a.depth * tOld * (1.0 + 0.7 * CF_RELIEF * (1.0 - a.form)) + 0.03 + 0.06 * a.depth - h : -9.0;
+  // (Where there are heaps, their own domes say how high: below.)
+  if (heapMix <= 0.0) return topsOld;
+#else
+  if (am <= 0.0 && heapMix <= 0.0) return -9.0;
   // (A sheet's top stands higher and lower with its cells, below: by up to
   // 0.7 CF_RELIEF of its height.)
   tTop *= 1.0 + 0.7 * CF_RELIEF * (1.0 - a.form);
   if (t >= tTop) return -(t - tTop) * a.depth - 0.02;
   if (overBase <= -0.1) return base;
+#endif
   float rise = 0.0;
   // The place in the noise: its tile is BASE_KM wide; a depth into it that
   // drifts from place to place (far) keeps two tiles from showing the same
@@ -2505,6 +2510,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // (The seams between heads go in by a share of the dome's height here at most: its core is whole, no pit goes
     // through it.)
     vec3 top = hm * sqrt(max(1.0 - U * U, 0.0));
+#ifdef TOPS_MAP
+    // (The map of the tops: as high as the domes within the heads' reach of the place, and the heads on them.)
+    vec3 Uo = max(U - CF_OUT / rmax, 0.0), to = hm * sqrt(max(1.0 - Uo * Uo, 0.0));
+    float tall = max(to.x, max(to.y, to.z));
+    return max(topsOld, tall > 0.0 ? a.level + tall + CF_OUT - sink + 0.03 + 0.06 * a.depth - h : -9.0);
+#endif
     int one = km.x >= km.y && km.x >= km.z ? 0 : km.y >= km.z ? 1 : 2;
     heapKm = km[one] - sink;
     heapIn = min(CF_OUT, 0.5 * top[one]);
@@ -2513,14 +2524,16 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     heapGate = 1.0;
     // (The seams of the large heads go in by a share of the dome's height at most, and the smaller heads stand on
     // their floor: clamped all together, that floor was the dome itself, smooth, wherever two large seams met.)
-    if (heapKm > -CF_OUT && heapKm < heapIn + CF_OUT) {
-      vec2 hk = headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), CF_HEAD * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
+    // (Not from so far that a texel of the read is a head and more: they are smoothed away there, and fade out before.)
+    if (heapKm > -CF_OUT && heapKm < heapIn + CF_OUT && lod < 3.5) {
+      vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), CF_HEAD * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
       // (On a low dome the heads are smaller too, by heapSmall: at their full size they cut it to crumbs.)
       heapSmall = clamp(top[one] / 0.4, 0.25, 1.0);
       heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y;
     }
     sheetF = f;
-    f = max(f, CF_K * (heapKm > 0.0 ? min(heapKm / CF_EDGE, 1.0) : heapKm));
+    // (Outside the heads' reach the march may stride farther: the field falls faster there.)
+    f = max(f, CF_K * (heapKm > 0.0 ? min(heapKm / CF_EDGE, 1.0) : min(heapKm, 2.0 * heapKm + CF_OUT)));
   }
   return f;
 }
@@ -2578,10 +2591,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       }
 #endif
     }
-    if (fine && heap && heapKm < heapIn + CF_OUT) {
+    if (fine && heap && heapKm < heapIn + CF_OUT && lod < 1.5) {
       // A heap's heads of 143 to 18 m, and near the eye of 20 to 2.5 m.
       float gate = heapGate;
-      heads += heapSmall * headsKm(textureLod(uHeads, q.xyz * DETAIL, lod + 2.8), CF_HEAD1, gate);
+      heads += heapSmall * (1.0 - smoothstep(0.5, 1.5, lod)) * headsKm(textureLod(uHeads, q.xyz * DETAIL, lod + 2.8), CF_HEAD1, gate);
 #if Q_MICRO
       float l1 = lod + 4.7;
       if (l1 < 1.5) {
@@ -2609,8 +2622,10 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       // A heap: the heads move the dome's surface, in km (none at the base, which is flat).
       // (Nor do they stand out farther than they are high over the base: a heap widens upwards from a flat base, and
       // no head hangs free beside it.)
-      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase) / CF_EDGE;
-      dn = max(dn, km < 0.0 ? 0.4 * km : km);
+      // (The base is level but not smooth: the heads' seams reach up into it by up to CF_RAG, lighter ragged gaps
+      // under a large heap; as a plane it was a featureless slab from below.)
+      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase + clamp(heads, -CF_RAG, 0.0)) / CF_EDGE;
+      dn = max(dn, km < 0.0 ? 0.8 * km : km);
     }
     // (Where a pixel is wider than that edge, only as sharp as a pixel and
     // a half: a harder edge stood in steps, and fragments of a few texels
