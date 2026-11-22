@@ -748,11 +748,27 @@ over the 1000 km or so of a ray along the horizon, its first steps 2.5,
 7.5 and 12.5 km long, where a slice of 150 km had steps of 0.4 to 3 km:
 in haze, whose light comes from the first km, the whole ray came out
 darker than a slice, and clouds at the horizon, whose air comes from the
-slices, stood out pale against the haze beside them. Two more slices hold the sky as the sea sees it, from
-its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
-ray from the eye, to the sea or out of the air (`LUT_END`). The table is
+slices, stood out pale against the haze beside them. Five more slices
+hold the sky as the sea sees it, from its surface through the whole air,
+for `skyAt` (round `LUT_SEA`), and one the whole ray from the eye, to the
+sea or out of the air (`LUT_END`); `LUT_N` = `LUT_S` + 6 slices a part.
+The sea's five are for places on the sea where the light stands higher or
+lower than over the eye's: they are made with the sky turned about the
+axis square to the light's vertical, the light raised by -1, -0.5, 0, 0.5
+and 1 times the angle round the Earth to the farthest sea seen
+(`lutSeaSpan`), and `skyAt` reads between them by the light's height over
+its place on the sea. The sea seen from 40 km reaches 700 km, 6 degrees
+round the Earth; with one slice made under the eye, the sea towards a
+setting sun seen from 40 km mirrored a sky too dark, 2 to 7 degrees below
+the horizon 8 levels darker than a march of many samples (main's skyAt, a
+march from each place on the sea, 4). With five, the sea below the horizon
+is within 0.0 to 1.9 levels of that march on average (main 0.1 to 2.9).
+The light's height is read linearly between slices, where the sky's light
+grows several times a degree in twilight: the sea below a light 4 degrees
+down comes out 1 to 3 levels too bright. Slices spaced more finely near the
+eye's place and coarsely beyond made the sea from 40 km worse again. The table is
 one 3D texture of half floats on unit 29, thirteen times as deep
-(thirteen parts of `LUT_S` + 2 slices, `LUT_PARTS`): the light's three
+(thirteen parts of `LUT_N` slices, `LUT_PARTS`): the light's three
 `vec4`, the optical depth, the three `vec4` of the part of the light
 scattered once from the light the clouds' map is of (the part their
 shadows take: the moon's, where it lights the clouds while the sun still
@@ -3923,7 +3939,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 (`LUT_S` + 2) + 2), RGBA16F, linear: 128 x 128 x 860 (`high`, `max`; 112.7 MB), 64 x 48 x 236 (`low`; 5.8 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 `LUT_N` + 2), RGBA16F, linear: 128 x 128 x 912 (`high`, `max`; 119.5 MB), 64 x 48 x 288 (`low`; 7.1 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
