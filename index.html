@@ -3796,7 +3796,15 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
 // It fills a shell from CI_LO to CI_HI, drawn on CI_LAYERS thin layers
 // through it: two decks of cirrus, each reading the ice in a frame of its
 // own.
+#ifdef CI2
+// The cirrus's layer (see ci2Form and highCloud): uCiA = its base (km),
+// depth (km), form and size (km); uCiB = thick and ice.
+uniform vec4 uCiA, uCiB;
+#define CI_LO uCiA.x
+#define CI_HI (uCiA.x + uCiA.y)
+#else
 const float CI_LO = 12.2, CI_HI = 12.8;    // km
+#endif
 const float CI_TAU = 4.0;                  // the vertical optical depth of the ice, per unit of it
 const float CI_VEIL = 0.4;                 // and of the veil, its mean
 const float CI_BAND = 0.8;                 // and of the body of a band of tufts, its median
@@ -3853,6 +3861,12 @@ uniform sampler2D uIceWay;
 // the share of sheets and streets; A, the share of flocks against large
 // systems.
 uniform sampler2D uCiMap;
+#ifdef CI2
+// The generating field of the cirrus, fBm at the layer's top (R: the large
+// sizes, G: the small ones, B: another field of large sizes; each
+// 0.5 + x / 6 for x of unit deviation).
+uniform sampler2D uG2;
+#endif
 
 // Loops of the cirrus run to bounds the compiler cannot know (uCirrus is
 // never negative), so that it keeps them as loops: unrolled, the hairs'
@@ -4458,13 +4472,120 @@ float ciAge(vec2 x, int k, float foot) {
   return (v.x + 0.3 * 0.03) / (v.y + 0.03);
 }
 
+#ifdef CI2
+// ---- The cirrus as one layer of ice falling through shear ----
+// The layer's record: uCiA = its base (km), depth (km), form (0 a sheet,
+// 1 fibres from heads, 2 small cells) and size (of a head or a cell, km);
+// uCiB = thick (a factor on the optical depth) and ice (how far the ice is
+// drawn out as it falls, 0 to 1).
+const float CI2_TILE = 32.0, CI2_TEX = 32.0 / 2048.0;   // G's tile and texel, km
+const int CI2_STEPS = 12, CI2_FAR = 6;     // steps of the march near the eye, and far off
+const vec2 CI2_THR = vec2(2.4, 3.2);       // the level of G over which there is ice: x - y * uCirrus
+const float CI2_LODK = 1.0;                // how many levels coarser G is read at the layer's base
+const vec3 CI2_FALL = vec3(0.8, 0.2, 0.1); // how deep the ice falls, of the layer: a mean, by B, by R
+const float CI2_GATE = 1.5;                // how much the map takes off G where it has little cirrus
+const vec3 CI2_RHO = vec3(0.18, 1.3, 2.0); // the extinction, 1/km: x * (exp(y * excess) - 1), levelling off at z
+const vec2 CI2_K = vec2(5.0, 14.0);        // the shear over the fall speed, 1/km, from region to region
+const float CI2_HOOK = 5.0;                // the first drift across the shear, km a km of fall, either way
+const float CI2_TURN = 0.8;                // the turn of the tail, km a km^3, either way
+const float CI2_H0 = 0.15, CI2_TOPS = 0.15; // the generating zone, km; how far under the top it may lie, of the depth
+const float CI2_STRETCH = 12.0, CI2_FTILE = 4.0, CI2_WANDER = 0.4; // fibres: how long for their width; the fine ones' tile, km; how far they wander, km
+const vec2 CI2_FIB = vec2(0.5, 0.3);       // the weight of the coarse and the fine fibres
+const vec2 CI2_BURST = vec2(0.7, 0.3);     // (y) how fast a head comes and goes as its ice falls
+const vec2 CI2_HEAD = vec2(0.9, 0.7);      // the weight of the large sizes and of the heads' own field
+const float CI2_HEADS = 0.7;               // how much denser the top of a streak is than its tail
+const float CI2_SUN = 1.2;                 // the depth towards the light, a factor
+const float CI2_LONG = 1.5;                // how much longer a placed head's tail is than the noise's streaks
+const float CI2_CELL = 12.0;                // placed heads: one at most to a cell of this many km
+const vec2 CI2_PLACED = vec2(3.4, 0.9);    // a placed head's excess at its middle, and how much the noise's forms fall back at small amounts
+const vec2 ET = vec2(0.8253, 0.5646), EN = vec2(-0.5646, 0.8253);   // along the shear, across it
+// A region's shear over the fall speed, first drift and turn, from the
+// cirrus's map there, times the layer's `ice`.
+vec3 ci2Reg(vec4 cm) {
+  return uCiB.y * vec3(mix(CI2_K.x, CI2_K.y, smoothstep(0.25, 0.75, cm.b)), CI2_HOOK * (2.0 * smoothstep(0.3, 0.7, cm.a) - 1.0), CI2_TURN * (2.0 * smoothstep(0.3, 0.7, cm.g) - 1.0));
+}
+// The displacement (km) of ice that has fallen h km below the layer's top,
+// for a region's reg: none in the generating zone, then a drift across the
+// shear that sets in over 0.15 km (the hook), a parabola along it
+// (constant shear) and a turn (the cube).
+vec2 ci2D(float h, vec3 reg) {
+  float s = max(h - CI2_H0, 0.0);
+  return (0.5 * reg.x * s * s) * ET + (reg.y * (s - 0.15 * (1.0 - exp(-s / 0.15))) + reg.z * s * s * s) * EN;
+}
+// The extinction (1/km, before the profile) of an excess of G over its level.
+float ci2Rho(float ex) {
+  float rho = CI2_RHO.x * (exp(CI2_RHO.y * max(ex, 0.0)) - 1.0);
+  return uCiB.x * rho / (1.0 + rho / CI2_RHO.z);
+}
+// Placed heads: sparse generating cells, each with a streak of its own (its
+// own shear and hook round the region's, its own size and life), so that
+// little cirrus is a few forms with a comma or a hook. The excess they add
+// along a step from xa at depth ha to xb at hb (warped map, km): a soft
+// body round the streak's line, wider and thinner as it falls; G's fibres
+// and its level fray it, so it has no outline. `amount` is the share of
+// cells with a head.
+float ci2Heads(vec2 xa, float ha, vec2 xb, float hb, vec3 reg, float amount) {
+  float hm = 0.5 * (ha + hb), sum = 0.0;
+  reg = vec3(CI2_LONG * reg.x, 0.0, 0.0);   // (each head has a hook and a turn of its own)   // (a placed head's ice falls slower or through more shear: a long tail)
+  vec2 q = (0.5 * (xa + xb) - ci2D(hm, reg)) / CI2_CELL - 0.5, q0 = floor(q);
+  for (int j = 0; j < CI_N(4); j++) {
+    vec2 id = q0 + vec2(float(j & 1), float(j >> 1));
+    uint n = ihash(uint(int(id.x) + 4096) * 73856093u ^ uint(int(id.y) + 4096) * 19349663u);
+    vec4 r = vec4(float(n & 255u), float((n >> 8) & 255u), float((n >> 16) & 255u), float(n >> 24)) / 255.0;
+    if (r.x >= amount) continue;
+    uint n2 = ihash(n + 77u);
+    vec4 r2 = vec4(float(n2 & 255u), float((n2 >> 8) & 255u), float((n2 >> 16) & 255u), float(n2 >> 24)) / 255.0;
+    vec2 c = (id + 0.15 + 0.7 * r.yz) * CI2_CELL;
+    vec3 rg = vec3(reg.x * (0.88 + 0.24 * r.w), uCiB.y * 3.5 * (2.0 * r2.x - 1.0), uCiB.y * (2.0 * r2.y - 1.0));
+    float len = uCiA.y * (0.35 + 0.65 * r2.z), sm = max(hm - CI2_H0, 0.0);
+    if (hm > len) continue;
+    vec2 ra = xa - c - ci2D(ha, rg), rb = xb - c - ci2D(hb, rg), dr = rb - ra;
+    float l2 = dot(dr, dr), t = l2 > 1e-8 ? clamp(-dot(ra, dr) / l2, 0.0, 1.0) : 0.0;
+    vec2 dm = ra + dr * t;
+    float rad = uCiA.w * (0.6 + 0.8 * r2.w) * (0.18 + 1.6 * sm);
+    sum += exp(-dot(dm, dm) / (rad * rad)) * sqrt(min(1.0, 1.77 * rad / max(sqrt(l2), 1e-3)))
+         * (1.0 - smoothstep(0.6 * len, len, hm)) * (0.45 + 0.7 * exp(-sm / 0.35)) * smoothstep(0.0, 0.1, hm);
+  }
+  return sum;
+}
+// The forms' weights from the layer's `form`: a sheet (cirrostratus),
+// fibres from heads (cirrus), small cells (cirrocumulus).
+vec3 ci2Form() {
+  float sheet = 1.0 - clamp(uCiA.z, 0.0, 1.0), cells = clamp(uCiA.z - 1.0, 0.0, 1.0);
+  return vec3(sheet, 1.0 - sheet - cells, cells);
+}
+// The layer's vertical optical depth at x on the map (km), over a footprint
+// of some 0.5 km: for its shadow on the low clouds and the sea, and the
+// glare. Four depths, the large sizes of G alone (no fibres, no placed
+// heads: over such a footprint they are their mean).
+float ci2Column(vec2 x) {
+  vec2 wm = ciWarp(x);
+  vec4 cm = textureLod(uCiMap, wm / WEATHER_KM, 4.0);
+  float c = uCirrus, thrM = 0.72 - 0.85 * c, gate = smoothstep(thrM - 0.3, thrM + 0.15, cm.r);
+  if (gate <= 0.0) return 0.0;
+  vec3 reg = ci2Reg(cm), fm = ci2Form();
+  float off = CI2_THR.x - CI2_THR.y * c + CI2_GATE * (1.0 - gate), sum = 0.0;
+  mat2 R = mat2(0.8, 0.6, -0.6, 0.8) / CI2_TILE;
+  for (int j = 0; j < CI_N(4); j++) {
+    float h = (float(j) + 0.5) * 0.25 * uCiA.y, hn = h / uCiA.y;
+    float f = CI2_HEAD.x * (textureLod(uG2, R * (wm - ci2D(h, reg)), 5.0).r - 0.5) * 6.0 + 0.45;
+    f = mix(f, 0.35 * f + 1.6 + off, fm.x);
+    sum += ci2Rho(f - off) * (1.0 - smoothstep(0.4, 0.8, hn)) * (1.0 - 0.5 * hn);
+  }
+  return (sum * 0.25 + ciThin(c) / uCiA.y * gate) * uCiA.y;
+}
+#endif
 // The depth as the light of the sun feels it, the ice seen over the
 // footprint f1, f2 (km on the map): the mean over the shell. (One loop over
 // the decks: each call of ciDensity is a copy for the compiler.)
 float cirrusDepth(vec2 x, vec2 f1, vec2 f2) {
+#ifdef CI2
+  return 0.5 * ci2Column(x);
+#else
   float s = 0.0;
   for (int k = 0; k < CI_N(CI_LAYERS); k++) s += ciDensity(x, k, f1, f2, false, true, vec4(-1.0), 1.0);
   return 0.5 * s;
+#endif
 }
 float cirrusDepth(vec2 x, float foot) {
   return cirrusDepth(x, vec2(foot, 0.0), vec2(0.0, foot));
@@ -4516,6 +4637,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   Th = 1.0;
   tHigh = -1.0;
   lk = vec3(0.0);
+#ifndef CI2
   // Where the ray is inside the shell: t0 to t1. From its base, a ray down
   // leaves it at once (lo.x is 0).
   vec2 lo = eyeSphere(o, d, CI_LO), hi = eyeSphere(o, d, CI_HI);
@@ -4740,6 +4862,200 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       wttN += tauS * tmid;
       tauN += tauS;
     }
+  }
+#endif
+#else
+  // One layer from its base (uCiA.x) up over its depth (uCiA.y). Ice is
+  // made at the layer's top (the generating level) and falls; ice that has
+  // fallen s has been displaced by ci2D(s): a first drift across (the wind
+  // just under the head: the hook of an uncinus) and a parabola along the
+  // shear, both of the region's own strength (the cirrus's map). So the
+  // ice at (x, s) is the generating field G at x - D(s), which also
+  // changes with s (the head came and went as the ice fell), times a
+  // profile; placed heads (ci2Heads) add single streaks. Fibres are a
+  // field of G drawn out along the shear. A step of the march reads G over
+  // the segment its ends map to.
+  float tau = 0.0, tauV = 0.0, bodyT = 0.0, veilT = 0.0, wideT = 0.0, wtt = 0.0, tSum = 0.0, nSum = 0.0;
+  float wn = 1.0, tauR = 0.0, wttR = 0.0, tauN = 0.0, onceN = 0.0, onceDN = 0.0, wttN = 0.0;
+  vec2 lowSun = vec2(0.0);
+  {
+    float DEPTH = uCiA.y, TOP = uCiA.x + uCiA.y;
+    vec2 lo = eyeSphere(o, d, uCiA.x), hi = eyeSphere(o, d, TOP);
+    float t0, t1;
+    if (uAlt < uCiA.x) {
+      t0 = lo.y; t1 = hi.y;
+    } else if (uAlt < TOP) {
+      t0 = 0.0; t1 = lo.y > lo.x && lo.x >= 0.0 ? lo.x : hi.y;
+    } else {
+      t0 = hi.x; t1 = lo.y > lo.x && lo.x >= 0.0 ? lo.x : hi.y;
+    }
+    t1 = min(t1, tmax);
+    if (t0 < 0.0 || t0 > 1e8 || t1 <= t0) return;
+    float pix = 2.0 * uTan / uRes.y * PASS_PIX * Q_FRAME;
+    float L = t1 - t0, jit = ign(gl_FragCoord.xy + 2.718 * uPass + 5.0);
+    // Steps crowd towards the eye where it is in the layer and the way is
+    // long; far off, where a pixel is wider than the fibres, fewer steps.
+    float pw = 1.0 + 2.0 * smoothstep(6.0, 40.0, L) * (1.0 - smoothstep(0.0, 3.0, t0));
+    float nst = floor(mix(float(CI2_STEPS), float(CI2_FAR), smoothstep(15.0, 60.0, t0)) + 0.5);
+    vec3 fm = ci2Form();
+    float c = uCirrus, thr = CI2_THR.x - CI2_THR.y * c, thrM = 0.72 - 0.85 * c;
+    // Little cirrus is a few placed heads; the noise's own forms come in
+    // as the amount grows.
+    float few = 1.0 - smoothstep(0.25, 0.7, c), placed = fm.y * mix(0.35, 0.9, smoothstep(0.05, 0.8, c));
+    vec3 pmid = o + d * (t0 + 0.5 * L), upm = normalize(pmid);
+    float musM = dot(upm, uLight), liM = 1.0 / max(abs(musM), 0.15);
+    float duskK = smoothstep(2.0, 6.0, liM) * smoothstep(0.02, 0.3, uLightI), tsSum = 0.0;
+    // The way towards the light over the map, per km of height.
+    vec2 shM = uLight.xz - upm.xz * musM;
+    shM = (length(shM) > 1e-6 ? normalize(shM) : vec2(1.0, 0.0)) * min(sqrt(max(1.0 - musM * musM, 0.0)) * liM, 6.0);
+    float fromAbove = smoothstep(-0.1, 0.1, musM);
+    mat2 R = mat2(0.8, 0.6, -0.6, 0.8) / CI2_TILE;
+    // Fibres: G drawn out CI2_STRETCH times along the shear, and a second
+    // set some 9 degrees off it: a place has the one or the other.
+    mat2 MF = mat2(ET.x / CI2_STRETCH, EN.x, ET.y / CI2_STRETCH, EN.y);
+    mat2 MG = MF * mat2(0.9877, 0.1564, -0.1564, 0.9877);
+    // The fibres are read on four sheets at fixed depths, where the ray
+    // crosses each, over a pixel: the steps move from frame to frame and
+    // are long, the sheets are not, so the fibres stay crisp near the eye.
+    // A step takes them from the sheets above and below it. A ray that
+    // runs level crosses few sheets: it reads them over its steps instead
+    // (wS).
+    vec4 FS = vec4(0.0);
+    float wS = smoothstep(0.08, 0.25, abs(dot(d, upm)));
+    if (wS > 0.0 && fm.z < 1.0) {
+      for (int k = 0; k < CI_N(4); k++) {
+        float hk = (float(k) + 0.5) * 0.25 * DEPTH;
+        vec2 es = eyeSphere(o, d, TOP - hk);
+        float tk = uAlt < TOP - hk ? es.y : es.x;
+        if (es.x > 1e8 || tk < t0 || tk > t1) continue;
+        vec3 pk = o + d * tk, uk = normalize(pk);
+        float ck = dot(d, uk), fk = pix * tk;
+        vec2 dk = d.xz - uk.xz * ck;
+        dk = length(dk) > 1e-6 ? normalize(dk) : vec2(1.0, 0.0);
+        vec2 wk = ciWarp(pk.xz + uDrift);
+        vec4 ck4 = textureLod(uCiMap, wk / WEATHER_KM, 4.0);
+        vec2 xk = wk - ci2D(hk, ci2Reg(ck4));
+        vec3 gk = (textureLod(uG2, R * xk, 5.0).rgb - 0.5) * 6.0;
+        xk += CI2_WANDER * gk.xz;
+        vec2 a1 = dk * (fk / max(abs(ck), 0.05)), a2 = vec2(-dk.y, dk.x) * fk;
+        float w2 = smoothstep(-0.25, 0.25, gk.y);
+        float v = mix((textureGrad(uG2, MF * xk / CI2_TILE, MF * a1 / CI2_TILE, MF * a2 / CI2_TILE).g - 0.5) * 6.0,
+                      (textureGrad(uG2, MG * xk / CI2_TILE + 0.61, MG * a1 / CI2_TILE, MG * a2 / CI2_TILE).g - 0.5) * 6.0, w2) * CI2_FIB.x;
+        if (fk < 0.03) v += CI2_FIB.y * (textureGrad(uG2, MF * xk / CI2_FTILE + 0.37, MF * a1 / CI2_FTILE, MF * a2 / CI2_FTILE).g - 0.5) * 6.0;
+        // (Some places are fibrous, some smooth.)
+        FS[k] = v * (0.45 + 0.55 * smoothstep(-0.8, 0.6, gk.x - gk.z));
+      }
+    }
+    for (int i = 0; i <= CI_N(CI2_STEPS); i++) {
+      if (float(i) > nst || tauN > 6.0) break;
+      float ua = i == 0 ? 0.0 : (float(i - 1) + jit) / nst, ub = float(i) == nst ? 1.0 : (float(i) + jit) / nst;
+      float ta = t0 + L * pow(ua, pw), tb = t0 + L * pow(ub, pw);
+      if (tb <= ta) continue;
+      float tmid = 0.5 * (ta + tb), dts = tb - ta;
+      vec3 pa = o + d * ta, pb = o + d * tb, pm = o + d * tmid, up = normalize(pm);
+      float ha = TOP - (length(pa) - RG), hb = TOP - (length(pb) - RG), h = clamp(0.5 * (ha + hb), 0.0, DEPTH);
+      float hn = h / DEPTH, cv = dot(d, up);
+      vec2 wm = ciWarp(pm.xz + uDrift);
+      vec4 cm = textureLod(uCiMap, wm / WEATHER_KM, 4.0);
+      float gate = smoothstep(thrM - 0.3, thrM + 0.15, cm.r);
+      // (Where the placed heads are goes by the map over some 60 km: a
+      // head is there or not all along its streak.)
+      float gateH = placed > 0.0 ? smoothstep(thrM - 0.35, thrM + 0.1, textureLod(uCiMap, wm / WEATHER_KM, 6.0).r) : 0.0;
+      if (gate <= 0.0 && gateH <= 0.0) continue;
+      // The region's own shear, hook and turn.
+      vec3 reg = ci2Reg(cm);
+      vec2 pxa = wm + (pa.xz - pm.xz), pxb = wm + (pb.xz - pm.xz);
+      vec2 xa = pxa - ci2D(ha, reg), xb = pxb - ci2D(hb, reg);
+      vec2 seg = xb - xa, x0 = 0.5 * (xa + xb);
+      float ls = length(seg), foot = pix * tmid;
+      vec2 e = ls > 1e-5 ? seg / ls : vec2(1.0, 0.0), en = vec2(-e.y, e.x);
+      float minor = max(foot, CI2_TEX * exp2(CI2_LODK * hn)), major = max(ls, minor);
+      vec2 tc = R * x0;
+      // The large sizes (R), a little of the small ones (G), and the
+      // field that says how deep the ice falls (B).
+      vec3 g = (textureGrad(uG2, tc, R * (e * major), R * (en * minor)).rgb - 0.5) * 6.0;
+      // The head over the time of the fall: G read farther on as the ice
+      // has fallen farther, so that a head comes and goes along its streak.
+      float sm = smoothstep(0.0, 0.5, max(h - CI2_H0, 0.0));
+      float burst = (textureLod(uG2, 3.1 * tc + CI2_BURST.y * h * vec2(0.37, 0.23), 5.0).b - 0.5) * 6.0;
+      float fib = 0.0;
+      if (wS < 1.0 && fm.z < 1.0) {
+        vec2 xf = x0 + CI2_WANDER * g.xz, nf = en * max(foot, 0.5 * CI2_TEX);
+        fib = CI2_FIB.x * (textureGrad(uG2, MF * xf / CI2_TILE, MF * seg / CI2_TILE, MF * nf / CI2_TILE).g - 0.5) * 6.0;
+      }
+      float us = clamp(hn * 4.0 - 0.5, 0.0, 3.0), k0 = floor(us);
+      fib = mix(fib, mix(FS[int(k0)], FS[int(min(k0 + 1.0, 3.0))], us - k0), wS);
+      float off = thr + CI2_GATE * (1.0 - gate);
+      // Cirrus: the noise's forms (the large sizes, where they gather;
+      // tufts; the heads' own field, which comes and goes), which fall back
+      // at small amounts, the placed heads, and the fibres on both.
+      float fn = CI2_HEAD.x * g.x + mix(0.4, 0.15, sm) * g.y + CI2_HEAD.y * burst;
+      float f = fn - CI2_PLACED.y * few, inHead = 0.0;
+      if (placed > 0.0) {
+        // (In a placed head's streak the noise is lifted to near its level,
+        // so that the streak is there whatever the noise, and frayed by it.)
+        float body = gateH > 0.0 ? ci2Heads(pxa, ha, pxb, hb, reg, placed * gateH) : 0.0;
+        inHead = clamp(2.0 * body, 0.0, 1.0);
+        off = mix(off, thr, inHead);
+        f += inHead * max(off - 0.1 - f, 0.0) + CI2_PLACED.x * body;
+      }
+      f += sm * fib * (1.0 + inHead);
+      // A sheet (cirrostratus): the same field with little contrast, over
+      // its level nearly everywhere.
+      if (fm.x > 0.0) f = mix(f, 0.35 * fn + 0.5 * sm * fib + 1.6 + off, fm.x);
+      // Small cells (cirrocumulus): G's small sizes at the cells' size,
+      // not drawn out.
+      if (fm.z > 0.0) {
+        vec2 tz = R * wm * (CI2_TILE / (64.0 * uCiA.w));
+        float cells = (textureGrad(uG2, tz, R * (e * max(ls, foot)) * (CI2_TILE / (64.0 * uCiA.w)), R * (en * foot) * (CI2_TILE / (64.0 * uCiA.w))).g - 0.5) * 6.0;
+        f = mix(f, 1.5 * cells + 0.5 * g.x + 0.6, fm.z);
+      }
+      // How far the ice of this head falls, and the profile: made in the top
+      // of the layer, thinner as it falls, gone by hmax. The generating
+      // level is not flat.
+      float hmax = DEPTH * clamp(CI2_FALL.x + CI2_FALL.y * g.z + CI2_FALL.z * g.x, 0.15, 1.0);
+      float hz = h - CI2_TOPS * DEPTH * clamp(0.5 - 0.35 * g.z - 0.2 * g.x, 0.0, 1.0);
+      float prof = smoothstep(0.0, 0.06 * DEPTH, hz) * (1.0 - smoothstep(0.5 * hmax, hmax, h)) * (1.0 - 0.5 * hn)
+                 * (1.0 + CI2_HEADS * exp(-max(h - CI2_H0, 0.0) / 0.25));
+      // (A placed head's ice falls as far as its own life says: ci2Heads.)
+      prof = mix(prof, smoothstep(0.0, 0.06 * DEPTH, hz) * (1.0 - 0.4 * hn), inHead);
+      float rho = ci2Rho(f - off) * prof;
+      float rv = ciThin(c) / DEPTH * gate;
+      // The same over some 4 km, for the glow round the light; and over the
+      // way towards the light, for the depth the light has crossed: the
+      // column above (or below, for a light from under the layer), times
+      // its slant, read where that way runs.
+      float fw = CI2_HEAD.x * (textureLod(uG2, tc, 9.5).r - 0.5) * 6.0 + 1.0 - CI2_PLACED.y * few;
+      fw = mix(fw, 0.35 * fw + 1.6 + off, fm.x);
+      float rw = ci2Rho(fw - off) * (1.0 - smoothstep(0.3, 0.9, hn)) * smoothstep(0.0, 0.05 * DEPTH, h);
+      wideT += (rw + rv) * dts;
+      veilT += (rv + fm.x * rho) * dts;
+      float tauS = (rho + rv) * dts;
+      if (tauS <= 0.0) continue;
+      float col = mix(max(DEPTH * 0.6 - h, 0.0), h, fromAbove), run = col * length(shM);
+      float fs = CI2_HEAD.x * (textureLod(uG2, R * (x0 + 0.5 * col * shM), log2(max(run, 0.25) / CI2_TEX) - 1.0).r - 0.5) * 6.0 + 0.25 - CI2_PLACED.y * few;
+      fs = mix(fs, 0.35 * fs + 1.6 + off, fm.x);
+      float tsS = (0.5 * ci2Rho(fs - off) + 0.5 * rho + rv) * col * CI2_SUN;
+      float li = liM, tr = exp(-tauN - 0.5 * tauS) * tauS;
+      onceN += tr * exp(-0.6 * tsS * li);
+      onceDN += tr * exp(-0.15 * tsS * li);
+      tsSum += tsS * tauS;
+      wttN += tauS * tmid;
+      tauN += tauS;
+      tauV += tauS * abs(cv);
+    }
+    tau = tauN;
+    wtt = wttN;
+    bodyT = 0.7 * tauV;
+    tSum = t0 + 0.5 * L;
+    nSum = 1.0;
+    lowSun = vec2(duskK, tauN > 0.0 ? tsSum / tauN : 0.0);
+#ifdef CI2_DBG
+    // (?cidbg=X, a test: black where the depth along the ray is over X.)
+    Th = tau > CI2_DBG ? 0.0 : 1.0;
+    tHigh = t0 + 0.5 * L;
+    return;
+#endif
   }
 #endif
   float tauF = tau;
@@ -7764,12 +8080,20 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
+    // `ci1=1` (temporary, for stills side by side): the cirrus as two decks of baked ice, as before.
+    const CI2 = new URLSearchParams(location.search).get('ci1') !== '1';
+    // The cirrus's layer: base and depth (km), form (0 a sheet, 1 fibres from heads, 2 small cells), size (km),
+    // thick, ice. `ci=base,depth,form,size,thick,ice` sets them (a test; an empty place keeps its value).
+    const CIRRUS_LAYER = [10.8, 2.0, 1.0, 0.6, 1.0, 1.0];
+    (new URLSearchParams(location.search).get('ci') || '').split(',').forEach((t, i) => { if (i < 6 && t !== '' && Number.isFinite(+t)) CIRRUS_LAYER[i] = +t; });
+    const CI_DBG = new URLSearchParams(location.search).get('cidbg');
     // `defs`: lines put after the #version line of the fragment shader.
     const link = (id, defs) => {
       const prog = gl.createProgram(), shaders = [];
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
+      if (id === 'fs' && CI2) defs = '#define CI2\n' + (CI_DBG ? `#define CI2_DBG ${(+CI_DBG).toFixed(3)}\n` : '') + (defs || '');
       if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
@@ -8196,6 +8520,61 @@ const SkySound = (() => {
     C('uniform1i', 'uIceWay', 11);
     C('uniform1i', 'uIcePhase', 12);
     C('uniform1i', 'uCiMap', 13);
+    if (CI2) {
+      // The cirrus's generating field: fBm of gradient
+      // noise that repeats with the tile, each size 2^(-1/3) of the one
+      // twice as large (a spectral slope of -5/3).
+      const N = 2048, data = new Uint8Array(N * N * 4);
+      let seed = 12345;
+      const rnd = () => {
+        seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const fbm = (first, count) => {
+        const out = new Float32Array(N * N);
+        for (let o = first; o < first + count; o++) {
+          const n = 1 << o, s = N / n, amp = Math.pow(2, -o / 3);
+          const gx = new Float32Array(n * n), gy = new Float32Array(n * n);
+          for (let i = 0; i < n * n; i++) { const a = 6.2831853 * rnd(); gx[i] = Math.cos(a); gy[i] = Math.sin(a); }
+          const i0 = new Int32Array(N), i1 = new Int32Array(N), fr = new Float32Array(N), fd = new Float32Array(N);
+          for (let x = 0; x < N; x++) {
+            const q = (x + 0.5) / s, i = Math.floor(q), f = q - i;
+            i0[x] = i % n; i1[x] = (i + 1) % n; fr[x] = f; fd[x] = f * f * f * (f * (f * 6 - 15) + 10);
+          }
+          for (let y = 0; y < N; y++) {
+            const j0 = i0[y] * n, j1 = i1[y] * n, fy = fr[y], v = fd[y], row = y * N;
+            for (let x = 0; x < N; x++) {
+              const a = i0[x], b = i1[x], fx = fr[x], u = fd[x];
+              const n00 = gx[j0 + a] * fx + gy[j0 + a] * fy, n10 = gx[j0 + b] * (fx - 1) + gy[j0 + b] * fy;
+              const n01 = gx[j1 + a] * fx + gy[j1 + a] * (fy - 1), n11 = gx[j1 + b] * (fx - 1) + gy[j1 + b] * (fy - 1);
+              const p = n00 + u * (n10 - n00), q2 = n01 + u * (n11 - n01);
+              out[row + x] += amp * (p + v * (q2 - p));
+            }
+          }
+        }
+        let m = 0, m2 = 0;
+        for (let i = 0; i < N * N; i++) { m += out[i]; m2 += out[i] * out[i]; }
+        m /= N * N;
+        const k = 255 / 6 / Math.sqrt(Math.max(m2 / (N * N) - m * m, 1e-12));
+        return [out, m, k];
+      };
+      [[0, 6], [6, 5], [1, 5]].forEach(([first, count], ch) => {
+        const [f, m, k] = fbm(first, count);
+        for (let i = 0; i < N * N; i++) data[4 * i + ch] = Math.max(0, Math.min(255, Math.round(127.5 + (f[i] - m) * k)));
+      });
+      for (let i = 0; i < N * N; i++) data[4 * i + 3] = 255;
+      gl.activeTexture(gl.TEXTURE19);
+      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+      gl.activeTexture(gl.TEXTURE0);
+      C('uniform1i', 'uG2', 19);
+    }
     C('uniform4fv', 'uBR', new Float32Array(BR));
     C('uniform4fv', 'uBO', new Float32Array(BO));
     C('uniform4fv', 'uWL', new Float32Array(WL.map(l => l / 550)));
@@ -8282,6 +8661,8 @@ const SkySound = (() => {
         ['uniform1f', 'uWind', state.wind],
         ['uniform2fv', 'uDrift', state.drift],
         ['uniform1f', 'uCirrus', state.cirrus],
+        ['uniform4f', 'uCiA', CIRRUS_LAYER[0], CIRRUS_LAYER[1], CIRRUS_LAYER[2], CIRRUS_LAYER[3]],
+        ['uniform4f', 'uCiB', CIRRUS_LAYER[4], CIRRUS_LAYER[5], 0, 0],
         ['uniform3fv', 'uLight', state.light],
         ['uniform1f', 'uLightI', state.lightI],
         ['uniform1f', 'uLightShare', state.lightShare],
