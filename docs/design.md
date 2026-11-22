@@ -298,20 +298,67 @@ before the renderer). A simple model, not a simulator:
   control, and they do not wake the panel) and the stick (its deflection
   to the rim; shown on a touch screen or with `?stick=1`, and where the
   panel would cover it, only while the panel has faded; held, it keeps
-  the panel away). Roll at `ROLL_RATE` (30 degrees a second) up to the bank
-  slider's limit (60), pitch at `PITCH_RATE` (5) up to the climb slider's
-  (15). Let go, the attitude stays. Level (`L`, the panel's button, the
-  stick's) moves both back to 0 at those rates. The panel's sliders set
-  the heading (a compass bearing: 180 degrees more than the heading in
-  degrees), the bank and the climb at once, and follow the flight.
+  the panel away). Roll at `ROLL_RATE` (30 degrees a second) up to
+  `BANK_MAX` (60), pitch at `PITCH_RATE` (5) up to `CLIMB_MAX` (15). Let
+  go, the attitude stays. Level (`L`, the panel's button, the stick's)
+  moves both back to 0 at those rates. The panel has no slider for the
+  attitude: the HUD shows it.
 - **Speed 0.** The aircraft stands: bank and climb only tilt the view, the
-  rudder and the heading slider turn it on the spot. `fly` returns true
+  rudder turns it on the spot. `fly` returns true
   while a control acts, and `frame` then asks for the next frame even when
   the renderer has settled.
 - **What follows the place, not the heading:** the clouds, the sea, the
   cirrus (read at `p.xz + uDrift`), the towers' grids (`state.drift`), the
   clouds' depth maps. The sea's wind is fixed in the world. The sound
   follows the speed and the altitude only.
+
+## The HUD
+
+A head-up display over the picture (`drawHud`, `paintHud`, after Steering
+in the script), on a 2D canvas of its own (`.hud`) between the picture and
+the overlays; it takes no pointer, so a drag on it turns the eye.
+
+- **On and off.** Off at first: the page's aim is a picture like a
+  photograph. `?hud=1` / `?hud=0`, else the stored choice (`sky.hud`, as
+  `sky.lang`), else off. The panel's switch and `H` (a steering key: the
+  same focus rule, it does not wake the panel) turn it over and store the
+  choice. Off, the canvas is hidden and its size set to 0: no pixels, no
+  drawing, and every other picture as before.
+- **When it draws.** `frame` calls `drawHud` after the renderer; it draws
+  only when its key (the CSS size, the device pixel ratio, `cameraOf(view())`,
+  heading, bank, climb, speed, altitude) has changed. At rest nothing is
+  drawn; in flight, once a frame (2D lines and text, well under a
+  millisecond).
+- **Conformal, as a helmet's display.** The horizon line and the pitch
+  ladder are projected with the picture's own camera (`cameraOf`, the
+  vertical field `FOV`, the canvas's CSS size): the horizon line is the
+  plane of zero pitch through the eye, the rungs (every 5 degrees, solid
+  above, dashed below, numbered, their tips towards the horizon) are the
+  elevations along the vertical through the middle of the view, each drawn
+  along its circle of elevation. They agree with the picture wherever the
+  eye looks, ahead or out of a side window, banked or climbing. The sea's
+  horizon lies below the line by the dip of the altitude (0.56 degrees at
+  0.3 km, 3.4 at 11 km): that is right, not an error. The flight path
+  marker is the direction flown (heading and climb, projected the same
+  way; the model has no angle of attack nor sideslip, so it is also the
+  nose), drawn when it is inside the ladder's area. The aircraft symbol in
+  the middle is where the eye looks (ahead: the nose).
+- **Instruments of the aircraft**, wherever the eye looks: the bank scale
+  at the top (10, 20, 30, 45, 60 degrees; its pointer at minus the bank,
+  square to the horizon as seen ahead), the heading tape under the
+  heading's box (compass bearing, `bearing`, 50 degrees wide), the speed
+  (km/h) on the left, the altitude (`altText`, the panel's unit) and the
+  vertical speed (m/s) on the right.
+- **Look.** Green (`HUD_GREEN`) over a thin dark edge (each layer is
+  stroked dark first, then green), so it reads on a bright cloud deck,
+  the blue sky, at dusk and at night. Sizes follow the shorter side of the
+  view (numbers 11 to 19 CSS px, from a phone to 2560 x 1440), lines of
+  whole device pixels; the canvas holds the screen's pixels
+  (`devicePixelRatio`). System fonts only, numbers and units only: no
+  language. The top holds the heading and the bank, the sides the speed
+  and the altitude: the bottom stays free for the panel and the stick.
+- `window.__hud()` gives the horizon line as drawn, the marker, the size of
+  the numbers and the ladder's area, for the tools (`check steer`).
 
 ## Sun, moon and sky in the JS
 

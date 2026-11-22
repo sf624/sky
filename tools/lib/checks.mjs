@@ -65,9 +65,9 @@ const detailOf = (img, [x0, y0, bw, bh]) => {
   }
   return sum / n / 3;
 };
-// The angle of the horizon in a picture (degrees, counter-clockwise positive), from the row of the strongest step
-// of brightness in each column of the middle half, near the line expected (y = y0 + slope * x).
-const horizonIn = (img, y0, slope, r = 40) => {
+// The horizon in a picture, from the row of the strongest step of brightness in each column of the middle half,
+// near the line expected (y = y0 + slope * x): its angle (degrees, counter-clockwise positive) and its row at x.
+const horizonLine = (img, y0, slope, r = 40) => {
   const L = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
   const xs = [], ys = [];
   for (let x = Math.round(img.w / 4); x < img.w * 3 / 4; x += 4) {
@@ -82,7 +82,29 @@ const horizonIn = (img, y0, slope, r = 40) => {
   const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
   let sxy = 0, sxx = 0;
   for (let i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
-  return -Math.atan(sxy / sxx) * 180 / Math.PI;
+  const k = sxy / sxx;
+  return { angle: -Math.atan(k) * 180 / Math.PI, at: (x) => my + k * (x - mx) };
+};
+const horizonIn = (img, y0, slope, r = 40) => horizonLine(img, y0, slope, r).angle;
+// The line of the HUD's green in a picture near the line expected (y = y0 + slope * x, CSS px; dpr device pixels
+// a CSS px), over the columns xs (CSS px): the green-weighted mean row of each column within r device pixels, and
+// the line through them, as horizonLine. The dark edge of the HUD's lines is not green.
+const greenLine = (img, y0, slope, xs, dpr = 1, r = 6) => {
+  const X = [], Y = [];
+  for (const cx of xs) {
+    const x = Math.round(cx * dpr), c = (y0 + slope * cx) * dpr;
+    let n = 0, sy = 0;
+    for (let y = Math.max(0, Math.round(c - r)); y <= Math.min(img.h - 1, c + r); y++) {
+      const i = 3 * (y * img.w + x), g = img.rgb[i + 1] - Math.max(img.rgb[i], img.rgb[i + 2]);
+      if (g > 40) { n += g; sy += g * (y + 0.5); }
+    }
+    if (n) { X.push(x / dpr); Y.push(sy / n / dpr); }
+  }
+  const mx = X.reduce((a, b) => a + b, 0) / X.length, my = Y.reduce((a, b) => a + b, 0) / Y.length;
+  let sxy = 0, sxx = 0;
+  for (let i = 0; i < X.length; i++) { sxy += (X[i] - mx) * (Y[i] - my); sxx += (X[i] - mx) ** 2; }
+  const k = sxy / sxx;
+  return { n: X.length, at: (x) => my + k * (x - mx) };
 };
 const errorsOf = (pages) => pages.flatMap((p) => p.errors);
 // The exposure (log2) of the page's last frame, or null where the page has no `window.__exposure` (the base, which
@@ -358,8 +380,9 @@ export const CHECKS = {
   // a still drawn directly there (heading, eye, bank) within the flight check's limit. (b) A banked flight on a
   // diagonal across the wrap matches its still no worse than one elsewhere (as wrap). (c) In the banked turn the
   // flown frame keeps the detail of a level flight (against their stills). (d) The sun stays put in the world: a
-  // turn of the heading by the panel, and a bank, move it on the screen where the camera says. (e) A bank tilts
-  // the sea's horizon by the bank, looking ahead; the stills at bank 0, 30 and 60 are for looking at.
+  // turn of the heading by the rudder key, and a bank by the bank key, move it on the screen where the camera says.
+  // (e) A bank tilts the sea's horizon by the bank, looking ahead; the stills at bank 0, 30 and 60 are for looking
+  // at. (f) A climb. (g) The HUD's horizon line agrees with the camera and the picture.
   async steer(ctx) {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
@@ -455,8 +478,8 @@ export const CHECKS = {
     expect(wa.at[0] < 1 && wa.at[1] < 1, 'the diagonal flight crosses the wrap on both axes');
     expect(wa.d.tile <= LIMITS.wrap(wc.d.tile), 'no seam across the wrap');
 
-    // (d) The sun, in a view towards it at a low sun: first where it is, then the panel turns the heading by 20
-    // degrees (the eye turns along), then a bank of 30 degrees.
+    // (d) The sun, in a view towards it at a low sun: first where it is, then the rudder (E, held for 6.7 s at
+    // rest) turns the heading by about 20 degrees (the eye turns along), then the bank key (D, 1 s) banks 30.
     {
       const q0 = 'date=172&time=17.6&cloud=0.3&cirrus=0&speed=0&heading=0';
       const p0 = await ctx.session.open(ctx.page, q0, ctx.size);
@@ -464,10 +487,14 @@ export const CHECKS = {
       try { await p0.step(2, 50); sun = (await flightNow(p0)).sun; pages.push(p0); } finally { await p0.close(); }
       const syaw = Math.atan2(sun[0], sun[2]) * 180 / Math.PI, sel = Math.asin(sun[1]) * 180 / Math.PI;
       const p = await ctx.session.open(ctx.page, `${q0}&yaw=${syaw - 15}&pitch=${sel}`, ctx.size);
-      const set = (id, v) => p.eval(`(() => { const s = document.getElementById('${id}'); s.value = ${v}; s.dispatchEvent(new Event('input')); return 0; })()`);
+      // Holds a key for n frames of 100 ms (the first frame after the press has no time: the frames had stopped).
+      const hold = async (code, n) => {
+        await p.eval(`(window.dispatchEvent(new KeyboardEvent('keydown', { code: '${code}' })), 0)`);
+        await p.step(n + 1, 100);
+        await p.eval(`(window.dispatchEvent(new KeyboardEvent('keyup', { code: '${code}' })), 0)`);
+      };
       try {
-        const steps = [['sun-0', null], ['sun-turned', async () => set('heading', `(+document.getElementById('heading').value + 20) % 360`)],
-          ['sun-banked', async () => set('bank', 30)]];
+        const steps = [['sun-0', null], ['sun-turned', () => hold('KeyE', 67)], ['sun-banked', () => hold('KeyD', 10)]];
         for (const [n, act] of steps) {
           if (act) await act();
           await p.step(run.view('default').frames, 50);
@@ -557,6 +584,72 @@ export const CHECKS = {
       const fm = { heading: 0, yaw: 60, pitch: -6, bank: b, climb: 0, at: [40, 60] };
       const pm = await stillAt(ctx, ctx.page, `date=172&time=17.4&cloud=0.5&${flightQuery(fm)}`, f(m));
       pages.push(pm);
+    }
+    // (g) The HUD (?hud=1) agrees with the camera and with the picture. For views ahead, aside, up and down, banked
+    // and climbing: its horizon line (window.__hud(): a point and an angle, CSS px) lies on the camera's plane of
+    // zero pitch (the line through the projections of two level directions) within 1 px at both edges of the
+    // picture, and so does the green line drawn (found in the picture, at the device's pixels, beside the middle
+    // and the flight path marker). Looking ahead at 0.3 km over a clear sea, the sea's horizon in a still without
+    // the HUD lies below the HUD's line by the dip of the altitude (0.56 degrees) within 2 px. One view on a
+    // phone's profile (411x781 at a ratio of 2.625).
+    {
+      const R = Math.PI / 180;
+      const states = [
+        ['ahead', { heading: 100, yaw: 100, pitch: 0, bank: 0, climb: 0 }, true],
+        ['ahead-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, true],
+        ['ahead-m45', { heading: 100, yaw: 100, pitch: 0, bank: -45, climb: 0 }, true],
+        ['right-m45-m10', { heading: 100, yaw: 130, pitch: 10, bank: -45, climb: -10 }, false],
+        ['side-30', { heading: 100, yaw: 160, pitch: 20, bank: 30, climb: 0 }, false],
+        ['left-5', { heading: 100, yaw: 10, pitch: -5, bank: 0, climb: 5 }, false],
+        ['phone-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, false, { w: 411, h: 781, dpr: 2.625, mobile: true }],
+      ];
+      const sea = 'date=172&time=11&alt=0.3&cloud=0&cirrus=0';
+      for (const [name, st, ahead, extra = {}] of states) {
+        const q = `${sea}&${flightQuery({ ...st, at: [40, 60] })}`;
+        const p = await ctx.session.open(ctx.page, run.stillQuery(`${q}&hud=1`), { ...ctx.size, ...extra });
+        let fl, hud;
+        try {
+          await p.step(run.view('default').frames, 50);
+          fl = await flightNow(p);
+          hud = await p.eval('window.__hud()');
+          await p.shot(f(`hud-${name}`));
+          pages.push(p);
+        } finally {
+          await p.close();
+        }
+        const img = readPng(f(`hud-${name}`)), dpr = extra.dpr || 1, w = img.w / dpr, h = img.h / dpr;
+        if (!hud || !hud.horizon) {
+          expect(false, `hud-${name}: a horizon line`);
+          continue;
+        }
+        // The camera's zero pitch: two level directions either side of the view's own azimuth.
+        const fwd = fl.cam.slice(6, 9), az = Math.atan2(fwd[0], fwd[2]);
+        const [a, b] = [-8, 8].map((d) => onScreen(fl.cam, [Math.sin(az + d * R), 0, Math.cos(az + d * R)], w, h));
+        const camAt = (x) => a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]);
+        const k = -Math.tan(hud.horizon.angle * R), hudAt = (x) => hud.horizon.y + k * (x - hud.horizon.x);
+        const off = Math.max(...[0, w].map((x) => Math.abs(hudAt(x) - camAt(x))));
+        // The green drawn: columns within the ladder's clip, away from the middle and the marker.
+        const [x0, , x1] = hud.clip, keep = (x) => Math.abs(x - w / 2) > 4 * hud.fs && (!hud.path || Math.abs(x - hud.path[0]) > 3 * hud.fs);
+        const xs = [];
+        for (let x = Math.ceil(x0 + 2); x < x1 - 2; x += 3) if (keep(x)) xs.push(x);
+        const green = greenLine(img, hudAt(0), k, xs, dpr);
+        const drawn = Math.max(...[x0, x1].map((x) => Math.abs(green.at(x) - camAt(x))));
+        lines.push(`hud-${name}: the HUD's horizon at ${hud.horizon.angle.toFixed(3)} degrees, off the camera's zero pitch by ${off.toFixed(3)} px; ` +
+          `the green drawn (${green.n} columns) off by ${drawn.toFixed(2)} px`);
+        expect(off <= 1, `hud-${name}: the HUD's horizon on the camera's zero pitch`);
+        expect(green.n > 20 && drawn <= 1, `hud-${name}: the green line drawn there`);
+        if (!ahead) continue;
+        // The sea's horizon, in a still of the same view without the HUD: below the HUD's line by the dip.
+        pages.push(await stillAt(ctx, ctx.page, q, f(`hud-${name}-sea`)));
+        const simg = readPng(f(`hud-${name}-sea`)), t = Math.tan(31 * R), dipPx = Math.tan(0.556 * R) / t * h / 2;
+        const r = hud.horizon.angle * R, seen = horizonLine(simg, hudAt(0) + dipPx / Math.cos(r), k);
+        const xa = w / 4, xb = 3 * w / 4;
+        const below = [xa, xb].map((x) => (seen.at(x) - hudAt(x)) * Math.cos(r));
+        const miss = Math.max(...below.map((d) => Math.abs(d - dipPx)));
+        lines.push(`hud-${name}: the sea's horizon at ${seen.angle.toFixed(2)} degrees, ${below.map((d) => d.toFixed(2)).join(' / ')} px below the HUD's line ` +
+          `(the dip: ${dipPx.toFixed(2)} px), off by ${miss.toFixed(2)} px`);
+        expect(miss <= 2, `hud-${name}: the sea's horizon below the HUD's line by the dip`);
+      }
     }
     const errors = errorsOf(pages);
     return { ok: ok && !errors.length, msg: [...lines, ...errors].join('\n') };
