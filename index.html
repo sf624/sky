@@ -2304,13 +2304,13 @@ const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's 
 // moving its surface by a share of its own size (see cloudShape, cloudField).
 // The discs' thresholds, for the cells of 2 km, 1 km and 500 m: at no amount; what the amount takes off; what the weather
 // map's amount does (it gathers the large heaps most); and the least (clear air stays between heaps).
-const vec3 CF_DISC = vec3(1.02, 1.1, 1.3), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
-const float CF_DISC_MIN = 0.42;
+const vec3 CF_DISC = vec3(1.02, 1.05, 1.22), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
+const float CF_DISC_MIN = 0.52;
 // The clusters: the mark of the map's amount over 10 km and more under which there are no heaps, with few clouds and
 // from half on, and half the width of the clusters' edge; how much the lanes raise the discs' thresholds; and how much
 // lower the largest discs' is deep in a cluster.
 const vec3 CF_MESO = vec3(0.54, 0.52, 0.05);
-const float CF_LANE = 0.4, CF_CORE = 0.12;
+const float CF_LANE = 0.4, CF_CORE = 0.03;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
@@ -2348,7 +2348,7 @@ Layer cloudLayer(vec2 x, float lod) {
   a.amount = 0.44 + 0.44 * uCloud - 0.03 * smoothstep(0.5, 0.7, uCloud) + 0.09 * smoothstep(0.6, 0.8, uCloud) - 0.04 * smoothstep(0.8, 1.0, uCloud) + mix(2.2, 0.6, smoothstep(0.1, 0.8, uCloud)) * (1.0 - 0.85 * smoothstep(0.88, 1.0, uCloud)) * (w.r - 0.5);
   a.amount = clamp(a.amount, 0.0, mix(1.0, 0.72, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // (Heaps: the slider says how many there are, and the map where they gather, at every amount alike.)
-  a.fair = (0.55 + 0.6 * uCloud) * smoothstep(0.0, 0.05, uCloud);
+  a.fair = (0.63 + 0.44 * uCloud) * smoothstep(0.0, 0.05, uCloud);
   a.gather = w.r - 0.5;
   // Heaps stand in clusters, streets and the walls of open cells, with clear lanes between: where the map's amount
   // over some 10 km and more is under a mark, which falls as the slider rises, there are none (lane); deep in a
