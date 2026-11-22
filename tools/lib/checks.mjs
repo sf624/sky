@@ -382,7 +382,7 @@ export const CHECKS = {
   // flown frame keeps the detail of a level flight (against their stills). (d) The sun stays put in the world: a
   // turn of the heading by the rudder key, and a bank by the bank key, move it on the screen where the camera says.
   // (e) A bank tilts the sea's horizon by the bank, looking ahead; the stills at bank 0, 30 and 60 are for looking
-  // at. (f) A climb. (g) The HUD's horizon line agrees with the camera and the picture.
+  // at. (f) A climb. (g) The HUD, fixed to the airframe, agrees with the camera and the picture.
   async steer(ctx) {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
@@ -585,70 +585,106 @@ export const CHECKS = {
       const pm = await stillAt(ctx, ctx.page, `date=172&time=17.4&cloud=0.5&${flightQuery(fm)}`, f(m));
       pages.push(pm);
     }
-    // (g) The HUD (?hud=1) agrees with the camera and with the picture. For views ahead, aside, up and down, banked
-    // and climbing: its horizon line (window.__hud(): a point and an angle, CSS px) lies on the camera's plane of
-    // zero pitch (the line through the projections of two level directions) within 1 px at both edges of the
-    // picture, and so does the green line drawn (found in the picture, at the device's pixels, beside the middle
-    // and the flight path marker). Looking ahead at 0.3 km over a clear sea, the sea's horizon in a still without
-    // the HUD lies below the HUD's line by the dip of the altitude (0.56 degrees) within 2 px. One view on a
-    // phone's profile (411x781 at a ratio of 2.625).
+    // (g) The HUD (?hud=1), a glass fixed to the airframe, agrees with the camera and with the picture. In views
+    // ahead, aside, up and down, banked and climbing (one on a phone's profile, 411x781 at a ratio of 2.625): its
+    // anchor (window.__hud()) is where the camera puts the nose, within 1 px; its horizon line lies on the camera's
+    // plane of zero pitch (the line through the projections of two level directions) within 1 px at both edges of
+    // the picture, and so does the green line drawn (found in the picture, at the device's pixels, along the
+    // horizon beside the marker). Looking ahead at 0.3 km over a clear sea, the sea's horizon in a still without the
+    // HUD lies below the HUD's line by the dip of the altitude (0.56 degrees) within 2 px. The flight path marker
+    // drawn (the middle of its green) is at the anchor within 1 px, looking ahead and with the eye 20 degrees to the
+    // right, where it has moved by the camera's shift of the nose. Looking 90 degrees aside the HUD's canvas is empty.
     {
       const R = Math.PI / 180;
       const states = [
-        ['ahead', { heading: 100, yaw: 100, pitch: 0, bank: 0, climb: 0 }, true],
-        ['ahead-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, true],
-        ['ahead-m45', { heading: 100, yaw: 100, pitch: 0, bank: -45, climb: 0 }, true],
-        ['right-m45-m10', { heading: 100, yaw: 130, pitch: 10, bank: -45, climb: -10 }, false],
-        ['side-30', { heading: 100, yaw: 160, pitch: 20, bank: 30, climb: 0 }, false],
-        ['left-5', { heading: 100, yaw: 10, pitch: -5, bank: 0, climb: 5 }, false],
-        ['phone-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, false, { w: 411, h: 781, dpr: 2.625, mobile: true }],
+        ['ahead', { heading: 100, yaw: 100, pitch: 0, bank: 0, climb: 0 }, { sea: true }],
+        ['ahead-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, { sea: true }],
+        ['ahead-m45', { heading: 100, yaw: 100, pitch: 0, bank: -45, climb: 0 }, { sea: true }],
+        ['up-m45-m5', { heading: 100, yaw: 110, pitch: 8, bank: -45, climb: -5 }, {}],
+        ['marker-ahead', { heading: 100, yaw: 100, pitch: 0, bank: 0, climb: 3 }, { marker: true }],
+        ['marker-right-20', { heading: 100, yaw: 120, pitch: 0, bank: 0, climb: 3 }, { marker: true }],
+        ['side-90', { heading: 100, yaw: 190, pitch: -8, bank: 20, climb: 0 }, { empty: true }],
+        ['phone-30-5', { heading: 100, yaw: 100, pitch: 0, bank: 30, climb: 5 }, { size: { w: 411, h: 781, dpr: 2.625, mobile: true } }],
       ];
       const sea = 'date=172&time=11&alt=0.3&cloud=0&cirrus=0';
-      for (const [name, st, ahead, extra = {}] of states) {
+      const painted = "(() => { const c = document.querySelector('.hud'); if (!c.width) return 0; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; })()";
+      const markers = {};
+      for (const [name, st, opt] of states) {
         const q = `${sea}&${flightQuery({ ...st, at: [40, 60] })}`;
-        const p = await ctx.session.open(ctx.page, run.stillQuery(`${q}&hud=1`), { ...ctx.size, ...extra });
-        let fl, hud;
+        const p = await ctx.session.open(ctx.page, run.stillQuery(`${q}&hud=1`), { ...ctx.size, ...(opt.size || {}) });
+        let fl, hud, count;
         try {
           await p.step(run.view('default').frames, 50);
           fl = await flightNow(p);
           hud = await p.eval('window.__hud()');
+          count = await p.eval(painted);
           await p.shot(f(`hud-${name}`));
           pages.push(p);
         } finally {
           await p.close();
         }
-        const img = readPng(f(`hud-${name}`)), dpr = extra.dpr || 1, w = img.w / dpr, h = img.h / dpr;
-        if (!hud || !hud.horizon) {
-          expect(false, `hud-${name}: a horizon line`);
+        const img = readPng(f(`hud-${name}`)), dpr = (opt.size || {}).dpr || 1, w = img.w / dpr, h = img.h / dpr;
+        const nose = onScreen(fl.cam, [Math.cos(fl.climb * R) * Math.sin(fl.heading * R), Math.sin(fl.climb * R), Math.cos(fl.climb * R) * Math.cos(fl.heading * R)], w, h);
+        if (opt.empty) {
+          lines.push(`hud-${name}: the nose at ${nose ? nose.map((v) => v.toFixed(0)).join(',') : 'behind the eye'}; ${count} pixels painted on the HUD's canvas`);
+          expect(hud && count === 0, `hud-${name}: nothing of the HUD in view`);
           continue;
         }
-        // The camera's zero pitch: two level directions either side of the view's own azimuth.
-        const fwd = fl.cam.slice(6, 9), az = Math.atan2(fwd[0], fwd[2]);
-        const [a, b] = [-8, 8].map((d) => onScreen(fl.cam, [Math.sin(az + d * R), 0, Math.cos(az + d * R)], w, h));
+        if (!hud || !hud.anchor || !hud.horizon) {
+          expect(false, `hud-${name}: an anchor and a horizon line`);
+          continue;
+        }
+        const anchorOff = Math.hypot(hud.anchor[0] - nose[0], hud.anchor[1] - nose[1]);
+        // The camera's zero pitch: two level directions either side of the heading.
+        const [a, b] = [-8, 8].map((d) => onScreen(fl.cam, [Math.sin((fl.heading + d) * R), 0, Math.cos((fl.heading + d) * R)], w, h));
         const camAt = (x) => a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]);
         const k = -Math.tan(hud.horizon.angle * R), hudAt = (x) => hud.horizon.y + k * (x - hud.horizon.x);
         const off = Math.max(...[0, w].map((x) => Math.abs(hudAt(x) - camAt(x))));
-        // The green drawn: columns within the ladder's clip, away from the middle and the marker.
-        const [x0, , x1] = hud.clip, keep = (x) => Math.abs(x - w / 2) > 4 * hud.fs && (!hud.path || Math.abs(x - hud.path[0]) > 3 * hud.fs);
-        const xs = [];
-        for (let x = Math.ceil(x0 + 2); x < x1 - 2; x += 3) if (keep(x)) xs.push(x);
+        // The green drawn: columns along the horizon line 2 to 5.5 degrees of the glass from its point on the
+        // vertical through the nose, either side (clear of the marker, the bank scale and the boxes).
+        const xs = [], c = Math.cos(hud.horizon.angle * R);
+        for (const side of [-1, 1]) {
+          for (let d = 2 * R * hud.scale; d <= 5.5 * R * hud.scale; d += 3) xs.push(hud.horizon.x + side * d * c);
+        }
         const green = greenLine(img, hudAt(0), k, xs, dpr);
-        const drawn = Math.max(...[x0, x1].map((x) => Math.abs(green.at(x) - camAt(x))));
-        lines.push(`hud-${name}: the HUD's horizon at ${hud.horizon.angle.toFixed(3)} degrees, off the camera's zero pitch by ${off.toFixed(3)} px; ` +
-          `the green drawn (${green.n} columns) off by ${drawn.toFixed(2)} px`);
+        const ends = [Math.min(...xs), Math.max(...xs)];
+        const drawn = Math.max(...ends.map((x) => Math.abs(green.at(x) - camAt(x))));
+        lines.push(`hud-${name}: the anchor off the camera's nose by ${anchorOff.toFixed(3)} px; the horizon at ${hud.horizon.angle.toFixed(3)} degrees, ` +
+          `off the camera's zero pitch by ${off.toFixed(3)} px; the green drawn (${green.n} columns) off by ${drawn.toFixed(2)} px; ${count} pixels painted`);
+        expect(anchorOff <= 1, `hud-${name}: the HUD anchored at the nose`);
         expect(off <= 1, `hud-${name}: the HUD's horizon on the camera's zero pitch`);
         expect(green.n > 20 && drawn <= 1, `hud-${name}: the green line drawn there`);
-        if (!ahead) continue;
+        if (opt.marker) {
+          // The marker's green, in a box round the anchor (its wings 1.45, its fin 1.05 degrees of the glass).
+          const F = R * hud.scale, [ax, ay] = hud.anchor;
+          let n = 0, sx = 0;
+          for (let y = Math.round((ay - 1.15 * F) * dpr); y <= Math.round((ay + 0.6 * F) * dpr); y++) {
+            for (let x = Math.round((ax - 1.7 * F) * dpr); x <= Math.round((ax + 1.7 * F) * dpr); x++) {
+              const i = 3 * (y * img.w + x), gr = img.rgb[i + 1] - Math.max(img.rgb[i], img.rgb[i + 2]);
+              if (gr > 40) { n += gr; sx += gr * (x + 0.5); }
+            }
+          }
+          const mx = n ? sx / n / dpr : NaN;
+          markers[name] = { mx, nose };
+          lines.push(`hud-${name}: the marker drawn at x ${mx.toFixed(2)} (anchor ${ax.toFixed(2)}, the camera's nose ${nose[0].toFixed(2)})`);
+          expect(Math.abs(mx - nose[0]) <= 1, `hud-${name}: the marker drawn at the nose`);
+        }
+        if (!opt.sea) continue;
         // The sea's horizon, in a still of the same view without the HUD: below the HUD's line by the dip.
         pages.push(await stillAt(ctx, ctx.page, q, f(`hud-${name}-sea`)));
         const simg = readPng(f(`hud-${name}-sea`)), t = Math.tan(31 * R), dipPx = Math.tan(0.556 * R) / t * h / 2;
         const r = hud.horizon.angle * R, seen = horizonLine(simg, hudAt(0) + dipPx / Math.cos(r), k);
-        const xa = w / 4, xb = 3 * w / 4;
-        const below = [xa, xb].map((x) => (seen.at(x) - hudAt(x)) * Math.cos(r));
+        const below = [w / 4, 3 * w / 4].map((x) => (seen.at(x) - hudAt(x)) * Math.cos(r));
         const miss = Math.max(...below.map((d) => Math.abs(d - dipPx)));
         lines.push(`hud-${name}: the sea's horizon at ${seen.angle.toFixed(2)} degrees, ${below.map((d) => d.toFixed(2)).join(' / ')} px below the HUD's line ` +
           `(the dip: ${dipPx.toFixed(2)} px), off by ${miss.toFixed(2)} px`);
         expect(miss <= 2, `hud-${name}: the sea's horizon below the HUD's line by the dip`);
+      }
+      const [m0, m1] = [markers['marker-ahead'], markers['marker-right-20']];
+      if (m0 && m1) {
+        const moved = m1.mx - m0.mx, want = m1.nose[0] - m0.nose[0];
+        lines.push(`hud: with the eye 20 degrees to the right the marker moved by ${moved.toFixed(2)} px (the camera's nose: ${want.toFixed(2)} px)`);
+        expect(Math.abs(moved - want) <= 1, 'hud: the marker moves with the nose');
       }
     }
     const errors = errorsOf(pages);

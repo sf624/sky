@@ -46,22 +46,23 @@ out of the same window), and a bank tilts the horizon; the sun stays where
 it is in the sky. At speed 0 the aircraft stands still: the bank and the
 climb only tilt it, and the rudder turns it on the spot.
 
-The HUD (head-up display) shows the flight over the view, in green, as in a
-flight simulator. It is off at first; **H** or the switch in the panel turns
-it on, and the browser remembers the choice. It shows:
+The HUD (head-up display) shows the flight in green, as in a flight
+simulator. It is off at first; **H** or the switch in the panel turns it on,
+and the browser remembers the choice. It is fixed to the aircraft, in the
+direction of flight, about 28 degrees across: you see it when you look
+ahead. The page starts looking out of a window to the right, where the HUD
+is out of view: turn the view 60 degrees to the left (drag to the right)
+to look ahead. It shows:
 
-- the horizon line and a pitch ladder every 5 degrees (solid above the
-  horizon, dashed below). They lie on the true directions wherever you
-  look, as a helmet's display: the horizon line is the level of your eye.
-  The sea's horizon lies a little below it, more so the higher you fly
-  (0.6 degrees at 300 m, 3.4 degrees at 11 km).
-- a small aircraft symbol in the middle: where you look (looking ahead, the
-  nose);
 - the flight path marker (a circle with wings): where the aircraft goes,
-  when it is in view;
-- the bank at the top (marks at 10, 20, 30, 45 and 60 degrees), the heading
-  under it (a compass bearing, 0 north), the speed on the left, the altitude
-  and the vertical speed on the right.
+  which is where its nose points;
+- the horizon line and a pitch ladder every 5 degrees (solid above the
+  horizon, dashed below). They lie on the true directions: the horizon
+  line is the level of your eye. The sea's horizon lies a little below it,
+  more so the higher you fly (0.6 degrees at 300 m, 3.4 degrees at 11 km).
+- the bank around the marker (marks at 10, 20, 30, 45 and 60 degrees), the
+  heading above it (a compass bearing, 0 north), the speed on the left, the
+  altitude and the vertical speed on the right.
 
 The page is in English or Japanese, following the browser's language
 (Japanese if the browser prefers Japanese to English, English otherwise).

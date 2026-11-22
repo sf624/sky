@@ -90,7 +90,7 @@ makes them NaN (`params.get('yaw') * RAD`), and the camera with them.
 `heading`, `bank`, `climb` and the parts of `at` fall back to 0.
 `window.__flight()` returns the flight as it is (heading, eye, bank and
 climb in degrees, altitude and place in km, the sun's direction and the
-camera), for the tools; `window.__hud()` the HUD's horizon line as drawn
+camera), for the tools; `window.__hud()` the HUD's anchor and horizon line as drawn
 (see [design.md](design.md#the-hud)).
 
 ## Judging a change

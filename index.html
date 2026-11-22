@@ -8879,14 +8879,20 @@ const SkySound = (() => {
   // aircraft's attitude: its heading, its climb (the nose up) and then its
   // bank (the right wing down, about the nose). Level, it is
   // camera(yaw, pitch) itself, to the last bit.
-  const cameraOf = v => {
-    if (!v.bank && !v.climb) return camera(v.yaw, v.pitch);
-    const a = basis(v.heading, v.climb), e = basis(v.yaw - v.heading, v.pitch);
+  // The aircraft's own axes: right (the right wing), up and forward (the
+  // nose), for its heading, climb and bank.
+  const airframe = v => {
+    const a = basis(v.heading, v.climb);
     const cb = Math.cos(v.bank), sb = Math.sin(v.bank);
     const R = [0, 1, 2].map(i => a[i] * cb - a[3 + i] * sb), U = [0, 1, 2].map(i => a[3 + i] * cb + a[i] * sb);
+    return [R, U, a.slice(6, 9)];
+  };
+  const cameraOf = v => {
+    if (!v.bank && !v.climb) return camera(v.yaw, v.pitch);
+    const [R, U, N] = airframe(v), e = basis(v.yaw - v.heading, v.pitch);
     const m = new Float32Array(9);
     for (let c = 0; c < 3; c++) {
-      for (let i = 0; i < 3; i++) m[3 * c + i] = R[i] * e[3 * c] + U[i] * e[3 * c + 1] + a[6 + i] * e[3 * c + 2];
+      for (let i = 0; i < 3; i++) m[3 * c + i] = R[i] * e[3 * c] + U[i] * e[3 * c + 1] + N[i] * e[3 * c + 2];
     }
     return m;
   };
@@ -11503,7 +11509,7 @@ const SkySound = (() => {
   stickPad.hidden = !(params.get('stick') === '1' || matchMedia('(pointer: coarse)').matches);
 
   // ---------- HUD ----------
-  // A head-up display over the picture, on a 2D canvas of its own: the
+  // A head-up display, on a 2D canvas of its own over the picture: the
   // flight as numbers and lines, off by default (the page's aim is a
   // picture as a photograph). The panel's switch, H and ?hud=1 / ?hud=0
   // turn it on and off; the choice is kept, as the language is. Off, its
@@ -11511,24 +11517,29 @@ const SkySound = (() => {
   // drawn again in a frame only when something it shows has changed (the
   // camera, the size, the flight).
   //
-  // What it shows. Conformal, as a helmet's display, wherever the eye
-  // looks: the horizon line and the pitch ladder (every 5 degrees, solid
-  // above the horizon, dashed below, numbered) lie on the true directions
-  // of the camera (cameraOf, the picture's own): the horizon line on the
-  // plane of zero pitch through the eye (the sea's horizon lies a little
-  // below it, by the dip of the altitude: 0.56 degrees at 0.3 km, 3.4 at
-  // 11 km), the rungs along the vertical through the middle of the view.
-  // The flight path marker (a circle with wings) is where the aircraft
-  // flies (heading and climb; it flies where its nose points), when it is
-  // in view. The aircraft symbol in the middle is where the eye looks:
-  // looking ahead, the nose. The instruments are the aircraft's, wherever
-  // the eye looks: the bank scale at the top (10, 20, 30, 45, 60 degrees),
-  // its pointer square to the horizon as seen ahead; the heading tape
-  // (compass bearing, 0 north) with the heading in a box; the speed (km/h)
-  // on the left; the altitude (in the panel's unit) and the vertical speed
-  // (m/s) on the right. Green with a thin dark edge, readable on cloud,
-  // blue sky and night; sized by the shorter side of the view, at the
-  // screen's pixels; only numbers and units, so no language.
+  // It is a glass fixed to the airframe, as a real HUD: a plane square to
+  // the nose, at a distance of 1, with the airframe's right and up as its
+  // axes (airframe). Everything on it is laid out in degrees from the nose
+  // (HUD_DEG: about 28 degrees across), and each point is projected with
+  // the picture's own camera (cameraOf), so the whole HUD sits round the
+  // nose wherever the eye looks: looking ahead it fills the middle of the
+  // view, looking 20 degrees aside it is seen 20 degrees aside, a little
+  // askew, and looking out of the side window it is out of view. It keeps
+  // its size in degrees, whatever the screen. On it: the flight path
+  // marker at the nose (the model flies where the nose points: no angle of
+  // attack, no sideslip); the horizon line and the pitch ladder (every 5
+  // degrees, solid above the horizon, dashed below, numbered), true to the
+  // world: the horizon line lies on the plane of zero pitch through the
+  // eye (the sea's horizon lies a little below it, by the dip of the
+  // altitude: 0.56 degrees at 0.3 km, 3.4 at 11 km), the rungs along the
+  // vertical through the nose; the bank scale round the nose (10, 20, 30,
+  // 45, 60 degrees), its pointer square to the horizon; the heading tape
+  // above it (compass bearing, 0 north) with the heading in a box; the
+  // speed (km/h) on the left; the altitude (in the panel's unit) and the
+  // vertical speed (m/s) on the right. The boxes and the scales stand
+  // upright on the glass, so they bank with the airframe (and with a view
+  // from it). Green with a thin dark edge, readable on cloud, blue sky and
+  // night; at the screen's pixels; only numbers and units, so no language.
   const hudCanvas = document.querySelector('.hud'), hudSwitch = document.getElementById('hud');
   let hudOn = false, hudDrawn = '', hudLines = null;
   // (At the start it only takes the choice: the first frame draws it. A
@@ -11545,29 +11556,14 @@ const SkySound = (() => {
     if (keep) try { localStorage.setItem('sky.hud', on ? '1' : '0'); } catch (err) {}
   }
   hudSwitch.addEventListener('change', () => setHud(hudSwitch.checked, true));
-  // Where the camera cam (right, up, forward) puts the direction d on a
-  // view w by h CSS pixels (FOV the vertical field), or null behind the eye.
-  const projected = (cam, d, w, h) => {
-    const f = cam[6] * d[0] + cam[7] * d[1] + cam[8] * d[2];
-    if (f < 1e-3) return null;
-    const k = h / 2 / Math.tan(FOV / 2) / f;
-    return [w / 2 + k * (cam[0] * d[0] + cam[1] * d[1] + cam[2] * d[2]), h / 2 - k * (cam[3] * d[0] + cam[4] * d[1] + cam[5] * d[2])];
-  };
   // The direction at azimuth a (the yaw convention) and elevation e.
   const toward3 = (a, e) => [Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)];
-  // A rung of the ladder at elevation e on the vertical of azimuth a: its
-  // middle and its direction on the screen (along the circle of e), or null.
-  const rungAt = (cam, a, e, w, h) => {
-    const p = projected(cam, toward3(a, e), w, h), q = projected(cam, toward3(a + 1e-4, e), w, h);
-    if (!p || !q) return null;
-    const n = Math.hypot(q[0] - p[0], q[1] - p[1]);
-    return n > 0 ? { p, d: [(q[0] - p[0]) / n, (q[1] - p[1]) / n] } : null;
-  };
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   function drawHud() {
     if (!hudOn) return;
     const box = hudCanvas.getBoundingClientRect(), w = box.width, h = box.height, dpr = window.devicePixelRatio || 1;
     if (!w || !h) return;
-    const cam = cameraOf(view());
+    const v = view(), cam = cameraOf(v);
     const key = [w, h, dpr, ...cam, state.heading, state.bank, state.climb, state.speed, state.alt].join();
     if (key === hudDrawn) return;
     hudDrawn = key;
@@ -11579,157 +11575,189 @@ const SkySound = (() => {
     const g = hudCanvas.getContext('2d');
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, W, H);
-    g.setTransform(W / w, 0, 0, H / h, 0, 0);
-    paintHud(g, w, h, dpr, cam);
+    paintHud(g, w, h, W / w, cam, airframe(v));
   }
+  // The layout on the glass, in degrees from the nose (x right, y up):
+  // the size of the numbers; the ladder's area (its half width, which is
+  // also the radius of its round top, and its bottom) and its rungs; the
+  // bank scale's radius (round the ladder's top); the heading tape's line
+  // and half width; the boxes' inner edges. About 28 degrees across, from
+  // 12 below the nose to 14.5 above.
+  const HUD_DEG = { font: 1, ladder: [8.6, -12], rung: 4.2, gap: 1.4, reach: 16, bank: 9.3, tape: 12.6, tapeW: 9, boxes: 9.2 };
   const HUD_GREEN = '#52ff8c', HUD_EDGE = 'rgba(0, 24, 8, .62)';
-  function paintHud(g, w, h, dpr, cam) {
-    const m = Math.min(w, h), cx = w / 2, cy = h / 2;
-    const fs = Math.min(19, Math.max(11, 0.011 * m + 3));            // the size of the numbers, CSS px
-    const px = 1 / dpr, lw = Math.max(1, Math.round(1.25 * dpr)) * px, edge = lw + 2 * Math.max(1, Math.round(dpr)) * px;
-    const font = `${Math.round(fs)}px ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace`;
-    const margin = Math.max(12, 0.03 * m);
-    // The layout: the heading at the top, the bank scale under it; the speed
-    // and the altitude either side of the middle; the ladder between them.
-    const tapeW = Math.min(0.5 * w, 22 * fs), tapeY = margin + 1.9 * fs, tapeEnd = tapeY + 1.9 * fs;
-    const bankR = Math.max(4 * fs, 0.14 * m), bankY = tapeEnd + 0.9 * fs + bankR;
-    const side = Math.min(0.3 * w, 0.45 * h);
-    const clip = [cx - side + 0.6 * fs, bankY - bankR / 2 + fs, cx + side - 0.6 * fs, h - margin];
-    const rungL = Math.min(0.1 * m, 7 * fs), gap = 0.35 * rungL, tip = 0.3 * fs, ladderR = 0.32 * h;
-    // Each layer: lines (solid and dashed) and texts, drawn first in the dark
-    // edge, then in green.
+  function paintHud(g, w, h, dpr, cam, [R, U, N]) {
+    const s0 = h / 2 / Math.tan(FOV / 2);                           // px per unit of the glass, looking ahead
+    const D = HUD_DEG, F = D.font * RAD, px = 1 / dpr;
+    const lw = Math.max(1, Math.round(1.25 * dpr)) * px, edge = lw + 2 * Math.max(1, Math.round(dpr)) * px;
+    const font = `${(F * s0).toFixed(2)}px ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace`;
+    // The glass in the camera: a point (x, y) of it is N + x R + y U; its
+    // camera coordinates are linear in x and y.
+    const cc = d => [cam[0] * d[0] + cam[1] * d[1] + cam[2] * d[2], cam[3] * d[0] + cam[4] * d[1] + cam[5] * d[2],
+      cam[6] * d[0] + cam[7] * d[1] + cam[8] * d[2]];
+    const cN = cc(N), cR = cc(R), cU = cc(U);
+    const NEAR = 0.05;
+    const camOf = ([x, y]) => [0, 1, 2].map(i => cN[i] + x * cR[i] + y * cU[i]);
+    const screen = c => [w / 2 + s0 * c[0] / c[2], h / 2 - s0 * c[1] / c[2]];
+    const on = p => { const c = camOf(p); return c[2] > NEAR ? screen(c) : null; };
+    // A world direction on the glass (its glass coordinates), or null.
+    const glassOf = d => { const n = dot3(d, N); return n > NEAR ? [dot3(d, R) / n, dot3(d, U) / n] : null; };
+    const deg = (x, y) => [x * RAD, y * RAD];
+    // Lines on the glass (polylines of glass points), cut where they pass
+    // behind the eye (the depth is linear along a line of the glass).
+    const lineTo = (path, pts, closed) => {
+      const all = closed ? [...pts, pts[0]] : pts;
+      let open = false;
+      for (let i = 0; i + 1 < all.length; i++) {
+        let a = all[i], b = all[i + 1];
+        const za = camOf(a)[2], zb = camOf(b)[2];
+        if (za <= NEAR && zb <= NEAR) { open = false; continue; }
+        const cut = (p, q, zp, zq) => { const t = (NEAR - zp) / (zq - zp); return [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]; };
+        let restart = !open;
+        if (za <= NEAR) { a = cut(a, b, za, zb); restart = true; }
+        if (zb <= NEAR) b = cut(b, a, zb, za);
+        const A = on(a) || screen(camOf(a)), B = on(b) || screen(camOf(b));
+        if (restart) path.moveTo(A[0], A[1]);
+        path.lineTo(B[0], B[1]);
+        open = zb > NEAR;
+      }
+    };
+    // A region of the glass as a clip on the screen (cut at the eye's plane).
+    const clipTo = pts => {
+      const kept = [];
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length], za = camOf(a)[2], zb = camOf(b)[2];
+        if (za > NEAR) kept.push(a);
+        if ((za > NEAR) !== (zb > NEAR)) { const t = (NEAR - za) / (zb - za); kept.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); }
+      }
+      g.beginPath();
+      if (kept.length < 3) { g.rect(0, 0, 0, 0); g.clip(); return; }
+      kept.forEach((p, i) => { const q = screen(camOf(p)); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+      g.closePath();
+      g.clip();
+    };
+    // Text on the glass at p, along the glass's angle a: the glass's own
+    // transform there (looking ahead, the screen's), sized for s0.
+    const texts = [];
+    const text = (p, t, align = 'center', a = 0) => texts.push({ p, t, align, a });
     const layer = () => ({ solid: new Path2D(), dashed: new Path2D(), texts: [] });
     const paint = (L) => {
       for (const pass of [0, 1]) {
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.lineJoin = g.lineCap = 'round';
         g.strokeStyle = pass ? HUD_GREEN : HUD_EDGE;
         g.lineWidth = pass ? lw : edge;
         g.setLineDash([]);
         g.stroke(L.solid);
-        g.setLineDash([0.6 * fs, 0.4 * fs]);
+        g.setLineDash([0.6 * F * s0, 0.4 * F * s0]);
         g.stroke(L.dashed);
         g.setLineDash([]);
-        g.font = font;
         for (const t of L.texts) {
-          g.save();
-          g.translate(t.x, t.y);
-          if (t.angle) g.rotate(t.angle);
-          g.textAlign = t.align || 'center';
+          const c = camOf(t.p);
+          if (c[2] <= NEAR) continue;
+          const P = screen(c), e = 1e-4, X = screen(camOf([t.p[0] + e, t.p[1]])), Y = screen(camOf([t.p[0], t.p[1] + e]));
+          const jx = [(X[0] - P[0]) / e / s0, (X[1] - P[1]) / e / s0], jy = [(Y[0] - P[0]) / e / s0, (Y[1] - P[1]) / e / s0];
+          const ca = Math.cos(t.a), sa = Math.sin(t.a);
+          const ax = [jx[0] * ca + jy[0] * sa, jx[1] * ca + jy[1] * sa], down = [jx[0] * sa - jy[0] * ca, jx[1] * sa - jy[1] * ca];
+          g.setTransform(dpr * ax[0], dpr * ax[1], dpr * down[0], dpr * down[1], dpr * P[0], dpr * P[1]);
+          g.font = font;
+          g.textAlign = t.align;
           g.textBaseline = 'middle';
           if (pass) {
             g.fillStyle = HUD_GREEN;
-            g.fillText(t.text, 0, 0);
+            g.fillText(t.t, 0, 0);
           } else {
-            g.lineWidth = edge;
-            g.strokeText(t.text, 0, 0);
+            g.lineWidth = edge / Math.hypot(...ax);
+            g.strokeText(t.t, 0, 0);
           }
-          g.restore();
         }
       }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
-    g.lineJoin = g.lineCap = 'round';
-    // The horizon and the ladder, conformal, clipped to the middle.
-    const fwd = cam.slice(6, 9);
-    const look = Math.hypot(fwd[0], fwd[2]) > 1e-6 ? Math.atan2(fwd[0], fwd[2]) : Math.atan2(-cam[3] * Math.sign(fwd[1]), -cam[5] * Math.sign(fwd[1]));
-    const ladder = layer();
-    hudLines = { w, h, fs, clip, horizon: null, path: null };
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    hudLines = { w, h, anchor: on([0, 0]), horizon: null, scale: s0 };
+    // Nothing of the glass in front of the eye: nothing to draw.
+    const corners = [deg(-15, -13), deg(15, -13), deg(15, 15), deg(-15, 15)];
+    if (corners.every(p => camOf(p)[2] <= NEAR)) return;
+    // The ladder and the horizon, true to the world, in the ladder's area.
+    const ladder = layer(), lad = ladder.solid;
+    ladder.texts = texts;
+    const [lr, lb] = D.ladder;
+    const rungL = D.rung * RAD, gap = D.gap * RAD, tip = 0.3 * F;
     for (let e = -85; e <= 85; e += 5) {
-      const r = rungAt(cam, look, e * RAD, w, h);
-      if (!r) continue;
-      const { p: [x, y], d: [dx, dy] } = r;
-      // The rungs near the middle only (about 21 degrees each way); the
-      // horizon whole, wherever its point on the vertical is.
-      if (e && Math.hypot(x - cx, y - cy) > ladderR) continue;
-      // Up, away from the horizon: the normal on the sky's side.
-      const [ux, uy] = [dy, -dx];
+      const p = glassOf(toward3(state.heading, e * RAD)), q = glassOf(toward3(state.heading + 1e-4, e * RAD));
+      if (!p || !q || Math.hypot(p[0], p[1]) > D.reach * RAD && e) continue;
+      const n = Math.hypot(q[0] - p[0], q[1] - p[1]), t = [(q[0] - p[0]) / n, (q[1] - p[1]) / n], up = [-t[1], t[0]];
+      const at = (k, u = 0) => [p[0] + k * t[0] + u * up[0], p[1] + k * t[1] + u * up[1]];
       if (e === 0) {
-        hudLines.horizon = { x, y, angle: -Math.atan2(dy, dx) / RAD };
-        const far = Math.hypot(w, h);
-        for (const s of [-1, 1]) {
-          ladder.solid.moveTo(x + s * gap * dx, y + s * gap * dy);
-          ladder.solid.lineTo(x + s * far * dx, y + s * far * dy);
-        }
+        const P = on(p), Q = on(at(1e-3));
+        if (P && Q) hudLines.horizon = { x: P[0], y: P[1], angle: -Math.atan2(Q[1] - P[1], Q[0] - P[0]) / RAD };
+        for (const s of [-1, 1]) lineTo(lad, [at(s * gap), at(s * 0.6)]);
         continue;
       }
-      const path = e > 0 ? ladder.solid : ladder.dashed, toH = e > 0 ? -1 : 1;
-      const angle = Math.atan2(dy, dx), upright = Math.abs(angle) > Math.PI / 2;
+      const toH = e > 0 ? -1 : 1, angle = Math.atan2(t[1], t[0]), flip = Math.abs(angle) > Math.PI / 2;
       for (const s of [-1, 1]) {
-        path.moveTo(x + s * gap * dx, y + s * gap * dy);
-        path.lineTo(x + s * rungL * dx, y + s * rungL * dy);
-        // The tip, towards the horizon.
-        ladder.solid.moveTo(x + s * rungL * dx, y + s * rungL * dy);
-        ladder.solid.lineTo(x + s * rungL * dx + toH * tip * ux, y + s * rungL * dy + toH * tip * uy);
-        const at = rungL + 0.4 * fs;
-        ladder.texts.push({ x: x + s * at * dx, y: y + s * at * dy, text: String(e), angle: upright ? angle - Math.PI : angle,
-          align: (s > 0) !== upright ? 'left' : 'right' });
-      }
-    }
-    // The flight path marker: where the aircraft flies.
-    const fp = projected(cam, toward3(state.heading, state.climb), w, h);
-    if (fp) {
-      hudLines.path = fp;
-      const [x, y] = fp, r = 0.45 * fs;
-      if (x > clip[0] && x < clip[2] && y > clip[1] && y < clip[3]) {
-        ladder.solid.moveTo(x + r, y);
-        ladder.solid.arc(x, y, r, 0, 2 * Math.PI);
-        ladder.solid.moveTo(x - r, y); ladder.solid.lineTo(x - r - fs, y);
-        ladder.solid.moveTo(x + r, y); ladder.solid.lineTo(x + r + fs, y);
-        ladder.solid.moveTo(x, y - r); ladder.solid.lineTo(x, y - r - 0.6 * fs);
+        lineTo(e > 0 ? lad : ladder.dashed, [at(s * gap), at(s * rungL)]);
+        lineTo(lad, [at(s * rungL), at(s * rungL, toH * tip)]);
+        text(at(s * (rungL + 0.4 * F)), String(e), (s > 0) !== flip ? 'left' : 'right', flip ? angle - Math.PI : angle);
       }
     }
     g.save();
-    g.beginPath();
-    g.rect(clip[0], clip[1], clip[2] - clip[0], clip[3] - clip[1]);
-    g.clip();
+    const area = [deg(-lr, lb), deg(lr, lb)];
+    for (let a = 0; a <= 180; a += 6) area.push(deg(lr * Math.cos(a * RAD), lr * Math.sin(a * RAD)));
+    clipTo(area);
     paint(ladder);
     g.restore();
+    texts.length = 0;
+    // The instruments, upright on the glass.
     const ins = layer(), L = ins.solid;
-    // The aircraft symbol, fixed in the middle.
-    const a = 0.6 * fs;
-    L.moveTo(cx - 3.2 * a, cy); L.lineTo(cx - 1.5 * a, cy); L.lineTo(cx - 0.75 * a, cy + 0.9 * a); L.lineTo(cx, cy);
-    L.lineTo(cx + 0.75 * a, cy + 0.9 * a); L.lineTo(cx + 1.5 * a, cy); L.lineTo(cx + 3.2 * a, cy);
-    // The heading: a tape of 50 degrees under its box.
-    const hd = bearing(state.heading), perDeg = tapeW / 50;
-    for (let k = Math.ceil((hd - 25) / 5) * 5; k <= hd + 25; k += 5) {
-      const x = cx + (k - hd) * perDeg, big = k % 10 === 0;
-      L.moveTo(x, tapeY); L.lineTo(x, tapeY + (big ? 0.55 : 0.3) * fs);
-      if (big) ins.texts.push({ x, y: tapeY + 1.25 * fs, text: String(((k % 360) + 360) % 360) });
-    }
-    L.moveTo(cx - tapeW / 2, tapeY); L.lineTo(cx + tapeW / 2, tapeY);
-    L.moveTo(cx - 0.35 * fs, tapeY - 0.45 * fs); L.lineTo(cx, tapeY - 0.05 * fs); L.lineTo(cx + 0.35 * fs, tapeY - 0.45 * fs);
-    const hw = 1.6 * fs, top = tapeY - 1.75 * fs;
-    L.rect(cx - hw, top, 2 * hw, 1.25 * fs);
-    ins.texts.push({ x: cx, y: top + 0.65 * fs, text: String(Math.round(hd) % 360).padStart(3, '0') });
-    // The bank scale, its pointer square to the horizon as seen ahead.
-    for (const b of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) {
-      const t = b * RAD, s = Math.sin(t), c = Math.cos(t), long = b % 30 === 0 ? 0.8 : 0.45;
-      if (b === 0) {
-        L.moveTo(cx, bankY - bankR); L.lineTo(cx - 0.4 * fs, bankY - bankR - 0.6 * fs);
-        L.lineTo(cx + 0.4 * fs, bankY - bankR - 0.6 * fs); L.closePath();
-        continue;
-      }
-      L.moveTo(cx + bankR * s, bankY - bankR * c);
-      L.lineTo(cx + (bankR + long * fs) * s, bankY - (bankR + long * fs) * c);
-    }
-    L.moveTo(cx + bankR * Math.sin(-60 * RAD), bankY - bankR * Math.cos(60 * RAD));
-    L.arc(cx, bankY, bankR, -Math.PI / 2 - 60 * RAD, -Math.PI / 2 + 60 * RAD);
+    ins.texts = texts;
+    // The flight path marker: the nose.
     {
-      const t = -state.bank, s = Math.sin(t), c = Math.cos(t), r0 = bankR - 0.15 * fs, r1 = bankR - 0.95 * fs, b = 0.28 * fs;
-      L.moveTo(cx + r0 * s, bankY - r0 * c);
-      L.lineTo(cx + r1 * s + b * c, bankY - r1 * c + b * s);
-      L.lineTo(cx + r1 * s - b * c, bankY - r1 * c - b * s);
-      L.closePath();
+      const r = 0.45 * F, ring = [];
+      for (let k = 0; k < 24; k++) ring.push([r * Math.cos(k * Math.PI / 12), r * Math.sin(k * Math.PI / 12)]);
+      lineTo(L, ring, true);
+      lineTo(L, [[-r, 0], [-r - F, 0]]);
+      lineTo(L, [[r, 0], [r + F, 0]]);
+      lineTo(L, [[0, r], [0, r + 0.6 * F]]);
+    }
+    // The bank scale round the nose, its pointer at minus the bank.
+    const bR = D.bank * RAD, polar = (a, r) => [r * Math.sin(a), r * Math.cos(a)];
+    {
+      const arc = [];
+      for (let a = -60; a <= 60; a += 3) arc.push(polar(a * RAD, bR));
+      lineTo(L, arc);
+      for (const b of [-60, -45, -30, -20, -10, 10, 20, 30, 45, 60]) lineTo(L, [polar(b * RAD, bR), polar(b * RAD, bR + (b % 30 === 0 ? 0.8 : 0.45) * F)]);
+      lineTo(L, [[0, bR], [-0.4 * F, bR + 0.6 * F], [0.4 * F, bR + 0.6 * F]], true);
+      const t = -state.bank, r1 = bR - 0.95 * F, side = [0.28 * F * Math.cos(t), -0.28 * F * Math.sin(t)], c1 = polar(t, r1);
+      lineTo(L, [polar(t, bR - 0.15 * F), [c1[0] + side[0], c1[1] + side[1]], [c1[0] - side[0], c1[1] - side[1]]], true);
+    }
+    // The heading: a tape of 45 degrees (0.4 of a degree of the glass each) under its box.
+    {
+      const hd = bearing(state.heading), y = D.tape * RAD, half = D.tapeW * RAD, per = half / 22.5;
+      for (let k = Math.ceil((hd - 22.5) / 5) * 5; k <= hd + 22.5; k += 5) {
+        const x = (k - hd) * per, big = k % 10 === 0;
+        lineTo(L, [[x, y], [x, y - (big ? 0.55 : 0.3) * F]]);
+        if (big) text([x, y - 1.25 * F], String(((k % 360) + 360) % 360));
+      }
+      lineTo(L, [[-half, y], [half, y]]);
+      lineTo(L, [[-0.35 * F, y + 0.45 * F], [0, y + 0.05 * F], [0.35 * F, y + 0.45 * F]]);
+      const bw = 1.6 * F, b0 = y + 0.5 * F;
+      lineTo(L, [[-bw, b0], [bw, b0], [bw, b0 + 1.25 * F], [-bw, b0 + 1.25 * F]], true);
+      text([0, b0 + 0.62 * F], String(Math.round(hd) % 360).padStart(3, '0'));
     }
     // The speed on the left, the altitude and the vertical speed on the right.
-    const bw = 4.6 * fs, bh = 1.5 * fs;
-    L.rect(cx - side - bw, cy - bh / 2, bw, bh);
-    ins.texts.push({ x: cx - side - 0.4 * fs, y: cy, text: state.speed.toFixed(0), align: 'right' });
-    ins.texts.push({ x: cx - side - 0.4 * fs, y: cy + 1.4 * fs, text: 'km/h', align: 'right' });
-    const [altNum, altUnit] = altText(state.alt).split(' ');
-    L.rect(cx + side, cy - bh / 2, bw + 0.8 * fs, bh);
-    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy, text: altNum, align: 'left' });
-    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy + 1.4 * fs, text: altUnit, align: 'left' });
-    const vs = Math.round(state.speed / 3.6 * Math.sin(state.climb));
-    ins.texts.push({ x: cx + side + 0.4 * fs, y: cy + 2.8 * fs, text: (vs > 0 ? '+' : '') + vs + ' m/s', align: 'left' });
+    {
+      const x = D.boxes * RAD, bh = 0.75 * F;
+      lineTo(L, [[-x, -bh], [-x, bh], [-x - 4.6 * F, bh], [-x - 4.6 * F, -bh]], true);
+      text([-x - 0.4 * F, 0], state.speed.toFixed(0), 'right');
+      text([-x - 0.4 * F, -1.4 * F], 'km/h', 'right');
+      const [altNum, altUnit] = altText(state.alt).split(' ');
+      lineTo(L, [[x, -bh], [x, bh], [x + 5.4 * F, bh], [x + 5.4 * F, -bh]], true);
+      text([x + 0.4 * F, 0], altNum, 'left');
+      text([x + 0.4 * F, -1.4 * F], altUnit, 'left');
+      const vs = Math.round(state.speed / 3.6 * Math.sin(state.climb));
+      text([x + 0.4 * F, -2.8 * F], (vs > 0 ? '+' : '') + vs + ' m/s', 'left');
+    }
     paint(ins);
   }
   {
@@ -11738,10 +11766,10 @@ const SkySound = (() => {
     try { stored = localStorage.getItem('sky.hud'); } catch (err) {}
     setHud(asked === '1' || asked === '0' ? asked === '1' : stored === '1', false, false);
   }
-  // For the tools: the HUD's horizon line as drawn (its point on the
-  // vertical of the view, CSS px, and its angle, degrees counter-clockwise),
-  // the flight path marker (or null behind the eye), the size of its
-  // numbers and the ladder's clip (left, top, right, bottom); false when off.
+  // For the tools: the HUD's anchor (the nose on the screen, CSS px, or
+  // null behind the eye), its horizon line as drawn (its point on the
+  // vertical through the nose and its angle, degrees counter-clockwise, or
+  // null) and the px of a unit of the glass looking ahead; false when off.
   window.__hud = () => hudOn && hudLines;
   // For the tools: the flight as it is now (degrees, km), and the camera.
   window.__flight = () => ({ heading: state.heading / RAD, yaw: state.yaw / RAD, pitch: state.pitch / RAD,
