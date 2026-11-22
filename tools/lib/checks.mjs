@@ -434,8 +434,10 @@ export const CHECKS = {
     // The turns are flown at the exposure of their first view, held (`?expo=`), and so are their stills: while
     // the view turns past the sun the meter moves (0.14 stops in the last 20 frames of the circle), and the mean
     // over frames, which lags it, would count as a difference of the picture.
-    // (At a place among heaps: the detail kept is the clouds'. At 40,60, since #113 a clear lane between clusters,
-    // it was the sea's glitter's, which a banked view keeps less of.)
+    // (At a place among heaps: the check is about the clouds' detail. At 40,60, since #113 a clear lane between
+    // clusters, it measured the sea's glitter, which a banked turn keeps less of than a level one whatever the
+    // clouds: main over a clear sea there (cloud=0) kept 0.862 of its still's detail in the banked turn against
+    // 0.914 in the level one; over clouds, 0.922 against 0.939 at 0,0 and 0.924 against 0.940 at 40,60.)
     const turn = 'date=172&time=15&cirrus=0.4&heading=30&yaw=50&pitch=-12&bank=45&at=0,0';
     const t0 = await settled(turn);
     // The control of the turn: the same first view, level (the eye's direction of the banked camera, no roll),
