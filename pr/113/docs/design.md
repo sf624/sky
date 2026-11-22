@@ -900,7 +900,9 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     everywhere). At most 0.72 for heaps: clear air between them inside a
     field. Set so that the share of the sea covered, seen straight down
     from 11 km, is 0.25, 0.46, 0.60, 0.87, 0.92 and 1 at `cloud` 0.25, 0.5,
-    0.65, 0.8, 0.9 and 1 (measured on stills).
+    0.65, 0.8, 0.9 and 1 (measured on stills). With heaps (cloud
+    up to about 0.5) the heaps' own thresholds set the cover (below): 0.30
+    and 0.38 at 0.25 and 0.5, seen so over one place.
   - `tower`: where A is over 0.75 to 0.95, from `uCloud` 0.15 to 0.4, for
     heaps.
   - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
@@ -979,6 +981,80 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   density over `CF_FULL` = 0.18 (at most 1), times the water for the
   height over the base, its 2/3 power per km: 0.3 to 1.2 in a sheet, 1.6
   times that in a heap (0.6 to 1.2).
+
+**Heaps** (cumulus). Where the layer's `form` is 1 and no tower stands
+(cloud up to about 0.5), the low clouds are heaps with a shape of their
+own inside the same field; the base shape and the carving above are then
+the towers' and the forming sheet's only. (Until #113 a heap was the base
+shape thresholded: because the density rises fast upwards and slowly
+sideways, the carving moved a top by tens of metres and a side by hundreds:
+wide low rafts with frayed edges and nearly flat tops, in an even sprinkle
+seen from far above.)
+
+- **Where**: the slider says how many heaps there are (`fair`, 0.63 +
+  0.44 `uCloud`), and the weather map where. A mask of clusters
+  (`cloudLayer`: `lane`, `core`) is the map's amount read over 3 km and
+  more (mip 3.5), less 0.6 of its largest systems (mip 6.5), elsewhere on
+  the map (so that the place where the page opens has heaps about it): where
+  it is under a mark (`CF_MESO`: 0.54 with few clouds, 0.52 from half on,
+  eased over 0.05 either way) the discs' thresholds are `CF_LANE` = 0.4
+  higher and there are no heaps: clusters, streets and the walls of open
+  cells, with clear lanes between. The map's amount at 1 km (`gather`)
+  moves the thresholds too (`CF_GATHER`).
+- **Discs**: the noise's Worley cells of 2 km, 1 km and 500 m (G, B, A),
+  read at one level (a cut through balls: discs of many sizes) and at mip
+  1.5 to 2.5 (smoother, their smaller cells stood as columns; smoother
+  still, from afar or in the depth maps, the discs melted away). A disc is
+  where its channel is over the threshold `CF_DISC` - `CF_DISC_AM` `fair`
+  - `CF_GATHER` `gather`, at least `CF_DISC_MIN` = 0.52: discs do not merge
+  into one body. (At 0.42, with a core that pulled the largest discs'
+  threshold down by 0.12, the heaps in a cluster's core merged into dark
+  masses that filled half the sky from 0.3 km.)
+- **A dome over each disc**: half an ellipsoid as wide as the disc and as
+  high as the layer lets a whole cell's be (`CF_DOME` = 1 of the layer's
+  depth for the 2 km cells, `CF_SIZES` = 0.65 and 0.4 of that for the
+  smaller), as a distance in km to first order (`heapKm`: `(1 - E) E` over
+  the gradient's length, `E` the ellipsoid's own measure). So a small disc
+  is a low dome and a large one a high one, and discs that overlap keep
+  their domes, with a cleft between; the nearest of the three sizes counts.
+- **Heads** (`uHeads`, see [Textures made at start](#textures-made-at-start)):
+  round heads on jittered lattices, the height of a ball's surface, meeting
+  in sharp creases. Read three times: heads of 2 km, 1 km, 500 m and 250 m
+  with the field without the fine noise (the light sees them), of 285 to
+  36 m with it (within mip 1.5), and of 38 to 5 m near the eye. Each moves
+  the dome's surface out by `CF_HEAD` km per unit of its height over
+  `CF_HEAD0` = 0.36 (about the mean). Each size carves the crowns of the
+  size above it fully and its seams `CF_GATE` = 0.6 as much. A seam goes no
+  deeper than `CF_SEAM` = 0.3: it has a floor, which bears the smaller
+  heads. The two largest sizes' seams go in by half the dome's height here
+  at most (no pit through a heap), they grow in over the lowest 0.4 of the
+  heap's height, the smaller ones are smaller on a low dome (`heapSmall`),
+  and no head stands out farther than `CF_OUT` = 0.28 km nor than it is high
+  over the base (a heap widens upwards from its base; no head hangs free
+  beside it). (As cones, the Worley cells of the noise, heads were soft
+  lobes. Clamped all together, the seams' floor was the dome itself, smooth
+  wherever two large seams met.)
+- **The base** is level, at the layer's `level`, and not smooth: the seams
+  reach up into it by up to `CF_RAG` = 80 m, eased in and out (cut off at
+  that, the hollows had flat roofs with hard edges: angular patches from
+  below; as a plane, a large heap's base was a featureless slab).
+- **The density** rises from the surface over `CF_EDGE` = 0.25 km, times
+  `CF_SHARP` as the towers' does. Outside the heads' reach the field falls
+  twice as fast as the distance (the march strides by it).
+- **With sheets and towers**: a union (`max` of the fields). The heaps sink
+  into the layer by the square of `1 - form` as it turns into a sheet, and
+  twice as fast where a tower stands; the sheet's shape keeps main's old
+  heaps' share below `form` 0.6 and loses it by 1. The sheet's erosion and
+  the towers' carving read their own field (`co`): read from the union, a
+  heap kept a smooth dome 90 m under its surface, which showed wherever a
+  seam between heads went deeper.
+- **The map of the tops** takes the heaps' own domes within the heads'
+  reach of each place, not the layer's bound.
+- **The light** is the heaps' as any cloud's (below). The deck's light
+  from below (`basal`) goes by the sheet's base only: it is a slab's, and a
+  heap is as wide as deep and loses light by its sides. (Lit so, a heap's
+  base was a bright patch with the column map's texels in it.) A heap's
+  base is as light as the heap is narrow: no term of its own.
 
 **The march** (`clouds`) runs from where the ray enters the shell (`ta`) to
 where it leaves it (`tb`, at most 600 km). A ray that goes on to the sea
@@ -3510,6 +3586,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uMS` | 0 | 512 x 272, RGBA32F, or RGBA16F without float filtering | JS: `buildMultiScatter` (y 0 to 143, 40 wide), `makeSky` (y 144 to 271) | The air's tables in one texture (Direct3D 11 gives a program 16): multiple scattering, the sky's light on the clouds and its lean; then the depth to the top of the air (`depthToTop`) |
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile (G and B rounded at their points) |
+| `uHeads` | 22 | 128^3, RGBA8, mipmapped, repeating (9.6 MB with its mipmaps) | `noise` shader, each slice with the noise's | The heads of heaps (see [Low clouds](#low-clouds)): R, G, B, A: round heads on jittered lattices of 4, 8, 16 and 32 cells per tile (each point kept 0.15 of a cell off the cell's sides; a ball of a radius of 0.4 to 0.64 of a cell, a little flatter than wide; the eight cells round the nearest corner hold every ball that reaches a place). The height of the ball's surface, 0.5 at its rim; where two meet the higher wins |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | The layer of low cloud (see `cloudLayer`). R: its amount; G: its depth; B: gusts on the sea (and the level of the bases); A: where the air rises (towers) |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 `LUT_N` + 2), RGBA16F, linear: 128 x 128 x 912 (`high`, `max`; 119.5 MB), 64 x 48 x 288 (`low`; 7.1 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
