@@ -900,7 +900,11 @@ through it.) Over more than half of it (`far.a`) rows of
 rolls 1.2 km apart across the wind (whole numbers of them across the map,
 bent over tens of km), each swelling and thinning every 2 km along its
 length, half a step on from the roll beside it: cells in ranks, as
-photographs of stratocumulus from above show them. Each roll swells more
+photographs of stratocumulus from above show them (they go as the slider
+rises from 0.8 to 0.9, `ROLLS_FROM` and `ROLLS_TO`: at the top of
+the slider, where the deck takes over, from 11 km they were parallel waves
+of one spacing with one kink, and from 40 km their ranks a lattice of dots
+over tens of km). Each roll swells more
 in some places than in others (0.35 to 1 of its depth, by the noise's 2
 km cells): rolls of one depth over tens of km were straight, regular
 stripes from 13 km. The heaps on the sheet
@@ -942,8 +946,8 @@ and the map of the tops allow for what the cells, heads and rolls add
 over the heaps (`topR`: `TOP_R` = 0.66 km, and the rolls).
 
 **The deck.** From 0.85 of cloud the overcast is one layer of its own,
-stratocumulus as photographs from above show it: small cells, some
-packed, some in short rows, on a thin sheet. `deckShare` says how much
+stratocumulus as photographs from above show it: a continuous surface of
+packed swellings over a thin sheet. `deckShare` says how much
 of the field it is: none at 0.85 (`DECK_FROM`), all at 1, and between
 more where the cover over some 20 km (`region`) is more (`t + 8 (region
 - 0.5) t (1 - t)`, `t` the slider's share of the way from 0.85 to 1), so
@@ -952,40 +956,44 @@ heaps' field and the deck's, and the light mixes their depths. (Above
 0.85 the heaps' field drew rows of rolls 1.2 km apart: from 6 km a
 ploughed field, which no photograph shows.)
 
-- **Its top** (`deckTop`) is the sheet's own top `ts` plus the puffs, read
+- **Its top** (`deckTop`) is the sheet's own top `ts` plus a relief, read
   from `uDeck`: a tile of `DECK_KM` = 32 km baked once (`deckBake`, in
-  the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km so that it
-  does not repeat. Four classes of puffs on jittered lattices, 710 m,
-  305 m, 237 m and 152 m apart (half as many again as before: from 6.4
-  km the cells' period was 1.3 to 2 times a photograph's, now 1.0 to 1.2
-  times), each lobed (three harmonics of its outline) and drawn out
-  along the rows, and drawn at a place moved by noise of 250 and 125 m
-  (up to some 40 m), so that their outlines are ragged, not round; a
-  relief of 125 and 62 m, some 8 m high, lies on them; the large ones are caps with
-  flat tops whose flanks meet the sheet at a finite slope (with domes
-  of powers under 0.5 the flanks stood as cliffs at their foot, and
-  their rims glittered), packed: some two to three times as wide as they
-  are high, so that they meet in narrow creases (three times as high and
-  apart, from 4 km they stood as round bulbs over dark gaps, where
-  photographs show a packed surface of shallow relief; lower and apart,
-  from above they were a grey blanket; a fifth wider and a quarter lower,
-  from 6.4 km their light varied by 0.20 to 0.34 of its mean at the scale
-  of the cells, where a photograph's varies by 0.39 to 0.47, then 0.25
-  to 0.39; with the smaller cells, as high, 0.32 to 0.46). The clumps
-  and the large cells meet in a soft maximum (log-sum-exp over 25 m: crisp creases, a fillet where they
-  merge); the smaller ones stand on them as bumps and alone between
-  them. Whether a puff is there is decided at its middle, from a map of
-  where they gather (`uDeckCtl`, drawn first: rows about 1.5 km apart
-  bent by slow noise, and patches of some 4 km), so that a puff is whole
-  or none. The map also holds the size of the cells by patches of 3 to
-  8 km (larger, higher and more of the large cells, fewer small puffs,
-  where it is high; the reverse where it is low), and how thick the
-  layer is by patches of 4 to 10 km (see its body): with one size
-  everywhere, the cells were as even as a carpet, where photographs show
-  lanes, darker patches and thicker areas at that scale. The map holds three tops, for closed, middling and open cover
-  (the puffs of each a subset of the one before, smaller); the cover `C`
-  picks between them: closed over most of the deck at full cloud, open
-  cells where the cover over 4 km is less and as the slider comes down.
+  the noise shader as `DECK_BAKE`), moved by a slow offset of up to 16 km
+  so that it does not repeat. The relief is one continuous surface of
+  packed, rounded swellings of many sizes: gradient noise of about 290,
+  145 and 70 m along one way and 0.6 of that across (drawn out 1.6 to 1, on
+  axes turned by 27 degrees with an integer matrix so that the tile still
+  repeats), and of 1 km for how high they stand; bent so that its tops are
+  broad and its clefts narrow and deep (`DK_SKEW`: negative skew, as lidar
+  finds on stratocumulus tops; less bent, and with more of the finest
+  size, from 3 km they stood as pointed hills), the clefts ending softly 50 m over the
+  sheet (`DK_FLOOR`: deeper, through the sheet, they were dark pits from
+  above even at noon); some 40 m high (`DK_RIDGE`), higher and
+  lower by a third over some 3 km, with a relief of 125 and 62 m some 8 m
+  high and a swell of 4.5 km. No term has a period of its own: the noise's
+  depth moves from place to place, so that no lattice of the stretched
+  noise lines up into rows, and its place is moved only a little (0.3 of
+  a cell). From 6.4 km at a sun of 11 degrees its light varies by 0.29 to
+  0.40 of its mean at the scale of the swellings (two photographs from that
+  height and sun: 0.39 to 0.50), dark parts some 85 to 125 m across and
+  separate, as the shaded sides of the swellings. Before: four classes of
+  puffs on jittered lattices, drawn out along rows 1.5 km apart, standing
+  on the sheet (from above lumps two to three times too coarse on a dark
+  floor); packed cushions cut by a partition (cracked pavement from
+  straight down); ridges of noise drawn out 3.5 to 1 and waved by a warp
+  (zig-zag ripples with one kink, like sand). The tile holds three tops,
+  for closed, middling and open cover; the cover `C` picks between them:
+  for middling and open cover (where the sheet's top in `fs` is 90 and 180
+  m lower) the same surface where it is high, raised by as much; for open
+  cover its lower half cut away (holes where it is lower than some 120 m
+  over the sheet), for middling cover almost none. Lowered with the sheet, the overcast at full cloud,
+  where the cover map says less than closed over patches of 4 km, had
+  darker patches with straight edges. With distance the tile is read
+  coarser than the pixel asks (up to `DECK_LOD_FAR` = 2 levels more as
+  the pixel grows from some 8 to 45 m), so that the relief fades towards
+  its mean: from 20 to 40 km it stood as a field of dots of one size (a
+  steeper fade, 4 levels from 8 to 16 m, drew rings and stepped edges from
+  40 km).
   The heights are half floats where the GPU can draw to them: in 8 bits
   they stepped by 2 m, and the flanks showed terraces.
 - **Its fine billows**, near the eye (where a pixel is under 5 to 10 m),
@@ -1001,7 +1009,7 @@ ploughed field, which no photograph shows.)
   edges, and those of the open patches, are moved by the map's finer
   cover (1 km and less): read at the map's texels alone (2.8 and 4 km),
   they were straight lines kilometres long. Where the slow map is high,
-  the sheet is smoother and a little higher, with fewer puffs (stratus).
+  the sheet is smoother and a little higher, with less relief (stratus).
 - **Its programs.** The deck's code is in `fs` only with `DECK` defined
   (and its bake in `noise` only with `DECK_BAKE`). Without it, the four
   programs that draw the low clouds are those of before the deck, and
@@ -1027,13 +1035,14 @@ ploughed field, which no photograph shows.)
 - **On Direct3D 11** every call is inlined, and the deck's reads are made
   in a dozen places of the scene's program: the depths read the smoother
   top, the map of the tops takes the deck's highest top (`DECK_TOP`) in
-  its 44 halvings, and the bake's loops take a bound from `uZ` so that
-  they are not unrolled.
+  its 44 halvings.
 - **Its body** is one density in a column, its depth set by its
   thickness, and both by how thick the layer is there (`deckThick`, -1
-  to 1, `uDeck`'s A): the sheet's top 50 m higher or lower, the puffs
+  to 1, `uDeck`'s A, mostly -0.6 to 0.6, soft over 2 to 8 km: through a threshold, -1 to 1, its thinner
+  patches were dark blots of one size with firm edges, from 20 to 40 km a
+  field of them): the sheet's top 50 m higher or lower, the relief
   a fifth higher or lower (in the bake), and the density (`deckBody`)
-  a quarter more or less. Closed, the sheet under the puffs is 100 to
+  a quarter more or less. Closed, the sheet under the relief is 100 to
   200 m thick (`DECK_SHEET`): with 10 to 150 m, from 11 km the thin
   patches between the cells were holes onto a deep-blue sea, where in
   photographs a closed deck has none (with 150 to 250 m, from 11 km at
@@ -1043,7 +1052,7 @@ ploughed field, which no photograph shows.)
   layer this thin (hard patches of light on the sea under it, bands in
   the air), so the deck's depths come from its top directly:
   `deckColumn` integrates the extinction up a column (of a smoother top,
-  `deckTopSoft`: the puffs on the cover by the map alone, without lanes
+  `deckTopSoft`: the relief on the cover by the map alone, without lanes
   or smooth sheet), and `deckShadow`
   takes the column above the place where the light crosses the layer's
   middle. The air under the deck (`airShadow`) is lit by the light that
