@@ -204,9 +204,12 @@ these rules, and new work at start should too:
   scene writes its distance as the depth, the cirrus's pass its numbers
   as the bits of one target and the depth (see
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
-  ice program needs three targets: it is drawn once into a pixel of three
-  as soon as it links (`warm`), and its second compile runs while the
-  scene's programs still compile. `?timing` prints where the time goes;
+  ice program needs three targets, the air's table (`airProg`) seven
+  (four where the GPU has fewer): each is drawn once into a pixel of as
+  many as soon as it links (`warm`), and its second compile runs while the
+  scene's programs still compile. Every draw of the air's table binds the
+  same count of targets (spare layers fill the draws that write fewer):
+  another count is another compile. `?timing` prints where the time goes;
   `node tools/sky.mjs d3d` measures it on Windows from WSL (see
   [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 
