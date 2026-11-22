@@ -727,8 +727,17 @@ values beyond. The directions are the azimuth from the stronger light's (the sun
 or the moon's at night: `uLutLight`; from the sun's, the moonlit sky
 stepped at the table's seam behind it), squeezed towards it (a square
 root: its glow), and the elevation from the horizon,
-squeezed towards the horizon, which lies at the middle of the table
-(`lutUV`, `lutDir`). Two more slices hold the sky as the sea sees it, from
+squeezed towards the horizon (a square root on either side), which lies at
+40 rows of 96 (`LUT_VH`: the 8 rows below it that it had at the middle
+serve above it), with some 5 more rows where the rays above the horizon
+graze the top of the boundary layer, seen from above 1.6 km (`lutWarp`,
+an arctangent step; `lutUV`, `lutDir`). Along such a ray the haze ends
+within some 0.6 km of height, and its depth and light change several
+times over within a degree; with the square root alone a row spanned 0.8
+km of that height at 4 km and 1.5 km at 11 km, the table mixed rays on
+either side of the top, and the sky at the horizon in twilight showed a
+band a few levels deep, the lower edge of a setting sun a red row (the
+depth from the table some 50 % too deep in the haze there). Two more slices hold the sky as the sea sees it, from
 its surface through the whole air (`LUT_SEA`, for `skyAt`), and the whole
 ray from the eye, to the sea or out of the air (`LUT_END`). The table is
 one 3D texture of half floats on unit 29, thirteen times as deep
