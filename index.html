@@ -2196,7 +2196,8 @@ void addSharp(vec3 p, vec3 od, vec4 dens, float scM, float extM, vec3 dir, float
 // three vec4 of the light (0 to 2), the depth (3), the three vec4 of the
 // part of the light scattered once that the clouds' shadows take (4 to 6),
 // and three vec4 each of the light of the boundary layer's sharp lobe from
-// the sun (7 to 9) and from the moon (10 to 12). (Parts along the depth, not
+// the sun (7 to 9) and from the moon (10 to 12); and two spare layers at
+// its end, which nothing reads (see LUT_DRAWS). (Parts along the depth, not
 // side by side in its width: AIR_LUT draws straight into the slices, each a
 // layer, where a part beside another had to be drawn apart and copied in,
 // 462 copies a table that took Direct3D 11 some 2 s.)
@@ -2258,12 +2259,12 @@ void airSlice(vec2 uv, float z, float f, bool once, vec2 sh, out vec4 La[3], out
   bool moonMap = once && dot(uLight, uSun) < 0.999;
   float z0 = once ? 4.0 : 0.0, zs = moonMap ? 10.0 : 7.0, ws = moonMap ? sh.y : sh.x;
   for (int k = 0; k < 3; k++) {
-    vec4 l = textureLod(uAirLut, vec3(xy, ((z0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0)
-           + ws * textureLod(uAirLut, vec3(xy, ((zs + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
-    if (!once) l += sh.y * textureLod(uAirLut, vec3(xy, ((10.0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N)), 0.0);
+    vec4 l = textureLod(uAirLut, vec3(xy, ((z0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N + 2.0)), 0.0)
+           + ws * textureLod(uAirLut, vec3(xy, ((zs + float(k)) * N + z + 0.5) / (LUT_PARTS * N + 2.0)), 0.0);
+    if (!once) l += sh.y * textureLod(uAirLut, vec3(xy, ((10.0 + float(k)) * N + z + 0.5) / (LUT_PARTS * N + 2.0)), 0.0);
     La[k] = f * uLutScale * l;
   }
-  oda = once ? vec3(0.0) : f * textureLod(uAirLut, vec3(xy, (3.0 * N + z + 0.5) / (LUT_PARTS * N)), 0.0).xyz;
+  oda = once ? vec3(0.0) : f * textureLod(uAirLut, vec3(xy, (3.0 * N + z + 0.5) / (LUT_PARTS * N + 2.0)), 0.0).xyz;
 }
 // The slice and the factor that airSlice reads the air from the eye to t
 // km with: between the slices on either side, linearly in t (a little
@@ -9377,20 +9378,21 @@ const SkySound = (() => {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     // ANGLE on Direct3D 11 compiles a program again at its first draw into
     // more than one target, and the GPU process waits for it: the ice
-    // program took 4.6 s there. Drawn into a pixel of three targets as soon
-    // as it is done, it is compiled again while the scene's program still
-    // compiles, instead of after it.
-    const warm = p => {
+    // program took 4.6 s there, the air's table's (airProg) 0.3 to 0.7 s.
+    // Drawn into a pixel of as many targets (n) as soon as it is done, it is
+    // compiled again while the scene's program still compiles, instead of
+    // after it.
+    const warm = (p, n) => {
       const frame = gl.createFramebuffer(), pixels = [];
       gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < n; i++) {
         pixels.push(gl.createTexture());
         gl.bindTexture(gl.TEXTURE_2D, pixels[i]);
         gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, pixels[i], 0);
       }
       gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+      gl.drawBuffers(pixels.map((t, i) => gl.COLOR_ATTACHMENT0 + i));
       gl.viewport(0, 0, 1, 1);
       gl.useProgram(p);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -9410,7 +9412,7 @@ const SkySound = (() => {
         if (!parallel) return false;
         if (!gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)) return true;
         mark(`program ${names.get(p)} compiled`);
-        if (p === iceProgram && gl.getProgramParameter(p, gl.LINK_STATUS)) warm(p);
+        if ((p === iceProgram || p === airProg) && gl.getProgramParameter(p, gl.LINK_STATUS)) warm(p, p === airProg ? LUT_MRT : 3);
         return false;
       });
       done(0.3 + 0.3 * (1 - left.length / programs.length));
@@ -10168,7 +10170,11 @@ const SkySound = (() => {
     // (LUT_MRT 7), or 4, 3, 4 and 2 in four (uLutPart 0 to 3), when the sun,
     // the moon, the haze, the height or the clouds have changed.
     const [LUT_AZ, LUT_EL, LUT_S] = Q.airLut || [0, 0, 0];
-    const LUT_PARTS = 13, LUT_DRAWS = LUT_MRT === 7 ? [[0, 1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]] : [[0, 1, 2, 3], [4, 5, 6], [7, 8, 9, 10], [11, 12]];
+    // (Each draw into LUT_MRT targets: a part, or -1 and -2, the two spare
+    // layers at the end of the texture, which nothing reads. ANGLE on Direct3D 11 compiles
+    // the program again for each count of targets it draws into, 0.3 to 0.7
+    // s each before the first picture.)
+    const LUT_PARTS = 13, LUT_DRAWS = LUT_MRT === 7 ? [[0, 1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12, -1]] : [[0, 1, 2, 3], [4, 5, 6, -1], [7, 8, 9, 10], [11, 12, -1, -2]];
     let lut = null;
     if (airProg) {
       // (A framebuffer for each slice and draw, made once: its targets the
@@ -10176,14 +10182,14 @@ const SkySound = (() => {
       lut = { targets: [], texture: gl.createTexture(), for: '' };
       gl.activeTexture(gl.TEXTURE29);
       gl.bindTexture(gl.TEXTURE_3D, lut.texture);
-      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, LUT_AZ, LUT_EL, LUT_PARTS * (LUT_S + 2));
+      gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA16F, LUT_AZ, LUT_EL, LUT_PARTS * (LUT_S + 2) + 2);
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
         [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, k, v);
       for (let sl = 0; sl < LUT_S + 2; sl++) {
         for (const parts of LUT_DRAWS) {
           const t = gl.createFramebuffer();
           gl.bindFramebuffer(gl.FRAMEBUFFER, t);
-          parts.forEach((k, i) => gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, lut.texture, 0, k * (LUT_S + 2) + sl));
+          parts.forEach((k, i) => gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, lut.texture, 0, k < 0 ? LUT_PARTS * (LUT_S + 2) - 1 - k : k * (LUT_S + 2) + sl));
           gl.drawBuffers(parts.map((k, i) => gl.COLOR_ATTACHMENT0 + i));
           if (sl === 0) complete(`the table of the air (${parts.length} layers of an RGBA16F 3D texture)`);
           lut.targets.push(t);

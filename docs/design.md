@@ -755,10 +755,17 @@ degrees up in twilight, seen from 0.3 km, came out up to 20 levels darker
 than a march of 160, 64 and 128 samples, and the circle showed its edge.
 So the march of `mid`, and of `max` before the table, is that much too
 dark there.) Each slice is drawn straight into its layers of the thirteen
-parts: in two draws into seven and six targets where the GPU has seven
+parts: in two draws into seven targets where the GPU has seven
 (`LUT_MRT`, `Q_LUT_MRT`; `uLutPart` 0: the parts 0 to 6; 1: the sharp
-lobe's), else in four (`uLutPart` 0: the light and the depth; 1: the light
-scattered once; 2 and 3: the sharp lobe's). A draw of the sharp lobe's
+lobe's), else in four into four (`uLutPart` 0: the light and the depth; 1:
+the light scattered once; 2 and 3: the sharp lobe's). A draw that writes
+fewer parts fills its other targets with two spare layers at the end of
+the texture, which nothing reads (`LUT_DRAWS`): ANGLE on Direct3D 11
+compiles the program again for each count of targets, and with draws into
+seven and six the first frame there took 1.7 to 1.9 s instead of 0.3. The
+program is drawn
+once into a pixel of seven targets as soon as it links (`warm`), so that
+its second compile runs while the scene's programs still compile. A draw of the sharp lobe's
 light marches the same samples but for that light alone (no light
 scattered many times, no transmittance of the view by itself). A
 framebuffer is made once for each draw of each slice, and all are drawn
@@ -3896,7 +3903,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | R: cloud cover; G: height of the heaps; B: gusts on the sea; A: bands along the wind (the old cirrus's map), where a sheet of low cloud forms rows |
 | `uPop` | 28, while the weather map is drawn; then deleted | 256^2 over 256 km, RGBA8, linear, repeating | `noise` shader (`uZ` -2), before `uWeather` | R: where the weather gathers heaps (rafts, open cells, streets, systems); 0 in the lanes |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
-| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x 13 (`LUT_S` + 2), RGBA16F, linear: 128 x 96 x 858 (`high`, `max`; 84 MB), 64 x 48 x 234 (`low`; 5.8 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
+| `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 (`LUT_S` + 2) + 2), RGBA16F, linear: 128 x 96 x 860 (`high`, `max`; 84.5 MB), 64 x 48 x 236 (`low`; 5.8 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
 | `uBody` | 22 | the level's `body`^3: 256^3 (128^3 at `low` and `mid`, and on a renderer on the CPU), RGBA8, mipmapped, repeating | `noise` shader (`uZ` 2 to 3) | The heaps' body: R, G turrets (`turrets`) at 4 and 8 cells per tile (2 km, 1 km); B the seams of the heads on them (`heads`: 500, 250, 125 m); A the seams of the billows of the fine noise (`billows`: 16, 32 and 64 cells per tile, read 7 times finer: 71, 36 and 18 m) |
 | `uSlope` | 21 | as `uWeather`, RGBA8, mipmapped, repeating | `slope` shader, from `uWeather` | The weather map's slope: R and G along x and z, per km (0 to 1 for -`SLOPE_MAX` to `SLOPE_MAX` = 2), for `cloudShape`'s `steep` |
 | `uIce` | 10 | the level's `ice`: 4096 x 4096 (`low` 1024, `mid` 2048; 1024 x 1024 without a GPU), RGBA8, mipmapped, repeating, anisotropic where available | `ice` shader, in pieces | The ice of the cirrus, four kinds (see [Cirrus](#cirrus)) |
