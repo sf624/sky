@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="bdfcefc PR #113">
+<meta name="build" content="f28451b PR #113">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -697,7 +697,13 @@ void main() {
   if (uZ >= 2.0) {
     // The heads of the heaps (uHeads): of 4, 8, 16 and 32 cells per tile (a head is 4 texels wide at least).
     vec3 p = vec3(uv, uZ - 2.0);
-    outColor = 0.5 + 0.5 * vec4(heads(p, 4.0, 70.0), heads(p, 8.0, 71.0), heads(p, 16.0, 72.0), heads(p, 32.0, 73.0));
+    // (In a loop to a bound the compiler cannot know: one copy of heads, not four.)
+    vec4 h = vec4(0.0);
+    for (int k = 0; k < 4 + int(min(uSize, 0.0)); k++) {
+      float m = heads(p, float(4 << k), 70.0 + float(k));
+      h = vec4(k == 0 ? m : h.x, k == 1 ? m : h.y, k == 2 ? m : h.z, k == 3 ? m : h.w);
+    }
+    outColor = 0.5 + 0.5 * h;
     return;
   }
   if (uZ >= 0.0) {
@@ -2203,6 +2209,10 @@ const int CLOUD_STEPS = int(400.0 / Q_MARCH);
 // keeps them as loops: Direct3D's compiler (ANGLE on Windows) may unroll a
 // loop of constant bounds, which makes the program far longer to compile.
 #define LONG_N(n) ((n) + int(min(uRes.x, 0.0)))
+// The same for a bound of a branch: Direct3D's compiler knows that a share
+// made by smoothstep is 0 to 1, finds that the branch would change nothing
+// at the bound, and runs it everywhere (see cloudShape).
+#define UNSEEN(v) ((v) + min(uRes.x, 0.0))
 const float LIGHT_MIN = 0.015;       // the first step towards the light, at least (km)
 // The light in a cloud (see clouds), fitted once to a Monte Carlo of
 // spheres 50 m to 2 km in radius (extinction 90 per km, Henyey-Greenstein
@@ -2237,7 +2247,7 @@ const float SKY_UNIT = 0.35;
 // out (see clouds).
 const float LIGHT_TAU = 4.5;
 // The steps of the light's marches from such a point (see clouds).
-const int LIGHT_STEPS = 26;
+const int LIGHT_STEPS = 34;
 const float UNDER = 0.3;            // the light of the sky left in the air under a full deck
 const float COLUMN = 0.11;          // (1 - g) 0.75: how a deep column dims the light through it
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
@@ -2401,6 +2411,15 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   heapKm = -9.0;
   heapMix = 0.0;
   heapAll = false;
+  // (These too are set at every call, though cloudField reads them only where they are set below. Else the compiler
+  // keeps each from the call before through every loop that reads the field: on Direct3D 11, under heaps at 0.3 km,
+  // the frame took a quarter longer. Not knob, swirl and sheetF: just over a top, the carving takes those of the
+  // read before. Nor heapGate: set here too, it moved a few pixels by a few levels on this machine's GL.)
+  overBase = 0.0;
+  formAt = 0.0;
+  heapHeads = 0.0;
+  heapIn = 0.0;
+  heapSmall = 1.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
   Layer a = cloudLayer(x, lod);
@@ -2482,7 +2501,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   knob = 1.0 - (0.6 * n.b + 0.4 * n.a);
   // (The old heaps' shape is left to the towers.)
   shape *= max(min(4.0 * a.tower, 1.0), 1.0 - smoothstep(0.6, 1.0, a.form));
-  if (a.form < 1.0) {
+  // (UNSEEN: at a form of 1 a sheet's terms mix to nothing, so Direct3D's compiler dropped this branch, and every read
+  // of the heaps' field read the sheet's too: the first stage of the clouds took a quarter longer.)
+  if (a.form < UNSEEN(1.0)) {
     // A sheet: packed cells at every size from 8 km to 500 m (the Worley
     // cells themselves, which meet in creases: thin lines where two large
     // cells meet, and breaks where the amount is low). The small cells are
@@ -3277,7 +3298,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       bool slab = slabbed == 1.0;
       // The marches of the light, as one loop of LIGHT_STEPS reads of the
       // field: the sky's two directions (steps 0 to 9, five each), the depth
-      // away from the light (tauB, 10 to 15) and towards it (16 to 25). Each call of cloudDensity is a copy of the field for
+      // away from the light (tauB, 10 to 15) and towards it (16 to 25, and
+      // on to the map of the shadow, 26 to 33). Each call of cloudDensity is a copy of the field for
       // Direct3D's compiler (ANGLE on Windows), which took far longer over
       // four loops, each with its call.
       // The sky's: the first two steps, 30 and 90 m, see the fine turrets (a
@@ -3327,10 +3349,31 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       vec3 w = vec3(0.0), offL = off, offB = cos(ab) * off + sin(ab) * cross(uLight, off);
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
+      // Beyond the light's own steps (some 0.4 to 1.4 km), the map of
+      // the clouds' shadow: the other heaps towards the light, out to
+      // tens of km, so that with the sun low they shade one another.
+      // It holds the depth along the line of light through this place
+      // from a height upwards, so read where the steps ended. With the
+      // light low it is read at the map's next height above that place
+      // (cloudShadowOwn), which lies up to 5 km farther along the light
+      // (275 m of height at 3 degrees): that way to it is marched (steps 26
+      // to 33), in 8 steps at about the map's own level. (Without it, the cloud
+      // on that way was left out, more the lower in each height of the
+      // map: lit slabs with flat tops across the shaded sides of heaps,
+      // one for each height of the map.)
+      vec3 xe = ps + uLight * reach;
+      float tauGap = 0.0, g = 0.0, lg = 0.0;
+      bool gapOn = wantCM && overMap < 1.0;
+      if (gapOn) {
+        float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
+        g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
+        lg = max(log2(0.04 * g / TEXEL_KM), lod);
+      }
       // (To bounds the compiler cannot know, as the long marches: unrolled, the field's code stood 26 times here,
-      // and every line added to it made the scene's programs that much longer to compile.)
+      // and every line added to it made the scene's programs that much longer to compile. One loop for all: each
+      // call of the field is a copy of it.)
       for (int n = 0; n < LONG_N(LIGHT_STEPS); n++) {
-        int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n - 16;
+        int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n < 26 ? n - 16 : n - 26;
         vec3 x;
         float l, wt;
         bool fine, moved = false;
@@ -3353,15 +3396,21 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           l = max(log2(0.5 * db / TEXEL_KM), lod);
           fine = j < 3;
           wt = db * (j < 3 ? 1.0 : 1.0 - overMap);
-        } else {
+        } else if (n < 26) {
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
           x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
+        } else {
+          if (!gapOn) continue;
+          x = xe + uLight * (g * (float(j) + 0.5) / 8.0);
+          l = lg;
+          fine = false;
+          wt = 0.125 * g;
         }
-        float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
+        float dt = n < 16 || n >= 26 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
         if (n < 10) {
           tw += dt;
           sw += dw;
@@ -3376,12 +3425,14 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (j < 3) tauBn += dt;
           sb += db;
           db *= 2.0;
-        } else {
+        } else if (n < 26) {
           if (j < 2) crisp += dt; else tauL += dt;
           if (j >= 2 && sl + dl <= CREASE_KM) tauNn += dt;
           if (moved) offL = -0.5 * offL + 0.866 * cross(uLight, offL);
           sl += dl;
           dl *= 1.6;
+        } else {
+          tauGap += dt;
         }
       }
       if (skyOn) {
@@ -3395,26 +3446,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         if (slab) {
           tauCM = above / max(sunUp, 0.05);
         } else {
-          // Beyond the light's own steps (some 0.4 to 1.4 km), the map of
-          // the clouds' shadow: the other heaps towards the light, out to
-          // tens of km, so that with the sun low they shade one another.
-          // It holds the depth along the line of light through this place
-          // from a height upwards, so read where the steps ended. With the
-          // light low it is read at the map's next height above that place
-          // (cloudShadowOwn), which lies up to 5 km farther along the light
-          // (275 m of height at 3 degrees): that way to it is marched here,
-          // in 8 steps at about the map's own level. (Without it, the cloud
-          // on that way was left out, more the lower in each height of the
-          // map: lit slabs with flat tops across the shaded sides of heaps,
-          // one for each height of the map.)
-          vec3 xe = ps + uLight * reach;
-          float tauGap = 0.0;
-          if (overMap < 1.0) {
-            float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
-            float g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
-            float lg = max(log2(0.04 * g / TEXEL_KM), lod);
-            for (int n = 0; n < LONG_N(8); n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
-          }
+          // (The map of the clouds' shadow beyond the light's steps, and the way to it: above.)
           tauCM = tauL + (1.0 - overMap) * tauGap + cloudShadowOwn(xe + eye());
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
         }
@@ -5166,32 +5198,49 @@ float topsBound(vec2 x, float h) {
 }
 // The highest such place over x (km over the sea); CB where there is none.
 // The bound falls with the height over the lowest 180 m of the field (rim),
-// so a search between there and CT finds it.
+// so a search between there and CT finds it: at CT, at CB + 0.3 km (for the
+// level of the base), at the rim, at the base if not at the rim, else
+// halving 11 times. (One loop with one read of the field: each call of it is
+// a copy of the field for the compiler.)
 float topAt(vec2 x) {
-  if (topsBound(x, CT - 0.001) >= 0.0) return CT;
-  topsBound(x, CB + 0.3);
-  float level = CB + 0.3 - overBase, lo = level + 0.04 * (CT - CB), hi = CT;
-  if (topsBound(x, lo) < 0.0) return topsBound(x, level + 0.001) < 0.0 ? CB : lo;
-  for (int i = 0; i < 11; i++) {
-    float m = 0.5 * (lo + hi);
-    if (topsBound(x, m) >= 0.0) lo = m; else hi = m;
+  float level = 0.0, lo = 0.0, hi = CT;
+  for (int k = 0; k < LONG_N(15); k++) {
+    float h = k == 0 ? CT - 0.001 : k == 1 ? CB + 0.3 : k == 2 ? lo : k == 3 ? level + 0.001 : 0.5 * (lo + hi);
+    float b = topsBound(x, h);
+    if (k == 0) {
+      if (b >= 0.0) return CT;
+    } else if (k == 1) {
+      level = CB + 0.3 - overBase;
+      lo = level + 0.04 * (CT - CB);
+    } else if (k == 2) {
+      // (On to the halving, past the base's read.)
+      if (b >= 0.0) k = 3;
+    } else if (k == 3) {
+      return b < 0.0 ? CB : lo;
+    } else if (b >= 0.0) {
+      lo = h;
+    } else {
+      hi = h;
+    }
   }
   return hi;
 }
 void main() {
   ivec2 n = ivec2(uRes), ij = ivec2(gl_FragCoord.xy);
   if (uTopsPass == 0.0) {
-    // Four places in the texel, a quarter of it from its middle.
+    // Four places in the texel, a quarter of it from its middle. (In a loop,
+    // for one copy of topAt.)
     vec2 c = gl_FragCoord.xy / uRes * WEATHER_KM, e = 0.25 * WEATHER_KM / uRes;
-    float m = max(max(topAt(c + vec2(-e.x, -e.y)), topAt(c + vec2(e.x, -e.y))),
-                  max(topAt(c + vec2(-e.x, e.y)), topAt(c + vec2(e.x, e.y))));
+    float m = -1e9;
+    for (int k = 0; k < LONG_N(4); k++) m = max(m, topAt(c + vec2((k & 1) == 1 ? e.x : -e.x, k > 1 ? e.y : -e.y)));
     // 50 m more, and rounded up to the 8 bits kept.
     outColor = vec4(ceil(clamp((m + 0.05 - CB) / (CT - CB), 0.0, 1.0) * 255.0) / 255.0);
     return;
   }
   vec4 m = vec4(0.0);
-  for (int j = -8; j <= 8; j++) {
-    for (int i = -8; i <= 8; i++) {
+  // (To bounds the compiler cannot know, as the long marches.)
+  for (int j = -8; j <= LONG_N(8); j++) {
+    for (int i = -8; i <= LONG_N(8); i++) {
       float v = texelFetch(uTopsIn, (ij + ivec2(i, j) + n) % n, 0).r;
       int r = max(abs(i), abs(j));
       m = max(m, v * vec4(r <= 1, r <= 2, r <= 4, true));
