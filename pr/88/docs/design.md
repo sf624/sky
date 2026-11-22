@@ -328,48 +328,73 @@ the overlays; it takes no pointer, so a drag on it turns the eye.
   only when its key (the CSS size, the device pixel ratio, `cameraOf(view())`,
   heading, bank, climb, speed, altitude) has changed. At rest nothing is
   drawn; in flight, once a frame (2D lines and text).
-- **A glass fixed to the airframe.** The HUD is a plane square to the nose
-  at a distance of 1, with the aircraft's right and up as its axes
-  (`airframe`, which `cameraOf` uses too). Its layout is in degrees from
-  the nose (`HUD_DEG`, about 28 degrees across and 26 high), and every
-  point of it is projected with the picture's own camera (`cameraOf`, the
-  vertical field `FOV`, the canvas's CSS size). So the HUD has a fixed
-  angular size whatever the screen, and it sits round the nose wherever
-  the eye looks: ahead it fills the middle of the view, with the eye 20
-  degrees aside it is seen 20 degrees aside (a little askew, as a glass
-  seen at a slant), and out of the side window it is out of view. Lines
-  are cut where they would pass behind the eye; the canvas's edge and the
-  ladder's area clip the rest, so nothing pops in or out.
+- **Two parts, as a helmet's display.** The readouts are fixed to the
+  screen (to the eye), so they are always in view; the attitude is drawn
+  on a glass fixed to the airframe, so it is seen only where the view
+  takes in the direction of flight. Both are laid out in degrees
+  (`HUD_DEG`, about 28 degrees across and 25 high): the readouts from the
+  middle of the screen, the glass from the nose, at the same size. Looking
+  ahead the nose is in the middle of the screen, and the two make one HUD.
+- **The helmet's readouts**, upright on the screen (they bank with a view
+  from the aircraft, as the head does): the speed (km/h) in a box on the
+  left; the altitude (`altText`, the panel's unit) in a box on the right,
+  with the vertical speed (m/s) under it; the aircraft's heading (compass
+  bearing, `bearing`; not the direction of view) in a box at the top. The
+  heading is a number, not a tape: a tape fixed to the screen would put
+  bearings where the world shows other ones whenever the eye looks aside.
+  On a narrow screen (a phone upright) the side boxes come in to stay
+  `HUD_SIDE_PX` from the edges.
+- **A glass fixed to the airframe.** A plane square to the nose at a
+  distance of 1, with the aircraft's right and up as its axes
+  (`airframe`, which `cameraOf` uses too); every point of it is projected
+  with the picture's own camera (`cameraOf`, the vertical field `FOV`, the
+  canvas's CSS size). So it sits round the nose wherever the eye looks:
+  ahead it fills the middle of the view, with the eye 20 degrees aside it
+  is seen 20 degrees aside (a little askew, as a glass seen at a slant),
+  and out of the side window it is out of view. Lines are cut where they
+  would pass behind the eye; the canvas's edge and the ladder's area clip
+  the rest, so nothing pops in or out. Where the glass passes under a
+  readout it is wiped out (`destination-out`), at full in the readout's
+  zone and fading over 0.8 of a degree round it, so the readouts stay
+  readable and nothing is shown twice.
 - **True to the world.** The horizon line and the pitch ladder (every 5
   degrees, solid above, dashed below, numbered, their tips towards the
   horizon) lie on the glass where the world's directions cross it: the
   horizon line is the plane of zero pitch through the eye, the rungs are
   the elevations on the vertical through the nose, each along its circle
-  of elevation. They are clipped to the ladder's area of the glass. The
-  sea's horizon lies below the line by the dip of the altitude (0.56
+  of elevation. They are clipped to the ladder's area of the glass; a
+  rung's number is drawn only where it fits in the area whole, never cut.
+  The sea's horizon lies below the line by the dip of the altitude (0.56
   degrees at 0.3 km, 3.4 at 11 km): that is right, not an error.
 - **Upright on the glass:** the flight path marker at the nose (the model
   has no angle of attack nor sideslip: the aircraft flies where the nose
-  points); the bank scale round it (10, 20, 30, 45, 60 degrees; its
-  pointer at minus the bank, square to the horizon); the heading tape
-  above (compass bearing, `bearing`, 45 degrees of heading) under the
-  heading's box; the speed (km/h) on the left; the altitude (`altText`,
-  the panel's unit) and the vertical speed (m/s) on the right. They bank
-  with the airframe; the eye, which turns with the aircraft, sees them
-  upright when it looks ahead. Text takes the glass's local transform.
+  points) and the bank scale round it (10, 20, 30, 45, 60 degrees; its
+  pointer at minus the bank, square to the horizon). They bank with the
+  airframe; the eye, which turns with the aircraft, sees them upright
+  when it looks ahead. Text takes the glass's local transform.
 - **Look.** Green (`HUD_GREEN`) over a thin dark edge (each layer is
   stroked dark first, then green), so it reads on a bright cloud deck,
-  the blue sky, at dusk and at night. Numbers 1 degree high (11 CSS px on
-  a phone, 16 at 1080 lines, 21 at 1440), lines of whole device pixels;
-  the canvas holds the screen's pixels (`devicePixelRatio`). System fonts
-  only, numbers and units only: no language.
-- **The default view** looks 60 degrees right of the nose: the HUD is then
-  out of view (its right edge may touch the left of a wide screen). A drag
-  to the right (the view turns left), or `?yaw=` equal to `?heading=`,
-  looks ahead; the page has no control of its own for that.
-- `window.__hud()` gives the anchor (the nose on the screen), the horizon
-  line as drawn and the scale of the glass, for the tools (`check steer`).
-  the numbers and the ladder's area, for the tools (`check steer`).
+  the blue sky, at dusk and at night. Numbers 1 degree high (12 CSS px on
+  a phone upright, 16 at 1080 lines, 21 at 1440), but never smaller than
+  `HUD_MIN_PX` (10 CSS px): on a short screen (a phone on its side) the
+  whole layout, the glass's too, grows to that, while the ladder's rungs
+  stay at their true elevations. Lines of whole device pixels; the canvas
+  holds the screen's pixels (`devicePixelRatio`). System fonts only,
+  numbers and units only: no language.
+- **The panel**, while it is shown, lies over the middle of the screen on
+  most screens (on a phone, over nearly all of it), and so over the HUD;
+  it fades a few seconds after the last touch, and the HUD is clear. The
+  HUD does not move out of its way: no place would be clear of it on a
+  phone, and readouts that jump as the panel comes and goes read worse.
+- **The default view** looks 60 degrees right of the nose: the glass is
+  then out of view (its right edge may touch the left of a wide screen),
+  and only the readouts show. A drag to the right (the view turns left),
+  or `?yaw=` equal to `?heading=`, looks ahead; the page has no control of
+  its own for that.
+- `window.__hud()` gives the glass's anchor (the nose on the screen), its
+  horizon line as drawn, whether any of it is on the screen (`airframe`),
+  the scale of the glass and of a degree of the layout, and the zones of
+  the readouts (`helmet`), for the tools (`check steer`).
 
 ## Sun, moon and sky in the JS
 
@@ -2793,9 +2818,12 @@ grow on the screen as the exposure opens up past `GLARE_EXPO` = 1.3
 (log2: a clear day's at 11 km with the sun high): above it, the glare is
 taken down by as much as the exposure rises. The eye looking at the sun
 adapts to the sun's surroundings, not to the dark sky of the
-stratosphere: at 40 km the exposure stands 3.5 stops higher than at 11
+stratosphere: at 40 km the exposure stood 3.5 stops higher than at 11
 km, and without the cap the glow ran into white 0.9 degrees round a high
-sun. (The meter counts the glare at `METER_GLINT` as before, so there the
+sun. (By day the eye's own limit, `DAY_OPEN` in
+[Exposure](#exposure-and-the-tone-curve), now holds the exposure of a
+view from 40 km within about a stop of 11 km's.)
+(The meter counts the glare at `METER_GLINT` as before, so there the
 level depends a little on the exposure; the glow covers far fewer blocks
 than the 3 % that set the highlights.) With the sun in the view the
 exposure moved by at most 0.01 stops up to 11 km; at 40 km it rose by 0.1
@@ -3015,7 +3043,56 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   of 255 from cruise), yet the sky showed only the brightest few stars.
   Now they are at about 40 to 70 under a quarter moon and 110 under a
   full moon, and a moonless night is darker still: black sky, stars, the
-  clouds below barely seen.
+  clouds below barely seen;
+- and while the sun shines on the eye, the eye opens up no further than
+  the sun's light lets it: the exposure, after all of the above, is at
+  most `DAY_OPEN[0]` = 3.5 stops past the exposure that shows a white
+  surface facing the sun, in the sun's light at the eye, at `WHITE`
+  (`dayEye`; `sunlitLevel`: the bare sun's light through the air to the
+  eye, `sunThrough`, with the ozone, times `ISUN` / pi). It hangs on the
+  light where the eye is, not on the view: turning the view does not
+  move it, so a turn from the Earth to the sky has no step in it. And it
+  hangs on the sun as the eye sees it, not on the sun's height over the
+  ground's horizon, which sets the twilight's exposure (`DUSK`): from 40
+  km the sun sets some 6.4 degrees below the horizontal, from 20 km 4.5,
+  from 11 km 3.4, and until then it shines on the eye. In the model's
+  air its light at 40 km is 0.97 of the bare sun's with the sun 0
+  degrees up, 0.8 at 2 down, a fifth at 4 down, and gone by 6 down; at
+  20 km 0.4 at 0 degrees, 0.18 at 2 down, gone by 4. So the limit lifts
+  by itself as the sun's light at the eye fades into the limb, and
+  twilight's exposure then comes in as before.
+  Up to the cruise heights no view comes near it, by day or at dusk: the
+  darkest, the deep blue zenith from 11 km, stays 0.26 to 0.74 stops
+  below by day (least with the sun 15 to 28 degrees up) and 0.3 at
+  sunset; the sea below from 0.3 km at noon in summer, 0.45; under an
+  overcast, 0.75 or more. Above `DAY_KM[0]` = 12 km it closes, along a
+  smoothstep, to `DAY_OPEN[1]` = 2.8 at 20 km and above, a little over
+  where a view with the sunlit Earth in it stands there by day (1.3 to
+  2.5 at 20 and 40 km): above the cruise heights the sky over the eye is
+  near space, and the eye, adapted to the sun and the sunlit Earth round
+  it, sees it near black, as photographs from the stratosphere show it.
+  Simons, from the balloon Manhigh II at 30 km, saw the sky black or a
+  dark violet by day and through the hour before sunset, with no
+  brightening overhead, while the ground below went slate-grey first.
+  A view of the sky alone now shows it about as dark as a view with the
+  Earth in it. Before, such a view opened up until the sky's faint blue
+  filled the frame: from 40 km it stood 4.4 to 5 stops above what it gets
+  now, a clear dark blue (about 22, 43, 89 in sRGB, now 3, 5, 11), where
+  a view with the Earth in it showed the same sky black; from 20 km 1.2
+  to 1.6 stops (26, 50, 103, now 14, 27, 57), from 15 km 0.7, from 13 km
+  0.4. Through sunset from 40 km the sky alone stays near black (median
+  luma 5 from 8 degrees up to 2 down, 8 at 4 down) and turns the dark
+  blue of before only as the sun sets at the eye (40 at 6 down); the
+  Earth below goes dark first (luma 51 at 0 degrees, 19 at 4 down, where
+  it was 109 and 64). From 20 km the sky alone stays dark navy down to 2
+  degrees below (luma 26 to 35) and takes twilight's exposure from 4
+  down, as before. Every view up to 11 km, by day, at dusk and at night,
+  is as before (216 views at 0.3, 3 and 11 km, the sun from 78 degrees up
+  to the night), and so is the night at every height.
+  The limit bounds the exposure of the sun as it is, not the envelope of
+  the sun higher (above): there, at 0.8 stops for each stop that the air
+  darkens, it held deep twilight and the night down by up to 6 stops at
+  40 km.
 
 `exposureFor` returns the exposure.
 
