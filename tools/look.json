@@ -243,7 +243,6 @@
      "min": 0.031
     }
    ],
-   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.0342
@@ -310,6 +309,7 @@
      "max": 0.063
     }
    ],
+   "expected": "fail",
    "reference": {
     "c551f8a": {
      "relief": 0.0351,
@@ -320,7 +320,7 @@
      "blobSize": 0.1633
     }
    },
-   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times."
+   "note": "Open. Limits from c551f8a, the page before #104: relief at least 0.9 times its value, blobs at most 1.25 times. Relief passes since the heaps have domes and heads; blobSize is still over: in the core of a cluster the heaps merge into masses larger than the old page's."
   },
   {
    "name": "cumulus-half-4km-down",

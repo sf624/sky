@@ -2305,19 +2305,19 @@ const vec2 CF_LEAN = vec2(0.22, 0.11); // how far a cloud leans with the wind's 
 // The discs' thresholds, for the cells of 2 km, 1 km and 500 m: at no amount; what the amount takes off; what the weather
 // map's amount does (it gathers the large heaps most); and the least (clear air stays between heaps).
 const vec3 CF_DISC = vec3(1.02, 1.1, 1.3), CF_DISC_AM = vec3(0.62, 0.62, 0.5), CF_GATHER = vec3(1.0, 0.8, 0.6);
-const float CF_DISC_MIN = 0.38;
+const float CF_DISC_MIN = 0.42;
 // The clusters: the mark of the map's amount over 10 km and more under which there are no heaps, with few clouds and
 // from half on, and half the width of the clusters' edge; how much the lanes raise the discs' thresholds; and how much
 // lower the largest discs' is deep in a cluster.
-const vec3 CF_MESO = vec3(0.53, 0.46, 0.05);
-const float CF_LANE = 0.4, CF_CORE = 0.2;
+const vec3 CF_MESO = vec3(0.54, 0.52, 0.05);
+const float CF_LANE = 0.4, CF_CORE = 0.12;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
 // near the eye of 38, 19, 9 and 5 m.
 const vec4 CF_HEAD = vec4(0.15, 0.4, 0.3, 0.2), CF_HEAD1 = vec4(0.16, 0.12, 0.08, 0.05), CF_HEAD2 = vec4(0.02, 0.011, 0.006, 0.003);
 const float CF_SEAM = 0.3;
-const float CF_RAG = 0.12;          // how far the seams between heads reach up into a heap's base, km
+const float CF_RAG = 0.08;          // how far the seams between heads reach up into a heap's base, km
 const float CF_HEAD0 = 0.36;         // the heads' height that moves nothing (about their mean)
 const float CF_GATE = 0.6;          // how much a head carves in the seams of the size above it
 
@@ -2354,7 +2354,10 @@ Layer cloudLayer(vec2 x, float lod) {
   // over some 10 km and more is under a mark, which falls as the slider rises, there are none (lane); deep in a
   // cluster the heaps are larger (core).
   // (Less most of the map's largest systems: no place is all cluster or all lane for a hundred km.)
-  float meso = textureLod(uWeather, x / WEATHER_KM, 3.5).r - 0.6 * (region - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
+  // (Read elsewhere on the map, as far: the clusters lie apart from the sheets' systems, and the place where the
+  // page opens has heaps about it.)
+  vec2 xm = x / WEATHER_KM + vec2(-0.3125, 0.469);
+  float meso = textureLod(uWeather, xm, 3.5).r - 0.6 * (textureLod(uWeather, xm, 6.5).r - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
   a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
   a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
   // Towers, where the air rises (A) and the slider lets heaps grow.
@@ -2635,8 +2638,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       // (Nor do they stand out farther than they are high over the base: a heap widens upwards from a flat base, and
       // no head hangs free beside it.)
       // (The base is level but not smooth: the heads' seams reach up into it by up to CF_RAG, lighter ragged gaps
-      // under a large heap; as a plane it was a featureless slab from below.)
-      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase + clamp(heads, -CF_RAG, 0.0)) / CF_EDGE;
+      // under a large heap; as a plane it was a featureless slab from below. Eased in and out: cut off at CF_RAG,
+      // the hollows had flat roofs with hard edges, angular patches from below.)
+      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase - CF_RAG * (1.0 - exp(-min(heads, 0.0) * min(heads, 0.0) / (CF_RAG * CF_RAG)))) / CF_EDGE;
       dn = max(dn, km < 0.0 ? 0.8 * km : km);
     }
     // (Where a pixel is wider than that edge, only as sharp as a pixel and
