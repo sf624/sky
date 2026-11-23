@@ -58,6 +58,58 @@ export function cover(img, opt = {}) {
   return mean(m);
 }
 
+// coverRise and coverFall, of a sweep (a list of pictures, the slider's steps in order): the largest rise and the
+// largest fall of the cover (above) between neighbouring pictures. A field that grows steadily: small rises, no fall.
+const coverSteps = (imgs, opt) => {
+  const c = imgs.map((img) => cover(img, opt)), d = c.slice(1).map((v, i) => v - c[i]);
+  return d.length ? d : [0];
+};
+export const coverRise = (imgs, opt = {}) => Math.max(0, ...coverSteps(imgs, opt));
+export const coverFall = (imgs, opt = {}) => Math.max(0, ...coverSteps(imgs, opt).map((v) => -v));
+
+// flatPlate: the largest connected part (4 neighbours) of the bright pixels (luma at least opt.luma, 150) whose
+// local relief is very low (the mean of |dx| + |dy| of the luma over a box of opt.k px, 7, under opt.grad, 3
+// levels), as a share of the region. Cloud tops are knobbly; a flat pale plate (a closed floor without the relief
+// of a sheet over it) is one large smooth part.
+export function flatPlate(img, opt = {}) {
+  const R = region(img, opt.region), { w, h, l } = R, lum = opt.luma ?? 150, gmax = opt.grad ?? 3, k = opt.k ?? 7;
+  const g = new Float64Array((w + 1) * (h + 1));
+  // (An integral image of the relief, for the box mean.)
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      row += (x + 1 < w ? Math.abs(l[i + 1] - l[i]) : 0) + (y + 1 < h ? Math.abs(l[i + w] - l[i]) : 0);
+      g[(y + 1) * (w + 1) + x + 1] = g[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const m = new Uint8Array(w * h), r = k >> 1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1), y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+      const s = g[y1 * (w + 1) + x1] - g[y0 * (w + 1) + x1] - g[y1 * (w + 1) + x0] + g[y0 * (w + 1) + x0];
+      m[y * w + x] = l[y * w + x] >= lum && s / ((x1 - x0) * (y1 - y0)) < gmax ? 1 : 0;
+    }
+  }
+  let best = 0;
+  const stack = new Int32Array(w * h);
+  for (let i0 = 0; i0 < w * h; i0++) {
+    if (m[i0] !== 1) continue;
+    let n = 0, top = 0;
+    stack[top++] = i0;
+    m[i0] = 2;
+    while (top) {
+      const i = stack[--top], x = i % w;
+      n++;
+      for (const j of [x > 0 ? i - 1 : -1, x + 1 < w ? i + 1 : -1, i - w, i + w]) {
+        if (j >= 0 && j < w * h && m[j] === 1) { m[j] = 2; stack[top++] = j; }
+      }
+    }
+    best = Math.max(best, n);
+  }
+  return best / (w * h);
+}
+
 // clumping: how unevenly the clouds lie over the region: the cover of the cloud mask in each window of a grid of
 // opt.nx by opt.ny (default 8 by 5), the standard deviation over the windows, over their mean. An even sprinkle of
 // heaps: low; clusters with clear lanes between: high.
@@ -366,4 +418,4 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip };

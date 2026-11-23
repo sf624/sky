@@ -940,7 +940,10 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   lies at the base of a closed sheet (`CF_VEIL`: density 0.4, fading over
   the lowest 0.3 of the depth), which the fine noise does not erode:
   through the thinnest places one sees grey cloud, not the sea. (Pits
-  through a sheet were dark specks from far above.) The top of a sheet
+  through a sheet were dark specks from far above.) The floor and the veil
+  only where the sheet's own shape is (nearly) whole (`keep` over 0.95, see
+  the heaps below): under a shape held back they were flat pale plates
+  with straight edges among the heaps, like floes. The top of a sheet
   stands higher over the largest of its cells of 4 km to 1 km, by up to
   0.7 `CF_RELIEF` = 0.35 of its height (some 100 m; the profile is read at
   `t / (1 + rise)`): relief without holes, which a low sun shows and a
@@ -1041,10 +1044,20 @@ seen from far above.)
 - **The density** rises from the surface over `CF_EDGE` = 0.25 km, times
   `CF_SHARP` as the towers' does. Outside the heads' reach the field falls
   twice as fast as the distance (the march strides by it).
-- **With sheets and towers**: a union (`max` of the fields). The heaps sink
-  into the layer by the square of `1 - form` as it turns into a sheet, and
-  twice as fast where a tower stands; the sheet's shape keeps main's old
-  heaps' share below `form` 0.6 and loses it by 1. The sheet's erosion and
+- **With sheets and towers**: a union (`max` of the fields). The sheet's
+  shape (with main's old heaps' share) is held back where the form is near
+  1 (`keep`: 1 below `form` 0.6, 0 at 1). From a slider of 0.575 to 0.75
+  (`turn`, eased in from 0.5 and out to 0.8) it comes back sooner: 0.88 of
+  it by `form` 0.92, the rest slowly over a form of 0.92 to 0.4 (a slider
+  of 0.575 to 0.7 at a mean region), and the heaps sink into the layer by
+  the square of `1 - form` only as that rest comes (and twice as fast
+  where a tower stands). So the heaps grow and merge and the sheet forms
+  among them: the cover straight down from 11 km rises steadily, by 0.09
+  at most for each 0.025 of the slider (main: 0.07 at most), where the shape that
+  came back over a form of 1 to 0.6 alone covered the sea within 0.05 of
+  the slider (a rise of 0.35), after the heaps had sunk. At 0.5 and 0.8
+  `turn` is 0, and all is as before: the form there also follows the
+  region, and from 40 km some places have a form of 0.8 at 0.5. The sheet's erosion and
   the towers' carving read their own field (`co`): read from the union, a
   heap kept a smooth dome 90 m under its surface, which showed wherever a
   seam between heads went deeper.

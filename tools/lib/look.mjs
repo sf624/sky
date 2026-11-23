@@ -21,7 +21,17 @@ export function pick(reg, { only } = {}) {
   return list;
 }
 
-// Measures one still against an entry's limits. Returns { status: PASS | FAIL | KNOWN | UNEXPECTED, values }, where
+// The stills of an entry: one, or with a sweep ({ param, values }) one for each value of a parameter of the page
+// (NAME@VALUE.png), whose measures take the list of pictures in order.
+export const stillsOf = (e) => e.sweep
+  ? e.sweep.values.map((v) => ({ file: `${e.name}@${v}.png`, q: `${e.q}&${e.sweep.param}=${v}` }))
+  : [{ file: `${e.name}.png`, q: e.q }];
+const readStills = (e, dir) => {
+  const imgs = stillsOf(e).map((s) => readPng(path.join(dir, s.file)));
+  return e.sweep ? imgs : imgs[0];
+};
+
+// Measures one still (or a sweep's list of stills) against an entry's limits. Returns { status: PASS | FAIL | KNOWN | UNEXPECTED, values }, where
 // UNEXPECTED is an entry marked expected: 'fail' that passed. Each value: { measure, value, min, max, ok, text }.
 export function judge(entry, img) {
   const values = entry.measures.map((m) => {
@@ -44,14 +54,16 @@ export async function render(session, root, list, size, dir, reg = loadRegistry(
   fs.mkdirSync(dir, { recursive: true });
   const done = new Map(), errors = {};
   for (const e of list) {
-    const png = path.join(dir, `${e.name}.png`);
-    const q = stillQuery(e.q);
-    if (done.has(q)) { fs.copyFileSync(done.get(q), png); continue; }
-    const t0 = Date.now();
-    const r = await runView(session, root, { name: e.name, q, frames: reg.frames, ms: reg.ms }, size, { png });
-    if (r.errors.length) errors[e.name] = r.errors;
-    done.set(q, png);
-    console.error(`  ${e.name}: rendered in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    for (const st of stillsOf(e)) {
+      const png = path.join(dir, st.file);
+      const q = stillQuery(st.q);
+      if (done.has(q)) { fs.copyFileSync(done.get(q), png); continue; }
+      const t0 = Date.now();
+      const r = await runView(session, root, { name: e.name, q, frames: reg.frames, ms: reg.ms }, size, { png });
+      if (r.errors.length) errors[e.name] = (errors[e.name] || []).concat(r.errors);
+      done.set(q, png);
+      console.error(`  ${st.file.replace(/\.png$/, '')}: rendered in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    }
   }
   return errors;
 }
@@ -61,7 +73,7 @@ export async function render(session, root, list, size, dir, reg = loadRegistry(
 export function report(list, dir, errors = {}, at = '') {
   const count = { PASS: 0, KNOWN: 0, FAIL: 0, 'PASS?': 0 };
   for (const e of list) {
-    const r = judge(e, readPng(path.join(dir, `${e.name}.png`)));
+    const r = judge(e, readStills(e, dir));
     const err = errors[e.name] || [];
     let word = r.status === 'UNEXPECTED' ? 'PASS?' : r.status;
     if (err.length && word !== 'KNOWN') word = 'FAIL';
@@ -100,9 +112,10 @@ export async function look(session, opt) {
     // One row per still: entries that share a query share a row.
     const rows = new Map();
     for (const e of list) {
-      const q = stillQuery(e.q);
+      const q = stillQuery(e.q) + (e.sweep ? ' sweep' : '');
       if (rows.has(q)) { rows.get(q).names.push(e.name); continue; }
-      rows.set(q, { names: [e.name], images: [baseDir && readPng(path.join(baseDir, `${e.name}.png`)), readPng(path.join(dir, `${e.name}.png`))].filter(Boolean) });
+      const of = (d) => stillsOf(e).map((st) => readPng(path.join(d, st.file)));
+      rows.set(q, { names: [e.name], images: [...(baseDir ? of(baseDir) : []), ...of(dir)] });
     }
     const cols = baseDir ? `   (base ${opt.baseName || ''} | page ${opt.at || ''})` : '';
     writePng(file, sheet([...rows.values()].map((r) => ({ label: r.names.join(', ') + cols, images: r.images }))));

@@ -109,11 +109,29 @@ test('the registry: every entry has a query, a date, what was wrong, and known m
     assert.ok(!names.has(e.name), `${e.name} twice`);
     names.add(e.name);
     assert.ok(e.q && e.reported && e.wrong, `${e.name}: q, reported, wrong`);
+    if (e.sweep) assert.ok(e.sweep.param && e.sweep.values.length >= 2, `${e.name}: a sweep of a parameter, two values at least`);
     for (const m of e.measures) {
       assert.ok(M.MEASURES[m.measure], `${e.name}: ${m.measure}`);
       assert.ok(m.min !== undefined || m.max !== undefined, `${e.name}: ${m.measure} has no limit`);
     }
   }
+});
+
+test('coverRise and coverFall: the largest rise and fall of the cover between neighbouring pictures', () => {
+  const grey = (v) => pic(40, 20, (x) => (x < v * 40 ? 230 : 40));
+  const imgs = [0.2, 0.3, 0.7, 0.65].map(grey);
+  assert.ok(Math.abs(M.coverRise(imgs) - 0.4) < 1e-9);
+  assert.ok(Math.abs(M.coverFall(imgs) - 0.05) < 0.03);
+  assert.equal(M.coverFall([0.1, 0.2].map(grey)), 0);
+});
+
+test('flatPlate: a large smooth bright part, not knobbly cloud', () => {
+  // (Grain at every pixel: knobs, as cloud tops are at this scale.)
+  const grain = (x, y) => { let n = (x * 374761393 + y * 668265263) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+  const knobbly = pic(120, 80, (x, y) => 160 + 80 * grain(x, y));
+  const plate = pic(120, 80, (x, y) => (x > 20 && x < 100 && y > 20 && y < 60 ? 200 : 160 + 80 * grain(x, y)));
+  assert.ok(M.flatPlate(knobbly) < 0.05);
+  assert.ok(M.flatPlate(plate) > 0.2);
 });
 
 test('sheet: rows of scaled pictures with labels', () => {
