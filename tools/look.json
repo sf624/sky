@@ -279,6 +279,7 @@
     }
    ],
    "bad": "e42d5dd",
+   "fixed": "4fc0fc0",
    "note": "Stars 12 levels over their surroundings, per 10 000 px (the frame is about 11 % of the sky): 0.3 to 1.2 is some 28 to 110 stars, down to magnitude 3.3 to 4.6; the eye sees to about 4 under a full moon. f605245: p50 18.8, stars 4.49 (414, past magnitude 5); e42d5dd: 14.9, 2.87 (264); the fix (the moon's light at the eye caps the exposure): 6.1, 0.50 (46, about magnitude 3.8)."
   },
   {
@@ -349,6 +350,7 @@
     }
    ],
    "bad": "e42d5dd",
+   "fixed": "4fc0fc0",
    "note": "The Earth's band just below the horizon (looking up, at the foot of the frame) over the same band in the level view. f605245: 2.86 (the meter opened 1.8 stops for the black sky); e42d5dd: 4.26 (and the night's key went out with it); the fix: 1.00."
   },
   {
