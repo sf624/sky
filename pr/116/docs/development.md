@@ -659,6 +659,17 @@ The shaders must run on any WebGL2. The code keeps these rules:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
   cannot see (November 2026).
+- **A branch that changes nothing at its bound gets a bound the compiler
+  cannot know (`UNSEEN`).** Microsoft's compiler (below) knows that a share
+  made by `smoothstep` lies from 0 to 1. Where a branch's terms mix to
+  nothing at its bound (the sheet's in `cloudShape`, `mix(cells, shape,
+  form)` skipped at a form of 1), it drops the test and runs the branch
+  everywhere: every read of the heaps' field read the sheet's noise too,
+  and the first stage of the clouds took a quarter longer on Direct3D 11
+  than with the test kept (#113, November 2026). GL kept the branch. Other
+  compilers may fold such a test differently too: `UNSEEN` changed no
+  picture there, while the same on the test for `all` moved some 150 pixels
+  of a still by up to 17 levels, and was left out.
 - **Each program small enough for Microsoft's compiler.** ANGLE on
   Direct3D 11 (Chrome and Edge on Windows) gives each program to
   Microsoft's HLSL compiler (FXC), which inlines every call: each call of
@@ -677,7 +688,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   133 s (one copy of their body, not two); the last place and warp kept
   from call to call in globals (`ciPlace`, `ciWarp`), removed, 105 s;
   both 57 s. Global state that many copies read and write costs much:
-  keep such functions pure. Unrolling small loops did not help (the
+  keep such functions pure. It costs at run time too: a global that a
+  call may leave as it was is kept from call to call through every loop
+  that reads the field. Set at every call of `cloudShape`, the heaps'
+  (#113) took the frame under heaps at 0.3 km on Direct3D 11 from 39.5 to
+  31.6 ms (main 31.8). Unrolling small loops did not help (the
   gather unrolled 180 s; every small loop of the cirrus's pass unrolled
   26 s against 21). In the whole scene, the bounds the compiler cannot
   know (`LONG_N`, `CI_N`) and vectors in place of arrays written at a
@@ -703,7 +718,12 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `SKY_LIGHT` 2.6 to 2.7 (5.7 more in the scene's program, timed alone
   with FXC), `TOPS_MAP` 1.3 to 1.4. The GPU process compiles
   several at once, and the first picture waits for their sum more than
-  for the longest. Measure
+  for the longest. The heaps of #113 (November 2026) made the field
+  longer; each read of it is a copy, so the light's steps, the way to the
+  shadow's map past them and the four reads of the mirror are each one
+  loop with one read, and the map of the tops searches all its heights in
+  one loop (four calls of the search, each with five calls of the field,
+  had made it link in 0.8 s with the heaps, against 0.2 to 0.3 s now). Measure
   a change of `fs` there: `node tools/sky.mjs d3d programs --base
   origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its
