@@ -940,7 +940,13 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   lies at the base of a closed sheet (`CF_VEIL`: density 0.4, fading over
   the lowest 0.3 of the depth), which the fine noise does not erode:
   through the thinnest places one sees grey cloud, not the sea. (Pits
-  through a sheet were dark specks from far above.) The floor and the veil
+  through a sheet were dark specks from far above.) The veil lies only
+  under a sheet that the fine noise cannot take away (its field before the
+  noise over 0.28 to 0.33 of the amount; a closed deck's is over 0.33 at
+  its base everywhere): where the cover was closing and the sheet thin, the
+  noise took the sheet and left the veil, a smooth film of haze over the
+  sea in the gaps of a deck, its edge the crisp contour of the amount
+  (cloud 0.78 to 0.9). The floor and the veil
   only where the sheet's own shape is (nearly) whole (`keep` over 0.95, see
   the heaps below): under a shape held back they were flat pale plates
   with straight edges among the heaps, like floes. The top of a sheet
