@@ -1584,7 +1584,7 @@ shows.
   streaks, never by anything round. (Frayed and eaten by the field's round
   sizes, they stood as clots and crumbs, like broken altocumulus.)
 - Their depth for an ice of 1 is 4 (`CI2_FORM.x`, as on the two decks
-  before), and 0.7 of that at large amounts (`CI2_FORM.y`).
+  before), and 0.7 of that from 0.5 of the slider (`CI2_FORM.y`).
 
 **The generating field** (`uG2`): fBm with a spectral slope of -5/3
 (each size 2^(-1/3) of the one twice as large), 2048 x 2048 over a tile
@@ -1605,26 +1605,31 @@ radiative transfer this way: a fractal field, displaced level by level
 along the fall streak.
 
 The field falls back at small amounts (`CI2_FEW`). The heads' own field
-(`burst`) is read over the step's segment like the rest, and weighs little
-(`CI2_HEAD.y`): read at one point of each long step, it summed to crumbs.
+(`burst`), read at one point of each step, weighs little (`CI2_HEAD.y`):
+at 0.7 each of a few long steps took one round patch of it, and their sum
+was crumbs.
 
-**Bands and lanes** (`ci2Lane`). From 0.3 of the slider the cirrus
+**Bands and lanes** (`ci2Lane`). From 0.15 of the slider the cirrus
 gathers in broad bands along the wind, some 20 to 40 km wide and 50 to
-100 km long, with lanes of clear or thinly veiled sky between; by the top
-of the slider they have joined. It is the field's large sizes read in a
-frame drawn out along the shear (`CI2_MB`), over a level that falls with
-the slider (`CI2_LANE`). The forms weigh by it, the field's level rises in
-the lanes, and the thin veil thins there by less (`ci2Veil`). The page
-starts at a band's edge (`CI2_BAND0`): a band to the north, a lane to the
-south. Without bands, much cirrus was ice in every direction: from inside
-the layer a white sky. Straight up from 3 km at four places, the share of
-sky deeper than 0.1, 0.3 and 1 at 0.7 of the slider is 49, 19 and 3 %
-(the two decks before: 54, 16 and 1 %); at 0.4, 21, 9 and 1 % (6, 3 and
-0 %); at 1, 90, 66 and 17 % (100, 62 and 13 %).
+100 km long, with lanes of thinner sky between; by the top of the slider
+they have joined. It is the field's large sizes read in a frame drawn out
+along the shear (`CI2_MB`), over a level that falls with the slider
+(`CI2_LANE`). The forms weigh by it (0.3 in a lane), the field's level
+rises in the lanes, and the thin veil thins there by less (`ci2Veil`).
+The page starts at a band's edge (`CI2_BAND0`). Far off the bands are read
+once a pixel, near the eye at every step. Without bands, much cirrus
+was ice in every direction: from inside the layer a white sky.
 
-Every read of the field repeats with the map: its frame is turned by
-(4, 3) with whole tiles to 256 km (`CI2_R`), and so are the fibres'
-frames.
+**Sheets.** The drawn sheets and streets (the ice's G) come in from 0.25
+of the slider, in one of the two sets of forms (in both, their long
+streaks crossed as a lattice). They are the broad lit sweeps high in the
+sky at a low sun, and the thin veil with passing fibres round an eye in
+the layer's upper part.
+
+Straight up from 3 km at four places, the share of sky deeper than 0.1,
+0.3 and 1 at 0.7 of the slider is 63, 29 and 3 % (the two decks before: 54, 16
+and 1 %); at 0.4, 18, 5 and 0 % (6, 3 and 0 %); at 1, 93, 69 and 25 % (100, 62 and
+13 %).
 
 **Fibres.** The field's small sizes read drawn out along the shear
 (`CI2_MF`): a tile of 20 km across it (texels of 10 m) and 270 km along
@@ -1649,8 +1654,9 @@ layer and the way is long; their bounds move from frame to frame near the
 eye and stand beyond some 7 km. A thin veil (`ciThin`, `ci2Veil`) lies
 under the layer's top, half of it in the first 0.35 km, for the halo. The
 depth over some 5 km (`wideT`), for the glow round the light, is read once
-per pixel, with the bands read over 40 km: the glow and the moon's ring do
-not go out in a lane.
+per pixel: the forms over 10 km, the bands by their mean over the sky, so
+that the glow and the moon's ring do not go out in a lane, and a form next
+to the moon does not light up as a plume.
 
 **Forms 0 and 2.** A sheet is the same field with little contrast, over
 its level nearly everywhere: a milky veil with faint striation. Small
@@ -1679,8 +1685,12 @@ their tails, and a low sun crosses more ice than a high one, with no
 constant for dusk.
 
 The cirrus's shadow on the low clouds and the sea, and the glare, read
-the layer's vertical depth over some 0.5 km (`ci2Column`: four depths of
-the field's large sizes and the drawn forms, no fibres).
+the layer's vertical depth (`ci2Column`: four depths of the field's large
+sizes and the drawn forms, no fibres) over a footprint: for the shadow,
+the sun's disc at the light's distance, 0.4 to 8 km (some 2 km at a sun
+3 degrees up). (Over 0.4 km at any sun, the
+streaks' shadows at a low sun stood as a thin dark level line across the
+low clouds near the eye's level.)
 
 **Its own pass.** `highCloud` runs in a program of its own (`fs` with
 `CIRRUS_PASS`), drawn before the scene into one target of the frame's
@@ -1720,12 +1730,12 @@ programs compile (`g2Field`), so that it does not hold the first picture
 back.
 
 **What still differs from photographs**: the dense hooked tuft of an
-uncinus is softer than in photographs; at a low sun the lit fan is a
-bright mass near the sun with finer streaks above it, where photographs
-(and the two decks before) show broad lit sweeps high up; a form next to
-the moon glows as a plume; inside a band the sky towards the sun is still
-white; thick ice does not grey at its core; the fine ripples across a
-sheet are missing; from 40 km the plumes are soft.
+uncinus is softer than in photographs; at a low sun the lit sweeps high
+up are streakier and some tenth darker than the two decks' were; where the
+sheets' streaks cross the field's, the sky is hatched; inside a band the
+sky towards the sun is still white; thick ice does not grey at its core;
+the fine ripples across a sheet are missing; from 40 km the plumes are
+soft.
 
 ## Sun, moon, stars
 

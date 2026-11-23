@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="e788502 PR #110">
+<meta name="build" content="ce7e454 PR #110">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3952,15 +3952,18 @@ float ci2Rho(float ex) {
 vec2 ci2FormAt(vec2 w, int k, out mat2 J) {
   return ciTile(w / WEATHER_KM + (k == 0 ? vec2(0.383, 0.617) : vec2(0.0)), k, J);
 }
+// (The second set of forms, set 0, has no sheets: two sets of long streaks
+// 27 degrees apart crossed as a lattice.)
+const vec4 CI2_SET0 = vec4(1.0, 0.0, 1.0, 1.0);
 float ci2FormIce(vec4 si, vec4 cm, float gate) {
   vec4 ice = si * si;
   float c = uCirrus, sr = smoothstep(0.35, 0.75, cm.b), sf = smoothstep(0.45, 0.8, cm.a);
-  float y = ice.r + 0.8 * (1.0 - sf) * ice.a + 0.15 * sf * ice.b + 0.5 * sr * smoothstep(0.15, 0.65, c) * ice.g;
+  float y = ice.r + 0.8 * (1.0 - sf) * ice.a + 0.15 * sf * ice.b + (0.45 + 1.05 * sr) * smoothstep(0.15, 0.65, c) * (0.15 + 0.85 * smoothstep(0.25, 0.5, c)) * ice.g;
   float fl = 0.04 * pow(1.0 - c, 6.0) + 0.02 * (1.0 - gate);
   y = max(y - fl, 0.0);
   return y * y / (y + 0.5 * fl + 1e-4);
 }
-// Where the cirrus gathers once there is much of it (from 0.3 of the
+// Where the cirrus gathers once there is some of it (from 0.15 of the
 // slider): in broad bands along the wind, some 20 to 40 km wide and 50 to
 // 100 km long (the large sizes of G in a frame drawn out along the shear,
 // whole tiles to the map), with lanes of clear or thinly veiled sky between;
@@ -3971,16 +3974,23 @@ float ci2FormIce(vec4 si, vec4 cm, float gate) {
 // at dusk a comb of like streaks where photographs show a few broad lit
 // sweeps.)
 const mat2 CI2_MB = mat2(1.0, 1.0, -3.0, 1.0) / 256.0;
-const vec3 CI2_LANE = vec3(-0.4, 0.9, 0.08);   // the bands' level: x + y * uCirrus over the noise; what is left in a lane
+const vec3 CI2_LANE = vec3(-0.4, 0.9, 0.3);   // the bands' level: x + y * uCirrus over the noise; what is left in a lane
 // (Shifted so that the place where the page starts lies at a band's edge: a
 // band to the north, a lane to the south.)
 const vec2 CI2_BAND0 = vec2(0.12, 0.0);
-// lod: 6 for the bands themselves; more for their mean over a wide place.
-float ci2Lane(vec2 w, float lod) {
-  float c = uCirrus, k = smoothstep(0.3, 0.6, c) * (1.0 - smoothstep(0.8, 0.98, c));
+float ci2Banded() {
+  return smoothstep(0.15, 0.45, uCirrus) * (1.0 - smoothstep(0.8, 0.98, uCirrus));
+}
+float ci2Lane(vec2 w) {
+  float k = ci2Banded();
   if (k <= 0.0) return 1.0;
-  float n = (textureLod(uG2, CI2_MB * w + CI2_BAND0, lod).r - 0.5) * 6.0;
-  return mix(1.0, CI2_LANE.z + (1.0 - CI2_LANE.z) * smoothstep(-0.35, 0.35, n + CI2_LANE.x + CI2_LANE.y * c), k);
+  float n = (textureLod(uG2, CI2_MB * w + CI2_BAND0, 6.0).r - 0.5) * 6.0;
+  return mix(1.0, CI2_LANE.z + (1.0 - CI2_LANE.z) * smoothstep(-0.35, 0.35, n + CI2_LANE.x + CI2_LANE.y * uCirrus), k);
+}
+// Its mean over the sky (the bands' share of it, for noise of unit
+// deviation): for the depth over tens of km.
+float ci2LaneMean() {
+  return mix(1.0, CI2_LANE.z + (1.0 - CI2_LANE.z) * smoothstep(-0.8, 0.8, CI2_LANE.x + CI2_LANE.y * uCirrus), ci2Banded());
 }
 // The thin, even veil (ciThin, the halo's crystals) where the map has
 // cirrus (gate) and by the bands (ln): it thins in the lanes, by less than
@@ -3990,7 +4000,7 @@ float ci2Veil(float gate, float ln) {
 }
 // The drawn forms' vertical optical depth for an ice of 1.
 float ci2FormTau(float gate) {
-  return CI2_FORM.x * uCiB.x * (0.6 + 0.8 * uCirrus) * (0.3 + 0.7 * gate) * mix(1.0, CI2_FORM.y, smoothstep(0.5, 0.85, uCirrus));
+  return CI2_FORM.x * uCiB.x * (0.6 + 0.8 * uCirrus) * (0.3 + 0.7 * gate) * mix(1.0, CI2_FORM.y, smoothstep(0.2, 0.5, uCirrus));
 }
 // The forms' weights from the layer's `form`: a sheet (cirrostratus),
 // fibres from heads (cirrus), small cells (cirrocumulus).
@@ -3999,36 +4009,33 @@ vec3 ci2Form() {
   return vec3(sheet, 1.0 - sheet - cells, cells);
 }
 // The layer's vertical optical depth at x on the map (km), over a footprint
-// of some 0.5 km: for its shadow on the low clouds and the sea, and the
-// glare. Four depths, the large sizes of G alone (no fibres, no placed
-// heads: over such a footprint they are their mean).
-float ci2Column(vec2 x) {
+// of `foot` km (0.4 and more): for its shadow on the low clouds and the
+// sea, and the glare. Four depths, the large sizes of G alone (no fibres,
+// no placed heads: over such a footprint they are their mean).
+float ci2Column(vec2 x, float foot) {
+  float lf = log2(max(foot, 0.4) / 0.4);
   vec2 wm = ciWarp(x);
   vec4 cm = textureLod(uCiMap, wm / WEATHER_KM, 4.0);
   float c = uCirrus, thrM = 0.72 - 0.85 * c, gate = smoothstep(thrM - 0.3, thrM + 0.15, cm.r);
   if (gate <= 0.0) return 0.0;
   vec3 reg = ci2Reg(cm), fm = ci2Form();
-  float ln = ci2Lane(wm, 6.0);
+  float ln = ci2Lane(wm);
   float off = CI2_THR.x - CI2_THR.y * c + CI2_GATE * (1.0 - gate * ln), sum = 0.0;
   mat2 R = CI2_R;
   for (int j = 0; j < CI_N(4); j++) {
     float h = (float(j) + 0.5) * 0.25 * uCiA.y, hn = h / uCiA.y;
-    float f = CI2_HEAD.x * (textureLod(uG2, R * (wm - ci2D(h, reg)), 5.0).r - 0.5) * 6.0 + 0.45;
+    float f = CI2_HEAD.x * (textureLod(uG2, R * (wm - ci2D(h, reg)), 5.0 + lf).r - 0.5) * 6.0 + 0.45;
     f = mix(f - CI2_FEW * (1.0 - smoothstep(0.25, 0.7, c)), 0.35 * f + 1.6 + off, fm.x);
     sum += ci2Rho(f - off) * (1.0 - smoothstep(0.4, 0.8, hn)) * (1.0 - 0.5 * hn);
   }
   mat2 J;
-  float form = fm.y * ci2FormTau(gate) * ln * (ci2FormIce(textureLod(uIce, ci2FormAt(wm, 1, J), 5.5), cm, gate) + 0.8 * ci2FormIce(textureLod(uIce, ci2FormAt(wm, 0, J), 5.5), cm, gate));
+  float form = fm.y * ci2FormTau(gate) * ln * (ci2FormIce(textureLod(uIce, ci2FormAt(wm, 1, J), 5.5 + lf), cm, gate) + 0.8 * ci2FormIce(textureLod(uIce, ci2FormAt(wm, 0, J), 5.5 + lf) * CI2_SET0, cm, gate));
   return sum * 0.25 * uCiA.y + ci2Veil(gate, ln) + form;
 }
-// The depth as the light of the sun feels it, the ice seen over the
-// footprint f1, f2 (km on the map): the mean over the shell. (One loop over
-// the decks: each call of ciDensity is a copy for the compiler.)
-float cirrusDepth(vec2 x, vec2 f1, vec2 f2) {
-  return 0.5 * ci2Column(x);
-}
+// The depth as the light of the sun feels it, the ice seen over a
+// footprint of `foot` km: the mean over the layer's two halves.
 float cirrusDepth(vec2 x, float foot) {
-  return cirrusDepth(x, vec2(foot, 0.0), vec2(0.0, foot));
+  return 0.5 * ci2Column(x, foot);
 }
 
 // Light scattered once by a sheet of depth te along the view, lit through a
@@ -4147,6 +4154,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
     // that column in closed form. Near the eye the steps read the forms
     // themselves (wNear), so that they change along a ray in the layer.
     float wNear = 1.0 - smoothstep(2.5, 4.5, t0);
+    // (The bands, far off: read once, at the middle of the way through the
+    // layer; near the eye each step reads them where it is.)
+    float lnP = wNear < 1.0 ? ci2Lane(ciWarp(pmid.xz + uDrift)) : 1.0;
     vec2 flCol = vec2(0.0), flIce = vec2(0.0), flHc = vec2(0.5 * DEPTH), flSg = vec2(0.1 * DEPTH);
     if (fm.y > 0.0 && wNear < 1.0) {
       for (int k = 0; k < CI_N(2); k++) {
@@ -4172,26 +4182,28 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
         if (gk <= 0.0) continue;
         tf = ci2FormAt(wk, k, JF);
         vec2 f1 = dk * max(fq / max(ck, 1e-3) + 0.08 * L * lk2, CI_MINF), f2 = vec2(-dk.y, dk.x) * max(fq, CI_MINF);
-        float ice = (k == 0 ? 0.8 : 1.0) * ci2FormIce(textureGrad(uIce, tf, JF * f1, JF * f2), ck4, gk);
-        flCol[k] = fm.y * ci2FormTau(gk) * ci2Lane(wk, 6.0) / max(ck, 0.05);
+        float ice = (k == 0 ? 0.8 : 1.0) * ci2FormIce(textureGrad(uIce, tf, JF * f1, JF * f2) * (k == 0 ? CI2_SET0 : vec4(1.0)), ck4, gk);
+        flCol[k] = fm.y * ci2FormTau(gk) * lnP / max(ck, 0.05);
         flIce[k] = ice;
         flHc[k] = hc;
         flSg[k] = DEPTH * (0.06 + 0.13 * age);
       }
     }
     // The depth over some 5 km (wideT), for the glow round the light: read
-    // once, at the middle of the way through the layer. (The bands are read
-    // over 40 km for it: the glow round the sun and the moon's ring do not
+    // once, at the middle of the way through the layer. (The bands count by
+    // their mean for it: the glow round the sun and the moon's ring do not
     // go out in a lane, as a moonlit sky seen through cirrus is one veil.)
     {
       vec2 wq = ciWarp(pmid.xz + uDrift);
       vec4 cq = textureLod(uCiMap, wq / WEATHER_KM, 4.0);
-      float gq = smoothstep(thrM - 0.3, thrM + 0.15, cq.r), lq = ci2Lane(wq, 9.5), oq = thr + CI2_GATE * (1.0 - gq * lq);
+      float gq = smoothstep(thrM - 0.3, thrM + 0.15, cq.r), lq = ci2LaneMean(), oq = thr + CI2_GATE * (1.0 - gq * lq);
       float fw = CI2_HEAD.x * (textureLod(uG2, R * (wq - ci2D(0.4 * DEPTH, ci2Reg(cq))), 9.5).r - 0.5) * 6.0 + 1.0 - CI2_FEW * few;
       fw = mix(fw, 0.35 * fw + 1.6 + oq, fm.x);
       mat2 JW;
-      float iw = ci2FormIce(textureLod(uIce, ci2FormAt(wq, 1, JW), 9.0), cq, gq) + 0.8 * ci2FormIce(textureLod(uIce, ci2FormAt(wq, 0, JW), 9.0), cq, gq);
-      wideT = gq > 0.0 ? (0.4 * ci2Rho(fw - oq) + ci2Veil(gq, lq) / DEPTH + fm.y * ci2FormTau(gq) * lq * iw * 1.5 / DEPTH) * L : 0.0;
+      // (The forms over some 10 km, at their own depth: over 5 km and half
+      // as deep again, a form next to the moon lit up as a plume.)
+      float iw = ci2FormIce(textureLod(uIce, ci2FormAt(wq, 1, JW), 10.0), cq, gq) + 0.8 * ci2FormIce(textureLod(uIce, ci2FormAt(wq, 0, JW), 10.0) * CI2_SET0, cq, gq);
+      wideT = gq > 0.0 ? (0.4 * ci2Rho(fw - oq) + ci2Veil(gq, lq) / DEPTH + fm.y * ci2FormTau(gq) * lq * iw / DEPTH) * L : 0.0;
     }
     for (int i = 0; i <= CI_N(CI2_STEPS); i++) {
       if (float(i) > nst || tauN > 6.0) break;
@@ -4227,10 +4239,10 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       // The head over the time of the fall: G read farther on as the ice
       // has fallen farther, so that a head comes and goes along its streak.
       float sm = smoothstep(0.0, 0.5, max(h - CI2_H0, 0.0));
-      // (Over the step's segment, as the field: read at a point, each of a
-      // few long steps took one round patch of it, and their sum was crumbs.)
-      float mb = max(minor, 0.133);
-      float burst = (textureGrad(uG2, 3.0 * tc + CI2_BURST.y * h * vec2(0.37, 0.23), 3.0 * (R * (e * max(major, mb))), 3.0 * (R * (en * mb))).b - 0.5) * 6.0;
+      // (One read at a point: it weighs little now. At 0.7, each of a few
+      // long steps took one round patch of it, and their sum was crumbs;
+      // read over the step's segment it cost a tenth of the pass.)
+      float burst = (textureLod(uG2, 3.0 * tc + CI2_BURST.y * h * vec2(0.37, 0.23), 5.0).b - 0.5) * 6.0;
       float fib = 0.0;
       if (wS < 1.0 && fm.z < 1.0) {
         vec2 xf = x0 + CI2_WANDER * (textureLod(uG2, tc, 8.0).rb - 0.5) * 6.0, nf = en * max(foot, 0.5 * CI2_TEX);
@@ -4238,7 +4250,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       }
       float us = clamp(hn * 4.0 - 0.5, 0.0, 3.0), k0 = floor(us);
       fib = mix(fib, mix(FS[int(k0)], FS[int(min(k0 + 1.0, 3.0))], us - k0), wS);
-      float ln = ci2Lane(wm, 6.0);
+      float ln = wNear > 0.0 ? mix(lnP, ci2Lane(wm), wNear) : lnP;
       float off = thr + CI2_GATE * (1.0 - gate * ln);
       // Cirrus: the noise's forms (the large sizes, where they gather;
       // tufts; the heads' own field, which comes and goes), which fall back
@@ -4301,7 +4313,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
         for (int k = 0; k < CI_N(2); k++) {
           mat2 JF;
           vec2 tf = ci2FormAt(wm, k, JF);
-          float ice = (k == 0 ? 0.8 : 1.0) * ci2FormIce(textureGrad(uIce, tf, JF * f1, JF * f2), cm, gate);
+          float ice = (k == 0 ? 0.8 : 1.0) * ci2FormIce(textureGrad(uIce, tf, JF * f1, JF * f2) * (k == 0 ? CI2_SET0 : vec4(1.0)), cm, gate);
           if (ice <= 0.0) continue;
           vec2 av = textureLod(uIceWay, tf, log2(max(max(foot, 0.15) * length(JF[0]) * float(textureSize(uIceWay, 0).x), 1.0))).ba;
           float age = (av.x + 0.3 * 0.03) / (av.y + 0.03);
@@ -4918,8 +4930,13 @@ void main() {
       float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5;
       p += d * clamp(-s * dh / (s * s + 9e-4), -min(tBar, 10.0), 10.0);
     }
-    vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
-    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
+    float tL = i == 2 ? 0.0 : raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+    vec3 pc = i == 2 ? glarePc : p + uLight * tL;
+    // (The shadow is as soft as the light's disc is wide at that distance:
+    // at a sun 3 degrees up, some 2 km. Read over 0.4 km at any sun, the streaks' shadows changed from row to row of the clouds
+    // near the eye's level, where the place read races along the ray, and
+    // stood as a thin dark level line across them.)
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : clamp(0.0093 * tL, 0.4, 8.0));
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;
