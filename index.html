@@ -4009,7 +4009,7 @@ vec3 ci2Form() {
   return vec3(sheet, 1.0 - sheet - cells, cells);
 }
 // The layer's vertical optical depth at x on the map (km), over a footprint
-// of `foot` km (0.5 and more): for its shadow on the low clouds and the
+// of `foot` km (0.4 and more): for its shadow on the low clouds and the
 // sea, and the glare. Four depths, the large sizes of G alone (no fibres,
 // no placed heads: over such a footprint they are their mean).
 float ci2Column(vec2 x, float foot) {
@@ -4932,14 +4932,11 @@ void main() {
     }
     float tL = i == 2 ? 0.0 : raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
     vec3 pc = i == 2 ? glarePc : p + uLight * tL;
-    // (The shadow is as soft as the light's disc is wide at that distance,
-    // and as the layer's depth is drawn out along a low light, up to 8 km:
-    // at a sun 3 degrees up, some 2 km and far more. Read over 0.5 km at
-    // any sun, the streaks' shadows changed from row to row of the clouds
+    // (The shadow is as soft as the light's disc is wide at that distance:
+    // at a sun 3 degrees up, some 2 km. Read over 0.4 km at any sun, the streaks' shadows changed from row to row of the clouds
     // near the eye's level, where the place read races along the ray, and
     // stood as a thin dark level line across them.)
-    float muL = max(dot(normalize(pc), uLight), 0.05);
-    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : clamp(0.0093 * tL + 0.25 * uCiA.y * sqrt(1.0 - muL * muL) / muL, 0.5, 8.0));
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : clamp(0.0093 * tL, 0.4, 8.0));
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;

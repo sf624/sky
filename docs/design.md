@@ -1687,8 +1687,8 @@ constant for dusk.
 The cirrus's shadow on the low clouds and the sea, and the glare, read
 the layer's vertical depth (`ci2Column`: four depths of the field's large
 sizes and the drawn forms, no fibres) over a footprint: for the shadow,
-the sun's disc at the light's distance plus a quarter of the layer's depth
-drawn out along the light, 0.5 to 8 km. (Over 0.5 km at any sun, the
+the sun's disc at the light's distance, 0.4 to 8 km (some 2 km at a sun
+3 degrees up). (Over 0.4 km at any sun, the
 streaks' shadows at a low sun stood as a thin dark level line across the
 low clouds near the eye's level.)
 
