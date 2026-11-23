@@ -16,7 +16,10 @@ export function pick(reg, { only } = {}) {
   if (only) {
     const names = only.split(',');
     for (const n of names) if (!list.some((e) => e.name === n)) throw new Error(`look: no entry ${n} (${list.map((e) => e.name).join(', ')})`);
-    list = list.filter((e) => names.includes(e.name));
+    // An entry measured against another (a measure's `against`) brings that one along.
+    const need = new Set(names);
+    for (const e of reg.entries) if (need.has(e.name)) for (const m of e.measures) if (m.against) need.add(m.against);
+    list = list.filter((e) => need.has(e.name));
   }
   return list;
 }
@@ -33,12 +36,19 @@ const readStills = (e, dir) => {
 
 // Measures one still (or a sweep's list of stills) against an entry's limits. Returns { status: PASS | FAIL | KNOWN | UNEXPECTED, values }, where
 // UNEXPECTED is an entry marked expected: 'fail' that passed. Each value: { measure, value, min, max, ok, text }.
-export function judge(entry, img) {
+export function judge(entry, img, still = null) {
   const values = entry.measures.map((m) => {
     const f = MEASURES[m.measure];
     if (!f) throw new Error(`look: ${entry.name}: no measure ${m.measure} (${Object.keys(MEASURES).join(', ')})`);
-    const value = f(img, m);
-    const name = m.label || m.measure + (m.measure === 'lumaPct' ? ` p${m.p ?? 50}` : m.measure === 'brightColour' ? ` ${m.of || 'sat'}` : '');
+    let value = f(img, m);
+    // against: the measure over the same measure of another entry's still (its region againstRegion, else
+    // region): a ratio between two views, such as the Earth's brightness looking up and looking level.
+    if (m.against) {
+      if (!still) throw new Error(`look: ${entry.name}: against ${m.against} needs the stills of the run`);
+      value /= f(still(m.against), { ...m, region: m.againstRegion || m.region });
+    }
+    const name = m.label || m.measure + (m.measure === 'lumaPct' ? ` p${m.p ?? 50}` : m.measure === 'brightColour' ? ` ${m.of || 'sat'}` : '')
+      + (m.against ? ` / ${m.against}` : '');
     const ok = (m.min === undefined || value >= m.min) && (m.max === undefined || value <= m.max);
     const lim = [m.min !== undefined ? `>= ${m.min}` : '', m.max !== undefined ? `<= ${m.max}` : ''].filter(Boolean).join(', ');
     return { measure: name, value, min: m.min, max: m.max, ok, text: `${name} ${fmt(value)}${lim ? ` (${lim})` : ''}${ok ? '' : ' !'}` };
@@ -73,7 +83,12 @@ export async function render(session, root, list, size, dir, reg = loadRegistry(
 export function report(list, dir, errors = {}, at = '') {
   const count = { PASS: 0, KNOWN: 0, FAIL: 0, 'PASS?': 0 };
   for (const e of list) {
-    const r = judge(e, readStills(e, dir));
+    const still = (n) => {
+      const other = list.find((x) => x.name === n);
+      if (!other) throw new Error(`look: ${e.name} is measured against ${n}: run that entry too`);
+      return readStills(other, dir);
+    };
+    const r = judge(e, readStills(e, dir), still);
     const err = errors[e.name] || [];
     let word = r.status === 'UNEXPECTED' ? 'PASS?' : r.status;
     if (err.length && word !== 'KNOWN') word = 'FAIL';

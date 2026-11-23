@@ -245,12 +245,17 @@
    "name": "night-full-moon-up-11km",
    "q": "date=328&time=20&lat=35&lon=135&alt=11&yaw=0&pitch=55&heading=0&cloud=0.3&cirrus=0&haze=1&wind=6&quality=high&moon=14.288",
    "reported": "2026-11-23",
-   "wrong": "a full moon's sky as a grey veil (with the full moon's report); the stars to about magnitude 4 must stay",
+   "wrong": "a full moon's sky as a grey veil with a moonless night's stars (with the full moon's report)",
    "measures": [
     {
      "measure": "lumaPct",
      "p": 50,
      "max": 17
+    },
+    {
+     "measure": "lumaPct",
+     "p": 50,
+     "min": 3
     },
     {
      "measure": "stars",
@@ -260,12 +265,21 @@
       1,
       1
      ],
-     "min": 2
+     "min": 0.3
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "max": 1.2
     }
    ],
-   "bad": "f605245",
-   "fixed": "23568e5",
-   "note": "f605245: p50 18.8, stars 4.49 per 10 000 px (414 points 12 levels over their surroundings); the fix: 14.9, 2.87 (264). Under a full moon the eye sees stars to about magnitude 4 (a bright sky of some 18 mag/arcsec2): the bound keeps some 180."
+   "bad": "e42d5dd",
+   "note": "Stars 12 levels over their surroundings, per 10 000 px (the frame is about 11 % of the sky): 0.3 to 1.2 is some 28 to 110 stars, down to magnitude 3.3 to 4.6; the eye sees to about 4 under a full moon. f605245: p50 18.8, stars 4.49 (414, past magnitude 5); e42d5dd: 14.9, 2.87 (264); the fix (the moon's light at the eye caps the exposure): 6.1, 0.50 (46, about magnitude 3.8)."
   },
   {
    "name": "night-new-moon-up-11km",
@@ -301,6 +315,41 @@
     }
    ],
    "note": "A guard, not a flaw: f605245 and the fix both give p50 7.8, stars 9.13 (840) and 4.30 at 40 levels (396)."
+  },
+  {
+   "name": "night-moon-level-40km",
+   "q": "date=327&time=24&clock=solar&lat=35&lon=135&alt=40&at=6.208,5.287&yaw=-46.78&pitch=0&heading=49.58&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=13&quality=high",
+   "reported": "2026-11-23",
+   "wrong": "the level view of night-moon-up-40km: what its Earth is measured against",
+   "measures": []
+  },
+  {
+   "name": "night-moon-up-40km",
+   "q": "date=327&time=24&clock=solar&lat=35&lon=135&alt=40&at=6.208,5.287&yaw=-46.78&pitch=19.88&heading=49.58&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=13&quality=high",
+   "reported": "2026-11-23",
+   "wrong": "at night under a moon, the view turned up to the stars: the Earth along the foot of the frame strangely bright",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.25,
+      0.935,
+      0.5,
+      0.06
+     ],
+     "p": 50,
+     "against": "night-moon-level-40km",
+     "againstRegion": [
+      0.25,
+      0.615,
+      0.5,
+      0.06
+     ],
+     "max": 1.6
+    }
+   ],
+   "bad": "e42d5dd",
+   "note": "The Earth's band just below the horizon (looking up, at the foot of the frame) over the same band in the level view. f605245: 2.86 (the meter opened 1.8 stops for the black sky); e42d5dd: 4.26 (and the night's key went out with it); the fix: 1.00."
   },
   {
    "name": "sky-40km-day",
