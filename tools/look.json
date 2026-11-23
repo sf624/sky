@@ -562,6 +562,39 @@
     }
    },
    "note": "The largest smooth bright part of the lower half, as a share of it: 0.020 with the floes, 0.003 without."
+  },
+  {
+   "name": "no-haze-film-in-gap-2.9km-0.81",
+   "q": "date=327&time=15&clock=solar&lat=35&lon=135&alt=2.9&at=10.163,8.655&yaw=97.13&pitch=-34.81&heading=49.58&bank=0&climb=0&cloud=0.81&cirrus=0.4&haze=1&wind=6&moon=13&quality=high&pixels=wqhd&hud=0&lang=en",
+   "reported": "2026-11-23",
+   "wrong": "in a large gap of the deck at cloud 0.81, a smooth translucent film like fog or frosted glass over the dark sea, with a crisp curved edge several km long: the base veil left where the fine noise had taken a thin closing sheet (on main too)",
+   "measures": [
+    {
+     "measure": "flatPlate",
+     "region": [
+      0,
+      0.35,
+      1,
+      0.65
+     ],
+     "luma": 80,
+     "grad": 2,
+     "max": 0.025
+    }
+   ],
+   "bad": "e6f6ffd",
+   "reference": {
+    "e6f6ffd": {
+     "flatPlate": 0.0578
+    },
+    "main f605245": {
+     "flatPlate": 0.0576
+    },
+    "without the veil": {
+     "flatPlate": 0.0059
+    }
+   },
+   "note": "flatPlate with a threshold for a grey film over a dark sea (luma 80, relief under 2): 0.058 with the film, 0.010 without."
   }
  ]
 }

@@ -2546,14 +2546,19 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // edges among the heaps, like floes, at a slider of 0.65.)
   float closed = smoothstep(CF_CLOSE + 0.1, CF_CLOSE + 0.18, a.amount) * smoothstep(0.95, 1.0, keep);
   shape = mix(CF_FLOOR * closed, 1.0, shape);
-  // And a veil lies at the base of a closed sheet, which the fine noise
-  // does not erode: through the thinnest places between cells one sees
-  // grey cloud, not the sea (pits through a sheet were dark specks from far
-  // above).
-  veil = CF_VEIL.x * closed * clamp(1.0 - t / CF_VEIL.y, 0.0, 1.0);
   // (Outside, the field falls about as fast as the shape does per km: the
   // march strides by it.)
   float d = shape * prof - (1.0 - am);
+  // And a veil lies at the base of a closed sheet, which the fine noise
+  // does not erode: through the thinnest places between cells one sees
+  // grey cloud, not the sea (pits through a sheet were dark specks from far
+  // above). Only under a sheet that the fine noise cannot take away (its
+  // field over a third of what it may be at most, as a closed deck's is at
+  // its base everywhere): where the cover was closing and the sheet thin,
+  // the noise took the sheet and left the veil, a smooth film of haze with
+  // the crisp edge of the amount's contour, over the sea in the gaps of a
+  // deck (cloud 0.78 to 0.9; main too).
+  veil = CF_VEIL.x * closed * clamp(1.0 - t / CF_VEIL.y, 0.0, 1.0) * smoothstep(0.28, 0.33, d / max(am, 1e-3));
   float f = CF_K * (d > 0.0 ? d / am : d);
   if (heapMix > 0.0) {
     // Heaps. Discs: the Worley cells of 2 km and of 1 km, read at one level (a cut through balls: discs of many sizes) and
