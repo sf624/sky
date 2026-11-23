@@ -93,7 +93,7 @@ The last line is the one to paste into a pull request: `look: 9 PASS, 5 KNOWN, 0
 
 The limits are absolute: no base is needed, and a flaw that was merged is still flagged after. They are set from the stills of the bad and the fixed commits, with a margin both ways; they change only on purpose, in a commit that says why. `--page REV` renders a commit (exported like a base): `look --page 9041c58 --only overcast-rows-11km` shows the proof of an entry. `--from DIR` measures the stills of an earlier run again, without Chrome (to try a limit). `--sheet` writes `sheet.png`, the stills of every entry in one picture; with `--base REV`, each row is base | page (`look --sheet --base origin/main` for a pull request).
 
-It takes about 2 minutes on the GPU for the 20 entries (19 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
+It takes about 2 minutes on the GPU for the 21 entries (20 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
 
 The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of the picture), in 8-bit sRGB levels as shown:
 
@@ -109,7 +109,7 @@ The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of
 | `blobSize` | The connected parts of the cloud mask: the area-weighted mean of their areas, as a share of the region. Large merged heaps: large. | Clouds that touch are one blob; only for views down onto clouds over the sea, where the mask is clean. |
 | `cover` | The share of the region in the cloud mask. | The same rough mask. |
 | `detailScale` | The lag at which the autocorrelation falls to 0.5, over the picture's width: the size of the detail. | It is dominated by the finest grain; it did not separate the cumulus before and after #104. |
-| `fibrousness` | The coherence of the luma's structure tensor in windows of 48 px (after a box blur of 3 px), weighted by the gradient energy: 1 where the structure runs one way (fibres, sweeps), 0 where it runs every way (clots, crumbs). The crumbly cirrus of 76fd6c6 gives 0.55 to 0.65, fibrous cirrus 0.79 to 0.94. | Whether the fibres look like cirrus: straight stripes score highest. Photographs of cirrus (resized, with grain and other things in the frame) range from 0.4 to 0.95, so a limit comes from the renders, not from them. A picture with little structure gives 1. |
+| `fibrousness` | The coherence of the luma's structure tensor in windows of 48 px (after a box blur of 3 px), weighted by the gradient energy: 1 where the structure runs one way (fibres, sweeps), 0 where it runs every way (clots, crumbs). The crumbly cirrus of 76fd6c6 gives 0.55 to 0.65, a cross-hatched patch (ce7e454) 0.66, fibrous cirrus 0.73 to 0.94. | Whether the fibres look like cirrus: straight stripes score highest. Photographs of cirrus (resized, with grain and other things in the frame) range from 0.4 to 0.95, so a limit comes from the renders, not from them. A picture with little structure gives 1. |
 | `whiteShare` | The share of near-white pixels (luma at least 225, saturation at most 0.08): a sky whited out by ice. | White that belongs: sunlit tops, the sun's glow. Keep the region on the sky. |
 | `lineDip` | A thin dark line across the region: per row, the dip of rows y, y + 1 below the rows on both sides, the median over `cols` strips, the largest over rows. | A line across less than half the strips; a line that is not darker than both sides. |
 

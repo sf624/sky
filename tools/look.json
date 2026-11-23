@@ -409,6 +409,27 @@
    "fixed": "1799ea2"
   },
   {
+   "name": "cirrus-hatch-3km-away",
+   "q": "time=12&date=319&alt=3&pitch=30&yaw=180&cloud=0&cirrus=0.7&at=60,40",
+   "reported": "2026-11-23",
+   "wrong": "a patch of the sky cross-hatched: two families of fine streaks at an angle, like pencil shading",
+   "measures": [
+    {
+     "measure": "fibrousness",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "min": 0.69
+    }
+   ],
+   "bad": "ce7e454",
+   "fixed": "1799ea2",
+   "note": "0.656 on ce7e454; main 0.862"
+  },
+  {
    "name": "cirrus-crumbs-3km-zenith",
    "q": "time=12&date=319&alt=3&pitch=75&yaw=180&cloud=0&cirrus=0.7",
    "reported": "2026-11-23",
