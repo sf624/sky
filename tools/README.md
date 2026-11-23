@@ -93,7 +93,9 @@ The last line is the one to paste into a pull request: `look: 9 PASS, 5 KNOWN, 0
 
 The limits are absolute: no base is needed, and a flaw that was merged is still flagged after. They are set from the stills of the bad and the fixed commits, with a margin both ways; they change only on purpose, in a commit that says why. `--page REV` renders a commit (exported like a base): `look --page 9041c58 --only overcast-rows-11km` shows the proof of an entry. `--from DIR` measures the stills of an earlier run again, without Chrome (to try a limit). `--sheet` writes `sheet.png`, the stills of every entry in one picture; with `--base REV`, each row is base | page (`look --sheet --base origin/main` for a pull request).
 
-It takes about 90 s on the GPU for the 17 entries (16 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
+It takes about 90 s on the GPU for the 19 entries (18 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
+
+A measure with `against: NAME` is divided by the same measure of entry NAME's still (over `againstRegion`, else the same region): a ratio between two views, such as the Earth's band looking up and looking level. `--only` brings that entry along.
 
 The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of the picture), in 8-bit sRGB levels as shown:
 
