@@ -855,6 +855,26 @@
     }
    },
    "note": "flatPlate with a threshold for a grey film over a dark sea (luma 80, relief under 2): 0.058 with the film, 0.010 without."
+  },
+  {
+   "name": "tower-dusk-line-3km",
+   "q": "date=172&time=18.9&alt=3&at=36.3,53.9&yaw=35&pitch=3&cloud=0.5",
+   "reported": "2026-11-24",
+   "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
+   "measures": [],
+   "bad": "6abc8ab",
+   "fixed": "TBD",
+   "note": "No measure separates the two (lineDip: 0.026 bad, 0.042 fixed at 3 km; 0.036 and 0.034 at 2.3 km: the line was six rows thick, and a tower's own clefts dip as much). Kept for the contact sheet."
+  },
+  {
+   "name": "tower-dusk-line-2.3km",
+   "q": "date=172&time=18.9&alt=2.3&at=36.3,53.9&yaw=35&pitch=5&cloud=0.5",
+   "reported": "2026-11-24",
+   "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
+   "measures": [],
+   "bad": "6abc8ab",
+   "fixed": "TBD",
+   "note": "No measure separates the two (lineDip: 0.026 bad, 0.042 fixed at 3 km; 0.036 and 0.034 at 2.3 km: the line was six rows thick, and a tower's own clefts dip as much). Kept for the contact sheet."
   }
  ]
 }
