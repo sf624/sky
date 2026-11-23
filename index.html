@@ -2429,9 +2429,11 @@ Layer cloudLayer(vec2 x, float lod) {
   a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
   a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
   // Towers: how far the layer lets them grow where the air rises (see cloudShape), with the slider and among heaps.
+  // (Among heaps only, a form over 0.6: in a sheet that forms, the heaps gathered round a tower's foot, sunk into
+  // the layer, were a flat pale plate in a gap of the deck.)
   // None where little air rises for some 20 km around (A of the map's mip 6.5): over half of the map, where the
   // field then skips the towers' cells altogether (reading them cost a tenth of the frame).
-  a.tower = smoothstep(0.15, 0.4, uCloud) * a.form * smoothstep(0.03, 0.05, wide.a);
+  a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.03, 0.05, wide.a);
   a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form);
   return a;
 }
