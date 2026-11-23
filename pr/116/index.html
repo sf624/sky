@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="e42d5dd PR #116">
+<meta name="build" content="2a4b40a PR #116">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -6826,6 +6826,8 @@ const SkySound = (() => {
                                               // band stands more than GLOW_FREE stops above the sky
   const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
                                        // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
+  const MOON_OPEN = 14.8, MOON_LIT = -16;   // under the moon the eye opens up at most to MOON_OPEN when a white surface
+                                       // facing it, in its light at the eye, is at MOON_LIT, NIGHT_RATE more per stop dimmer
   const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // in sunlight the eye opens up at most DAY_OPEN[0] stops past the exposure
                                        // that shows a white surface facing the sun, in the sun's light at the eye, at
                                        // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
@@ -7492,6 +7494,21 @@ const SkySound = (() => {
     const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
     return WHITE + open - sunlitLevel(state.alt, state.elev);
   }
+  // The night's eye (see MOON_OPEN): the most the exposure may be, from the
+  // moon's light where the eye is now: the eye under a moon is adapted to
+  // the moonlit world round it, wherever it looks, as the day's eye is to
+  // the sun's (dayEye). Without it a view turned up to a black sky with
+  // stars opened up some 2.5 stops (from 40 km, a full moon high), and
+  // the moonlit Earth along the foot of the frame came out bright. The
+  // moon's light at the eye (moonI, its phase and the air, sunThrough along
+  // it) falls through moonrise and moonset to nothing, and the limit rises
+  // with it out of the way: no step. Under a crescent or no moon it lies
+  // far above the exposure, which opens for the stars.
+  function moonEye() {
+    if (state.moonI <= 0) return Infinity;
+    const lit = Math.log2(state.moonI) + sunlitLevel(state.alt, Math.asin(state.moon[1]) / RAD);
+    return Number.isFinite(lit) ? MOON_OPEN - NIGHT_RATE * (lit - MOON_LIT) : Infinity;
+  }
   function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     // By day the key holds the exposure down no further than to show at
@@ -7585,7 +7602,7 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return Math.min(E, dayEye());
+    return Math.min(E, dayEye(), moonEye());
   }
 
   // ---------- Drawing ----------

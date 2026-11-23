@@ -2792,7 +2792,38 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   The limit bounds the exposure of the sun as it is, not the envelope of
   the sun higher (above): there, at 0.8 stops for each stop that the air
   darkens, it held deep twilight and the night down by up to 6 stops at
-  40 km.
+  40 km;
+- and under a moon the eye opens up no further than the moon's light at
+  the eye lets it (`moonEye`, beside `dayEye`): the exposure is at most
+  `MOON_OPEN` = 14.8 when a white surface facing the moon, in its light
+  at the eye (`moonI`, from its phase, times the same `sunThrough` along
+  the moon's direction), stands at `MOON_LIT` = -16 (a full moon high,
+  from cruise), and `NIGHT_RATE` = 0.5 stops more for each stop that it is
+  dimmer. The eye under a moon is adapted to the moonlit world round it,
+  wherever it looks. Without it a view turned up to the black sky opened
+  up as the stars filled the frame: from 40 km under a moon of 13 days,
+  1.7 stops between the level view and one raised 20 degrees, and the
+  moonlit Earth along the foot of the frame came out a bright blue-white
+  (its luma 2.9 times the level view's, and 4.3 times with the night's key
+  below, which went out as the exposure rose); now 1.0. Looking down at
+  the dark sea from 0.3 km it held the exposure 0.9 stops lower too. The
+  level views it leaves within 0.1 stops: they meter about there. With
+  the moon lower or dimmer the limit rises, by half a stop for each stop,
+  as the night limit does; under a half moon it is some 1.8 stops higher
+  and holds only the views up from 11 and 40 km and down to the sea from
+  0.3 km, by up to a stop;
+  under a crescent or no moon it lies far above the exposure, which opens
+  for the stars as before. As the moon sets its light at the eye fades
+  through the long path of air and then the planet hides it: the limit
+  rises smoothly out of the way, long before the moon's own light on the
+  clouds is gone (from 11 km under a moon of 13 days: 15.25 with the moon
+  22 degrees up, 15.58 at 5, 16.18 at 0, and the meter's own 16.65 at 1
+  degree down; at most 0.47 stops between stills 1.3 degrees of the moon
+  apart, where the meter alone moved 0.27). Under a full moon the stars thin out with it: in a view
+  up from 11 km (the frame about 11 % of the sky) 46 stars stand 12 levels
+  over their surroundings at 1280x720, down to about magnitude 3.8, where
+  the eye sees to about 4 under a full moon; before, 414, past magnitude 5,
+  as on a moonless night.
 
 `exposureFor` returns the exposure.
 
@@ -2829,10 +2860,8 @@ drawn at the eye's thresholds, and dimmed with the rest they fade: with
 the dimming going out by 18 instead of 17.5 (0.1 stops left at a moonless
 night's 17.6), the Milky Way in a view up from cruise went from 15 to 12
 of luma at its median. For the eye the dimming would grow on into the
-dark; the stars are why it does not. Under a full moon the stars 12
-levels over their surroundings went from 279 to 180 in a view up from
-cruise: about magnitude 4.5, where the eye sees down to about 4 under a
-bright sky.
+dark; the stars are why it does not. Under a full moon the stars are
+thinned by the moon's limit above, not by the key.
 
 The dimming follows the adaptation, not the moon: late twilight with the
 same light is dimmed the same. From 11 km away from the sun on a moonless
