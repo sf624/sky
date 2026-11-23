@@ -703,7 +703,14 @@ void main() {
     // 0 to 1); where two lobes meet, a sharp cleft.
     vec3 p = vec3((gl_FragCoord.x - uTower.y) / uSize, uZ - 3.0, uv.y);
     float d = -1.0;
-    for (int i = 0; i < int(uTower.x); i++) d = max(d, uLobes[i].w - length(p - uLobes[i].xyz));
+    // (A lobe whose middle is in the lowest tenth of the box goes straight down from its middle: the tower's foot
+    // is as wide at the base as just over it. As balls, the lowest lobes drew in under their middles, and the tower
+    // stood on a torn, narrower edge.)
+    for (int i = 0; i < int(uTower.x); i++) {
+      vec3 r = p - uLobes[i].xyz;
+      if (uLobes[i].y < 0.1) r.y = max(r.y, 0.0);
+      d = max(d, uLobes[i].w - length(r));
+    }
     outColor = vec4((d + 0.25) / 0.32);
     return;
   }
@@ -2313,7 +2320,7 @@ float overBase = 0.0, heapUp = 0.0, formAt = 0.0, veil = 0.0, knob = 0.5;
 vec3 swirl = vec3(0.0);
 // A heap (cloudShape): how far inside its dome the place is, km (negative outside); how much of the layer there is such heaps;
 // how far its heads of 1 km to 125 m move its surface out, km; and how much the smallest of them lets finer ones do.
-float heapKm = -9.0, heapMix = 0.0, heapHeads = 0.0, heapGate = 1.0, heapIn = 0.0, heapSmall = 1.0, sheetF = -9.0;
+float heapKm = -9.0, heapMix = 0.0, heapHeads = 0.0, heapGate = 1.0, heapIn = 0.0, heapSmall = 1.0, heapOut = 0.28, sheetF = -9.0;
 bool heapAll = false;
 
 // The field at p without the fine noise. lod: how much to smooth, as a mip
@@ -2375,9 +2382,15 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 const float TW_CELL = 8.0, TW_BOX = 4.2, TW_N = 6.0;
 const vec2 TW_RISE = vec2(0.12, 0.4);
 const float TW_TOP = 0.7;           // the top of every model, of its box (a model may be wider than high)
-const float TW_SEAM = 0.24;         // twice how deep the seams of the large heads go into a tower, km
+const float TW_SEAM = 0.16;         // twice how deep the seams of the large heads go into a tower, km
 // (The model has a tower's forms of a km and of half a km: the heads of those sizes move its surface less, or not.)
-const vec4 TW_HEAD = vec4(0.0, 0.25, 0.4, 0.5);
+const vec4 TW_HEAD = vec4(0.0, 0.2, 0.6, 0.8);
+// On a tower: how far heads may stand out of it, km (CF_OUT on a heap: a head that far out of a turret's round side
+// was cut loose by the finer ones, a crumb beside the outline), and the size of its heads of 285 m and less.
+const float TW_OUT = 0.13, TW_SMALL = 0.4;
+// Heaps gather round a tower's foot: within TW_FOOT.x km of its middle the discs' thresholds are lower by
+// TW_FOOT.z, less and less out to TW_FOOT.y km (inside the tower's cell), and no lane is clear there.
+const vec3 TW_FOOT = vec3(1.4, 3.1, 0.14);
 // A layer of cloud at x (km on the weather map): the level of its bases
 // (km), its depth (km), its amount (0 to 1: how much of the base shape is
 // kept; over CF_CLOSE the cover closes) and its form (0: a sheet of cells,
@@ -2466,6 +2479,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   formAt = 0.0;
   heapHeads = 0.0;
   heapIn = 0.0;
+  heapOut = CF_OUT;
   heapSmall = 1.0;
   y = (h - CB) / (CT - CB);
   if (y <= 0.0 || y >= 1.0) return -9.0;
@@ -2510,7 +2524,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // and leaning as the heaps do. towerKm: how far inside its surface the place is, km; outside the model's bounds
   // (a cylinder about its box, up to its top), no nearer than that. It grows out of the layer from its top down as
   // the air rises more and as the layer lets it (drop).
-  float towerKm = -9.0, towerTop = -9.0;
+  float towerKm = -9.0, towerTop = -9.0, towerFoot = 0.0;
   if (a.tower > 0.0 && heapMix > 0.0) {
     vec2 cell = floor(x / TW_CELL), cw = cell - (WEATHER_KM / TW_CELL) * floor(cell * (TW_CELL / WEATHER_KM));
     uint h1 = ihash(uint(cw.x) + 64u * uint(cw.y) + 0x3c6ef372u);
@@ -2525,6 +2539,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       if (grow > 0.0) {
         float ht = mix(2.6, 3.7, r1.z), side = ht / TW_TOP;
         towerTop = ht * grow;
+        towerFoot = grow * (1.0 - smoothstep(TW_FOOT.x, TW_FOOT.y, length(x - c)));
         vec2 dx = x - CF_LEAN * overBase - c;
         float outside = max(length(dx) - 0.5 * side, overBase - towerTop - CF_OUT);
 #ifdef TOPS_MAP
@@ -2650,7 +2665,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // sets how much of a cell is disc: the weather map gathers the heaps and clears lanes between them.
     // (Never smoother than that by much: read from afar or for the depth maps, the discs would melt away.)
     vec4 c = textureLod(uNoise, vec3(q.x, off.y + 0.11, q.z), clamp(lod, 1.5, 2.5));
-    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane;
+    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0) - TW_FOOT.z * towerFoot, CF_DISC_MIN) + CF_LANE * a.lane * (1.0 - towerFoot);
     const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
     // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
     // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
@@ -2677,6 +2692,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float tw = smoothstep(-0.15, 0.15, towerKm - near.x + sink);
     vec4 hd = CF_HEAD * mix(vec4(1.0), TW_HEAD, tw);
     near = vec2(max(near.x, towerKm + sink), mix(near.y, TW_SEAM, tw));
+    heapOut = mix(CF_OUT, TW_OUT, tw);
     heapKm = near.x - sink;
     heapIn = min(CF_OUT, 0.5 * near.y);
     // The heads of 1 km to 125 m, in 3D, where they may reach the surface.
@@ -2688,7 +2704,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     if (heapKm > -CF_OUT && heapKm < heapIn + CF_OUT && lod < 3.5) {
       vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), hd * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
       // (On a low dome the heads are smaller too, by heapSmall: at their full size they cut it to crumbs.)
-      heapSmall = clamp(near.y / 0.4, 0.25, 1.0);
+      heapSmall = mix(clamp(near.y / 0.4, 0.25, 1.0), TW_SMALL, tw);
       heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y;
     }
     sheetF = f;
@@ -2785,7 +2801,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
       // (The base is level but not smooth: the heads' seams reach up into it by up to CF_RAG, lighter ragged gaps
       // under a large heap; as a plane it was a featureless slab from below. Eased in and out: cut off at CF_RAG,
       // the hollows had flat roofs with hard edges, angular patches from below.)
-      float km = min(heapKm + min(heads, min(CF_OUT, max(overBase, 0.0))), overBase - CF_RAG * (1.0 - exp(-min(heads, 0.0) * min(heads, 0.0) / (CF_RAG * CF_RAG)))) / CF_EDGE;
+      float km = min(heapKm + min(heads, min(heapOut, max(overBase, 0.0))), overBase - CF_RAG * (1.0 - exp(-min(heads, 0.0) * min(heads, 0.0) / (CF_RAG * CF_RAG)))) / CF_EDGE;
       dn = max(dn, km < 0.0 ? 0.8 * km : km);
     }
     // (Where a pixel is wider than that edge, only as sharp as a pixel and
@@ -5662,11 +5678,20 @@ void main() {
     // and flat bright slabs across the clouds a degree below the eye's
     // level.)
     if (i == 0) {
-      float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5;
-      p += d * clamp(-s * dh / (s * s + 9e-4), -min(tBar, 10.0), 10.0);
+      // (From 1 to 1.4 km over that height, on a tower, the place moves less and less, and the ray counts as level
+      // over a wider range of slopes, 0.03 and 0.15 for each km more: a tower's side 2 km over it took the cirrus's
+      // shadow from 10 km behind it just over the eye's level and from 10 km before it just under, and a
+      // razor-straight dark line crossed the tower there at dusk, with a pale cap above it. A tower's edge is hard:
+      // its mean place does not jump.)
+      float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5, lev = 0.03 + 0.15 * max(abs(dh) - 1.0, 0.0);
+      p += d * (1.0 - smoothstep(1.0, 1.4, abs(dh))) * clamp(-s * dh / (s * s + lev * lev), -min(tBar, 10.0), 10.0);
     }
-    vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
-    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
+    float far = raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+    vec3 pc = i == 2 ? glarePc : p + uLight * far;
+    // (On the low clouds the cirrus's shadow is as soft as the sun's disc makes it, 0.0093 of the way to the cirrus:
+    // 1.8 km with the sun 3 degrees high, where 50 m of a tower's height are 1 km of cirrus, and each streak of it
+    // drew a thin level line across the tower.)
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : i == 0 ? max(0.5, 0.0093 * far) : 0.5);
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;
@@ -7200,7 +7225,14 @@ const SkySound = (() => {
       pile(d1 * Math.cos(a), d1 * Math.sin(a), R(0.6, 0.88), w1, 1, R(0.7, 1));
       pile(d2 * Math.cos(a2), d2 * Math.sin(a2), R(0.4, 0.7), w2, 1, R(0.8, 1));
       // (And one lobe that joins their feet: no gap through the tower between them.)
-      balls.push([(d1 * Math.cos(a) + d2 * Math.cos(a2)) / 3, 0.6 * w0, (d1 * Math.sin(a) + d2 * Math.sin(a2)) / 3, 1.1 * w0]);
+      const jx = (d1 * Math.cos(a) + d2 * Math.cos(a2)) / 3, jz = (d1 * Math.sin(a) + d2 * Math.sin(a2)) / 3;
+      balls.push([jx, 0.6 * w0, jz, 1.1 * w0]);
+      // A foot wider than the piles: low domes round them, unlike in size and height, so that the tower narrows
+      // upwards from a broad base. (Without it a tower was a column that stood alone on the sea.)
+      for (let i = 0, n = Math.round(R(6, 9)), b = R(0, 6.28); i < n; i++, b += 6.28 / n + R(-0.3, 0.3)) {
+        const r = R(0.4, 0.62) * w0, d = R(0.8, 1.25) * w0;
+        balls.push([jx + d * Math.cos(b), R(0.1, 0.9) * r, jz + d * Math.sin(b), r]);
+      }
       // Into the box: the top at 0.7 (TW_TOP) at most, the widest reach at 0.4 of the middle axis at most.
       let top = 0, reach = 0, cx = 0, cz = 0;
       for (const b of balls) { cx += b[0] / balls.length; cz += b[2] / balls.length; }
