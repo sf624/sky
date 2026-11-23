@@ -2374,7 +2374,7 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 // (the weather map's A about the cell, over TW_RISE.x; whole from TW_RISE.y).
 const float TW_CELL = 8.0, TW_BOX = 4.2, TW_N = 6.0;
 const vec2 TW_RISE = vec2(0.12, 0.4);
-const float TW_TOP = 0.92;          // the top of every model, of its box
+const float TW_TOP = 0.7;           // the top of every model, of its box (a model may be wider than high)
 const float TW_SEAM = 0.24;         // twice how deep the seams of the large heads go into a tower, km
 // (The model has a tower's forms of a km and of half a km: the heads of those sizes move its surface less, or not.)
 const vec4 TW_HEAD = vec4(0.0, 0.25, 0.4, 0.5);
@@ -2520,7 +2520,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       uint h2 = ihash(h1);
       vec4 r1 = vec4(h1 & 255u, (h1 >> 8u) & 255u, (h1 >> 16u) & 255u, h1 >> 24u) / 255.0;
       vec4 r2 = vec4(h2 & 255u, (h2 >> 8u) & 255u, (h2 >> 16u) & 255u, h2 >> 24u) / 255.0;
-      vec2 c = (cell + 0.5 + 0.36 * (r1.xy - 0.5)) * TW_CELL;
+      vec2 c = (cell + 0.5 + 0.2 * (r1.xy - 0.5)) * TW_CELL;
       float grow = a.tower * smoothstep(TW_RISE.x, TW_RISE.y, textureLod(uWeather, c / WEATHER_KM, 4.0).a + 0.12 * (r2.x - 0.5));
       if (grow > 0.0) {
         float ht = mix(2.6, 3.7, r1.z), side = ht / TW_TOP;
@@ -7159,8 +7159,8 @@ const SkySound = (() => {
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
   const TOWER = 64, TOWERS = 6;        // the towers' models: the side of one's box in texels, and how many (TW_N in fs)
   // The towers' models (towering cumulus), each a list of lobes for the noise shader (x, y, z, radius, of the box's
-  // side; y up from the base, the top at TW_TOP of fs): a pile of lobes about as wide as a third of its height, and
-  // a lower one beside it (young turrets beside and on older ones). Within 0.38 of the box's middle axis: the heads
+  // side; y up from the base, the top at TW_TOP of fs): a pile of lobes about half as wide as high, and
+  // a lower one beside it (young turrets beside and on older ones). Within 0.4 of the box's middle axis: the heads
   // stand out farther.
   function towerLobes() {
     const models = [];
@@ -7194,18 +7194,18 @@ const SkySound = (() => {
       // Three piles side by side, of unlike heights, each narrower towards its top: the tower, and two shoulders
       // that reach well up its sides. (With low shoulders and a top as wide as its foot, a tower seen from afar was a
       // stalk with a head.)
-      const w0 = R(0.18, 0.23), a = R(0, 6.28), a2 = a + R(1.8, 4.4), w1 = R(0.75, 0.95) * w0, w2 = R(0.6, 0.85) * w0;
+      const w0 = R(0.24, 0.3), a = R(0, 6.28), a2 = a + R(1.8, 4.4), w1 = R(0.75, 0.95) * w0, w2 = R(0.6, 0.85) * w0;
       const d1 = 0.45 * (w0 + w1), d2 = 0.45 * (w0 + w2);
       pile(0, 0, 1, w0, R(0.85, 1.05), R(0.7, 1));
       pile(d1 * Math.cos(a), d1 * Math.sin(a), R(0.6, 0.88), w1, 1, R(0.7, 1));
       pile(d2 * Math.cos(a2), d2 * Math.sin(a2), R(0.4, 0.7), w2, 1, R(0.8, 1));
       // (And one lobe that joins their feet: no gap through the tower between them.)
       balls.push([(d1 * Math.cos(a) + d2 * Math.cos(a2)) / 3, 0.6 * w0, (d1 * Math.sin(a) + d2 * Math.sin(a2)) / 3, 1.1 * w0]);
-      // Into the box: the top at 0.92 (TW_TOP) at most, the widest reach at 0.4 of the middle axis at most.
+      // Into the box: the top at 0.7 (TW_TOP) at most, the widest reach at 0.4 of the middle axis at most.
       let top = 0, reach = 0, cx = 0, cz = 0;
       for (const b of balls) { cx += b[0] / balls.length; cz += b[2] / balls.length; }
       for (const b of balls) { top = Math.max(top, b[1] + b[3]); reach = Math.max(reach, Math.hypot(b[0] - cx, b[2] - cz) + b[3]); }
-      const k = Math.min(0.92 / top, 0.4 / reach), l = new Float32Array(4 * 128);
+      const k = Math.min(0.7 / top, 0.4 / reach), l = new Float32Array(4 * 128);
       // (A wide one is lower than its box. One of too many lobes is drawn again.)
       if (balls.length > 128) continue;
       balls.forEach((b, i) => l.set([0.5 + k * (b[0] - cx), k * b[1], 0.5 + k * (b[2] - cz), k * b[3]], 4 * i));
