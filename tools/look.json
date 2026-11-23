@@ -265,7 +265,7 @@
       1,
       1
      ],
-     "min": 0.3
+     "min": 0.6
     },
     {
      "measure": "stars",
@@ -275,12 +275,11 @@
       1,
       1
      ],
-     "max": 1.2
+     "max": 2.5
     }
    ],
-   "bad": "e42d5dd",
-   "fixed": "4fc0fc0",
-   "note": "Stars 12 levels over their surroundings, per 10 000 px (the frame is about 11 % of the sky): 0.3 to 1.2 is some 28 to 110 stars, down to magnitude 3.3 to 4.6; the eye sees to about 4 under a full moon. f605245: p50 18.8, stars 4.49 (414, past magnitude 5); e42d5dd: 14.9, 2.87 (264); the fix (the moon's light at the eye caps the exposure): 6.1, 0.50 (46, about magnitude 3.8)."
+   "bad": "c61d584",
+   "note": "Stars 12 levels over their surroundings, per 10 000 px (the frame is about 11 % of the sky). f605245: p50 18.8, stars 4.49 (a moonless night's); e42d5dd: 14.9, 2.87; c61d584 (the moon's limit alone): 6.1, 0.50; the fix (the stars by the light round them): 6.9, 1.29."
   },
   {
    "name": "night-new-moon-up-11km",
@@ -352,6 +351,96 @@
    "bad": "e42d5dd",
    "fixed": "4fc0fc0",
    "note": "The Earth's band just below the horizon (looking up, at the foot of the frame) over the same band in the level view. f605245: 2.86 (the meter opened 1.8 stops for the black sky); e42d5dd: 4.26 (and the night's key went out with it); the fix: 1.00."
+  },
+  {
+   "name": "night-moon-stars-0.3km",
+   "q": "date=327&time=24&clock=solar&lat=35&lon=135&alt=0.3&at=6.208,5.287&yaw=-46.78&pitch=30&heading=49.58&cloud=0&cirrus=0.4&haze=1&wind=6&moon=13&quality=high",
+   "reported": "2026-11-24",
+   "wrong": "under a full moon, looking up: the stars of a dark sky gone (the moon's limit, c61d584) or a moonless night's under a moonlit sky (main)",
+   "measures": [
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "min": 0.9
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "max": 2.0
+    }
+   ],
+   "bad": "c61d584",
+   "note": "Stars 12 levels over their surroundings per 10 000 px, in the sky above some 33 degrees of the frame. main 3dd244b: 1.21 (to magnitude 3.75 in the sweep at 480x270), c61d584: 0.65 (3.0); the fix: 1.28 (4.25). The target, an estimate within half a magnitude: about 4.5. main is within it here: the moonlit sky near the sea held its exposure down already."
+  },
+  {
+   "name": "night-moon-stars-11km",
+   "q": "date=327&time=24&clock=solar&lat=35&lon=135&alt=11&at=6.208,5.287&yaw=-46.78&pitch=30&heading=49.58&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=13&quality=high",
+   "reported": "2026-11-24",
+   "wrong": "under a full moon, looking up: the stars of a dark sky gone (the moon's limit, c61d584) or a moonless night's under a moonlit sky (main)",
+   "measures": [
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "min": 1.55
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "max": 3.0
+    }
+   ],
+   "bad": "c61d584",
+   "note": "Stars 12 levels over their surroundings per 10 000 px, in the sky above some 33 degrees of the frame. main 3dd244b: 4.70 (to 5.25), c61d584: 1.37 (4.25); the fix: 1.91 (4.5). Target about 5."
+  },
+  {
+   "name": "night-moon-stars-40km",
+   "q": "date=327&time=24&clock=solar&lat=35&lon=135&alt=40&at=6.208,5.287&yaw=-46.78&pitch=30&heading=49.58&cloud=0.5&cirrus=0.4&haze=1&wind=6&moon=13&quality=high",
+   "reported": "2026-11-24",
+   "wrong": "under a full moon, looking up: the stars of a dark sky gone (the moon's limit, c61d584) or a moonless night's under a moonlit sky (main)",
+   "measures": [
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "min": 2.8
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      0.45
+     ],
+     "max": 6.5
+    }
+   ],
+   "bad": "c61d584",
+   "note": "Stars 12 levels over their surroundings per 10 000 px, in the sky above some 33 degrees of the frame. main 3dd244b: 13.6 (to 6.75, as on a moonless night), c61d584: 1.98 (4.75); the fix: 3.91 (5.5). Target about 5.5; the Milky Way faint."
   },
   {
    "name": "sky-40km-day",

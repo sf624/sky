@@ -139,3 +139,20 @@ test('sheet: rows of scaled pictures with labels', () => {
   assert.equal(s.w, 2 * 32 + 3 * 2);
   assert.equal(s.h, 2 + 18 + 16 + 2);
 });
+
+test('stars: points 12 levels or more over their surroundings, per 10 000 px', () => {
+  const pts = [[10, 10, 60], [40, 20, 30], [70, 30, 8], [100, 40, 40]];   // x, y, levels over a sky of 5
+  const img = pic(200, 50, (x, y) => 5 + (pts.find((p) => p[0] === x && p[1] === y) || [0, 0, 0])[2]);
+  assert.ok(Math.abs(M.stars(img) - 3 / (200 * 50) * 1e4) < 1e-9);          // the one 8 levels over is not seen
+  assert.ok(Math.abs(M.stars(img, { t: 5 }) - 4 / (200 * 50) * 1e4) < 1e-9);
+});
+
+test('judge: a measure against another entry\'s still is their ratio', () => {
+  const a = pic(20, 20, () => 40), b = pic(20, 20, () => 20);
+  const e = { name: 'up', measures: [{ measure: 'lumaPct', against: 'level', max: 1.5 }] };
+  const r = judge(e, a, (n) => (assert.equal(n, 'level'), b));
+  assert.equal(r.status, 'FAIL');
+  assert.ok(Math.abs(r.values[0].value - 2) < 1e-9);
+  const reg = { entries: [e, { name: 'level', measures: [] }, { name: 'other', measures: [] }] };
+  assert.deepEqual(pick(reg, { only: 'up' }).map((x) => x.name), ['up', 'level']);
+});
