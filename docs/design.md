@@ -2566,8 +2566,59 @@ all dimmed and reddened by the air:
   the true radiance at every size). The air dims a star by its own
   transmission, the light of the sky lies over it, and the exposure and
   the night's tone curve decide which show: on a moonless night from
-  cruise the faintest of the catalogue just show, under a moon and in
-  twilight fewer, the brightest first. Their colour is their own; at night
+  cruise the faintest of the catalogue just show, in twilight fewer, the
+  brightest first.
+- **Stars under a moon.** There the exposure alone is not enough. The
+  eye sees the dim moonlit Earth and the stars at once; a screen has one
+  exposure, and at the moonlit world's (the moon's limit, `moonEye`, and
+  the night's key) the stars of the dark sky above 20 km were all but gone
+  (from 40 km, stars to magnitude 4.75, where the eye sees to about 5.5),
+  while at the exposure of the sky alone a moonless night's stars showed
+  under a bright moonlit sky (main: to 6.75 from 40 km, past 5.5 from 11
+  km). So under a moon each star is shown by what the eye sees of it
+  against the light round it:
+  - the background `cd` (cd/m2): the light of the sky behind it (the
+    air's so far, the airglow, the Milky Way and the zodiacal light, as
+    drawn) and the moon's glare in the eye, `uMoonLux` times the CIE's
+    function (`glareShape`, the sun's glare too) at its angle from the
+    moon, fading out from 25 to 45 degrees (`MOON_VEIL`: the function is
+    for a light in a lit field, and the eye's limit far from the moon is
+    the sky's);
+  - the faintest star seen, `mLim`: Crumey's (2014) fit to the
+    thresholds for a sky of that brightness (`sb`, mag/arcsec2): the
+    largest of 0.27 sb + 0.8, 0.383 sb - 1.44 and 0.426 sb - 2.365, less
+    2.5 log F with F = 2 (0.753), less `STAR_LOSS` = 0.4 for the eye
+    adapted to the moonlit world, not to the dark sky;
+  - the star then shows as a star of the moonless night's scale that much
+    fainter (`shift` = 6.5 - `mLim`), at the exposure of a moonless night
+    from cruise (`STAR_EXPO` = 17.4, `uStarLift` = 2 to the stops it lies
+    above the shown exposure), and fades out over the last `STAR_FADE` =
+    0.25 magnitudes above the limit. The Milky Way and the zodiacal cone,
+    extended and seen by the same contrast, are shown at that exposure
+    too, dimmed by the same shift (in their true ratio, 0.921 per
+    magnitude).
+  How far this applies is `uStarMoon` (`starMoonFor`): from none where
+  the moon's light at the eye is the moonless sky's (`NIGHT_LUX` = 0.002
+  lux) to all of it `STAR_MOON` = 3 stops above, and only where its light
+  in the air is more than the twilight's (`moonOverSun`, as `moonAirFor`
+  reads it). So a moonless night and the twilight are drawn as before, bit
+  for bit, and a quarter moon or more in full. It hangs on the light at
+  the eye and the sky behind each star, not on where the view points.
+  Measured on stills (480x270, the faintest 0.25-magnitude bin in which at
+  least half the stars stand 12 levels over the ring round them), the
+  limits come near the estimates (Crumey's fit for the page's moonlit
+  sky, Baker's naked-eye observations via Reeves et al., 2018, the glare
+  from CIE 146:2002; each within about half a magnitude; no count by an
+  eyewitness under a full moon from high altitude was found). Under a
+  moon of 13 days, looking up and away from it, the faintest stars shown
+  are about magnitude 4.25 from 0.3 km (the estimate about 4.5), 4.5 to
+  4.75 from 11 km (about 5) and 5.25 to 5.5 from 40 km (about 5.5), and
+  4.5 to 5 within 30 degrees of the moon (at best about 5.2). Before, held
+  at the moon's limit: 3.75, 4.25 and 4.75; at the exposure of the view
+  alone (before the limit): 4.0 to 4.25, 5.25 to 5.75 and 6.75. Under a
+  half moon 5 to 5.5. At 40 km the Milky Way shows faintly away from the
+  moon; from 0.3 km it does not. A moonless night is as before, bit for
+  bit (30 stills at 0.3, 11 and 40 km). Their colour is their own; at night
   the rods' grey takes it from all but the brightest, by their luminance
   ([Exposure and the tone curve](#exposure-and-the-tone-curve)). Before,
   the stars at night were drawn after the exposure as the eye's threshold
@@ -2914,11 +2965,9 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   clouds is gone (from 11 km under a moon of 13 days: 15.25 with the moon
   22 degrees up, 15.58 at 5, 16.18 at 0, and the meter's own 16.65 at 1
   degree down; at most 0.47 stops between stills 1.3 degrees of the moon
-  apart, where the meter alone moved 0.27). Under a full moon the stars thin out with it: in a view
-  up from 11 km (the frame about 11 % of the sky) 46 stars stand 12 levels
-  over their surroundings at 1280x720, down to about magnitude 3.8, where
-  the eye sees to about 4 under a full moon; before, 414, past magnitude 5,
-  as on a moonless night.
+  apart, where the meter alone moved 0.27). The stars under a moon are not left to this limit alone (see [Sun, moon,
+  stars](#sun-moon-stars)): held at it, the stars of the dark sky above 20
+  km were all but gone.
 
 `exposureFor` returns the exposure.
 
