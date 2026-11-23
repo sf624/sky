@@ -1,5 +1,5 @@
 {
- "about": "Look invariants: one entry per flaw the owner reported, each a view (q, a still: speed=0 is added) with absolute measures and limits (tools/lib/measures.mjs). Fields: reported (the date), wrong (what was wrong, in one line), measures (each: measure, region [x, y, w, h] as fractions of the picture, its options, and min and/or max), bad and fixed (commits where it was bad and where it was fixed: the proof), expected ('fail': a known open flaw; it is reported as KNOWN, and passing fails the run so that the mark is removed), reference (values measured on other commits, for reading only). The stills are of size (unless --size; the limits hold at this size). A limit changes only on purpose, in a commit that says why.",
+ "about": "Look invariants: one entry per flaw the owner reported, each a view (q, a still: speed=0 is added) with absolute measures and limits (tools/lib/measures.mjs). Fields: reported (the date), wrong (what was wrong, in one line), measures (each: measure, region [x, y, w, h] as fractions of the picture, its options, and min and/or max), bad and fixed (commits where it was bad and where it was fixed: the proof), sweep ({param, values}: one still for each value of that parameter of the page, measured together by the sweep measures), expected ('fail': a known open flaw; it is reported as KNOWN, and passing fails the run so that the mark is removed), reference (values measured on other commits, for reading only). The stills are of size (unless --size; the limits hold at this size). A limit changes only on purpose, in a commit that says why.",
  "size": "1280x720",
  "frames": 46,
  "ms": 50,
@@ -497,6 +497,71 @@
     }
    },
    "note": "The darkest quarter of the sky's part of the frame: heavy dark masses pull it down. Limit: 0.9 times the value of c551f8a."
+  },
+  {
+   "name": "slider-heaps-to-sheet-11km-down",
+   "q": "date=172&time=15.5&cirrus=0&alt=11&yaw=0&pitch=-90",
+   "sweep": {
+    "param": "cloud",
+    "values": [
+     0.5,
+     0.55,
+     0.6,
+     0.65,
+     0.7,
+     0.75,
+     0.8
+    ]
+   },
+   "reported": "2026-11-23",
+   "wrong": "between cloud 0.6 and 0.7 the field jumped from scattered cumulus to broad sheets, with flat pale plates like floes at 0.65; the cover straight down from 11 km fell from 0.55 to 0.625, then rose by 0.35 within 0.05 of the slider",
+   "measures": [
+    {
+     "measure": "coverRise",
+     "max": 0.15
+    },
+    {
+     "measure": "coverFall",
+     "max": 0.01
+    }
+   ],
+   "bad": "f28451b",
+   "reference": {
+    "f28451b": {
+     "coverRise": 0.279,
+     "coverFall": 0.014
+    },
+    "main f605245": {
+     "coverRise": 0.11,
+     "coverFall": 0
+    }
+   },
+   "note": "The cover straight down from 11 km at the slider's steps of 0.05: the largest rise between neighbours, and the largest fall. Main rises by 0.110 at most."
+  },
+  {
+   "name": "no-floes-11km-0.65",
+   "q": "date=172&time=15.5&cirrus=0.3&alt=11&yaw=0&pitch=-20&cloud=0.65",
+   "reported": "2026-11-23",
+   "wrong": "flat pale plates with straight edges, like floes, among the heaps at cloud 0.65 (the closing floor and the veil under a sheet whose shape was held back)",
+   "measures": [
+    {
+     "measure": "flatPlate",
+     "region": [
+      0,
+      0.5,
+      1,
+      0.5
+     ],
+     "max": 0.008
+    }
+   ],
+   "bad": "f28451b",
+   "reference": {
+    "f28451b": {
+     "flatPlate": 0.0203
+    }
+   },
+   "note": "The largest smooth bright part of the lower half, as a share of it: 0.020 with the floes, 0.003 without."
   }
  ]
 }

@@ -2442,9 +2442,20 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // stepped outlines.)
   float tTop = pow(min(am * (1.0 + 0.2 * CF_KNOB * a.form), 1.0), 1.0 / k);
   // (Heaps: no higher than their domes and the heads on them.)
-  // They sink into the layer as it turns into a sheet, and where a tower stands: sink, km. (heapMix: 1 where there are
-  // heaps at all; all: nothing but heaps.)
-  float hmax = CF_DOME * a.depth, sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) + 2.0 * a.tower, 1.0), tHeap = (hmax + CF_OUT - sink) / a.depth;
+  // From heaps to a sheet, as the slider goes from 0.5 to 0.8 (turn: 1 from 0.575 to 0.75): the sheet's own shape
+  // comes back as the form falls (keep, below), most of it while the form is still near 1, the last share slowly, over
+  // a form of 0.92 to 0.4 (a slider of 0.575 to 0.7 at a mean region); and the heaps sink into the layer only as that
+  // last share comes, and where a tower stands: sink, km. (A sheet whose shape came back over a form of 1 to 0.6 alone
+  // covered the sea within a slider of 0.05, wherever its cover closed: the cover from 11 km rose by 0.35 there, and
+  // the heaps had sunk before it came. Without turn, at 0.5 and at 0.8, both are as they were: the form there also
+  // follows the region, and from 40 km some places at 0.5 have a form of 0.8.) (heapMix: 1 where there are heaps at
+  // all; all: nothing but heaps.)
+  float turn = smoothstep(0.5, 0.575, uCloud) * (1.0 - smoothstep(0.75, 0.8, uCloud));
+  float keep = max(min(4.0 * a.tower, 1.0), mix(1.0 - smoothstep(0.6, 1.0, a.form),
+                   1.0 - 0.12 * pow(smoothstep(0.4, 0.92, a.form), 2.0) - 0.88 * smoothstep(0.92, 1.0, a.form), turn));
+  float hmax = CF_DOME * a.depth;
+  float sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)) + 2.0 * a.tower, 1.0);
+  float tHeap = (hmax + CF_OUT - sink) / a.depth;
   bool all = a.form >= 1.0 && a.tower <= 0.0;
   heapAll = all;
   heapMix = tHeap > 0.0 ? 1.0 : 0.0;
@@ -2499,8 +2510,8 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float shape = clamp((mix(sn, sm, mix(CF_BIG, 0.55, a.tower)) - CF_LO) / (CF_HI - CF_LO) + CF_SMALL * (n.b - 0.46), 0.0, 1.0);
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
   knob = 1.0 - (0.6 * n.b + 0.4 * n.a);
-  // (The old heaps' shape is left to the towers.)
-  shape *= max(min(4.0 * a.tower, 1.0), 1.0 - smoothstep(0.6, 1.0, a.form));
+  // (The old heaps' shape is left to the towers, and comes back as the sheet forms: keep, above.)
+  shape *= keep;
   // (UNSEEN: at a form of 1 a sheet's terms mix to nothing, so Direct3D's compiler dropped this branch, and every read
   // of the heaps' field read the sheet's too: the first stage of the clouds took a quarter longer.)
   if (a.form < UNSEEN(1.0)) {
@@ -2525,8 +2536,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // towards its sides: a dome of turrets, not a block with a flat top.)
   float prof = 1.0 - pow(max(t / (1.0 + rise) / mix(1.0, 0.55 + 0.45 * smoothstep(0.5, 0.9, sm), a.tower), 0.0), k);
   // (Where the amount is over CF_CLOSE the cover closes: no place is quite
-  // empty.)
-  float closed = smoothstep(CF_CLOSE + 0.1, CF_CLOSE + 0.18, a.amount);
+  // empty. Only where the sheet's shape is (nearly) whole: under a shape held
+  // back, the floor and the veil below were flat pale plates with straight
+  // edges among the heaps, like floes, at a slider of 0.65.)
+  float closed = smoothstep(CF_CLOSE + 0.1, CF_CLOSE + 0.18, a.amount) * smoothstep(0.95, 1.0, keep);
   shape = mix(CF_FLOOR * closed, 1.0, shape);
   // And a veil lies at the base of a closed sheet, which the fine noise
   // does not erode: through the thinnest places between cells one sees
