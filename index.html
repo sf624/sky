@@ -583,6 +583,10 @@ precision highp sampler2D;
 // 3D noise, or the weather map (uZ -1). Everything repeats.
 uniform float uZ;
 uniform float uSize;
+// A tower's model (uZ from 3): its lobes, balls in the model's box (xyz: the middle, y up; w: the radius; in units of the
+// box's side), how many of them, and where its part of the slice starts, in texels.
+uniform vec4 uLobes[128];
+uniform vec2 uTower;
 out vec4 outColor;
 
 // An integer hash: xor-shifts and multiplies, Wellons' lowbias32
@@ -694,6 +698,15 @@ float heads(vec3 p, float cells, float seed) {
 
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
+  if (uZ >= 3.0) {
+    // A tower (uTower in fs): how far inside the nearest of its lobes the place is, of the box's side (-0.25 to 0.07 as
+    // 0 to 1); where two lobes meet, a sharp cleft.
+    vec3 p = vec3((gl_FragCoord.x - uTower.y) / uSize, uZ - 3.0, uv.y);
+    float d = -1.0;
+    for (int i = 0; i < int(uTower.x); i++) d = max(d, uLobes[i].w - length(p - uLobes[i].xyz));
+    outColor = vec4((d + 0.25) / 0.32);
+    return;
+  }
   if (uZ >= 2.0) {
     // The heads of the heaps (uHeads): of 4, 8, 16 and 32 cells per tile (a head is 4 texels wide at least).
     vec3 p = vec3(uv, uZ - 2.0);
@@ -1658,6 +1671,8 @@ uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
 uniform sampler3D uNoise;
 // The heads of heaps, repeating: round heads of 2 km, 1 km, 500 m and 250 m in a tile (R, G, B, A; 0.5 at a head's rim).
 uniform sampler3D uHeads;
+// The towers' models, side by side along x (see cloudShape): how far inside the model's surface a place is.
+uniform sampler3D uTower;
 // Weather map, repeating (see cloudLayer). R: the amount of low cloud, G:
 // its depth, B: gusts on the sea (and the level of the bases), A: where
 // the air rises (towers).
@@ -2203,6 +2218,16 @@ vec2 eyeSphere(vec3 o, vec3 d, float h) {
   return b < 0.0 ? vec2(c / q, q) : vec2(q, c / q);
 }
 
+// An integer hash: Wellons' lowbias32, as in the noise shader.
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
 // ---------- Clouds ----------
 // A shell from CB to CT holds them. A field says where they are: a density
 // (see cloudShape), positive inside a cloud and negative outside.
@@ -2344,6 +2369,15 @@ const float CF_GATE = 0.6;          // how much a head carves in the seams of th
 const float CF_OUT = 0.28;           // how far heads may stand out of a dome at most, km
 const float CF_EDGE = 0.25;         // a heap's density per km inside its surface is 1 over this (times CF_SHARP)
 const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the fine noise's place, in its tiles (low in a cloud)
+// Towers (towering cumulus): one may stand in each cell of TW_CELL km of the weather map (a whole share of it), a model
+// of stacked turrets (uTower, TW_N of them in boxes of 64 texels, TW_BOX km a side at full size), where the air rises
+// (the weather map's A about the cell, over TW_RISE.x; whole from TW_RISE.y).
+const float TW_CELL = 8.0, TW_BOX = 4.2, TW_N = 6.0;
+const vec2 TW_RISE = vec2(0.18, 0.45);
+const float TW_TOP = 0.92;          // the top of every model, of its box
+const float TW_SEAM = 0.24;         // twice how deep the seams of the large heads go into a tower, km
+// (The model has a tower's forms of a km and of half a km: the heads of those sizes move its surface less, or not.)
+const vec4 TW_HEAD = vec4(0.0, 0.25, 0.4, 0.5);
 // A layer of cloud at x (km on the weather map): the level of its bases
 // (km), its depth (km), its amount (0 to 1: how much of the base shape is
 // kept; over CF_CLOSE the cover closes) and its form (0: a sheet of cells,
@@ -2380,9 +2414,9 @@ Layer cloudLayer(vec2 x, float lod) {
   float meso = textureLod(uWeather, xm, 3.5).r - 0.6 * (textureLod(uWeather, xm, 6.5).r - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
   a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
   a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
-  // Towers, where the air rises (A) and the slider lets heaps grow.
-  a.tower = smoothstep(0.75, 0.95, w.a) * smoothstep(0.15, 0.4, uCloud) * a.form;
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), mix(0.6 + 1.2 * w.g * w.g, 2.8 + 1.4 * w.g, a.tower), a.form);
+  // Towers: how far the layer lets them grow where the air rises (see cloudShape), with the slider and among heaps.
+  a.tower = smoothstep(0.15, 0.4, uCloud) * a.form;
+  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form);
   return a;
 }
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
@@ -2462,17 +2496,49 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // all; all: nothing but heaps.)
   float turn = smoothstep(0.5, 0.575, uCloud) * (1.0 - smoothstep(0.75, 0.8, uCloud));
   float hmax = CF_DOME * a.depth;
-  float sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)) + 2.0 * a.tower, 1.0);
+  float sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)), 1.0);
   float tHeap = (hmax + CF_OUT - sink) / a.depth;
-  bool all = a.form >= 1.0 && a.tower <= 0.0;
+  bool all = a.form >= 1.0;
   heapAll = all;
   heapMix = tHeap > 0.0 ? 1.0 : 0.0;
   float tOld = tTop;
   if (heapMix > 0.0) tTop = all ? tHeap : max(tTop, tHeap);
+  // A tower: the model of this cell of the map, turned and sized by the cell's hash, standing on the layer's base
+  // and leaning as the heaps do. towerKm: how far inside its surface the place is, km; outside the model's bounds
+  // (a cylinder about its box, up to its top), no nearer than that. It grows out of the layer from its top down as
+  // the air rises more and as the layer lets it (drop).
+  float towerKm = -9.0, towerTop = -9.0;
+  if (a.tower > 0.0 && heapMix > 0.0) {
+    vec2 cell = floor(x / TW_CELL), cw = cell - (WEATHER_KM / TW_CELL) * floor(cell * (TW_CELL / WEATHER_KM));
+    uint h1 = ihash(uint(cw.x) + 64u * uint(cw.y) + 0x3c6ef372u), h2 = ihash(h1);
+    vec4 r1 = vec4(h1 & 255u, (h1 >> 8u) & 255u, (h1 >> 16u) & 255u, h1 >> 24u) / 255.0;
+    vec4 r2 = vec4(h2 & 255u, (h2 >> 8u) & 255u, (h2 >> 16u) & 255u, h2 >> 24u) / 255.0;
+    vec2 c = (cell + 0.5 + 0.36 * (r1.xy - 0.5)) * TW_CELL;
+    float grow = a.tower * smoothstep(TW_RISE.x, TW_RISE.y, textureLod(uWeather, c / WEATHER_KM, 4.0).a + 0.12 * (r2.x - 0.5));
+    if (grow > 0.0) {
+      float ht = mix(2.6, 3.7, r1.z), side = ht / TW_TOP;
+      towerTop = ht * grow;
+      vec2 dx = x - CF_LEAN * overBase - c;
+      float outside = max(length(dx) - 0.5 * side, overBase - towerTop - CF_OUT);
+#ifdef TOPS_MAP
+      // (The map of the tops: the tower's top, as far out as its box and its lean reach.)
+      towerKm = length(x - c) < 0.5 * side + length(CF_LEAN) * towerTop + CF_OUT + 0.3 ? a.level + towerTop + CF_OUT + 0.05 - h : -9.0;
+#else
+      if (outside < 0.0) {
+        float ang = 6.2832 * r1.w, up = (overBase + ht - towerTop) / side;
+        vec2 e = vec2(cos(ang), sin(ang)), l = vec2(e.x * dx.x - e.y * dx.y, e.y * dx.x + e.x * dx.y) / side + 0.5;
+        float v = min(floor(TW_N * r2.y), TW_N - 1.0);
+        towerKm = (0.32 * textureLod(uTower, vec3((v + clamp(l.x, 0.008, 0.992)) / TW_N, l.y, up), clamp(lod, 0.0, 2.0)).r - 0.25 - max(up - 1.0, 0.0)) * side;
+      } else {
+        towerKm = -outside - 0.3;
+      }
+#endif
+    }
+  }
 #ifdef TOPS_MAP
   // (A margin: the map of the tops reads four places in each texel, and a
-  // tower's depth rises steeply across one.)
-  float topsOld = am > 0.0 && !all ? a.level + a.depth * tOld * (1.0 + 0.7 * CF_RELIEF * (1.0 - a.form)) + 0.03 + 0.06 * a.depth - h : -9.0;
+  // heap's depth rises steeply across one.)
+  float topsOld = max(am > 0.0 && !all ? a.level + a.depth * tOld * (1.0 + 0.7 * CF_RELIEF * (1.0 - a.form)) + 0.03 + 0.06 * a.depth - h : -9.0, towerKm);
   // (Where there are heaps, their own domes say how high: below.)
   if (heapMix <= 0.0) return topsOld;
 #else
@@ -2480,7 +2546,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // (A sheet's top stands higher and lower with its cells, below: by up to
   // 0.7 CF_RELIEF of its height.)
   tTop *= 1.0 + 0.7 * CF_RELIEF * (1.0 - a.form);
-  if (t >= tTop) return -(t - tTop) * a.depth - 0.02;
+  if (t >= tTop && towerKm < -CF_OUT) return max(-(t - tTop) * a.depth - 0.02, towerKm + 0.5 * CF_OUT);
   if (overBase <= -0.1) return base;
 #endif
   float rise = 0.0;
@@ -2503,7 +2569,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float wm = 0.625 * m.g + 0.25 * m.b + 0.125 * m.a, sm = (m.r + 1.0 - wm) / (2.0 - wm), shape = 0.0;
   // (The old heaps' shape is left to the towers, and comes back as the sheet forms: keep, see turn above.)
   float back = smoothstep(0.4, 0.92, a.form);
-  float keep = max(min(4.0 * a.tower, 1.0), mix(1.0 - smoothstep(0.6, 1.0, a.form), 1.0 - 0.12 * back * back - 0.88 * smoothstep(0.92, 1.0, a.form), turn));
+  float keep = mix(1.0 - smoothstep(0.6, 1.0, a.form), 1.0 - 0.12 * back * back - 0.88 * smoothstep(0.92, 1.0, a.form), turn);
 #ifndef TOPS_MAP
   if (!all)
 #else
@@ -2523,7 +2589,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     float sn = (n.r + 1.0 - wn) / (2.0 - wn);
     sm = (m.r + 1.0 - wm) / (2.0 - wm);
     // (And its cells of 1 km by themselves: small heaps between the large.)
-    shape = keep * clamp((mix(sn, sm, mix(CF_BIG, 0.55, a.tower)) - CF_LO) / (CF_HI - CF_LO) + CF_SMALL * (n.b - 0.46), 0.0, 1.0);
+    shape = keep * clamp((mix(sn, sm, CF_BIG) - CF_LO) / (CF_HI - CF_LO) + CF_SMALL * (n.b - 0.46), 0.0, 1.0);
     // (UNSEEN: at a form of 1 a sheet's terms mix to nothing, so Direct3D's compiler dropped this branch, and every read
     // of the heaps' field read the sheet's too: the first stage of the clouds took a quarter longer.)
     if (a.form < UNSEEN(1.0)) {
@@ -2549,7 +2615,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   knob = 1.0 - (0.6 * n.b + 0.4 * n.a);
   // (A tower stands highest over the middle of its large cell and lower
   // towards its sides: a dome of turrets, not a block with a flat top.)
-  float prof = 1.0 - pow(max(t / (1.0 + rise) / mix(1.0, 0.55 + 0.45 * smoothstep(0.5, 0.9, sm), a.tower), 0.0), k);
+  float prof = 1.0 - pow(max(t / (1.0 + rise), 0.0), k);
   // (Where the amount is over CF_CLOSE the cover closes: no place is quite
   // empty. Only where the sheet's shape is (nearly) whole: under a shape held
   // back, the floor and the veil below were flat pale plates with straight
@@ -2597,6 +2663,12 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // (The nearest dome and its height here, picked without indexing: Direct3D compiles an index into a vector as a
     // loop.)
     vec2 near = km.x >= km.y && km.x >= km.z ? vec2(km.x, top.x) : km.y >= km.z ? vec2(km.y, top.y) : vec2(km.z, top.z);
+    // (A tower is a heap of its own shape: its heads are the heaps', at their full size.)
+    // (Its heads go over into the heaps' where a heap's dome stands out of it, within 150 m either way: switched at
+    // the line where the two meet, the heads' sizes jumped there, and the dome ended in a flat face.)
+    float tw = smoothstep(-0.15, 0.15, towerKm - near.x + sink);
+    vec4 hd = CF_HEAD * mix(vec4(1.0), TW_HEAD, tw);
+    near = vec2(max(near.x, towerKm + sink), mix(near.y, TW_SEAM, tw));
     heapKm = near.x - sink;
     heapIn = min(CF_OUT, 0.5 * near.y);
     // The heads of 1 km to 125 m, in 3D, where they may reach the surface.
@@ -2606,7 +2678,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // their floor: clamped all together, that floor was the dome itself, smooth, wherever two large seams met.)
     // (Not from so far that a texel of the read is a head and more: they are smoothed away there, and fade out before.)
     if (heapKm > -CF_OUT && heapKm < heapIn + CF_OUT && lod < 3.5) {
-      vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), CF_HEAD * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
+      vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), hd * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
       // (On a low dome the heads are smaller too, by heapSmall: at their full size they cut it to crumbs.)
       heapSmall = clamp(near.y / 0.4, 0.25, 1.0);
       heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y;
@@ -4124,16 +4196,6 @@ uniform sampler2D uCiMap;
 // unroll a loop that writes an array at an index it cannot know, and
 // cannot unroll one whose bound it cannot know (see the GLSL rules).
 #define CI_N(n) ((n) + int(min(uCirrus, 0.0)))
-
-// An integer hash: Wellons' lowbias32, as in the noise shader.
-uint ihash(uint x) {
-  x ^= x >> 16u;
-  x *= 0x7feb352du;
-  x ^= x >> 15u;
-  x *= 0x846ca68bu;
-  x ^= x >> 16u;
-  return x;
-}
 
 // Gradient noise in 2D (within about -0.7 to 0.7), repeating every `per`
 // cells (whole numbers); the lattice wraps by hand (see the GLSL rules).
@@ -7087,6 +7149,63 @@ const SkySound = (() => {
   // ALT_MAX (see the altitude's control, below).
   const ALT_MIN = 0.3, ALT_LINEAR = 13, ALT_MAX = 40, ALT_STEP = 0.02, ALT_LOG_STEPS = 400;
   const NOISE = 128, WEATHER = 1024;   // sizes of the cloud textures
+  const TOWER = 64, TOWERS = 6;        // the towers' models: the side of one's box in texels, and how many (TW_N in fs)
+  // The towers' models (towering cumulus), each a list of lobes for the noise shader (x, y, z, radius, of the box's
+  // side; y up from the base, the top at TW_TOP of fs): a pile of lobes about as wide as a third of its height, and
+  // a lower one beside it (young turrets beside and on older ones). Within 0.38 of the box's middle axis: the heads
+  // stand out farther.
+  function towerLobes() {
+    const models = [];
+    for (let v = 0, tries = 0; v < TOWERS; tries++) {
+      let seed = 0x2545f491 + tries * 0x9e3779b9 >>> 0;
+      const rnd = () => { seed = Math.imul(seed ^ seed >>> 15, 0x2c1b3c6d) >>> 0; seed = Math.imul(seed ^ seed >>> 12, 0x297a2d39) >>> 0; seed = (seed ^ seed >>> 15) >>> 0; return seed / 4294967296; };
+      const R = (a, b) => a + (b - a) * rnd();
+      const balls = [];
+      // A pile about an axis that bends as it rises (top: its height; w0: its half width at the foot, times `waist`
+      // half-way up and `crown` at the top): lobes along the axis fill it, lobes of a third to a half of its width
+      // stand out of its sides all the way up, in a spiral so that none stands over another, and a few domes of
+      // unlike heights make its top. It swells and narrows a little on the way up (swell).
+      const pile = (x0, z0, top, w0, waist, crown) => {
+        const bend = [R(-0.2, 0.2) * w0, R(-0.2, 0.2) * w0, R(0, 6.28), R(0, 6.28)];
+        const axis = y => [x0 + bend[0] * Math.sin(5 * y + bend[2]), z0 + bend[1] * Math.sin(4 * y + bend[3])];
+        const swell = [R(0.08, 0.2), R(5, 9) / top, R(0, 6.28)];
+        const width = y => { const t = Math.min(y / top, 1); return w0 * (t < 0.5 ? 1 + (waist - 1) * 2 * t : waist + (crown - waist) * (2 * t - 1)) * (1 + swell[0] * Math.sin(swell[1] * y + swell[2])); };
+        const body = top - 0.6 * width(top);
+        for (let y = 0.3 * w0; y < body; y += 0.4 * width(y)) balls.push([axis(y)[0], y, axis(y)[1], 0.74 * width(y)]);
+        const n = Math.round(4.2 * body / w0);
+        for (let i = 0, a = R(0, 6.28); i < n; i++, a += 2.4) {
+          const y = 0.03 + (i + R(0, 1)) / n * (body - 0.03), w = width(y) * R(0.88, 1.12), r = w * R(0.3, 0.52), d = w - r * R(0.25, 0.8), c = axis(y), b = a + R(-0.5, 0.5);
+          balls.push([c[0] + d * Math.cos(b), y, c[1] + d * Math.sin(b), r]);
+        }
+        const w = width(top), c = axis(top), m = Math.round(R(3, 5));
+        for (let i = 0, a = R(0, 6.28); i < m; i++, a += 6.28 / m + R(-0.4, 0.4)) {
+          const r = w * (i ? R(0.42, 0.62) : R(0.6, 0.75)), d = i ? w * R(0.35, 0.6) : w * R(0, 0.2);
+          balls.push([c[0] + d * Math.cos(a), top - r - (i ? R(0.1, 0.8) * w : 0), c[1] + d * Math.sin(a), r]);
+        }
+      };
+      // Three piles side by side, of unlike heights, each narrower towards its top: the tower, and two shoulders
+      // that reach well up its sides. (With low shoulders and a top as wide as its foot, a tower seen from afar was a
+      // stalk with a head.)
+      const w0 = R(0.18, 0.23), a = R(0, 6.28), a2 = a + R(1.8, 4.4), w1 = R(0.75, 0.95) * w0, w2 = R(0.6, 0.85) * w0;
+      const d1 = 0.45 * (w0 + w1), d2 = 0.45 * (w0 + w2);
+      pile(0, 0, 1, w0, R(0.85, 1.05), R(0.7, 1));
+      pile(d1 * Math.cos(a), d1 * Math.sin(a), R(0.6, 0.88), w1, 1, R(0.7, 1));
+      pile(d2 * Math.cos(a2), d2 * Math.sin(a2), R(0.4, 0.7), w2, 1, R(0.8, 1));
+      // (And one lobe that joins their feet: no gap through the tower between them.)
+      balls.push([(d1 * Math.cos(a) + d2 * Math.cos(a2)) / 3, 0.6 * w0, (d1 * Math.sin(a) + d2 * Math.sin(a2)) / 3, 1.1 * w0]);
+      // Into the box: the top at 0.92 (TW_TOP) at most, the widest reach at 0.4 of the middle axis at most.
+      let top = 0, reach = 0, cx = 0, cz = 0;
+      for (const b of balls) { cx += b[0] / balls.length; cz += b[2] / balls.length; }
+      for (const b of balls) { top = Math.max(top, b[1] + b[3]); reach = Math.max(reach, Math.hypot(b[0] - cx, b[2] - cz) + b[3]); }
+      const k = Math.min(0.92 / top, 0.4 / reach), l = new Float32Array(4 * 128);
+      // (A wide one is lower than its box. One of too many lobes is drawn again.)
+      if (balls.length > 128) continue;
+      balls.forEach((b, i) => l.set([0.5 + k * (b[0] - cx), k * b[1], 0.5 + k * (b[2] - cz), k * b[3]], 4 * i));
+      models.push(l.subarray(0, 4 * balls.length));
+      v++;
+    }
+    return models;
+  }
   // The cirrus's ice: texels a side (on a GPU, and on a software renderer),
   // and per draw; the way of its fibres is a quarter as wide.
   const ICE = 4096, ICE_SOFT = 1024, ICE_PIECE = 512;
@@ -8476,6 +8595,12 @@ const SkySound = (() => {
       const heads = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_3D, heads);
       gl.texStorage3D(gl.TEXTURE_3D, Math.log2(n) + 1, gl.RGBA8, n, n, n);
+      // The towers' models on unit 30: TOWERS boxes of TOWER texels a side, side by side along x; a slice is a height.
+      gl.activeTexture(gl.TEXTURE30);
+      const tower = gl.createTexture(), lobes = towerLobes();
+      gl.bindTexture(gl.TEXTURE_3D, tower);
+      gl.texStorage3D(gl.TEXTURE_3D, 3, gl.R8, TOWER * TOWERS, TOWER, TOWER);
+      for (const k of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R]) gl.texParameteri(gl.TEXTURE_3D, k, gl.CLAMP_TO_EDGE);
       gl.activeTexture(gl.TEXTURE3);
       const weather = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, weather);
@@ -8484,6 +8609,7 @@ const SkySound = (() => {
         const draw = noiseProgram;
         gl.useProgram(draw);
         const uZ = gl.getUniformLocation(draw, 'uZ'), uSize = gl.getUniformLocation(draw, 'uSize');
+        const uLobes = gl.getUniformLocation(draw, 'uLobes'), uTower = gl.getUniformLocation(draw, 'uTower');
         const target = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, target);
         gl.viewport(0, 0, n, n);
@@ -8498,6 +8624,20 @@ const SkySound = (() => {
             gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, heads, 0, z);
             gl.uniform1f(uZ, 2 + (z + 0.5) / n);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
+            // (And a slice of each tower.)
+            if (z < TOWER) {
+              gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tower, 0, z);
+              gl.uniform1f(uZ, 3 + (z + 0.5) / TOWER);
+              gl.uniform1f(uSize, TOWER);
+              lobes.forEach((l, v) => {
+                gl.viewport(v * TOWER, 0, TOWER, TOWER);
+                gl.uniform4fv(uLobes, l);
+                gl.uniform2f(uTower, l.length / 4, v * TOWER);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+              });
+              gl.viewport(0, 0, n, n);
+              gl.uniform1f(uSize, n);
+            }
           }]);
         }
         parts.push([0, () => {
@@ -8527,6 +8667,8 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE2);
       smooth(gl.TEXTURE_3D);
       gl.activeTexture(gl.TEXTURE22);
+      smooth(gl.TEXTURE_3D);
+      gl.activeTexture(gl.TEXTURE30);
       smooth(gl.TEXTURE_3D);
       gl.activeTexture(gl.TEXTURE0);
     }
@@ -8582,6 +8724,7 @@ const SkySound = (() => {
     };
     C('uniform1i', 'uNoise', 2);
     C('uniform1i', 'uHeads', 22);
+    C('uniform1i', 'uTower', 30);
     C('uniform1i', 'uWeather', 3);
     C('uniform1i', 'uWaves', 4);
     C('uniform1i', 'uIce', 10);
@@ -8955,6 +9098,7 @@ const SkySound = (() => {
     for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uHeads'), 22);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uTower'), 30);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
     const depthMap = (unit, size, column) => {
       const m = { size, column, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
