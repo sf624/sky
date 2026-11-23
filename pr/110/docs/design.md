@@ -1563,7 +1563,9 @@ weather's layers (issue #84), and are reached with the test parameter
 
 **The drawn forms** (`uIce`, see "The ice" below): heads with tails and
 hooks, feathers, streets, sheets, flocks and large systems, each a column
-of ice, read in two frames 27 degrees apart (`ciTile`), their kinds mixed
+of ice, read as two sets in one direction (`ciTile`: both along the
+layer's shear, the second the mirror image of the first at another place;
+27 degrees apart, as before, the two were a hatch), their kinds mixed
 by the cirrus's map and the slider's floor (`ci2FormIce`). They are the
 cirrus's figures: at small and middle amounts a form is what one sees. A
 column is set in the layer's depth by its age (`uIceWay`, B over A): ice
@@ -1591,8 +1593,9 @@ shows.
 of 25.6 km; R the large sizes, G the small ones, B another field of large
 sizes. It stands for the ice made at the layer's top. Ice that has fallen
 `h` below the top has been displaced by `ci2D(h)`: a first drift across
-the shear that sets in over 0.15 km, a parabola along it (constant shear
-over the fall speed, 5 to 14 per km) and a turn, their strengths from the
+the shear that ends within some 0.5 km (the hook: at most 0.45 km), a
+parabola along it (constant shear over the fall speed, 12 to 24 per km)
+and a slight turn, their strengths from the
 cirrus's map, so they differ from region to region (`ci2Reg`). So the ice
 at `(x, h)` is the field at `x - D(h)`, over a level set by the slider and
 the map, times a profile (made near the top, thinner as it falls, gone by
@@ -1619,6 +1622,25 @@ rises in the lanes, and the thin veil thins there by less (`ci2Veil`).
 The page starts at a band's edge (`CI2_BAND0`). Far off the bands are read
 once a pixel, near the eye at every step. Without bands, much cirrus
 was ice in every direction: from inside the layer a white sky.
+
+**One direction.** Within the layer, at one place, the ice runs one way:
+the shear's. Four things keep to it:
+
+- both sets of forms lie along it (above);
+- the layer's fibres are laid on a form only where its own strands run
+  along it (`ci2Along`, from the R of `uIceWay`); a tail that has turned
+  keeps its own strands;
+- a drawn sheet or street counts by how far the ice round it, over a km,
+  runs along it; and far off the field gives way where a form is
+  (`CI2_YIELD`);
+- the fibres lie level on their sheets, and a fall streak slants down:
+  seen across the shear the two run together, seen along it they part by
+  tens of degrees in the picture. So the fibres fade where the eye looks
+  along the shear (`CI2_ACROSS`, by the view's level part: straight up
+  they stay), and the streaks stand alone there, soft.
+
+Without these, patches of the sky from below were cross-hatched: two
+families of fine streaks at an angle.
 
 **Sheets.** The drawn sheets and streets (the ice's G) come in from 0.25
 of the slider, in one of the two sets of forms (in both, their long
@@ -1732,7 +1754,9 @@ back.
 **What still differs from photographs**: the dense hooked tuft of an
 uncinus is softer than in photographs; at a low sun the lit sweeps high
 up are streakier and some tenth darker than the two decks' were; where the
-sheets' streaks cross the field's, the sky is hatched; inside a band the
+eye looks along the shear the field's streaks are soft, without fibres; a
+form next to the moon shows faint streaks, and some places have a faint
+ring at half of the slider; inside a band the
 sky towards the sun is still white; thick ice does not grey at its core;
 the fine ripples across a sheet are missing; from 40 km the plumes are
 soft.
