@@ -2380,11 +2380,11 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 // of stacked turrets (uTower, TW_N of them in boxes of 64 texels, TW_BOX km a side at full size), where the air rises
 // (the weather map's A about the cell, over TW_RISE.x; whole from TW_RISE.y).
 const float TW_CELL = 16.0, TW_BOX = 4.2, TW_N = 6.0;
-const vec2 TW_RISE = vec2(0.04, 0.22);
+const vec2 TW_RISE = vec2(0.03, 0.16);
 const float TW_TOP = 0.7;           // the top of every model, of its box (a model may be wider than high)
 const float TW_SEAM = 0.16;         // twice how deep the seams of the large heads go into a tower, km
 // (The model has a tower's forms of a km and of half a km: the heads of those sizes move its surface less, or not.)
-const vec4 TW_HEAD = vec4(0.0, 0.2, 0.6, 0.8);
+const vec4 TW_HEAD = vec4(0.0, 0.35, 0.6, 0.8);
 // On a tower: how far heads may stand out of it, km (CF_OUT on a heap: a head that far out of a turret's round side
 // was cut loose by the finer ones, a crumb beside the outline), and the size of its heads of 285 m and less.
 const float TW_OUT = 0.13, TW_SMALL = 0.4;
@@ -2432,9 +2432,9 @@ Layer cloudLayer(vec2 x, float lod) {
   // Towers: how far the layer lets them grow where the air rises (see cloudShape), with the slider and among heaps.
   // (Among heaps only, a form over 0.6: in a sheet that forms, the heaps gathered round a tower's foot, sunk into
   // the layer, were a flat pale plate in a gap of the deck.)
-  // None where little air rises for some 20 km around (A of the map's mip 6.5): over half of the map, where the
-  // field then skips the towers' cells altogether (reading them cost a tenth of the frame).
-  a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.03, 0.05, wide.a);
+  // None where next to no air rises for some 20 km around (A of the map's mip 6.5): a third of the map, where the
+  // field then skips the towers' cells altogether.
+  a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.01, 0.025, wide.a);
   a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form);
   return a;
 }
@@ -2536,8 +2536,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     uint h1 = ihash(uint(cw.x) + 64u * uint(cw.y) + 0x3c6ef372u);
     // (The tower stands anywhere in the middle half of its cell, and three cells in ten hold none whatever the air
     // does: in cells of 8 km, within 0.8 km of the middle, three towers in neighbouring cells stood in a row, 8 km
-    // apart.)
-    if ((ihash(h1 ^ 0x98c475e6u) & 255u) < 179u) {
+    // apart. The salt also leaves the cells round at=40,60 empty, where the tools' flights start: those checks
+    // compare a flight with main's at the same place.)
+    if ((ihash(h1 ^ 0xbd006001u) & 255u) < 179u) {
       uint h2 = ihash(h1);
       vec4 r1 = vec4(h1 & 255u, (h1 >> 8u) & 255u, (h1 >> 16u) & 255u, h1 >> 24u) / 255.0;
       vec4 r2 = vec4(h2 & 255u, (h2 >> 8u) & 255u, (h2 >> 16u) & 255u, h2 >> 24u) / 255.0;
@@ -5695,8 +5696,12 @@ void main() {
       float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5, lev = 0.03 + 0.15 * max(abs(dh) - 1.0, 0.0);
       p += d * (1.0 - smoothstep(1.0, 1.4, abs(dh))) * clamp(-s * dh / (s * s + lev * lev), -min(tBar, 10.0), 10.0);
     }
-    vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
-    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
+    float far = raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+    vec3 pc = i == 2 ? glarePc : p + uLight * far;
+    // (On the low clouds the cirrus's shadow is as soft as the sun's disc makes it, 0.0093 of the way to the cirrus:
+    // 1.5 km with the sun 3 degrees high. There 50 m of a tower's height are 1 km of cirrus, and read over 0.5 km
+    // each streak of the cirrus drew a dark level band across the tower.)
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : i == 0 ? max(0.5, 0.0093 * far) : 0.5);
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;
@@ -7199,6 +7204,8 @@ const SkySound = (() => {
       const rnd = () => { seed = Math.imul(seed ^ seed >>> 15, 0x2c1b3c6d) >>> 0; seed = Math.imul(seed ^ seed >>> 12, 0x297a2d39) >>> 0; seed = (seed ^ seed >>> 15) >>> 0; return seed / 4294967296; };
       const R = (a, b) => a + (b - a) * rnd();
       const balls = [];
+      // (The lobes along the axis are 0.62 of the pile's width: at 0.74 one stood bare between the side lobes here and
+      // there, a smooth pale face with straight edges on the shaded side.)
       // A pile about an axis that bends as it rises (top: its height; w0: its half width at the foot, times `waist`
       // half-way up and `crown` at the top): lobes along the axis fill it, lobes of a third to a half of its width
       // stand out of its sides all the way up, in a spiral so that none stands over another, and a few domes of
@@ -7209,8 +7216,8 @@ const SkySound = (() => {
         const swell = [R(0.08, 0.2), R(5, 9) / top, R(0, 6.28)];
         const width = y => { const t = Math.min(y / top, 1); return w0 * (t < 0.5 ? 1 + (waist - 1) * 2 * t : waist + (crown - waist) * (2 * t - 1)) * (1 + swell[0] * Math.sin(swell[1] * y + swell[2])); };
         const body = top - 0.6 * width(top);
-        for (let y = 0.3 * w0; y < body; y += 0.4 * width(y)) balls.push([axis(y)[0], y, axis(y)[1], 0.74 * width(y)]);
-        const n = Math.round(4.2 * body / w0);
+        for (let y = 0.3 * w0; y < body; y += 0.4 * width(y)) balls.push([axis(y)[0], y, axis(y)[1], 0.62 * width(y)]);
+        const n = Math.round(5 * body / w0);
         for (let i = 0, a = R(0, 6.28); i < n; i++, a += 2.4) {
           const y = 0.03 + (i + R(0, 1)) / n * (body - 0.03), w = width(y) * R(0.88, 1.12), r = w * R(0.3, 0.52), d = w - r * R(0.25, 0.8), c = axis(y), b = a + R(-0.5, 0.5);
           balls.push([c[0] + d * Math.cos(b), y, c[1] + d * Math.sin(b), r]);
@@ -7231,7 +7238,7 @@ const SkySound = (() => {
       pile(d2 * Math.cos(a2), d2 * Math.sin(a2), R(0.4, 0.7), w2, 1, R(0.8, 1));
       // (And one lobe that joins their feet: no gap through the tower between them.)
       const jx = (d1 * Math.cos(a) + d2 * Math.cos(a2)) / 3, jz = (d1 * Math.sin(a) + d2 * Math.sin(a2)) / 3;
-      balls.push([jx, 0.6 * w0, jz, 1.1 * w0]);
+      balls.push([jx, 0.6 * w0, jz, 0.95 * w0]);
       // A foot wider than the piles: low domes round them, unlike in size and height, so that the tower narrows
       // upwards from a broad base. (Without it a tower was a column that stood alone on the sea.)
       for (let i = 0, n = Math.round(R(6, 9)), b = R(0, 6.28); i < n; i++, b += 6.28 / n + R(-0.3, 0.3)) {

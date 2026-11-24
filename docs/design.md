@@ -905,8 +905,8 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     and 0.38 at 0.25 and 0.5, seen so over one place.
   - `tower`: how far the layer lets towers grow (0 to 1): from `uCloud`
     0.15 to 0.4, among heaps only (a form over 0.6 to 0.95), and where
-    some air rises within 20 km (A of the map's mip 6.5 over 0.03 to
-    0.05). Where they stand is the field's own business (Towers, below).
+    some air rises within 20 km (A of the map's mip 6.5 over 0.01 to
+    0.025). Where they stand is the field's own business (Towers, below).
   - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
     before the sun was two lobes one on the other).
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
@@ -1089,16 +1089,19 @@ seen from far above.)
     weather map. The cell's hash gives its place (anywhere in the middle
     half of the cell), its turn and its height (2.1 to 3.7 km); the model
     follows from the cell's place (`(x + 3 z) mod 6`: no two cells that
-    touch hold the same one). Three cells in ten hold none. The others
+    touch hold the same one). Three cells in ten hold none (by a second
+    hash, whose salt also keeps the cells round the place where the tools'
+    flights start, `at=40,60`, empty: those checks compare a flight with
+    main's at the same place). The others
     hold one as far as the air rises at the tower's place (A at mip 4 over
-    `TW_RISE` = 0.04 to 0.22) and the layer lets it (`tower`): it grows
+    `TW_RISE` = 0.03 to 0.16) and the layer lets it (`tower`): it grows
     out of the layer from its top down. (In cells of 8 km with the tower
     within 0.8 km of the middle, towers in neighbouring cells stood in a
     row, 8 km apart.)
   - *In the field*: the tower leans as the heaps do, and its distance
     (`towerKm`) is joined to the nearest dome's by a `max`: so it has the
     heaps' flat base, their density at the surface and their light. Its
-    heads are the heaps' but smaller (`TW_HEAD`: none of 2 km, 0.2, 0.6
+    heads are the heaps' but smaller (`TW_HEAD`: none of 2 km, 0.35, 0.6
     and 0.8 of the next three; `TW_SMALL` = 0.4 of the finer ones), stand
     out 0.13 km at most (`TW_OUT`; at the heaps' 0.28 km they were cut
     loose, crumbs beside the outline), and their seams go in 80 m at most
@@ -2435,7 +2438,11 @@ on the map.
   before it just under, a razor-straight dark line across the tower at
   dusk with a pale cap above; and a tower's edge is hard, so its mean
   place does not jump. It reads the mean
-  of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
+  of the two decks over 0.5 km (`cirrusDepth`), or over what the sun's
+  disc covers if that is more (0.0093 of the way to the cirrus: 1.5 km
+  with the sun 3 degrees high, where 50 m of a tower's height are 1 km of
+  cirrus, and read over 0.5 km each streak of the cirrus drew a dark level
+  band across the tower); so does the glare,
   over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
   `ciGlare`), as each call is a copy for the compiler. These calls leave
   out the hairs and the veil's noise (`ciDensity` with `fibres` false),
