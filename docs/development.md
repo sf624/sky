@@ -669,7 +669,16 @@ The shaders must run on any WebGL2. The code keeps these rules:
   than with the test kept (#113, November 2026). GL kept the branch. Other
   compilers may fold such a test differently too: `UNSEEN` changed no
   picture there, while the same on the test for `all` moved some 150 pixels
-  of a still by up to 17 levels, and was left out.
+  of a still by up to 17 levels, and was left out then. The test for
+  nothing but heaps (`all`, the form at 1) is such a test too. Until #117
+  a term from the weather map stood in it and hid it from the compiler;
+  without that term the sheet's noise was read at every read of the field
+  again, and the frame of the default view took a fifth longer on
+  Direct3D 11 (18.4 against 15.3 ms at 1898 x 982) while GL showed 5 %.
+  With `UNSEEN` it is 15.9 ms, and a few pixels of a still on GL move by
+  up to 4 levels. So measure a change of the field on Direct3D 11 as well
+  (`d3d page --base origin/main`, a few runs in turns): GL does not show
+  what its compiler folds.
 - **Each program small enough for Microsoft's compiler.** ANGLE on
   Direct3D 11 (Chrome and Edge on Windows) gives each program to
   Microsoft's HLSL compiler (FXC), which inlines every call: each call of
