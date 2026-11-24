@@ -259,42 +259,68 @@ function install(cfg, hashBytes) {
     if ([G.R8I, G.RG8I, G.RGBA8I, G.R16I, G.RG16I, G.RGBA16I, G.R32I, G.RG32I, G.RGBA32I].includes(f)) return [G.RGBA_INTEGER, G.INT, Int32Array];
     return null;
   };
-  // Reads back what the frame drew (textures and the canvas) and logs a hash of each. Uses the unwrapped
+  // Takes every error flag off the queue (WebGL keeps one flag per kind, so a failed call can leave several) and
+  // gives the first, or 0. Only for the read-back's own calls: errors of the page are kept before it starts.
+  const drain = (gl) => {
+    let first = 0;
+    for (let e; (e = O.getError.call(gl));) first = first || e;
+    return first;
+  };
+  const failed = (gl, key, why) => {
+    T.errors.push(`readback ${key}: ${why}`);
+    rec(gl.canvas, `readback ${key} ${why}`);
+  };
+  // Reads back textures drawn into ([key, entry] pairs of s.dirty) and logs a hash of each. Uses the unwrapped
   // functions, its own framebuffer, and restores the read binding, so the page's state is left as it was. GL
   // errors already pending are kept for the page's own getError (see below), not consumed.
+  const readTextures = (gl, entries) => {
+    const s = st(gl);
+    for (let e; (e = O.getError.call(gl));) s.errors.push(e);
+    if (!s.fbo) s.fbo = O.createFramebuffer.call(gl);
+    O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.fbo);
+    O.readBuffer.call(gl, gl.COLOR_ATTACHMENT0);
+    for (const [key, d] of entries) {
+      const info = s.tex.get(d.tex), how = info && readAs(info.fmt);
+      if (!info) { failed(gl, key, 'of unknown size'); continue; }
+      if (!how) { failed(gl, key, `in a format the trace cannot read (${ENUM[info.fmt] || info.fmt})`); continue; }
+      const w = Math.max(1, info.w >> d.level), h = Math.max(1, info.h >> d.level);
+      const parts = [];
+      let why = '';
+      for (const layer of [...d.layers].sort((x, y) => x - y)) {
+        if (layer === null) O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, d.tex, d.level);
+        else O.framebufferTextureLayer.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, d.tex, d.level, layer);
+        const e = drain(gl), status = O.checkFramebufferStatus.call(gl, gl.READ_FRAMEBUFFER);
+        if (e || status !== gl.FRAMEBUFFER_COMPLETE) { why = `cannot be attached (${e ? ENUM[e] || e : ENUM[status] || status})`; break; }
+        const buf = new how[2](w * h * 4);
+        O.readPixels.call(gl, 0, 0, w, h, how[0], how[1], buf);
+        const r = drain(gl);
+        if (r) { why = `readPixels failed (${ENUM[r] || r})`; break; }
+        parts.push(digest(bytes(buf)));
+      }
+      O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      drain(gl);
+      const layers = d.layers.has(null) ? '' : ` layers ${d.layers.size}`;
+      if (why) { failed(gl, key, `${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers}: ${why}`); continue; }
+      const hash = Promise.all(parts).then((p) => (p.length === 1 ? p[0] : textHash(p.join(''))));
+      rec(gl.canvas, `readback ${key} ${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers} = #`, hash);
+    }
+    O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.readFb);
+  };
+  // A texture that the page deletes before the frame ends (a probe, a target of one pass) is read back just
+  // before its deletion: after it, it can no longer be attached, and what was drawn into it is gone.
+  const readBeforeDelete = (gl, tex) => {
+    const s = st(gl);
+    const entries = [...s.dirty].filter(([, d]) => d.tex === tex).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+    if (!entries.length) return;
+    for (const [key] of entries) s.dirty.delete(key);
+    readTextures(gl, entries);
+  };
+  // Reads back what the frame drew (textures and the canvas) and logs a hash of each.
   const readBack = (gl) => {
     const s = st(gl);
     for (let e; (e = O.getError.call(gl));) s.errors.push(e);
-    const fail = (key, why) => {
-      T.errors.push(`readback ${key}: ${why}`);
-      rec(gl.canvas, `readback ${key} ${why}`);
-    };
     if (s.dirty.size) {
-      if (!s.fbo) s.fbo = O.createFramebuffer.call(gl);
-      O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.fbo);
-      O.readBuffer.call(gl, gl.COLOR_ATTACHMENT0);
-      for (const [key, d] of [...s.dirty].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
-        const info = s.tex.get(d.tex), how = info && readAs(info.fmt);
-        if (!info) { fail(key, 'of unknown size'); continue; }
-        if (!how) { fail(key, `in a format the trace cannot read (${ENUM[info.fmt] || info.fmt})`); continue; }
-        const w = Math.max(1, info.w >> d.level), h = Math.max(1, info.h >> d.level);
-        const parts = [];
-        let ok = true;
-        for (const layer of [...d.layers].sort((x, y) => x - y)) {
-          if (layer === null) O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, d.tex, d.level);
-          else O.framebufferTextureLayer.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, d.tex, d.level, layer);
-          const buf = new how[2](w * h * 4);
-          O.readPixels.call(gl, 0, 0, w, h, how[0], how[1], buf);
-          if (O.getError.call(gl)) ok = false;
-          parts.push(digest(bytes(buf)));
-        }
-        O.framebufferTexture2D.call(gl, gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
-        const layers = d.layers.has(null) ? '' : ` layers ${d.layers.size}`;
-        if (!ok) { fail(key, `${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers}: readPixels failed`); continue; }
-        const hash = Promise.all(parts).then((p) => (p.length === 1 ? p[0] : textHash(p.join(''))));
-        rec(gl.canvas, `readback ${key} ${ENUM[info.fmt] || info.fmt} ${w}x${h}${layers} = #`, hash);
-      }
-      O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.readFb);
+      readTextures(gl, [...s.dirty].sort((x, y) => (x[0] < y[0] ? -1 : 1)));
       s.dirty.clear();
     }
     if (s.screen) {
@@ -302,7 +328,8 @@ function install(cfg, hashBytes) {
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, buf = new Uint8Array(w * h * 4);
       O.readPixels.call(gl, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
       O.bindFramebuffer.call(gl, gl.READ_FRAMEBUFFER, s.readFb);
-      if (O.getError.call(gl)) fail('canvas', 'readPixels failed');
+      const e = drain(gl);
+      if (e) failed(gl, 'canvas', `readPixels failed (${ENUM[e] || e})`);
       else rec(gl.canvas, `readback canvas ${w}x${h} = #`, digest(buf));
       s.screen = false;
     }
@@ -340,6 +367,7 @@ function install(cfg, hashBytes) {
         });
         text = m + '(' + args.join(', ') + ')';
       }
+      if (m === 'deleteTexture' && T.on && a[0]) readBeforeDelete(this, a[0]);
       // An error that the read-back took off the queue goes back to the page first.
       const r = m === 'getError' && s.errors.length ? s.errors.shift() : orig.apply(this, a);
       // Keep the state the read-back and the draw counts need.
