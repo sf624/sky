@@ -903,17 +903,14 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     0.65, 0.8, 0.9 and 1 (measured on stills). With heaps (cloud
     up to about 0.5) the heaps' own thresholds set the cover (below): 0.30
     and 0.38 at 0.25 and 0.5, seen so over one place.
-  - `tower`: where A is over 0.75 to 0.95, from `uCloud` 0.15 to 0.4, for
-    heaps.
+  - `tower`: how far the layer lets towers grow (0 to 1): from `uCloud`
+    0.15 to 0.4, among heaps only (a form over 0.6 to 0.95), and where
+    some air rises within 20 km (A of the map's mip 6.5 over 0.03 to
+    0.05). Where they stand is the field's own business (Towers, below).
   - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
-    before the sun was two lobes one on the other); a
-    tower's 2.8 to 4.2 km.
+    before the sun was two lobes one on the other).
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
-  the depth: flat under, round over, `k` = 2. A tower's `t` is divided
-  by 0.55 to 1 (`smoothstep(0.5, 0.9)` of the larger read of the base
-  shape, below): it stands highest over the middle of its large cell and
-  lower towards its sides, a dome of turrets and not a block with a flat
-  top.
+  the depth: flat under, round over, `k` = 2.
 - **The base shape**, from `uNoise` (128^3; R Perlin-Worley, G, B, A Worley
   cells of 2 km, 1 km and 500 m in a tile of `BASE_KM` = 8 km), read at a
   depth that drifts from place to place (`far`) so that no two tiles look
@@ -922,10 +919,10 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
   Worley cells, mixed `CF_BIG` = 0.25 with the same read 4 times larger
   (which gathers heaps), stretched from `CF_LO` to `CF_HI`, plus `CF_SMALL`
   = 0.35 of the 1 km cells by themselves (small heaps between the large).
-  A tower is a larger heap: the larger read weighs 0.55 there, not
-  `CF_BIG`. (Its shape was read 0.45 as fast upwards, with `k` = 3: its
-  cells became columns, which the carving fluted into bundles of needles,
-  like a ridge of rock.) For a
+  (Until #117 a tower was this shape under a taller profile, the larger
+  read weighing 0.55: a broad smooth dome, and rare. Before that it was
+  read 0.45 as fast upwards, with `k` = 3: its cells became columns, which
+  the carving fluted into bundles of needles, like a ridge of rock.) For a
   sheet: the Worley cells themselves at every size from 8 km to 500 m,
   which meet in creases; the small ones are read through a matrix that
   draws them out across the wind (whole 32nds, so the pattern still wraps
@@ -1069,6 +1066,54 @@ seen from far above.)
   seam between heads went deeper.
 - **The map of the tops** takes the heaps' own domes within the heads'
   reach of each place, not the layer's bound.
+- **Towers** (towering cumulus) are models, not noise: noise gives lumps,
+  and a taller dome is a bullet, where a tower is a broad foot, shoulders
+  and stacked turrets (after the modelled clouds of Guerrilla's Nubis
+  talks, 2022 and 2023; the models here are made at start, not drawn by
+  hand).
+  - *The models* (`towerLobes` in the JS, `uTower`, see [Textures made at
+    start](#textures-made-at-start)): `TW_N` = 6, each a union of 60 to
+    80 balls from a seeded generator: three piles of unlike heights side
+    by side (the tower and two shoulders), each a core along an axis that
+    bends, lobes of a third to a half of its width standing out of its
+    sides in a spiral, and a crown of a few domes of unlike heights; one
+    lobe joins their feet, and a skirt of 6 to 9 low domes round them makes
+    the foot wider than the piles. The texture holds how far inside the
+    nearest lobe a place is (-0.25 to 0.07 of the box's side as 0 to 1):
+    where two lobes meet, a sharp cleft. A lobe whose middle is in the
+    lowest tenth of the box goes straight down from its middle, so the
+    foot is as wide at the base as just over it. The top is at `TW_TOP` =
+    0.7 of the box at most, the widest reach 0.4 of the side from the
+    middle axis: a model may be wider than high.
+  - *Where*: one tower at most in each cell of `TW_CELL` = 16 km of the
+    weather map. The cell's hash gives its place (anywhere in the middle
+    half of the cell), its turn and its height (2.1 to 3.7 km); the model
+    follows from the cell's place (`(x + 3 z) mod 6`: no two cells that
+    touch hold the same one). Three cells in ten hold none. The others
+    hold one as far as the air rises at the tower's place (A at mip 4 over
+    `TW_RISE` = 0.04 to 0.22) and the layer lets it (`tower`): it grows
+    out of the layer from its top down. (In cells of 8 km with the tower
+    within 0.8 km of the middle, towers in neighbouring cells stood in a
+    row, 8 km apart.)
+  - *In the field*: the tower leans as the heaps do, and its distance
+    (`towerKm`) is joined to the nearest dome's by a `max`: so it has the
+    heaps' flat base, their density at the surface and their light. Its
+    heads are the heaps' but smaller (`TW_HEAD`: none of 2 km, 0.2, 0.6
+    and 0.8 of the next three; `TW_SMALL` = 0.4 of the finer ones), stand
+    out 0.13 km at most (`TW_OUT`; at the heaps' 0.28 km they were cut
+    loose, crumbs beside the outline), and their seams go in 80 m at most
+    (`TW_SEAM`): the model holds the forms of a km and of half a km.
+    Within 150 m of where a dome and the tower meet the two kinds of
+    heads blend. Outside the model's bounds (a cylinder about its box, up
+    to its top) the field says no nearer than those bounds; inside them
+    the layer's early way out is not taken, and the map of the tops holds
+    the tower's top.
+  - *Round its foot* the heaps gather: within `TW_FOOT` = 1.4 km of the
+    tower's middle the thresholds of the 2 km and 1 km discs are 0.14
+    lower, less and less out to 3.1 km, and no lane is clear there.
+  - *Cost*: the cell's hash and the read of its air are made at every read
+    of the field where the layer lets towers grow; the model is read
+    inside its bounds only.
 - **The light** is the heaps' as any cloud's (below). The deck's light
   from below (`basal`) goes by the sheet's base only: it is a slab's, and a
   heap is as wide as deep and loses light by its sides. (Lit so, a heap's
@@ -2384,7 +2429,12 @@ on the map.
   30 km of the mean place, with the eye near the clouds' height the place
   jumped across one row and raced along the ray where it grazes 1.1 km: a
   thin dark line and flat lit slabs across the clouds a degree under the
-  eye's level.) It reads the mean
+  eye's level.) From 1 to 1.4 km over that height the place moves less
+  and less, and not at all higher up: a tower's side 2 km over it took the
+  shadow from 10 km behind it just over the eye's level and from 10 km
+  before it just under, a razor-straight dark line across the tower at
+  dusk with a pale cap above; and a tower's edge is hard, so its mean
+  place does not jump. It reads the mean
   of the two decks over 0.5 km (`cirrusDepth`), and so does the glare,
   over 0.3 km: the scene reads the three in one loop (`ciCloud`, `ciSea`,
   `ciGlare`), as each call is a copy for the compiler. These calls leave
@@ -3730,6 +3780,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uStars` | 1 | 1024 x 128, RGBA32F, nearest | JS, `buildStars` | Star catalogue |
 | `uNoise` | 2 | 128^3, RGBA8, mipmapped, repeating | `noise` shader | R: Perlin-Worley; G, B, A: Worley at 4, 8 and 16 cells per tile (G and B rounded at their points) |
 | `uHeads` | 22 | 128^3, RGBA8, mipmapped, repeating (9.6 MB with its mipmaps) | `noise` shader, each slice with the noise's | The heads of heaps (see [Low clouds](#low-clouds)): R, G, B, A: round heads on jittered lattices of 4, 8, 16 and 32 cells per tile (each point kept 0.15 of a cell off the cell's sides; a ball of a radius of 0.4 to 0.64 of a cell, a little flatter than wide; the eight cells round the nearest corner hold every ball that reaches a place). The height of the ball's surface, 0.5 at its rim; where two meet the higher wins |
+| `uTower` | 30 | 384 x 64 x 64, R8, three levels, clamped (2 MB) | `noise` shader, a slice of each model with the noise's first 64 slices | The towers' models (see [Low clouds](#low-clouds)), six side by side along x, a slice a height: how far inside the model's surface a place is. |
 | `uWeather` | 3 | 1024^2 over 256 km, RGBA8, mipmapped, repeating | `noise` shader | The layer of low cloud (see `cloudLayer`). R: its amount; G: its depth; B: gusts on the sea (and the level of the bases); A: where the air rises (towers) |
 | `uWaves` | 4 | 512^2, RGBA8, mipmapped, anisotropic where available | `waves` shader | R, G: wave slopes; B: slope squared; A: streaks |
 | `uAirLut` | 29 | `LUT_AZ` x `LUT_EL` x (13 `LUT_N` + 2), RGBA16F, linear: 128 x 128 x 912 (`high`, `max`; 119.5 MB), 64 x 48 x 288 (`low`; 7.1 MB); none at `mid` | `fs` with `AIR_LUT`, straight into its layers, two draws a slice (four where the GPU draws into fewer than seven targets) | The air's light and depth along view rays (see [The air](#the-air)), made again when the light, the air, the height or the clouds change |
