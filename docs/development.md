@@ -274,6 +274,19 @@ flies: at rest the page draws nothing. Fix the drawing scale with
 on the same GPU moves the numbers by 10 to 20 %: repeat, and compare
 medians or minimums.
 
+On Direct3D 11 (Chrome and Edge on Windows) the frame can grow where GL
+shows nothing: Microsoft's compiler may fold or flatten a branch after a
+harmless-looking edit, and the frame gets a fifth slower with the same
+picture (see the GLSL rules). Before a pull request that changes what is
+drawn is shown, run `node tools/sky.mjs d3dperf` on the owner's machine
+(WSL with Windows Chrome; it skips elsewhere): six views, the branch
+against `origin/main` in turns, some 7 minutes. Put its last line
+(`d3dperf: 6 views, worst …`) in the pull request's description. A view
+fails above 1.10 times main's frame time, the working limit for one pull
+request; an `undecided` view is not a pass: run it again (`--views`,
+`--rounds`). See
+[tools/README.md](../tools/README.md#frame-time-on-direct3d-11-d3dperf).
+
 Each frame of the hero is six draws: the first stage of the clouds'
 light (the low clouds' pass, `fs` with `CLOUD_PASS` and `uStage` 0, a
 quarter of the pixels), the cirrus's pass and the low clouds' (with
@@ -677,8 +690,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   Direct3D 11 (18.4 against 15.3 ms at 1898 x 982) while GL showed 5 %.
   With `UNSEEN` it is 15.9 ms, and a few pixels of a still on GL move by
   up to 4 levels. So measure a change of the field on Direct3D 11 as well
-  (`d3d page --base origin/main`, a few runs in turns): GL does not show
-  what its compiler folds.
+  (`d3dperf`, the page against main in turns): GL does not show what its
+  compiler folds. Taken out again in a copy of 9de3e45, the `UNSEEN` of
+  `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
+  the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
+  2026-11-24).
 - **Each program small enough for Microsoft's compiler.** ANGLE on
   Direct3D 11 (Chrome and Edge on Windows) gives each program to
   Microsoft's HLSL compiler (FXC), which inlines every call: each call of
