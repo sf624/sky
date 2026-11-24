@@ -858,7 +858,7 @@
   },
   {
    "name": "tower-dusk-line-3km",
-   "q": "date=172&time=18.9&alt=3&at=33,53.9&yaw=35&pitch=3&cloud=0.5",
+   "q": "date=172&time=18.9&alt=3&at=127.7,53.3&yaw=35&pitch=3&cloud=0.5",
    "reported": "2026-11-24",
    "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
    "measures": [],
@@ -868,7 +868,7 @@
   },
   {
    "name": "tower-dusk-line-2.3km",
-   "q": "date=172&time=18.9&alt=2.3&at=33,53.9&yaw=35&pitch=5&cloud=0.5",
+   "q": "date=172&time=18.9&alt=2.3&at=127.7,53.3&yaw=35&pitch=5&cloud=0.5",
    "reported": "2026-11-24",
    "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
    "measures": [],
