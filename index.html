@@ -2517,7 +2517,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   float hmax = CF_DOME * a.depth;
   float sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)), 1.0);
   float tHeap = (hmax + CF_OUT - sink) / a.depth;
-  bool all = a.form >= 1.0;
+  // (UNSEEN: Direct3D's compiler knows that the form is at most 1, and with the bare test it read the sheet's noise
+  // below at every read of the field, a fifth of the frame in the default view. Until the towers were models, a
+  // term from the weather map stood in this test and hid it.)
+  bool all = a.form >= UNSEEN(1.0);
   heapAll = all;
   heapMix = tHeap > 0.0 ? 1.0 : 0.0;
   float tOld = tTop;
@@ -5688,12 +5691,8 @@ void main() {
       float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5, lev = 0.03 + 0.15 * max(abs(dh) - 1.0, 0.0);
       p += d * (1.0 - smoothstep(1.0, 1.4, abs(dh))) * clamp(-s * dh / (s * s + lev * lev), -min(tBar, 10.0), 10.0);
     }
-    float far = raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
-    vec3 pc = i == 2 ? glarePc : p + uLight * far;
-    // (On the low clouds the cirrus's shadow is as soft as the sun's disc makes it, 0.0093 of the way to the cirrus:
-    // 1.8 km with the sun 3 degrees high, where 50 m of a tower's height are 1 km of cirrus, and each streak of it
-    // drew a thin level line across the tower.)
-    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : i == 0 ? max(0.5, 0.0093 * far) : 0.5);
+    vec3 pc = i == 2 ? glarePc : p + uLight * raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
+    float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : 0.5);
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;
