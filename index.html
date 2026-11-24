@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="3dd244b main">
+<meta name="build" content="4725dbf main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -1617,6 +1617,7 @@ uniform vec3 uBalance;   // white balance (balanceFor)
 uniform float uSaturation;  // a camera's saturation (saturationFor)
 uniform float uNightEye;    // how far the eye's night vision has come in, from its adaptation: 0 by day to 1 (nightEyeFor)
 uniform float uNightGrey;   // how far the night's wider grey has come in, from its adaptation: 0 to 1 (nightGreyFor)
+uniform float uNightDark;   // how far the night's steeper curve has come in, from its adaptation: 0 to 1 (nightDarkFor)
 // Twelve wavelengths (405-680 nm), four per vec4.
 uniform vec4 uBR[3];    // Rayleigh scattering per km
 uniform vec4 uBO[3];    // ozone absorption per km
@@ -1635,6 +1636,9 @@ uniform sampler2D uMS;
 uniform vec4 uWL[3];    // wavelength / 550 nm
 uniform vec4 uMA[3];    // the aerosol by wavelength, relative to 550 nm (ANGSTROM in the JS)
 uniform float uNight;   // radiance of the moonless night sky (airglow)
+uniform float uStarMoon;  // how far the moon sets what the eye sees of the stars: 0 without it (starMoonFor)
+uniform float uStarLift;  // the stars, the Milky Way and the zodiacal cone, of their light: the exposure they are seen at (starLiftFor)
+uniform float uMoonLux;   // the moon's illuminance at the eye, lux (its glare in the eye)
 uniform float uAlt;     // altitude of the eye, km
 uniform float uCloud;   // cloud amount: 0 (none) to 1 (overcast)
 uniform float uWind;    // wind over the sea, m/s
@@ -1770,6 +1774,9 @@ const float MS_MU_MIN = -0.35;
 const float STAR_GAIN = 20.0;   // the core of a star of magnitude 6.5, of the airglow's radiance (see main)
 const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
 const float EYE_GAIN = 6.0;     // the Milky Way and the zodiacal cone, of their brightness (see main)
+const float STAR_LOSS = 0.4;    // under a moon: magnitudes the eye, adapted to the moonlit world, loses (see main)
+const float STAR_FADE = 0.25;   // ...and a star this many magnitudes over the limit is shown in full
+const vec2 MOON_VEIL = vec2(45.0, 25.0);   // the moon's glare in the eye (glareShape) fades out from MOON_VEIL.y to .x degrees (see main)
 const vec2 ZODI_BAND = vec2(20.0, 2.0);   // the cone's half width as drawn, degrees, at 15 degrees from the sun and far from it (zodiacal)
 const float EARTHSHINE = 1e-6;  // the moon's dark side, lit by the earth (of sunlight per steradian)
 const float S10 = 6.61e-12;     // radiance of one star of the 10th magnitude per square degree, of the sun's light (V = -26.74)
@@ -1778,9 +1785,8 @@ const float ROD_HALF = 0.01;    // cd/m2 where the rods count as much as the con
 const vec2 MESOPIC = vec2(0.003, 3.0);   // cd/m2: at night the rods alone below, the cones alone above (see main)
 const float NIGHT_LOOK = 1.7;   // the look's power for what the rods see (see main)...
 const float LOOK_PIVOT = 0.12;  // ...the same as by day at this level
-const float DARK_LOOK = 2.0;    // ...and as the eye adapts to a darker night (DARK_EYE), steeper...
+const float DARK_LOOK = 2.0;    // ...and as the eye adapts to a darker night (uNightDark), steeper...
 const float DARK_PIVOT = 0.07;  // ...about this level
-const vec2 DARK_EYE = vec2(15.5, 17.5);   // the exposure (log2) over which the night's curve turns to DARK_LOOK
 const vec3 ROD_TINT = vec3(0.911, 1.003, 1.235);   // the rods' grey, a little blue (luminance 1)...
 const vec3 ROD_BLUE = vec3(0.666, 1.025, 1.742);   // ...and bluer, for blue light from SKY_BLUE cd/m2 up (see main)
 const vec2 SKY_BLUE = vec2(0.001, 0.01);
@@ -1793,6 +1799,10 @@ const float GLARE_EXPO = 1.3;    // ...up to this exposure (log2, a clear day's 
 const int GRID = 128;
 const int SLOTS = 8;
 const float LN_FLUX_MAX = 5.9915;   // ln(400)
+// The eye's glare: the veiling luminance per unit of illuminance at the eye,
+// t2 the square of the angle from the light in degrees (CIE 146:2002, the
+// general disability glare function of a young eye; see the sun's glare).
+float glareShape(float t2) { return 10.0 / (t2 * sqrt(t2)) + 5.0 / t2; }
 
 vec2 raySphere(vec3 o, vec3 d, float r) {
   float b = dot(o, d);
@@ -5830,9 +5840,34 @@ void main() {
     // times their light, at every hour: large faint glows that the
     // dark-adapted eye sees plainly, where a screen's dark end would hide
     // them. One gain for both keeps their ratio.
-    float glow = uNight * (vanRhijn + EYE_GAIN * milkyWay(c)) * free;
+    float mw = milkyWay(c);
     vec4 z = zodiacal(dot(d, uSun), dot(c, uEcliptic));
-    float zodi = S10 * (z.y + EYE_GAIN * z.z * z.w) * free;
+    // Under a moon what the eye sees of the stars is set by the light round
+    // each: the sky behind it (the air's light so far, the airglow, the
+    // Milky Way) and the moon's glare in the eye, and by the eye's
+    // adaptation to the moonlit world. The faintest star seen, mLim, is
+    // Crumey's (2014) for that background, less STAR_LOSS. A star is then
+    // shown as a star of the moonless night's scale that much fainter
+    // (shift), at the exposure of a moonless night (uStarLift), and fades
+    // out over its last STAR_FADE magnitudes; so do the Milky Way and the
+    // zodiacal cone. Without a moon (uStarMoon 0) nothing of this applies,
+    // and the stars are as the exposure shows them.
+    float mLim = 99.0, shift = 0.0, ext = 1.0;
+    if (uStarMoon > 0.0) {
+      vec4 bg[3];
+      for (int k = 0; k < 3; k++) bg[k] = L[k] + tg[k] * (visX / max(vis, 1e-6)) * (uNight * (vanRhijn + EYE_GAIN * mw) * free * pow(uWL[k], vec4(-3.0)) + S10 * (z.y + EYE_GAIN * z.z * z.w) * free);
+      float bgY = ISUN * (0.2126 * (dot(uWR[0], bg[0]) + dot(uWR[1], bg[1]) + dot(uWR[2], bg[2]))
+                        + 0.7152 * (dot(uWG[0], bg[0]) + dot(uWG[1], bg[1]) + dot(uWG[2], bg[2]))
+                        + 0.0722 * (dot(uWB[0], bg[0]) + dot(uWB[1], bg[1]) + dot(uWB[2], bg[2])));
+      float tm = max(degrees(acos(clamp(dot(d, uMoon), -1.0, 1.0))), 1.0);
+      float cd = CD * max(bgY, 0.0) + uMoonLux * glareShape(tm * tm) * smoothstep(MOON_VEIL.x, MOON_VEIL.y, tm);
+      float sb = -2.5 * log(max(cd, 1e-9) / 1.08e5) / log(10.0);      // mag per square arcsecond
+      mLim = max(max(0.27 * sb + 0.8, 0.383 * sb - 1.44), 0.426 * sb - 2.365) - 0.753 - STAR_LOSS * uStarMoon;
+      shift = uStarMoon * max(6.5 - mLim, 0.0);
+      ext = uStarLift * exp(-0.921 * shift);
+    }
+    float glow = uNight * (vanRhijn + EYE_GAIN * mw * ext) * free;
+    float zodi = S10 * (z.y + EYE_GAIN * z.z * z.w * ext) * free;
     vec4 st[3];
     for (int k = 0; k < 3; k++) st[k] = vec4(0.0);
     ivec2 cell = starCell(c);
@@ -5840,6 +5875,11 @@ void main() {
       vec4 t = texelFetch(uStars, ivec2(cell.x * SLOTS + s, cell.y), 0);
       if (t.w < 0.0) break;
       float lf = fract(t.w) * LN_FLUX_MAX;           // log of the brightness
+      float fade = 1.0;
+      if (uStarMoon > 0.0) {
+        fade = mix(1.0, smoothstep(0.0, STAR_FADE, mLim - (6.5 - lf / STAR_LN_MAG)), uStarMoon);
+        lf -= STAR_LN_MAG * shift;
+      }
       float rad = pix * (0.7 + 0.04 * lf);           // a point; the brightest a touch wider
       vec3 e = c - t.xyz;
       float w = exp(lf - dot(e, e) / (rad * rad));
@@ -5856,7 +5896,7 @@ void main() {
       }
       if (w > 1e-3) {
         float tilt = floor(t.w) / 63.0 * 8.0 - 4.0;  // blue to red
-        for (int k = 0; k < 3; k++) st[k] += w * pow(uWL[k], vec4(tilt));
+        for (int k = 0; k < 3; k++) st[k] += fade * w * pow(uWL[k], vec4(tilt));
       }
     }
     // The glow of the night sky (and the zodiacal light) is wide: thin
@@ -5867,7 +5907,7 @@ void main() {
     float vg = visX / max(vis, 1e-6);
     // The stars: the core of a star of magnitude 6.5 is STAR_GAIN times the
     // airglow's radiance, each magnitude brighter STAR_LN_MAG brighter.
-    float stars = uNight * STAR_GAIN * free;
+    float stars = uNight * STAR_GAIN * free * uStarLift;
     for (int k = 0; k < 3; k++) {
       G[k] += tk[k] * sun;
       L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
@@ -5892,7 +5932,7 @@ void main() {
     float deg = degrees(acos(min(mu, 1.0)));
     float t2 = deg * deg + pow(degrees(SUN_R), 2.0);
     float glare = GLARE * min(1.0, exp2(GLARE_EXPO) / uExposure)
-                * SUN_L * PI * SUN_R * SUN_R * (10.0 / (t2 * sqrt(t2)) + 5.0 / t2);
+                * SUN_L * PI * SUN_R * SUN_R * glareShape(t2);
     if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
@@ -5991,7 +6031,7 @@ void main() {
     // Way, the zodiacal light and the stars stand out as the dark-adapted
     // eye sees them; under a moon, with the gentler curve, the moonlit sky
     // lies over them. One curve for everything, set by the adaptation.
-    float dark = smoothstep(DARK_EYE.x, DARK_EYE.y, log2(uExposure));
+    float dark = uNightDark;
     float n = mix(uLook, mix(NIGHT_LOOK, DARK_LOOK, dark), rodShare);
     float pivot = LOOK_PIVOT * pow(DARK_PIVOT / LOOK_PIVOT, dark);
     looked = mix(looked, col * pow(yl, n - 1.0) * pow(pivot, uLook - n), rodShare);
@@ -7095,6 +7135,9 @@ const SkySound = (() => {
                                               // band stands more than GLOW_FREE stops above the sky
   const NIGHT_OPEN = 16.75, NIGHT_SKY = -22.5, NIGHT_RATE = 0.5;   // at night the eye opens up at most to NIGHT_OPEN
                                        // when the sky's level is NIGHT_SKY, NIGHT_RATE stops more per stop darker
+  const MOON_OPEN = 14.8, MOON_LIT = -16;
+  const NIGHT_LUX = 0.002, STAR_MOON = 3, STAR_EXPO = 17.4;   // the stars under a moon (starMoonFor, starLiftFor)   // under the moon the eye opens up at most to MOON_OPEN when a white surface
+                                       // facing it, in its light at the eye, is at MOON_LIT, NIGHT_RATE more per stop dimmer
   const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // in sunlight the eye opens up at most DAY_OPEN[0] stops past the exposure
                                        // that shows a white surface facing the sun, in the sun's light at the eye, at
                                        // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
@@ -7622,6 +7665,30 @@ const SkySound = (() => {
   // degrees down.
   const NIGHT_GREY = [12, 15];
   const nightGreyFor = e => smooth01((e - NIGHT_GREY[0]) / (NIGHT_GREY[1] - NIGHT_GREY[0]));
+  // The night's steeper curve (DARK_LOOK in fs) comes in as the exposure
+  // goes from DARK_EYE[0] (about a full moon's) to DARK_EYE[1] (a moonless
+  // night from cruise).
+  const DARK_EYE = [15.5, 17.5];
+  const nightDarkFor = e => smooth01((e - DARK_EYE[0]) / (DARK_EYE[1] - DARK_EYE[0]));
+  // The night's key: the screen shows a moonlit night darker than the
+  // eye's adaptation (the exposure, which sets the rods' grey and the
+  // curves above) holds it. Lit by the moon the brightest clouds are some
+  // 0.02 to 0.06 cd/m2, far below the cones' white, and the eye sees them
+  // dim; shown at the meter's grey they read as dusk. Tone mapping for low
+  // light maps such a scene into a reduced range (Kirk and O'Brien, 2011),
+  // as film underexposes "day for night" by about two stops. The shown
+  // exposure is the adaptation less NIGHT_DIM stops at NIGHT_KEY[1] (a full
+  // moon's clouds from cruise), coming in from NIGHT_KEY[0] (the end of
+  // nautical twilight) and going again by NIGHT_KEY[2] (a moonless night
+  // from cruise), where the picture is the stars, the Milky Way and the
+  // zodiacal light over a near-black sky, as before. It changes by at most
+  // 0.6 stops for each stop of the adaptation, which itself opens by half a
+  // stop for each stop the night darkens (NIGHT_RATE): a darker night is
+  // still shown darker, and no light switches on or off.
+  const NIGHT_KEY = [12, 14.5, 17.5], NIGHT_DIM = 1.0;
+  const nightDimFor = e => NIGHT_DIM * (e < NIGHT_KEY[1] ? smooth01((e - NIGHT_KEY[0]) / (NIGHT_KEY[1] - NIGHT_KEY[0]))
+                                                       : 1 - smooth01((e - NIGHT_KEY[1]) / (NIGHT_KEY[2] - NIGHT_KEY[1])));
+  const shownFor = e => e - nightDimFor(e);
 
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
@@ -7737,6 +7804,49 @@ const SkySound = (() => {
     const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
     return WHITE + open - sunlitLevel(state.alt, state.elev);
   }
+  // The night's eye (see MOON_OPEN): the most the exposure may be, from the
+  // moon's light where the eye is now: the eye under a moon is adapted to
+  // the moonlit world round it, wherever it looks, as the day's eye is to
+  // the sun's (dayEye). Without it a view turned up to a black sky with
+  // stars opened up some 2.5 stops (from 40 km, a full moon high), and
+  // the moonlit Earth along the foot of the frame came out bright. The
+  // moon's light at the eye (moonI, its phase and the air, sunThrough along
+  // it) falls through moonrise and moonset to nothing, and the limit rises
+  // with it out of the way: no step. Under a crescent or no moon it lies
+  // far above the exposure, which opens for the stars.
+  function moonEye() {
+    const lit = moonlitLevel();
+    return Number.isFinite(lit) ? MOON_OPEN - NIGHT_RATE * (lit - MOON_LIT) : Infinity;
+  }
+  // The level of a white surface facing the moon, in its light at the eye
+  // (as sunlitLevel for the sun); -Infinity without it.
+  function moonlitLevel() {
+    if (state.moonI <= 0) return -Infinity;
+    return Math.log2(state.moonI) + sunlitLevel(state.alt, Math.asin(state.moon[1]) / RAD);
+  }
+  // The moon's illuminance at the eye, lux: pi times the luminance of that
+  // white surface (CD cd/m2 a unit, as in the shader).
+  const CD = 6650;
+  const moonLux = () => Math.PI * CD * 2 ** moonlitLevel();
+  // How far the moon sets what the eye sees of the stars (uStarMoon, see
+  // main in fs): from none where its light at the eye is that of the
+  // moonless sky (NIGHT_LUX, the airglow and the stars) to all of it
+  // STAR_MOON stops above, and only where its light in the air is more
+  // than the twilight's (by 0 to STAR_MOON stops, as in moonAirFor). So a
+  // moonless night and the twilight are shown as before, and a quarter moon
+  // or more at night in full.
+  function starMoonFor() {
+    const lux = moonLux();
+    if (!(lux > 0)) return 0;
+    return smooth01(Math.log2(lux / NIGHT_LUX) / STAR_MOON) * smooth01(moonOverSun() / STAR_MOON);
+  }
+  // The exposure the stars are seen at under a moon (uStarLift): a
+  // moonless night's from cruise (STAR_EXPO), not the moonlit world's,
+  // which the moon's limit and the night's key hold down. The eye sees a
+  // dim moonlit Earth and the stars at once; a screen has one exposure,
+  // and at the Earth's the stars of a dark sky above 20 km were all but
+  // gone. What the eye loses of them under the moon, main in fs takes off.
+  const starLiftFor = e => 2 ** (starMoonFor() * Math.max(0, STAR_EXPO - shownFor(e)));
   function exposureAt(st, elev, d) {
     const low = Math.max(st.low + d, NIGHT_LEVEL), high = st.high + d, mid = Math.max(st.mid + d, NIGHT_LEVEL);
     // By day the key holds the exposure down no further than to show at
@@ -7793,10 +7903,12 @@ const SkySound = (() => {
   // its disc and its light on the clouds and the sea, is drawn at every hour.
   function moonAirFor() {
     if (state.moonI <= 0) return 0;
-    const q = Math.log2(state.moonI) + airLevel(state.alt, Math.asin(state.moon[1]) / RAD)
-            - Math.log2(Math.max(state.sunOn, 1e-30)) - airLevel(state.alt, state.elev);
-    return smooth01((q - MOON_AIR[0]) / (MOON_AIR[1] - MOON_AIR[0]));
+    return smooth01((moonOverSun() - MOON_AIR[0]) / (MOON_AIR[1] - MOON_AIR[0]));
   }
+  // How much brighter the air the moon lights is than the air the sun
+  // lights (stops, from airLevel for each light, at the eye's height).
+  const moonOverSun = () => Math.log2(state.moonI) + airLevel(state.alt, Math.asin(state.moon[1]) / RAD)
+                          - Math.log2(Math.max(state.sunOn, 1e-30)) - airLevel(state.alt, state.elev);
   // The level at share k of the sorted levels q, as a mean over the shares
   // k - b to k + b, weighed by a triangle: a block that crosses the band's
   // edge counts for nothing there, so the level moves smoothly as the view
@@ -7830,7 +7942,7 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return Math.min(E, dayEye());
+    return Math.min(E, dayEye(), moonEye());
   }
 
   // ---------- Drawing ----------
@@ -8551,12 +8663,16 @@ const SkySound = (() => {
         ['uniform1f', 'uMoonI', state.moonI * moonAirFor()],
         ['uniformMatrix3fv', 'uSky', false, state.sky],
         ['uniform1f', 'uHaze', state.haze],
-        ['uniform1f', 'uExposure', 2 ** (logE ?? firstE)],
+        ['uniform1f', 'uExposure', 2 ** shownFor(logE ?? firstE)],
         ['uniform1f', 'uLook', v.look],
         ['uniform3fv', 'uBalance', balanceFor()],
         ['uniform1f', 'uSaturation', saturationFor()],
         ['uniform1f', 'uNightEye', nightEyeFor(logE ?? firstE)],
         ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? firstE)],
+        ['uniform1f', 'uNightDark', nightDarkFor(logE ?? firstE)],
+        ['uniform1f', 'uStarMoon', starMoonFor()],
+        ['uniform1f', 'uStarLift', starLiftFor(logE ?? firstE)],
+        ['uniform1f', 'uMoonLux', state.moonI > 0 ? moonLux() : 0],
         ['uniform1f', 'uAlt', v.alt],
         ['uniform1f', 'uCloud', v.cloud],
         ['uniform1f', 'uWind', state.wind],
