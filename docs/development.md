@@ -744,11 +744,22 @@ The shaders must run on any WebGL2. The code keeps these rules:
   with FXC), `TOPS_MAP` 1.3 to 1.4. The GPU process compiles
   several at once, and the first picture waits for their sum more than
   for the longest. The heaps of #113 (November 2026) made the field
-  longer; each read of it is a copy, so the light's steps, the way to the
-  shadow's map past them and the four reads of the mirror are each one
-  loop with one read, and the map of the tops searches all its heights in
-  one loop (four calls of the search, each with five calls of the field,
-  had made it link in 0.8 s with the heaps, against 0.2 to 0.3 s now). Measure
+  longer; each read of it is a copy, so the light's steps and the four
+  reads of the mirror are each one loop with one read, and the map of the
+  tops searches all its heights in one loop (four calls of the search,
+  each with five calls of the field, had made it link in 0.8 s with the
+  heaps, against 0.2 to 0.3 s now). One loop is not always the faster
+  frame, though: the 8 steps of the way to the shadow's map past the
+  light's steps, as 8 more steps of the light's loop (#113), made the
+  clouds' pass link in 5.0 s alone against 6.9 s with a loop of their
+  own, but the frame over a deck took 14 % longer on Direct3D 11 (12.8
+  against 11.2 ms, `overcast` of `d3dperf`), 6 % under the moon and 3 %
+  among heaps, where those steps read nothing with the sun high. GL did
+  not change (9.8 against 9.7 ms), nor did FXC's code of the loop much
+  (some 25 instructions of 890): the cost comes later, in the driver. So
+  they are a loop of their own again; the first picture comes 0.5 to
+  1.7 s later (`d3d page`, three runs each: 13.9 to 16.6 s against 13.4
+  to 14.9 s). Weigh such a merge with `d3dperf` as well as `d3d programs`. Measure
   a change of `fs` there: `node tools/sky.mjs d3d programs --base
   origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its

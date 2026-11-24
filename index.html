@@ -2289,7 +2289,7 @@ const float SKY_UNIT = 0.35;
 // out (see clouds).
 const float LIGHT_TAU = 4.5;
 // The steps of the light's marches from such a point (see clouds).
-const int LIGHT_STEPS = 34;
+const int LIGHT_STEPS = 26;
 const float UNDER = 0.3;            // the light of the sky left in the air under a full deck
 const float COLUMN = 0.11;          // (1 - g) 0.75: how a deep column dims the light through it
 const float PENUMBRA = 0.06;        // how far light strays sideways in a cloud, km: shadows on it are soft
@@ -3437,10 +3437,13 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       bool slab = slabbed == 1.0;
       // The marches of the light, as one loop of LIGHT_STEPS reads of the
       // field: the sky's two directions (steps 0 to 9, five each), the depth
-      // away from the light (tauB, 10 to 15) and towards it (16 to 25, and
-      // on to the map of the shadow, 26 to 33). Each call of cloudDensity is a copy of the field for
-      // Direct3D's compiler (ANGLE on Windows), which took far longer over
-      // four loops, each with its call.
+      // away from the light (tauB, 10 to 15) and towards it (16 to 25). Each
+      // call of cloudDensity is a copy of the field for Direct3D's compiler
+      // (ANGLE on Windows), which took far longer over four loops, each with
+      // its call. (The way on to the map of the shadow is a loop of its own,
+      // below: as steps 26 to 33 of this one, it took no read where the sun
+      // was high, yet the frame over a deck took a seventh longer on
+      // Direct3D 11.)
       // The sky's: the first two steps, 30 and 90 m, see the fine turrets (a
       // seam between heads sees less of the sky than a crown).
       // tauB's: the first three steps, out to 175 m, see the fine turrets:
@@ -3488,31 +3491,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       vec3 w = vec3(0.0), offL = off, offB = cos(ab) * off + sin(ab) * cross(uLight, off);
       float sl = 0.0, dl = step, kl = min(log2(step / 0.05), 0.0), reach = 27.8 * max(step, 0.015), moveAt = 5.1 * max(step, 0.015);
       int i0 = wantF ? 0 : 2, i1 = wantCM ? 10 : 2;
-      // Beyond the light's own steps (some 0.4 to 1.4 km), the map of
-      // the clouds' shadow: the other heaps towards the light, out to
-      // tens of km, so that with the sun low they shade one another.
-      // It holds the depth along the line of light through this place
-      // from a height upwards, so read where the steps ended. With the
-      // light low it is read at the map's next height above that place
-      // (cloudShadowOwn), which lies up to 5 km farther along the light
-      // (275 m of height at 3 degrees): that way to it is marched (steps 26
-      // to 33), in 8 steps at about the map's own level. (Without it, the cloud
-      // on that way was left out, more the lower in each height of the
-      // map: lit slabs with flat tops across the shaded sides of heaps,
-      // one for each height of the map.)
-      vec3 xe = ps + uLight * reach;
-      float tauGap = 0.0, g = 0.0, lg = 0.0;
-      bool gapOn = wantCM && overMap < 1.0;
-      if (gapOn) {
-        float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
-        g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
-        lg = max(log2(0.04 * g / TEXEL_KM), lod);
-      }
       // (To bounds the compiler cannot know, as the long marches: unrolled, the field's code stood 26 times here,
-      // and every line added to it made the scene's programs that much longer to compile. One loop for all: each
-      // call of the field is a copy of it.)
+      // and every line added to it made the scene's programs that much longer to compile.)
       for (int n = 0; n < LONG_N(LIGHT_STEPS); n++) {
-        int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n < 26 ? n - 16 : n - 26;
+        int j = n < 10 ? n % 5 : n < 16 ? n - 10 : n - 16;
         vec3 x;
         float l, wt;
         bool fine, moved = false;
@@ -3535,21 +3517,15 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           l = max(log2(0.5 * db / TEXEL_KM), lod);
           fine = j < 3;
           wt = db * (j < 3 ? 1.0 : 1.0 - overMap);
-        } else if (n < 26) {
+        } else {
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
           x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
           fine = !moved;
           wt = dl;
-        } else {
-          if (!gapOn) continue;
-          x = xe + uLight * (g * (float(j) + 0.5) / 8.0);
-          l = lg;
-          fine = false;
-          wt = 0.125 * g;
         }
-        float dt = n < 16 || n >= 26 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
+        float dt = n < 16 || j >= i0 ? cloudDensity(x, l, fine) * wt : 0.0;
         if (n < 10) {
           tw += dt;
           sw += dw;
@@ -3564,14 +3540,12 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (j < 3) tauBn += dt;
           sb += db;
           db *= 2.0;
-        } else if (n < 26) {
+        } else {
           if (j < 2) crisp += dt; else tauL += dt;
           if (j >= 2 && sl + dl <= CREASE_KM) tauNn += dt;
           if (moved) offL = -0.5 * offL + 0.866 * cross(uLight, offL);
           sl += dl;
           dl *= 1.6;
-        } else {
-          tauGap += dt;
         }
       }
       if (skyOn) {
@@ -3585,7 +3559,26 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         if (slab) {
           tauCM = above / max(sunUp, 0.05);
         } else {
-          // (The map of the clouds' shadow beyond the light's steps, and the way to it: above.)
+          // Beyond the light's own steps (some 0.4 to 1.4 km), the map of
+          // the clouds' shadow: the other heaps towards the light, out to
+          // tens of km, so that with the sun low they shade one another.
+          // It holds the depth along the line of light through this place
+          // from a height upwards, so read where the steps ended. With the
+          // light low it is read at the map's next height above that place
+          // (cloudShadowOwn), which lies up to 5 km farther along the light
+          // (275 m of height at 3 degrees): that way to it is marched here,
+          // in 8 steps at about the map's own level. (Without it, the cloud
+          // on that way was left out, more the lower in each height of the
+          // map: lit slabs with flat tops across the shaded sides of heaps,
+          // one for each height of the map.)
+          vec3 xe = ps + uLight * reach;
+          float tauGap = 0.0;
+          if (overMap < 1.0) {
+            float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
+            float g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
+            float lg = max(log2(0.04 * g / TEXEL_KM), lod);
+            for (int n = 0; n < LONG_N(8); n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
+          }
           tauCM = tauL + (1.0 - overMap) * tauGap + cloudShadowOwn(xe + eye());
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
         }
