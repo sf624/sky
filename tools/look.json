@@ -637,10 +637,10 @@
       0.15
      ],
      "cols": 4,
-     "max": 0.03
+     "max": 0.05
     }
    ],
-   "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085).",
+   "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085). Limit 0.03 until the towers became models: main's old tower, which filled the left of this view, is gone, and the heaps behind it measure 0.034 by their own level shadow edges at dusk, the same with cirrus=0 and with the place of the cirrus's shadow not moved at all (the line's cause).",
    "bad": "8582b03",
    "fixed": "efd2b2f"
   },
