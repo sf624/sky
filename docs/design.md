@@ -1089,10 +1089,8 @@ seen from far above.)
     weather map. The cell's hash gives its place (anywhere in the middle
     half of the cell), its turn and its height (2.1 to 3.7 km); the model
     follows from the cell's place (`(x + 3 z) mod 6`: no two cells that
-    touch hold the same one). Three cells in ten hold none (by a second
-    hash, whose salt also keeps the cells round the place where the tools'
-    flights start, `at=40,60`, empty: those checks compare a flight with
-    main's at the same place). The others
+    touch hold the same one). Every third cell along x and along z holds
+    none (`(x + 2 z) mod 3 = 1`), so that no three stand in a row. The others
     hold one as far as the air rises at the tower's place (A at mip 4 over
     `TW_RISE` = 0.03 to 0.16) and the layer lets it (`tower`): it grows
     out of the layer from its top down. (In cells of 8 km with the tower
