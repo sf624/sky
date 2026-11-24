@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="8a04631 main">
+<meta name="build" content="685878f main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -1674,6 +1674,11 @@ uniform float uPass;
 // It wraps at the width of the weather map, which every pattern must divide.
 uniform vec2 uDrift;
 uniform float uCirrus;  // amount of high, thin cloud: 0 (none) to 1
+// The low layer's record (state.low in the JS; see cloudLayer). x: km added to the level of the bases; y: a factor
+// on the depth; z: the form's bias, added to the amount that turns heaps into a sheet (-1: heaps at every amount,
+// 1: a sheet); w: how smooth a sheet is (0: cells, 1: an even sheet). As the page opens: 0, 1, 0, 0.
+uniform vec4 uLow;
+uniform float uLowTowers;   // the record's towers: the share of them that the layer lets grow (1 as the page opens)
 // Cloud noise, repeating. R: Perlin-Worley; G, B, A: Worley at rising frequencies.
 uniform sampler3D uNoise;
 // The heads of heaps, repeating: round heads of 2 km, 1 km, 500 m and 250 m in a tile (R, G, B, A; 0.5 at a head's rim).
@@ -2407,8 +2412,10 @@ Layer cloudLayer(vec2 x, float lod) {
   vec4 w = textureLod(uWeather, x / WEATHER_KM, max(lod - 2.0, 2.0));
   // (far: the map elsewhere, smoothed over tens of km: slow patterns.)
   a.far = textureLod(uWeather, x / WEATHER_KM + 0.37, 5.5);
-  a.level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, a.far.b);
-  a.form = 1.0 - smoothstep(0.5, 0.85, uCloud + 0.4 * (region - 0.5));
+  a.level = CB + 0.15 + 0.15 * smoothstep(0.25, 0.75, a.far.b) + uLow.x;
+  // (The record's form is a bias inside the smoothstep, not a form set in a branch: set so, Direct3D's compiler no
+  // longer knew that the form lies from 0 to 1, and the frame over a deck took 5 % longer with the same picture.)
+  a.form = 1.0 - smoothstep(0.5, 0.85, uCloud + 0.4 * (region - 0.5) + uLow.z);
   // Few clouds stand in fields (the map's clumps and streets), with clear
   // sea between: the map decides where, steeply; with more, it only thins
   // and thickens the cover. Heaps keep clear air between them inside a
@@ -2434,8 +2441,8 @@ Layer cloudLayer(vec2 x, float lod) {
   // the layer, were a flat pale plate in a gap of the deck.)
   // None where next to no air rises for some 20 km around (A of the map's mip 6.5): a third of the map, where the
   // field then skips the towers' cells altogether.
-  a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.01, 0.025, wide.a);
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form);
+  a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.01, 0.025, wide.a) * uLowTowers;
+  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form) * uLow.y;
   return a;
 }
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
@@ -2637,11 +2644,14 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       c = mix(n, c, smoothstep(0.35, 0.65, far.g));
       float cells = 0.4 * (0.6 * m.g + 0.4 * m.b) + 0.6 * (0.45 * c.g + 0.35 * c.b + 0.2 * c.a);
       shape = mix(clamp((cells - 0.2) / 0.5, 0.0, 1.0), shape, a.form);
+      // (The record's smooth: the cells fill in towards one even sheet, with less relief and less taken by the fine
+      // noise, see cloudField.)
+      shape = mix(shape, 1.0, 0.8 * uLow.w);
       // The top of a sheet stands higher over its cells of 4 km to 1 km and
       // over the largest of them, by up to 0.7 CF_RELIEF of its height (some 100 m): relief
       // without holes, which a low sun shows and a high one hardly. (A lower
       // floor under the shape gave relief too, and pits: specks from 40 km.)
-      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form);
+      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form) * (1.0 - 0.6 * uLow.w);
     }
   }
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
@@ -2795,7 +2805,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     // under 0.2, creases go in elsewhere; its mean is 0.54): billows on its
     // whole outside, a cauliflower.
     e = clamp(e, 0.0, 1.0);
-    float er = CF_ERODE * e;
+    float er = CF_ERODE * e * (1.0 - 0.8 * uLow.w);
     float dn = mix((max(co, 0.0) / CF_K - er) / (1.0 - er), co / CF_K - CF_KNOB * ((carve ? e : 0.54) - 0.2), formAt);
     // A heap is dense right behind its surface (a sheet thickens slowly):
     // what is left after the carving is CF_SHARP times as dense, up to 1.
@@ -7586,6 +7596,21 @@ const SkySound = (() => {
     }
   }
   // Axes: x west, y up, z south. The view starts towards the south-west.
+  // The low layer's record within its bounds (setLow; LOW_RANGE: the least and the most of each field). The shell
+  // of the low clouds ends at CT = 5 km in fs, and what stands higher is cut off flat: so a lifted base takes from
+  // the depth (the highest heap's dome and its heads, 1.8 km times the depth and 0.28 km over a base 0.3 km above
+  // the level), and it has no towers (2.1 to 3.7 km over the base, whose height is not a field yet).
+  const LOW_RANGE = { base: [0, 2.25], depth: [0.4, 1.5], form: [-1, 1], smooth: [0, 1], towers: [0, 1] };
+  const LOW_TOP = 5 - 0.6 - 0.3 - 0.28 - 0.02, LOW_TOWER_BASE = 0.1;
+  const setLow = low => {
+    for (const k in LOW_RANGE) if (k in low) state.low[k] = Math.min(LOW_RANGE[k][1], Math.max(LOW_RANGE[k][0], low[k]));
+    state.low.depth = Math.min(state.low.depth, (LOW_TOP - state.low.base) / 1.8);
+    if (state.low.base > LOW_TOWER_BASE) state.low.towers = 0;
+  };
+  // The record as fs takes it (uLow), and as a key for what is built from the layer (the map of the tops, the
+  // depth maps, the look of the frame).
+  const lowUniform = () => [state.low.base, state.low.depth, state.low.form, state.low.smooth];
+  const lowKey = () => [...lowUniform(), state.low.towers].join();
   const state = {
     time: 15, day: 80, moonAge: 13, haze: 1, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
@@ -7593,6 +7618,11 @@ const SkySound = (() => {
     // Flight: speed in km/h, heading like yaw, and the way made (km, wrapped to the weather map).
     // The aircraft's climb (the nose up) and bank (the right wing down), radians (see fly).
     speed: 900, heading: 0, climb: 0, bank: 0, drift: [0, 0], cirrus: 0.4,
+    // The low layer's record, beside its amount (cloud): what cloudLayer in fs makes a layer of (uLow, uLowTowers).
+    // base: km added to the level of the bases; depth: a factor on the depth; form: a bias on the amount that turns
+    // heaps into a sheet (-1: heaps at every amount, 1: a sheet); smooth: how even a sheet is; towers: the share of
+    // the towers that grow. These values are the page's: with them the picture is as it was before the record.
+    low: { base: 0, depth: 1, form: 0, smooth: 0, towers: 1 },
     // Days the sun has moved on beyond state.day while the time ran (see
     // tick): playing past midnight then turns the sky on smoothly. 0 once the
     // date or the time is set.
@@ -8863,6 +8893,8 @@ const SkySound = (() => {
         ['uniform1f', 'uMoonLux', state.moonI > 0 ? moonLux() : 0],
         ['uniform1f', 'uAlt', v.alt],
         ['uniform1f', 'uCloud', v.cloud],
+        ['uniform4fv', 'uLow', lowUniform()],
+        ['uniform1f', 'uLowTowers', state.low.towers],
         ['uniform1f', 'uWind', state.wind],
         ['uniform2fv', 'uDrift', state.drift],
         ['uniform1f', 'uCirrus', state.cirrus],
@@ -9140,7 +9172,7 @@ const SkySound = (() => {
     const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = Q.stale || 0.5;
     const S = {};
     gl.useProgram(shadowProg);
-    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud']) S[n] = gl.getUniformLocation(shadowProg, n);
+    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud', 'uLow', 'uLowTowers']) S[n] = gl.getUniformLocation(shadowProg, n);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uHeads'), 22);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uTower'), 30);
@@ -9255,6 +9287,7 @@ const SkySound = (() => {
     const TOPS = 1024;
     gl.useProgram(topsProg);
     const uCloudTops = gl.getUniformLocation(topsProg, 'uCloud'), uTopsPass = gl.getUniformLocation(topsProg, 'uTopsPass');
+    const uLowTops = gl.getUniformLocation(topsProg, 'uLow'), uLowTowersTops = gl.getUniformLocation(topsProg, 'uLowTowers');
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uWeather'), 3);
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uTopsIn'), 24);
     const tops = [24, 23].map(unit => {
@@ -9273,9 +9306,11 @@ const SkySound = (() => {
     C('uniform1i', 'uTops', 23);
     let topsFor = null;
     const uResTops = gl.getUniformLocation(topsProg, 'uRes');
-    const drawTops = cloud => {
+    const drawTops = (cloud, key) => {
       gl.useProgram(topsProg);
       gl.uniform1f(uCloudTops, cloud);
+      gl.uniform4fv(uLowTops, lowUniform());
+      gl.uniform1f(uLowTowersTops, state.low.towers);
       gl.viewport(0, 0, TOPS, TOPS);
       gl.uniform2f(uResTops, TOPS, TOPS);
       // (The first texture is on its unit only while the second draw reads it.)
@@ -9288,7 +9323,7 @@ const SkySound = (() => {
       });
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(prog);
-      topsFor = cloud;
+      topsFor = key;
     };
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
@@ -9437,7 +9472,7 @@ const SkySound = (() => {
       restart = false;
       const flying = state.speed > 0;
       if (!flying || Math.abs(way[1]) > CLIMB_STEP) altSeen = v.alt;
-      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud].join();
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, lowKey()].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
       if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return false;   // settled
@@ -9493,7 +9528,8 @@ const SkySound = (() => {
         ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
       gl.uniform1f(uSteps, steps);
       // The map of the tops, for this frame's clouds.
-      if (v.cloud > 0 && v.cloud !== topsFor) drawTops(v.cloud);
+      const topsKey = [v.cloud, lowKey()].join();
+      if (v.cloud > 0 && topsKey !== topsFor) drawTops(v.cloud, topsKey);
       // The table of the air's light, for this frame's light, air and height.
       const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare].join() : '';
       if (lut && lutKey !== lut.for) {
@@ -9537,8 +9573,8 @@ const SkySound = (() => {
       // The depth maps, for this frame's light and clouds, and a place near
       // enough: all of a map whose light or clouds have changed, else the
       // first layer that is stale (flown too far), one a frame.
-      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, ...state.light].join() : '';
-      const maps = [[shadowMap, shade, state.light], [columnMap, v.cloud > 0 ? String(v.cloud) : '', [0, 1, 0]]];
+      const shade = v.cloud > 0 && state.lightI > 0 ? [v.alt, v.cloud, lowKey(), ...state.light].join() : '';
+      const maps = [[shadowMap, shade, state.light], [columnMap, v.cloud > 0 ? [v.cloud, lowKey()].join() : '', [0, 1, 0]]];
       const shiftOf = at => [wrapped(state.drift[0] - at[0]), wrapped(state.drift[1] - at[1])];
       const drawLayer = (m, dir, layer) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
@@ -9552,6 +9588,8 @@ const SkySound = (() => {
         gl.uniform1f(S.uLayer, layer);
         gl.uniform2fv(S.uDrift, state.drift);
         gl.uniform1f(S.uCloud, v.cloud);
+        gl.uniform4fv(S.uLow, lowUniform());
+        gl.uniform1f(S.uLowTowers, state.low.towers);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.useProgram(prog);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
@@ -9999,6 +10037,12 @@ const SkySound = (() => {
   // A view can be given in the address: ?time=17.5&cloud=0.7&yaw=120&pitch=-10
   const params = new URLSearchParams(location.search);
   for (const id in sliders) if (params.has(id)) document.getElementById(id).value = params.get(id);
+  // The low layer's record, for tests (low.base, low.depth, low.form, low.smooth, low.towers): no control sets it yet.
+  {
+    const low = {};
+    for (const k in state.low) if (params.has('low.' + k) && isFinite(parseFloat(params.get('low.' + k)))) low[k] = parseFloat(params.get('low.' + k));
+    setLow(low);
+  }
   // The drawing limit of the hero: the address, else the last choice, else WQHD.
   const pixels = document.getElementById('pixels');
   let storedPixels = null;
