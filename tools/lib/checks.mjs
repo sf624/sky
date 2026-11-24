@@ -339,6 +339,9 @@ export const CHECKS = {
     const f = (n) => path.join(ctx.dir, n + '.png');
     const lines = [], pages = [];
     let ok = true;
+    // (The flights start at 200,40, a place with heaps and no tower within some 30 km: at 40,60, where they started
+    // until #117, a tower now stands, the low flight started inside it, and the page was no longer compared with a
+    // base that shows the same clouds. The steering check's flights start there too.)
     // The flight's exposure at its last frame sets the still's (`?expo=`), so that both are drawn at the same
     // exposure: each follows a meter of its own (the still settles at rest, within a hysteresis, the flight
     // tracks), and they end a hair apart, which the comparison would count as a difference of the picture.
@@ -348,7 +351,7 @@ export const CHECKS = {
       const out = {};
       for (const fl of flights) {
         const fly = f(`${fl.name}.${who}`), still = f(`${fl.name}-still.${who}`);
-        const p = await ctx.session.open(root, `${fl.q}&speed=900&heading=0&at=40,60`, ctx.size);
+        const p = await ctx.session.open(root, `${fl.q}&speed=900&heading=0&at=200,40`, ctx.size);
         let e = null;
         const seen = [];
         try {
@@ -363,7 +366,7 @@ export const CHECKS = {
         } finally {
           await p.close();
         }
-        pages.push(await stillAt(ctx, root, `${fl.q}&heading=0&${at(reached(40, 60, 900, 0, fl.frames, 16))}${pinned(e)}`, still));
+        pages.push(await stillAt(ctx, root, `${fl.q}&heading=0&${at(reached(200, 40, 900, 0, fl.frames, 16))}${pinned(e)}`, still));
         out[fl.name] = { ...diffPng(still, fly, { out: f(`${fl.name}-diff.${who}`) }), expo: e,
           range: e === null ? null : Math.max(...seen) - Math.min(...seen) };
       }
@@ -444,11 +447,11 @@ export const CHECKS = {
     // turned by the rudder at the same rate (700 km/h at 45 degrees: 2.9 degrees a second; the rudder's 3).
     const fwd = t0.fl.cam.slice(6, 9), deg = 180 / Math.PI;
     const level = `date=172&time=15&cirrus=0.4&heading=30&yaw=${Math.atan2(fwd[0], fwd[2]) * deg}&pitch=${Math.asin(fwd[1]) * deg}&at=0,0`;
-    const circle = 'date=172&time=15&cirrus=0.4&heading=0&yaw=20&pitch=-12&bank=60&at=40,60';
+    const circle = 'date=172&time=15&cirrus=0.4&heading=0&yaw=20&pitch=-12&bank=60&at=200,40';
     const c0 = await settled(circle);
     // (a) and (c).
     const flights = [
-      ...[0, 90, 180, 270].map((hd) => ({ name: `heading-${hd}`, q: `${base}&heading=${hd}&yaw=${hd + 20}&at=40,60`, hd, kmh: 900, frames: 61, ms: 16 })),
+      ...[0, 90, 180, 270].map((hd) => ({ name: `heading-${hd}`, q: `${base}&heading=${hd}&yaw=${hd + 20}&at=200,40`, hd, kmh: 900, frames: 61, ms: 16 })),
       { name: 'turn-45', q: `${turn}&expo=${t0.e}`, from: [0, 0], hd: 30, bank: 45, kmh: 700, frames: 121, ms: 16, two: true, e: t0.e },
       { name: 'rudder', q: `${level}&expo=${t0.e}`, from: [0, 0], hd: 30, rudder: 1, kmh: 700, frames: 121, ms: 16, e: t0.e,
         before: "window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))" },
@@ -459,7 +462,7 @@ export const CHECKS = {
     const result = {};
     for (const fl of flights) {
       const { fl: got, e } = await fly(fl.name, `${fl.q}&speed=${fl.kmh}`, fl.frames, fl.ms, fl.two, fl.before);
-      const want = flownPath({ x: fl.from ? fl.from[0] : 40, z: fl.from ? fl.from[1] : 60, heading: fl.hd, bank: fl.bank, rudder: fl.rudder, kmh: fl.kmh, frames: fl.frames, ms: fl.ms });
+      const want = flownPath({ x: fl.from ? fl.from[0] : 200, z: fl.from ? fl.from[1] : 40, heading: fl.hd, bank: fl.bank, rudder: fl.rudder, kmh: fl.kmh, frames: fl.frames, ms: fl.ms });
       await stillThere(fl.name, 'date=172&time=15&cirrus=0.4', got, fl.e ?? e);
       const d = diffPng(f(`${fl.name}-still`), f(fl.name), { out: f(`${fl.name}-diff`) });
       const sa = readPng(f(`${fl.name}-still`)), fa = readPng(f(fl.name));
@@ -467,11 +470,11 @@ export const CHECKS = {
       result[fl.name] = { d, sharp };
       const miss = apart(got.at, want.at) * 1e6, turned = got.heading - fl.hd;
       lines.push(`${fl.name}: heading ${fl.hd} -> ${got.heading.toFixed(3)} (sum ${want.heading.toFixed(3)}), place off the sum by ${miss.toFixed(1)} mm` +
-        `${fl.name === 'circle' ? `, ${(apart(got.at, [40, 60]) * 1000).toFixed(1)} m from the start after turning ${turned.toFixed(2)} degrees` : ''}; ` +
+        `${fl.name === 'circle' ? `, ${(apart(got.at, [200, 40]) * 1000).toFixed(1)} m from the start after turning ${turned.toFixed(2)} degrees` : ''}; ` +
         `against the still ${fmtDiff(d)}; detail ${sharp.toFixed(3)} of the still's`);
       expect(miss < 1 && Math.abs(got.heading - want.heading) < 1e-6, `${fl.name}: the place and heading of the sum`);
       if (fl.name.startsWith('heading-') || fl.name === 'circle') expect(d.mean <= limit, `${fl.name}: within ${limit} of the still`);
-      if (fl.name === 'circle') expect(Math.abs(turned - 360) < 0.6 && apart(got.at, [40, 60]) < 0.01, 'the circle closes');
+      if (fl.name === 'circle') expect(Math.abs(turned - 360) < 0.6 && apart(got.at, [200, 40]) < 0.01, 'the circle closes');
     }
     // The bank adds nothing to a turn's own cost: against the level turn over the same view, the banked one is
     // as close to its still and as sharp (its detail measured over the same part of the view, see detailOf). (Any turn, a drag of the view too, keeps less detail than a straight
@@ -532,7 +535,7 @@ export const CHECKS = {
     // matches the picture there once the aircraft has stopped and the picture settled (the altitude cannot be
     // given exactly in the address: its slider rounds it). Then a climb into the top of the range levels off.
     {
-      const p = await ctx.session.open(ctx.page, 'date=172&time=14&alt=3&pitch=-5&yaw=60&heading=0&climb=5&speed=900&at=40,60', ctx.size);
+      const p = await ctx.session.open(ctx.page, 'date=172&time=14&alt=3&pitch=-5&yaw=60&heading=0&climb=5&speed=900&at=200,40', ctx.size);
       const stop = "(() => { const s = document.getElementById('speed'); s.value = 0; s.dispatchEvent(new Event('input')); return 0; })()";
       try {
         await p.step(61, 16);
@@ -557,7 +560,7 @@ export const CHECKS = {
       const sliderNow = (p) => p.eval("[+document.getElementById('alt').value, document.getElementById('altOut').value]");
       for (const [name, start, climb, frames, want] of [['through 13 km', 12.95, 10, 120, null], ['down through 13 km', 13.05, -10, 120, null],
         ['to the top', 39.9, 10, 400, 40], ['to the bottom', 0.4, -10, 400, 0.3]]) {
-        const q = await ctx.session.open(ctx.page, `date=172&time=14&alt=${start}&heading=0&climb=${climb}&speed=900&at=40,60`, ctx.size);
+        const q = await ctx.session.open(ctx.page, `date=172&time=14&alt=${start}&heading=0&climb=${climb}&speed=900&at=200,40`, ctx.size);
         let fl, sl;
         try {
           await q.step(frames, 16);
@@ -586,7 +589,7 @@ export const CHECKS = {
     // right). And stills at bank 0, 30, 60 at a low sun at 11 km, for looking at; their exposures.
     for (const b of [0, 30, 60]) {
       const n = `horizon-${b}`;
-      const fl = { heading: 100, yaw: 100, pitch: 0, bank: b, climb: 0, at: [40, 60] };
+      const fl = { heading: 100, yaw: 100, pitch: 0, bank: b, climb: 0, at: [200, 40] };
       pages.push(await stillAt(ctx, ctx.page, `date=172&time=11&alt=0.3&cloud=0&cirrus=0&${flightQuery(fl)}`, f(n)));
       const img = readPng(f(n));
       // The sea's horizon dips 0.56 degrees at 0.3 km: from the middle of the picture, rotated by the bank.
@@ -596,7 +599,7 @@ export const CHECKS = {
       lines.push(`${n}: the horizon at ${angle.toFixed(2)} degrees (expected ${b})`);
       expect(Math.abs(angle - b) < 1, `${n}: the horizon tilted by the bank`);
       const m = `banked-${b}`;
-      const fm = { heading: 0, yaw: 60, pitch: -6, bank: b, climb: 0, at: [40, 60] };
+      const fm = { heading: 0, yaw: 60, pitch: -6, bank: b, climb: 0, at: [200, 40] };
       const pm = await stillAt(ctx, ctx.page, `date=172&time=17.4&cloud=0.5&${flightQuery(fm)}`, f(m));
       pages.push(pm);
     }
@@ -631,7 +634,7 @@ export const CHECKS = {
         "if (!z.some(([zx, zy, zw, zh]) => x >= zx && x <= zx + zw && y >= zy && y <= zy + zh)) out++; } return [n, out]; })()";
       const markers = {};
       for (const [name, st, opt] of states) {
-        const q = `${sea}&${flightQuery({ ...st, at: [40, 60] })}`;
+        const q = `${sea}&${flightQuery({ ...st, at: [200, 40] })}`;
         const p = await ctx.session.open(ctx.page, run.stillQuery(`${q}&hud=1`), { ...ctx.size, ...(opt.size || {}) });
         let fl, hud, count;
         try {

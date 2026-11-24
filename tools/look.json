@@ -624,7 +624,7 @@
   },
   {
    "name": "dusk-eye-line-1.5km",
-   "q": "date=327&time=16.75&alt=1.5&at=46.18,-22.87&yaw=100&pitch=6&cloud=0.5",
+   "q": "date=327&time=16.75&alt=1.5&at=46.18,-22.87&yaw=120&pitch=6&cloud=0.5",
    "reported": "2026-11-23",
    "wrong": "a thin dark horizontal line at the eye level across the clouds",
    "measures": [
@@ -637,10 +637,10 @@
       0.15
      ],
      "cols": 4,
-     "max": 0.05
+     "max": 0.03
     }
    ],
-   "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085). Limit 0.03 until the towers became models: main's old tower, which filled the left of this view, is gone, and the heaps behind it measure 0.034 by their own level shadow edges at dusk, the same with cirrus=0 and with the place of the cirrus's shadow not moved at all (the line's cause).",
+   "note": "Also absent on 9041c58 (0.009); present on b5e1760 (0.085). Reported at yaw=100; the view was turned to yaw=120 when the towers became models (#117): main's old tower, which filled the left of the reported view, is gone, and the heaps behind it measure 0.034 there by their own level shadow edges at dusk, with or without cirrus. At yaw=120: 0.091 on 8582b03, 0.005 on efd2b2f, 0.007 on 4725dbf, 0.012 with the towers.",
    "bad": "8582b03",
    "fixed": "efd2b2f"
   },
@@ -858,7 +858,7 @@
   },
   {
    "name": "tower-dusk-line-3km",
-   "q": "date=172&time=18.9&alt=3&at=127.7,53.3&yaw=35&pitch=3&cloud=0.5",
+   "q": "date=172&time=18.9&alt=3&at=33,53.9&yaw=35&pitch=3&cloud=0.5",
    "reported": "2026-11-24",
    "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
    "measures": [],
@@ -868,7 +868,7 @@
   },
   {
    "name": "tower-dusk-line-2.3km",
-   "q": "date=172&time=18.9&alt=2.3&at=127.7,53.3&yaw=35&pitch=5&cloud=0.5",
+   "q": "date=172&time=18.9&alt=2.3&at=33,53.9&yaw=35&pitch=5&cloud=0.5",
    "reported": "2026-11-24",
    "wrong": "a razor-straight dark line across a tower at the eye's level at dusk, with a pale cap above it",
    "measures": [],
