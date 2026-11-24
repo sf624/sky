@@ -17,7 +17,8 @@ const winTemp = () => {
 };
 
 // Script put first in the page's <head>: posts its console lines, the renderer, the GPU time of each animation
-// frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`.
+// frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`,
+// then goes on to the next view of a chain, if any.
 // With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
 const INJECT = `<script>(() => {
   const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
@@ -40,7 +41,13 @@ const INJECT = `<script>(() => {
     }
     return c;
   };
-  const finish = o => { done = true; post(o).then(() => post({ ev: 'done' })); };
+  // After \`done\`, the next view of a chain (d3dperf), if the server has one: the same Chrome, so its programs
+  // may come from the GPU process's cache.
+  const finish = o => {
+    done = true;
+    post(o).then(() => post({ ev: 'done' })).then(() => fetch('/d3d/next/' + run)).then(r => (r.ok ? r.text() : ''))
+      .then(u => { if (u) location.replace(u); }).catch(() => {});
+  };
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = cb => raf(ts => {
     let query = null;
@@ -53,8 +60,9 @@ const INJECT = `<script>(() => {
         gl.deleteQuery(p);
       }
       if (!done && !SHOT && times.length >= FRAMES + 10) {
-        const s = times.slice(10).sort((a, b) => a - b);
-        finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
+        const t = times.slice(10, FRAMES + 10), s = [...t].sort((a, b) => a - b);
+        finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], mean: t.reduce((a, b) => a + b, 0) / t.length,
+          times: t.map(x => +x.toFixed(3)), w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
       }
     }
   });
@@ -177,18 +185,21 @@ process.on('exit', () => {
   try { kill(processesOf(current.prof)); fs.rmSync(current.dir, { recursive: true, force: true }); } catch {}
 });
 
-// One headless Windows Chrome on Direct3D 11 at url, until the page reports `done` or `limit` s pass.
-async function runChrome(url, reports, id, { limit, size }) {
+// One headless Windows Chrome on Direct3D 11 at url, until finished() (the page reported `done`) or `limit` s
+// pass. Returns true when it was stopped by the limit.
+export async function runChrome(url, finished, id, { limit, size }) {
   const temp = winTemp(), prof = `sky-d3d-${process.pid}-${id}`;
   fs.mkdirSync(path.join(temp.wsl, prof));
   current = { prof, dir: path.join(temp.wsl, prof) };
   const child = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', `--user-data-dir=${temp.win}\\${prof}`,
     '--disable-gpu-shader-disk-cache', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     `--window-size=${size.w},${size.h}`, url], { cwd: '/mnt/c', stdio: 'ignore' });
-  child.on('error', (e) => reports.push({ ev: 'done', error: String(e) }));
+  let failed = null;
+  child.on('error', (e) => (failed = String(e)));
   const t0 = Date.now();
-  while (Date.now() - t0 < limit * 1000 && !reports.some((r) => r.ev === 'done')) await sleep(250);
-  const timedOut = !reports.some((r) => r.ev === 'done');
+  while (Date.now() - t0 < limit * 1000 && !finished() && !failed) await sleep(250);
+  if (failed) throw new Error(`d3d: Chrome did not start: ${failed}`);
+  const timedOut = !finished();
   for (let i = 0; i < 10; i++) {
     const pids = processesOf(prof);
     if (!pids.length) break;
@@ -205,15 +216,24 @@ async function runChrome(url, reports, id, { limit, size }) {
   return timedOut;
 }
 
-// `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
-export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
-  if (!fs.existsSync(CHROME)) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
-  const reports = new Map();
-  const files = new Map();
+// The Windows Chrome to run, or null on a machine without it.
+export const windowsChrome = () => (fs.existsSync(CHROME) ? CHROME : null);
+export const CHROME_PATH = CHROME;
+
+// The local server of a d3d run: the pages and harness files (files: path -> text), the reports each run posts
+// (reports: id -> list), and the next view of a chain (next: id -> URL).
+export async function d3dServer() {
+  const reports = new Map(), files = new Map(), next = new Map();
   const server = await startServer({
     handle(req, res, url) {
-      const m = /^\/d3d\/(report\/(\w+)|page\/(\w+)\/index\.html|programs\/(\w+)\.(json|html))$/.exec(url.pathname);
+      const m = /^\/d3d\/(report\/(\w+)|page\/(\w+)\/index\.html|programs\/(\w+)\.(json|html)|next\/(\w+))$/.exec(url.pathname);
       if (!m) return false;
+      if (m[6]) {
+        const to = next.get(m[6]);
+        res.writeHead(to ? 200 : 404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+        res.end(to || '');
+        return true;
+      }
       if (m[2] && req.method === 'POST') {
         let body = '';
         req.on('data', (d) => (body += d));
@@ -232,6 +252,20 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
     },
   });
   const port = new URL(server.url('.')).port;
+  return { reports, files, next, port, close: () => server.close() };
+}
+
+// The page with the script above, served at /d3d/page/<key>/index.html.
+export const servePage = (srv, key, html) => srv.files.set(`/d3d/page/${key}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
+// The URL of a page served under key, as run id, with ?timing&res=1 and the query (its quality max unless named),
+// timing `frames` frames.
+export const pageUrl = (srv, key, id, q, frames) =>
+  `http://localhost:${srv.port}/d3d/page/${key}/index.html?timing&res=1&${withQuality(q)}&d3d=${id}&d3dFrames=${frames}`;
+
+// `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
+export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
+  if (!windowsChrome()) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
+  const srv = await d3dServer(), { reports, files, port } = srv;
   const results = [];
   try {
     for (let r = 0; r < runs; r++) {
@@ -243,13 +277,13 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
           files.set(`/d3d/programs/${id}.json`, JSON.stringify(programsOf(html)));
           url = `http://localhost:${port}/d3d/programs/${id}.html?d3d=${id}`;
         } else {
-          files.set(`/d3d/page/${id}/index.html`, html.replace('<head>', '<head>\n' + INJECT));
+          servePage(srv, id, html);
           // (A picture is taken at the page's own drawing size: no res=1.)
-          url = `http://localhost:${port}/d3d/page/${id}/index.html?timing${shot ? '' : '&res=1'}&${withQuality(q)}&d3d=${id}` +
-            (shot ? `&d3dShot=${shot}` : `&d3dFrames=${frames}`);
+          url = shot ? `http://localhost:${port}/d3d/page/${id}/index.html?timing&${withQuality(q)}&d3d=${id}&d3dShot=${shot}`
+            : pageUrl(srv, id, id, q, frames);
         }
         reports.set(id, []);
-        const timedOut = await runChrome(url, reports.get(id), id, { limit, size });
+        const timedOut = await runChrome(url, () => reports.get(id).some((g) => g.ev === 'done'), id, { limit, size });
         const got = reports.get(id);
         results.push({ page: page.name, run: r + 1, timedOut, got });
         print(page.name, r + 1, mode, got, timedOut, limit);
@@ -262,7 +296,7 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
       }
     }
   } finally {
-    server.close();
+    srv.close();
   }
   return results;
 }
@@ -281,5 +315,5 @@ function print(name, run, mode, got, timedOut, limit) {
   const shown = got.find((g) => g.ev === 'shown');
   if (shown) console.log(`  ${shown.failed ? 'failed' : 'first picture'} at ${shown.at.toFixed(2)} s (since the navigation)`);
   const f = got.find((g) => g.ev === 'frames');
-  if (f?.median) console.log(`  GPU time per frame at ${f.w} x ${f.h}: median ${f.median.toFixed(2)} ms, p90 ${f.p90.toFixed(2)} ms`);
+  if (f?.median) console.log(`  GPU time per frame at ${f.w} x ${f.h}: mean ${f.mean.toFixed(2)} ms, median ${f.median.toFixed(2)} ms, p90 ${f.p90.toFixed(2)} ms`);
 }
