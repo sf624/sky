@@ -909,6 +909,32 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     0.025). Where they stand is the field's own business (Towers, below).
   - `depth`: a sheet's 0.3 to 1.4 km (G and R); a heap's 0.6 to 1.8 km, most of them under 1 km (G squared: deeper, a heap
     before the sun was two lobes one on the other).
+- **The layer's record** (`state.low` in the JS; `uLow`, `uLowTowers`): five
+  values beside the amount that `cloudLayer` and the sheet's shape take
+  from the page, not from constants. As the page opens they are 0, 1, 0, 0
+  and 1, and the picture is the one described here. No control sets them
+  yet (test parameters do, see
+  [development.md](development.md#url-parameters)); a weather will (#84).
+  - `base` (0 to 2.25 km): added to `level`.
+  - `depth` (a factor, 0.4 to 1.5): on `depth`, a sheet's and a heap's.
+  - `form` (-1 to 1): a bias added to the slider and the region inside the
+    form's `smoothstep`: at -1 heaps at every amount, at 1 a sheet. (Set
+    in a branch, `if (set) a.form = …`, the form cost 5 % of the frame
+    over a deck on Direct3D 11 with the same picture: Microsoft's compiler
+    no longer knew that it lies from 0 to 1. See the GLSL rules.) The
+    helpers of the change from heaps to a sheet (`turn`, the towers' share)
+    still read the slider.
+  - `smooth` (0 to 1): the sheet's cells fill in towards one even sheet
+    (`mix(shape, 1, 0.8 smooth)`), its relief is `1 - 0.6 smooth` of what
+    it was, and the fine noise takes `1 - 0.8 smooth` of `CF_ERODE`.
+  - `towers` (0 to 1): a factor on `tower`.
+
+  `setLow` keeps the record within the shell: what stands over `CT` is cut
+  off flat, so a lifted base takes from the depth (at most `(3.8 - base) /
+  1.8`), and over a base lifted by more than 0.1 km no towers grow (their
+  height, 2.1 to 3.7 km, is not a field yet). The record is part of the
+  keys of what is built from the layer: the map of the tops, both depth
+  maps, and the frame's look (a still is drawn again).
 - **The profile**: `1 - t^k`, `t` the height over the level as a share of
   the depth: flat under, round over, `k` = 2.
 - **The base shape**, from `uNoise` (128^3; R Perlin-Worley, G, B, A Worley

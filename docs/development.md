@@ -75,6 +75,19 @@ These are read directly.
 
 With `date` and no `moon`, the moon's age follows the given date.
 
+These are for tests only: they set the low layer's record (see
+[design.md](design.md#low-clouds)), which no control sets yet. Their names
+and ranges may change. The page clamps each to its range, and the depth
+and the towers to what fits under the top of the low clouds' shell.
+
+| Parameter | Range | Default | Meaning |
+|---|---|---|---|
+| `low.base` | 0 to 2.25 | 0 | km added to the level of the low clouds' bases (0.75 to 0.9 km at 0) |
+| `low.depth` | 0.4 to 1.5 | 1 | A factor on the layer's depth; at most `(3.8 - low.base) / 1.8` |
+| `low.form` | -1 to 1 | 0 | A bias on the amount that turns heaps into a sheet: -1 heaps at every amount, 1 a sheet |
+| `low.smooth` | 0 to 1 | 0 | How even a sheet is: 0 cells, 1 one smooth sheet |
+| `low.towers` | 0 to 1 | 1 | The share of the towers that grow; 0 with `low.base` over 0.1 |
+
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
 it is automatic), `sky.lang` (the language, set by the panel's language
@@ -691,7 +704,12 @@ The shaders must run on any WebGL2. The code keeps these rules:
   With `UNSEEN` it is 15.9 ms, and a few pixels of a still on GL move by
   up to 4 levels. So measure a change of the field on Direct3D 11 as well
   (`d3dperf`, the page against main in turns): GL does not show what its
-  compiler folds. Taken out again in a copy of 9de3e45, the `UNSEEN` of
+  compiler folds. A value given to the field from outside is the same
+  trap: the layer's form set in a branch on a uniform (`if (uLow.z >= 0.0)
+  a.form = uLow.z`) took the frame over a deck to 1.05 times main's on
+  Direct3D 11 (11.70 against 11.19 ms, `overcast` of `d3dperf`), alone of
+  six such edits; as a bias inside the form's `smoothstep` it costs
+  nothing measurable (1.007). Taken out again in a copy of 9de3e45, the `UNSEEN` of
   `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
   the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
   2026-11-24).
