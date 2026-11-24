@@ -2379,8 +2379,8 @@ const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the 
 // Towers (towering cumulus): one may stand in each cell of TW_CELL km of the weather map (a whole share of it), a model
 // of stacked turrets (uTower, TW_N of them in boxes of 64 texels, TW_BOX km a side at full size), where the air rises
 // (the weather map's A about the cell, over TW_RISE.x; whole from TW_RISE.y).
-const float TW_CELL = 8.0, TW_BOX = 4.2, TW_N = 6.0;
-const vec2 TW_RISE = vec2(0.12, 0.4);
+const float TW_CELL = 16.0, TW_BOX = 4.2, TW_N = 6.0;
+const vec2 TW_RISE = vec2(0.04, 0.22);
 const float TW_TOP = 0.7;           // the top of every model, of its box (a model may be wider than high)
 const float TW_SEAM = 0.16;         // twice how deep the seams of the large heads go into a tower, km
 // (The model has a tower's forms of a km and of half a km: the heads of those sizes move its surface less, or not.)
@@ -2389,7 +2389,8 @@ const vec4 TW_HEAD = vec4(0.0, 0.2, 0.6, 0.8);
 // was cut loose by the finer ones, a crumb beside the outline), and the size of its heads of 285 m and less.
 const float TW_OUT = 0.13, TW_SMALL = 0.4;
 // Heaps gather round a tower's foot: within TW_FOOT.x km of its middle the discs' thresholds are lower by
-// TW_FOOT.z, less and less out to TW_FOOT.y km (inside the tower's cell), and no lane is clear there.
+// TW_FOOT.z, less and less out to TW_FOOT.y km (inside the tower's cell), and no lane is clear there. (Not the
+// 500 m discs': lower, they were shreds beside the foot.)
 const vec3 TW_FOOT = vec3(1.4, 3.1, 0.14);
 // A layer of cloud at x (km on the weather map): the level of its bases
 // (km), its depth (km), its amount (0 to 1: how much of the base shape is
@@ -2533,31 +2534,34 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   if (a.tower > 0.0 && heapMix > 0.0) {
     vec2 cell = floor(x / TW_CELL), cw = cell - (WEATHER_KM / TW_CELL) * floor(cell * (TW_CELL / WEATHER_KM));
     uint h1 = ihash(uint(cw.x) + 64u * uint(cw.y) + 0x3c6ef372u);
-    // (Half of the cells may hold one, by a bit of the hash: the others go no further. The cell's air is one more
-    // read of the map for every read of the field, most of them in clear air, where the field does little else.)
-    if ((h1 & 2u) != 0u) {
+    // (The tower stands anywhere in the middle half of its cell, and three cells in ten hold none whatever the air
+    // does: in cells of 8 km, within 0.8 km of the middle, three towers in neighbouring cells stood in a row, 8 km
+    // apart.)
+    if ((ihash(h1 ^ 0x98c475e6u) & 255u) < 179u) {
       uint h2 = ihash(h1);
       vec4 r1 = vec4(h1 & 255u, (h1 >> 8u) & 255u, (h1 >> 16u) & 255u, h1 >> 24u) / 255.0;
       vec4 r2 = vec4(h2 & 255u, (h2 >> 8u) & 255u, (h2 >> 16u) & 255u, h2 >> 24u) / 255.0;
-      vec2 c = (cell + 0.5 + 0.2 * (r1.xy - 0.5)) * TW_CELL;
+      vec2 c = (cell + 0.5 + 0.5 * (r1.xy - 0.5)) * TW_CELL;
       float grow = a.tower * smoothstep(TW_RISE.x, TW_RISE.y, textureLod(uWeather, c / WEATHER_KM, 4.0).a + 0.12 * (r2.x - 0.5));
       if (grow > 0.0) {
-        float ht = mix(2.6, 3.7, r1.z), side = ht / TW_TOP;
+        float ht = mix(2.1, 3.7, r1.z), side = ht / TW_TOP;
         towerTop = ht * grow;
         towerFoot = grow * (1.0 - smoothstep(TW_FOOT.x, TW_FOOT.y, length(x - c)));
         vec2 dx = x - CF_LEAN * overBase - c;
         float outside = max(length(dx) - 0.5 * side, overBase - towerTop - CF_OUT);
 #ifdef TOPS_MAP
         // (The map of the tops: the tower's top, as far out as its box and its lean reach.)
-        towerKm = length(x - c) < 0.5 * side + length(CF_LEAN) * towerTop + CF_OUT + 0.3 ? a.level + towerTop + CF_OUT + 0.05 - h : -9.0;
+        towerKm = length(x - c) < 0.4 * side + length(CF_LEAN) * towerTop + CF_OUT + 0.15 ? a.level + towerTop + CF_OUT + 0.05 - h : -9.0;
 #else
         if (outside < 0.0) {
           float ang = 6.2832 * r1.w, up = (overBase + ht - towerTop) / side;
           vec2 e = vec2(cos(ang), sin(ang)), l = vec2(e.x * dx.x - e.y * dx.y, e.y * dx.x + e.x * dx.y) / side + 0.5;
-          float v = min(floor(TW_N * r2.y), TW_N - 1.0);
+          // (The model by the cell's place, so that no two cells that touch, by a side or a corner, hold the same one.)
+          float v = mod(cw.x + 3.0 * cw.y, TW_N);
           towerKm = (0.32 * textureLod(uTower, vec3((v + clamp(l.x, 0.008, 0.992)) / TW_N, l.y, up), clamp(lod, 0.0, 2.0)).r - 0.25 - max(up - 1.0, 0.0)) * side;
         } else {
-          towerKm = -outside - 0.3;
+          // (As far out as the model says just inside its bounds: nearer, the march crept round every tower.)
+          towerKm = -outside - max(0.3, 0.08 * side);
         }
 #endif
       }
@@ -2670,7 +2674,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // sets how much of a cell is disc: the weather map gathers the heaps and clears lanes between them.
     // (Never smoother than that by much: read from afar or for the depth maps, the discs would melt away.)
     vec4 c = textureLod(uNoise, vec3(q.x, off.y + 0.11, q.z), clamp(lod, 1.5, 2.5));
-    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0) - TW_FOOT.z * towerFoot, CF_DISC_MIN) + CF_LANE * a.lane * (1.0 - towerFoot);
+    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0) - TW_FOOT.z * towerFoot * vec3(1.0, 1.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane * (1.0 - towerFoot);
     const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
     // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
     // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
