@@ -31,6 +31,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs `look` on the GPU (unless names are given without `look`; on SwiftShader it is skipped, with a line saying so), then the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
 | `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3dperf [--base DIR\|REV] [--rounds N] [--views a,b] [--frames N] [--size WxH] [--speed KMH] [--fail RATIO] [--limit S]` | On WSL only: the frame time on Direct3D 11 of six views, the page against the base (default `origin/main`) in turns, a verdict for each and one line for the pull request (see [Frame time on Direct3D 11](#frame-time-on-direct3d-11-d3dperf)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
 The default size is 1280x720 on the GPU and 480x270 on SwiftShader; a view may set its own (`dpr2-fhd`).
@@ -220,7 +221,10 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
 - `d3d page`: the page with `?timing&res=1` (and `--q`): its console lines
   (each program compiled, the textures, the first picture, in seconds since
   the page was opened), then the GPU time of `--frames` frames (default 60,
-  `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080).
+  `EXT_disjoint_timer_query_webgl2`) at `--size` (default 1920x1080):
+  their mean, median and p90. Read the mean: in some views the frames
+  alternate between cheap and dear ones, nearly half of each, and the
+  median jumps from one kind to the other from run to run.
   With `--shot S`, instead of the GPU time: the canvas as a PNG, S s (real
   time) after the first picture, at the canvas's size (the page's own
   drawing size at this window's device pixel ratio of 1; no `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
@@ -236,7 +240,19 @@ not lose the context even where a draw held the GPU process for 143 s
 (also with `--gpu-watchdog-timeout-seconds=2`), where a browser with a
 window does: watch the times of the second compiles, not for a loss.
 
-Measured on the owner's machine on 2026-11-19 (`d3d programs`, each
+Measured on the owner's machine on 2026-11-24, main at 9de3e45:
+`d3d programs`, two runs, link in s: `fs (CIRRUS_PASS)` 9.0 and 9.3,
+`fs` 8.2 and 8.2, `fs (CLOUD_PASS)` 5.3 and 5.1, `ice` 3.3 and 3.4 (its
+draw into three targets 3.6), `fs (SKY_LIGHT)` 2.6 and 2.7, `noise` 0.9,
+`fs (SHADOW_MAP)` 0.3, `fs (TOPS_MAP)` 0.25. The harness's draw of `fs`
+alone ends in GL error 1282, and its copy of `fs (AIR_LUT)` does not
+compile; the page draws both. In the page (`d3dperf`, a window of
+1920 x 1080, 15 runs), the first picture comes 12.9 to 14.1 s after the
+navigation; `fs (CLOUD_PASS)` is ready at 9.2 to 9.8 s, `fs` at 10.8 to
+12.4 s, `fs (CIRRUS_PASS)` at 12.0 to 13.4 s. The frame times of the
+views of `d3dperf` are below.
+
+Earlier, on 2026-11-19 (`d3d programs`, each
 program alone, in s: its link, then its first draw into all its targets):
 main's `fs` 6.4 and 6.0; round 19's 98.9 and 114.9; 7d1a635's 124.0 and
 121.5; now `fs` 8.9 and `fs (CIRRUS_PASS)` 9.7, one target each, and
@@ -252,6 +268,76 @@ page draws it). Round 20 rebased on that main did not link: its `fs`
 read 20 textures, where Direct3D 11 allows 16. `d3d page`, three runs at
 2560 x 1440: the first picture 12.5 to 13.7 s (main 10.9 to 12.8 s), the
 GPU time per frame 24.1 to 24.9 ms (main 16.5 to 16.9 ms).
+
+### Frame time on Direct3D 11 (`d3dperf`)
+
+Microsoft's compiler may fold or flatten a branch after a harmless-looking
+edit: the frame gets a fifth slower on Direct3D 11 with the same picture,
+and GL shows nothing (see the GLSL rules). `d3dperf` watches for it, on
+the owner's machine; GitHub's runners have no such GPU.
+
+```sh
+node tools/sky.mjs d3dperf                  # this tree against origin/main, some 7 minutes
+node tools/sky.mjs d3dperf --views tower --rounds 7
+```
+
+It times six views, flying at 50 km/h (the page draws nothing at rest;
+at that speed a view moves some 20 m while it is timed), with `res=1`, at
+`quality=max`, in a window of `--size` (default 1920x1080, drawn at
+1898 x 982): `default` (11 km), `overcast` (11 km over a deck),
+`heaps-3km`, `tower` (a tower close ahead at 3 km), `cirrus` (12.5 km,
+level inside the cirrus) and `night` (a full moon over clouds). Each round
+runs the base, then the page: one Windows Chrome each (as `d3d`), which
+goes through the six views in its tab, so the later views' programs may
+come from the GPU process's cache. A view times `--frames` frames (default
+120) after the first picture and 10 more; its frame time is their mean.
+The verdict of a view takes the median of the `--rounds` rounds (default
+5, at least 3) on each side, and their ratio, page over base. The ratio is
+known to within the larger run-to-run spread of the two sides (the range
+of the rounds as a share of their median; from five rounds on, without the
+lowest and the highest). `PASS`: the ratio, plus that spread, is at most
+`--fail` (default 1.10, the working limit of one pull request). `FAIL`:
+the ratio, less the spread, is over it. Else `undecided`, with the range
+the ratio may have: run it again, with more rounds or that view alone; it
+is never a pass. The start comes as information: the first picture and the
+three programs ready last (seconds since the navigation, the first view of
+each round only, whose programs are compiled cold), page against base.
+The last line is for the pull request's description:
+
+```
+d3dperf: 6 views, worst 1.00x (cirrus), 0 FAIL, 0 undecided, spread up to 3.2 % at 9de3e45 vs origin/main (9de3e45)
+```
+
+Exit status 0 when every view passes, 1 when one fails, 3 when none fails
+and one is undecided; 0 with a `SKIP` line on a machine without Windows
+Chrome. Every frame's GPU time is kept in `frames.json` in the run's
+folder (`tools/out/d3dperf/…`, or `--out DIR`). Run nothing else on the GPU
+meanwhile: the tools' GL runs on WSL share it.
+
+It is not one of the checks: it needs Windows Chrome, it takes minutes,
+and it measures time, which drifts with the machine's load, where `check`
+compares pictures and traces that do not drift.
+
+Measured on 2026-11-24 (main at 9de3e45; drawn at 1898 x 982; the median
+of five rounds, ms; the spread of three runs of main against itself):
+
+| View | main | spread, main against main | 8582b03 (before #113 and #117) | a copy of main without the `UNSEEN` of `all` |
+|---|---|---|---|---|
+| `default` | 16.1 to 16.3 | 0.2 to 1.5 % | 14.5 | 17.6 (1.08x, undecided) |
+| `overcast` | 12.8 to 12.9 | 0.2 to 0.5 % | 10.8 | 13.5 (1.05x, PASS) |
+| `heaps-3km` | 16.5 to 16.6 | 0.2 to 0.8 % | 17.9 | 21.6 (1.30x, FAIL) |
+| `tower` | 16.0 to 16.6 | 0.3 to 3.5 % | 12.7 | 18.1 (1.095x, undecided) |
+| `cirrus` | 17.7 to 17.8 | 0.1 to 0.7 % | 16.9 | 21.0 (1.18x, FAIL) |
+| `night` | 15.3 to 16.2 | 0.1 to 6.0 % | 13.2 | 16.6 (1.09x, undecided) |
+
+Main against main passed twice, and once was undecided in `night` (1.05x)
+with no FAIL. `tower` and `night` have two states: their frames
+alternate between cheap and dear ones (14 and 19 ms in `tower`, 12 and
+17 ms in `night`), and the share of each changes from run to run (in
+`night` a fifth to two fifths cheap), so a run's mean takes one of two
+values (16.0 or 16.5 ms in `tower`, 15.1 or 16.1 ms in `night`). Their
+spread is the largest; the median of five rounds is seldom moved by it.
+
 
 ## Timings and limits
 
@@ -300,3 +386,5 @@ Other copies broken on purpose, each caught: the loop stopping one frame early (
 | `lib/look.mjs`, `lib/measures.mjs`, `lib/sheet.mjs` | The command `look`; the measures of a still; the contact sheet. |
 | `test/measures.test.mjs` | Unit tests of the measures on synthetic pictures, and of the registry: `node --test tools/test/*.test.mjs`. |
 | `lib/d3d.mjs` | The command `d3d`: Windows Chrome on Direct3D 11, its harness pages, its cleanup. |
+| `lib/d3dperf.mjs` | The command `d3dperf`: its views, the rounds in turns, the verdict. |
+| `test/d3dperf.test.mjs` | Unit tests of `d3dperf`'s arithmetic (the medians, the spread, the verdict, the summary line). |

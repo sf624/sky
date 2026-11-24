@@ -27,6 +27,8 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
               real time: time to the first draw, frame rate, GPU time per draw
   d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]
               on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
+  d3dperf     [--base DIR|REV] [--rounds N] [--views a,b] [--frames N] [--size WxH] [--speed KMH] [--fail RATIO] [--limit S]
+              on WSL: the frame time on Direct3D 11 against the base (default origin/main), in turns; one line to paste
 common:       --page DIR (the page to test; default: this repository)
 environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
 
@@ -89,7 +91,7 @@ async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (!cmd || cmd === 'help' || cmd === '--help') { console.log(USAGE); return 0; }
   const opt = parseArgs(rest);
-  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'look', 'check', 'drive', 'perf', 'd3d'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
+  if (!['trace', 'trace-diff', 'stills', 'img-diff', 'look', 'check', 'drive', 'perf', 'd3d', 'd3dperf'].includes(cmd)) throw new Error(`unknown command ${cmd}\n${USAGE}`);
   // look --from DIR measures stills already made: no Chrome, no queue.
   if (cmd === 'look' && opt.from && !('sheet' in opt)) {
     const { look } = await import('./lib/look.mjs');
@@ -139,6 +141,21 @@ async function main() {
     await d3d(pages, { mode, q: opt.q || '', runs: +(opt.runs || 1), limit: +(opt.limit || 300), frames: +(opt.frames || 60),
       size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null });
     return 0;
+  }
+  if (cmd === 'd3dperf') {
+    // Windows Chrome too, not queued.
+    const { d3dperf, VIEWS, ROUNDS, SPEED, FAIL, FRAMES } = await import('./lib/d3dperf.mjs');
+    const { windowsChrome } = await import('./lib/d3d.mjs');
+    const { parseSize, resolveBase } = await import('./lib/run.mjs');
+    const baseSpec = opt.base || 'origin/main';
+    const names = opt.views ? opt.views.split(',') : VIEWS.map((v) => v.name);
+    for (const n of names) if (!VIEWS.some((v) => v.name === n)) throw new Error(`d3dperf: no view ${n} (${VIEWS.map((v) => v.name).join(', ')})`);
+    // (Without Windows Chrome, no base is exported: d3dperf only says it skips.)
+    const pages = windowsChrome() ? [{ name: 'base', dir: resolveBase(baseSpec, REPO) }, { name: 'page', dir: page }] : [];
+    const baseAt = commitOf(baseSpec);
+    return await d3dperf(pages, { views: VIEWS.filter((v) => names.includes(v.name)), rounds: +(opt.rounds || ROUNDS),
+      frames: +(opt.frames || FRAMES), size: parseSize(opt.size || '1920x1080'), limit: +(opt.limit || 300), speed: +(opt.speed ?? SPEED),
+      fail: +(opt.fail || FAIL), out: path.join(out('d3dperf'), 'frames.json'), at: commitOf(page), baseName: baseAt && baseAt !== baseSpec ? `${baseSpec} (${baseAt})` : baseSpec });
   }
   const { Session } = await import('./lib/page.mjs');
   const run = await import('./lib/run.mjs');
