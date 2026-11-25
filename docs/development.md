@@ -58,6 +58,8 @@ These are read directly.
 | `stick` | none | `1`: shows the steering stick, which otherwise shows only on a touch screen (`pointer: coarse`) |
 | `hud` | stored choice, else off | `1`: shows the HUD, `0`: hides it (see [design.md](design.md#the-hud)). Not stored; the panel's switch and `H` store their choice |
 | `at` | `0,0` | Starting place, `x,z` in km on the weather map (wrapped to 0 to 256) |
+| `weather` | none | A weather of the panel's list, by its id: `clear`, `fair`, `mixed`, `overcast`, `cirrus`, `altocumulus`, `ac-cumulus`, `altostratus` (see `WEATHERS` and [design.md](design.md#weathers)). It sets `cloud`, `mid`, `cirrus`, `haze`, `wind`, the middle layer's record and the place; those parameters, given with it, win. `random` draws one from `seed`. Another value counts as none |
+| `seed` | drawn at random | With `weather=random`: a whole number that gives the weather, its values and its place. Without it, the page draws a seed and adds it to the address |
 | `pixels` | stored choice, else `wqhd` | The hero's drawing limit: `fhd`, `wqhd` or `4k`. Not stored |
 | `enlarge` | on | `0`: the canvas stays as large as the picture at every level, and the browser stretches it to the screen, as before the page enlarged it itself at `high` and `max` (see [design.md](design.md#the-drawing-size)). For comparing on a screen finer than the drawing limit |
 | `quality` | stored choice, else `auto` | The quality level: `low`, `mid`, `high`, `max` or `auto` (see [design.md](design.md#quality-levels)). A level that does not start falls back to the one below. Not stored. The tools add `quality=max` to every page they load, unless the query names a level |
@@ -95,7 +97,8 @@ holds, and a sheet some 0.6 km deep, an optical depth of about 20). With
 `cloud` from 0.6 to 0.9 the sheet has gaps. `low.depth=0.5` gives a thin
 sheet, greyer from above and lighter from below.
 
-The middle layer's record, likewise for tests (no control sets it yet):
+The middle layer's record, likewise for tests (no control sets it; a
+weather of the list sets it, and these win over the weather):
 
 | Parameter | Range | Default | Meaning |
 |---|---|---|---|
@@ -139,7 +142,9 @@ monospace text appears at the top left, over a dark backing, and the title is hi
   drawn, the time between frames (smoothed; `at rest` when nothing is drawn) and the exposure (log2);
 - the query line: every parameter that shapes the picture, with the values now (date, time, clock,
   `lat`, `lon`, `alt`, the place `at`, `yaw`, `pitch`, `heading`, `bank`, `climb`, `speed`, `cloud`,
-  `mid`, `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
+  `mid`, `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, the middle layer's
+  `midform`, `midbase`, `middepth` and `midrolls` where they are not their first values (a weather
+  sets them), and `res` when it was given);
 - a `Copy URL` button, which puts the whole address on the clipboard.
 
 To see what a screenshot showed, type its query line after `?`, add `speed=0` (the line has the

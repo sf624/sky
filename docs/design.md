@@ -12,7 +12,7 @@ blocks. It loads no other file.
 
 | Block | Kind | What it is |
 |---|---|---|
-| (no id) | JS | `TEXT`, the strings in Japanese and English, and `applyLanguage`. It runs right after the panel. |
+| (no id) | JS | `TEXT`, the strings in Japanese and English, `WEATHERS` (the weathers of the panel's list, see [Weathers](#weathers)) and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
@@ -30,6 +30,44 @@ sea, cirrus, glare. It flies (900 km/h by default) and is drawn as a mean
 over frames. It fills the window, and the page does not scroll.
 `makeSky(canvas, view, { done, shown })` makes its renderer, a step at a
 time (see the next section).
+
+### Weathers
+
+`WEATHERS`, a table in the first script, holds the weathers of the panel's
+list. Each has an id (its name in the address), its names in English and
+Japanese, a weight, the values of the sliders it sets (`cloud`, `mid`,
+`cirrus`, `haze`, `wind`; one not named goes to 0, or for `haze` and
+`wind` to its first value), the middle layer's record (`midform`,
+`midbase`, `middepth`, `midrolls`, as in the address; not named, its first
+values) and a place on the weather map (`at`, km; 0,0 if not named). A
+value is a number or `[low, usual, high]`. The list's options and their
+text are made from the table. It holds only what the page draws soundly
+today: there is no stratus (`low.smooth`) in it, and no `low.*` field.
+
+- Chosen from the list, a weather sets its usual values and moves the
+  aircraft to its place. The place jumps, so the picture starts again
+  without its past (`reset` in the frame, a move of more than 1 km).
+  Middle clouds raised from 0 are built as when their slider is raised
+  (`midWanted`, see [Middle clouds](#middle-clouds)): the frames go on
+  without the layer until its programs are ready.
+- The die draws a weather from a seed: one of the table by weight, then
+  each value between its low and its high, and any whole-km place on the
+  map. The seed's numbers are xorshift32 started from the seed through
+  lowbias32. The same seed gives the same weather, values and place. The
+  ranges are those under which each weather was looked at, so a draw
+  stays a real combination of layers, not noise over the sliders.
+- The list shows the weather while the five sliders and the record hold
+  what it set (after the sliders' rounding); once one is moved it shows
+  "custom", an option that is hidden and disabled otherwise. Without
+  `weather` in the address, it shows the weather whose usual values the
+  sliders and the record hold: the page's first values are those of
+  "Partly cloudy" (`mixed`, cumulus and cirrus).
+- A choice in the panel writes `weather` (and `seed`) into the address
+  with `history.replaceState`, and takes out the parameters it sets
+  (`cloud`, `mid`, `cirrus`, `haze`, `wind`, `midform`, `midbase`,
+  `middepth`, `midrolls`, `at`), so that the address can be shared.
+  `?weather=random` without a seed only adds the seed drawn.
+- Nothing changes the weather by itself: the time-lapse leaves it.
 
 ## Conventions
 
@@ -81,8 +119,11 @@ script.
 
 The JS then runs once, at load, and does little:
 
-1. **Inputs.** URL parameters with the id of a slider set that slider's
-   value (the browser clamps it to the slider's range and step). Then
+1. **Inputs.** `weather` sets the sliders of a weather, the middle
+   layer's record and the place (see [Weathers](#weathers)). Then URL
+   parameters with the id of a slider set that slider's value (the
+   browser clamps it to the slider's range and step): they win over the
+   weather, as `midform` and the others and `at` do. Then
    `readInputs()` copies the sliders into `state`. `now`, `rate` and `play`
    then act as the now button, the select and the play button, but the
    time does not run yet (see below). `alt`, `yaw`, `pitch`, `heading`, `bank`,
@@ -1762,9 +1803,10 @@ under an altostratus is grey, not the blue of a clear sky. Their shadow
 `midDensity`, `midClouds`. A second shell of cloud over the low clouds':
 altocumulus and altostratus, from `midbase` = 5.2 km up, 0.4 km deep as
 cells and 1.2 km as a sheet. The panel's slider "Middle clouds" (`mid`)
-sets its amount, 0 at first. Its form, base and depth have no control
-yet: `midform`, `midbase`, `middepth` and `midrolls` in the address set
-them (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
+sets its amount, 0 at first. Its form, base and depth have no control of
+their own: a weather of the list sets them (see [Weathers](#weathers)),
+and `midform`, `midbase`, `middepth` and `midrolls` in the address win
+over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
 
 - **Only where there are any.** A page that never shows middle clouds
   compiles and draws what it did before they existed, call for call. In
