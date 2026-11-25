@@ -2442,7 +2442,9 @@ Layer cloudLayer(vec2 x, float lod) {
   // None where next to no air rises for some 20 km around (A of the map's mip 6.5): a third of the map, where the
   // field then skips the towers' cells altogether.
   a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.01, 0.025, wide.a) * uLowTowers;
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form) * uLow.y;
+  // (The record's smooth: an even sheet is as deep as the sheets of its region, mip 6.5, with a little of the place's
+  // own: under a depth that changed every few km, its base was mottled like a stratocumulus's.)
+  a.depth = mix(mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), (0.5 + 0.5 * wide.g) * (0.55 + 0.9 * wide.r), 0.85 * uLow.w), 0.6 + 1.2 * w.g * w.g, a.form) * uLow.y;
   return a;
 }
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
@@ -2644,14 +2646,20 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       c = mix(n, c, smoothstep(0.35, 0.65, far.g));
       float cells = 0.4 * (0.6 * m.g + 0.4 * m.b) + 0.6 * (0.45 * c.g + 0.35 * c.b + 0.2 * c.a);
       shape = mix(clamp((cells - 0.2) / 0.5, 0.0, 1.0), shape, a.form);
-      // (The record's smooth: the cells fill in towards one even sheet, with less relief and less taken by the fine
-      // noise, see cloudField.)
-      shape = mix(shape, 1.0, 0.8 * uLow.w);
+      // (The record's smooth: the cells go, and one even sheet is left, with less taken by the fine noise, see
+      // cloudField. Its amount opens gaps in it where the Perlin-Worley noise of 8 km and of 2 km is low: the sheet
+      // thins out towards a gap over the 0.2 of the noise about the mark thr, which falls as the amount rises; over
+      // CF_CLOSE the floor below closes them, and they are shallow hollows in its top. Filled in to 1 everywhere, the
+      // sheet stayed whole at every amount.)
+      float thr = 0.72 - 0.6 * (a.amount - 0.69);
+      shape = mix(shape, 1.0 - am + am * smoothstep(thr - 0.1, thr + 0.1, 0.7 * sm + 0.3 * sn), uLow.w);
       // The top of a sheet stands higher over its cells of 4 km to 1 km and
       // over the largest of them, by up to 0.7 CF_RELIEF of its height (some 100 m): relief
       // without holes, which a low sun shows and a high one hardly. (A lower
       // floor under the shape gave relief too, and pits: specks from 40 km.)
-      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form) * (1.0 - 0.6 * uLow.w);
+      // (The record's smooth: long swells in place of the cells' relief, from the same Perlin-Worley noise, some 100 m
+      // over 8 km and half of that over 2 km; within the same bound, 0.7 CF_RELIEF, that the map of the tops takes.)
+      rise = CF_RELIEF * mix(max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0), clamp(0.8 * (sm - 0.3) + 0.4 * (sn - 0.3), 0.0, 0.7), uLow.w) * (1.0 - a.form);
     }
   }
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
@@ -2805,7 +2813,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     // under 0.2, creases go in elsewhere; its mean is 0.54): billows on its
     // whole outside, a cauliflower.
     e = clamp(e, 0.0, 1.0);
-    float er = CF_ERODE * e * (1.0 - 0.8 * uLow.w);
+    float er = CF_ERODE * e * (1.0 - 0.75 * uLow.w);
     float dn = mix((max(co, 0.0) / CF_K - er) / (1.0 - er), co / CF_K - CF_KNOB * ((carve ? e : 0.54) - 0.2), formAt);
     // A heap is dense right behind its surface (a sheet thickens slowly):
     // what is left after the carving is CF_SHARP times as dense, up to 1.
@@ -2832,7 +2840,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     // of the light take the full sharpness whatever their level: thinner,
     // they let the sun through a heap, which glowed evenly from behind.)
     float sharp = mix(0.5, 1.0, formAt) * CF_SHARP;
-    if (dn > 0.0) dn = min(dn * (fine ? clamp(0.39 * exp2(-lod), 1.0, sharp) : sharp), 1.0);
+    // (The record's smooth: an even sheet is no sharper near the eye than far off. Twice as dense in its fringe within
+    // some 15 km, it was lit otherwise there: a pale blob under the eye from 11 km.)
+    if (dn > 0.0) dn = min(dn * (fine ? clamp(0.39 * exp2(-lod), 1.0, mix(sharp, 1.0, uLow.w * (1.0 - formAt))) : sharp), 1.0);
     bump = CF_K * dn - c;
   }
   return veil > 0.0 ? max(c + bump, under) : c + bump;
@@ -3280,7 +3290,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         }
         lit = false;
         fog = false;
-        next = clamp(-0.6 * f, FINE * dsIn, COARSE * dsAir);
+        // (Over an even sheet, the record's smooth, the steps far off are no shorter than ds: a ray that skims its
+        // level top for tens of km crept along it, ran out of steps, and showed the sea in a dark band under the
+        // horizon. Only beyond 12 to 30 km: nearer, such steps left a thin ring on the sheet seen from 11 km.)
+        next = clamp(-0.6 * f, mix(FINE, 1.0, uLow.w * (1.0 - formAt) * smoothstep(12.0, 30.0, t)) * dsIn, COARSE * dsAir);
         // Over the tops round here (uTops), the ray meets no cloud before it
         // has come down to them or gone as far sideways as they hold: it
         // strides there, less a share of a stride new for each pixel and
@@ -3314,7 +3327,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // The steps towards the light shrink with the distance below 8 km (to
       // 15 m): a near cloud shows its small billows lit and shaded as a far
       // one shows its big ones.
-      float step = max(clamp(0.00625 * tE, LIGHT_MIN, 0.05), 0.6 * ds);
+      // (Not over an even sheet, the record's smooth: its billows are those of the fine noise at every distance, and
+      // with short steps near the eye they no longer shaded one another there: under a low sun the sheet was flat
+      // within a few km, textured beyond, and the two met in an arc.)
+      float step = max(clamp(0.00625 * tE, mix(LIGHT_MIN, 0.05, uLow.w), 0.05), 0.6 * ds);
+      // even: a sheet that is smooth or thin by its record (low.smooth, low.depth under 1). On its level top the depth
+      // over the light's first two steps (tauF) is all or nothing as the first step's middle falls inside the cloud or
+      // over it, and that follows the angle of the view: from 11 km a ring round the eye, darker inside, with blocks.
+      // So those steps start anywhere in the first step (jit, new for each pixel and frame: the mean over the frames
+      // is the integral), and tauF comes from the first stage at every distance (worked out here within some 10 km,
+      // it was lighter there: a pale blob with a crisp edge).
+      float even = clamp(max(uLow.w, 2.0 * (1.0 - uLow.y)), 0.0, 1.0);
       // The offsets of the light's later steps turn from frame to frame by
       // interleaved gradient noise, which covers the circle evenly over the
       // frames (white noise left a grain in the settled picture).
@@ -3388,7 +3411,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           above = A.z;
           sky = A.w;
           skyLean = B.x / ws;
-          if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
+          if (0.8 * pix * tE > 0.01 * (1.0 - even)) tauF = B.y / ws;
           tauN = B.z / ws;
           tauNn = B.w / ws;
         }
@@ -3493,6 +3516,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // a wide part of it.
       bool skyOn = !mapped && !under0, backOn = uStage > 0.5 && !fog && basal * smoothstep(2.0, 6.0, above) <= 0.999, wantF = tauF < 0.0 && !slab, wantCM = !mapped && !slab;
       float overMap = smoothstep(0.25, 0.45, uLight.y);
+      // (By a hash of its own: by interleaved gradient noise the mean kept a diagonal hatch, as for offB above. And as
+      // a vector chosen with offL below: added to the steps' place in a term of its own, with a factor of 0, the
+      // compiler still summed the place otherwise, and the default picture moved by a few levels in a few pixels.)
+      vec3 jit = uLight * (even * (hash(gl_FragCoord.yx + 9.37 * uPass + 3.3) - 0.5) * step);
       float tw = 0.0, sw = 0.0, dw = 0.03, sb = 0.0, db = 0.025, tauL = 0.0, crisp = 0.0;
       // (The depth away from the light strays by off turned at random: by
       // the same interleaved gradient noise as the point and the steps
@@ -3531,7 +3558,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
-          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
+          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : jit);
           fine = !moved;
           wt = dl;
         }
@@ -3706,7 +3733,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         vec3 qs = q.xyz + vec3(ps.x - p.x, heightAt(ps) - heightAt(p), ps.z - p.z) / BASE_KM;
         vec4 cn = textureLod(uNoise, vec3(qs.x * 3.5, 0.37, qs.z * 3.5), max(lod + 1.8, 0.0));
         float cell = 0.65 * cn.g * (2.0 - cn.g) + 0.35 * textureLod(uNoise, vec3(qs.x * 10.0, 0.61, qs.z * 10.0), max(lod + 3.3, 0.0)).g;
-        cells = mix(1.0, clamp(exp(-5.5 * (cell - 0.66)), 0.5, 1.6), 1.0 - smoothstep(2.0, 6.0, tE));
+        // (An even sheet, the record's smooth, shows 0.3 of them: a ceiling faintly mottled.)
+        cells = mix(1.0, clamp(exp(-5.5 * (cell - 0.66)), 0.5, 1.6), (1.0 - smoothstep(2.0, 6.0, tE)) * (1.0 - 0.7 * uLow.w));
       }
       many = ms + mix(diffuse, cells * deck.x, below);
       // The sky's light, by how much of the sky the place sees; less where
