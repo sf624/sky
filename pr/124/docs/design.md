@@ -1835,7 +1835,14 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   (`uNoise`, `uHeads`) and the weather map read elsewhere on it:
   - *cells* (`midCells`, `midform` = 1): the noise's Worley cells in a tile
     of `MID_KM` = 6.4 km (1.6 km, 800 m and 400 m), each a dome over a
-    shallower bowl. A threshold of the field (the amount, the map over 4 km
+    shallower bowl. They are read on an oblique cut through the noise's
+    tile (`MID_CUT_X`, `MID_CUT_Z`: whole numbers of tiles in the weather
+    map's 256 km, so it repeats with the map and no sooner), at a depth in
+    the noise that wanders with the weather map; the lumps and the fine
+    noise are read aslant through their tiles likewise. On a level slice
+    the same 6.4 by 8 km of cells stood at every tile (the map only slid
+    it), and the lumps repeated every 1.27 km: from 20 to 40 km up the
+    field was a lattice, and ranks ran to the horizon from any height. A threshold of the field (the amount, the map over 4 km
     and more, the noise's swell) says where cells stand, run together or
     shrink apart; the map's other channels move the place in the noise and
     say which size leads. The cells fill 0.65 of the layer's depth, at a

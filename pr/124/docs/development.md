@@ -699,7 +699,11 @@ The shaders must run on any WebGL2. The code keeps these rules:
   (`cirrusLight`); with `SKY_LIGHT`: the sky's light on the clouds. The
   passes and `SKY_LIGHT` get the scene's uniforms by name: the fixed ones
   (`C`, then `fixedFor`) and the view's and the frame's (`view` in
-  `draw`). Set a fixed uniform of `fs` with `C`, never on `prog` alone.
+  `draw`); `TOPS_MAP` gets the fixed ones too. Set a fixed uniform of `fs`
+  with `C`, never on `prog` alone. (From #113 on, the map of the tops set its
+  textures' units by hand and left out the noise's until fixed: it read the
+  heaps' discs from unit 0, stood too low, and the march strode through
+  every heap above the smallest domes.)
 - **Loops in code that rarely runs get a bound the compiler cannot know.**
   The compiler unrolls a loop of constant bounds, and the unrolled code
   makes the whole shader heavier for the GPU even where a branch skips it:
