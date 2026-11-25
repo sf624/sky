@@ -43,6 +43,7 @@ debug overlay shows them so).
 | `alt` | 0.3 to 40, any | 11 | Altitude of the eye, km. The slider is even in km (20 m a step) up to 13 km and even in log(h) above; the value beside it takes a number typed in m or km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
 | `cloud` | 0 to 1, 0.01 | 0.5 | Amount of low cloud |
+| `mid` | 0 to 1, 0.01 | 0 | Amount of middle cloud (altocumulus, altostratus; see [design.md](design.md#middle-clouds)). Nothing of it is compiled until it is over 0 |
 | `cirrus` | 0 to 1, 0.01 | 0.4 | Amount of high, thin cloud |
 
 These are read directly.
@@ -94,6 +95,15 @@ holds, and a sheet some 0.6 km deep, an optical depth of about 20). With
 `cloud` from 0.6 to 0.9 the sheet has gaps. `low.depth=0.5` gives a thin
 sheet, greyer from above and lighter from below.
 
+The middle layer's record, likewise for tests (no control sets it yet):
+
+| Parameter | Range | Default | Meaning |
+|---|---|---|---|
+| `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
+| `midbase` | 5 to 9 | 5.2 | The layer's base, km |
+| `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
+| `midrolls` | 0 to 1 | 0 | How far the cells stand in ranks of small elements |
+
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
 it is automatic), `sky.lang` (the language, set by the panel's language
@@ -129,7 +139,7 @@ monospace text appears at the top left, over a dark backing, and the title is hi
   drawn, the time between frames (smoothed; `at rest` when nothing is drawn) and the exposure (log2);
 - the query line: every parameter that shapes the picture, with the values now (date, time, clock,
   `lat`, `lon`, `alt`, the place `at`, `yaw`, `pitch`, `heading`, `bank`, `climb`, `speed`, `cloud`,
-  `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
+  `mid`, `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
 - a `Copy URL` button, which puts the whole address on the clipboard.
 
 To see what a screenshot showed, type its query line after `?`, add `speed=0` (the line has the
