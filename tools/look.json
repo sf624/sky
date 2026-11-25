@@ -1041,7 +1041,7 @@
     }
    ],
    "bad": "4dfadd8",
-   "fixed": "7230a28",
+   "fixed": "2aaab3a",
    "note": "The heap's upper right part, over the cut: cover 0.51 bad (the same at 4725dbf and 9de3e45), 0.99 fixed, as with the stride over the tops turned off."
   },
   {
@@ -1062,7 +1062,7 @@
     }
    ],
    "bad": "4dfadd8",
-   "fixed": null
+   "fixed": "91fd886"
   }
  ]
 }
