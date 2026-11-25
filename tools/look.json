@@ -875,6 +875,26 @@
    "bad": "6abc8ab",
    "fixed": "ed8c5c4",
    "note": "No measure separates the two (lineDip: 0.026 bad, 0.042 fixed at 3 km; 0.036 and 0.034 at 2.3 km: the line was six rows thick, and a tower's own clefts dip as much). Kept for the contact sheet."
+  },
+  {
+   "name": "stratus-arc-3km-low-sun",
+   "q": "date=172&time=17.8&alt=3&pitch=-12&cloud=1&low.form=1&low.smooth=1",
+   "reported": "2026-11-24",
+   "wrong": "an even sheet (low.smooth=1) under a low sun: flat and smooth within a few km of the eye, textured beyond, the two meeting in an arc",
+   "measures": [],
+   "bad": "685878f",
+   "fixed": "09320cc",
+   "note": "No measure separates the two: the fine relief falls towards the eye in both (the spread of the luma less its blur over 4 px, rows at 0.65 and 0.92 of the height: 2.0 and 1.0 bad, 2.1 and 0.9 fixed); the flaw was the line where it fell at once. Kept for the contact sheet."
+  },
+  {
+   "name": "stratus-dark-patch-11km",
+   "q": "date=172&time=11&alt=11&pitch=-35&cirrus=0&low.depth=0.5&cloud=1&low.form=1&low.smooth=1",
+   "reported": "2026-11-24",
+   "wrong": "a thin sheet (low.depth=0.5) from 11 km: a darker, bluer patch round the eye, with a ring for its edge and blocks in it",
+   "measures": [],
+   "bad": "685878f",
+   "fixed": "09320cc",
+   "note": "No measure separates the two (relief 0.008 bad, 0.007 fixed). The ring's edge and the blocks went (the spread of the green in the patch, rows at 0.35 to 0.9 of the height: 2.8 to 4.1 bad, 1.5 to 2.9 fixed); a smooth fall from far to near stays (the red at 0.8 over that at 0.05 of the height: 0.84 bad, 0.87 fixed; 0.91 over a deck of the default record). Kept for the contact sheet."
   }
  ]
 }
