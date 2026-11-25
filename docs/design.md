@@ -924,9 +924,46 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     no longer knew that it lies from 0 to 1. See the GLSL rules.) The
     helpers of the change from heaps to a sheet (`turn`, the towers' share)
     still read the slider.
-  - `smooth` (0 to 1): the sheet's cells fill in towards one even sheet
-    (`mix(shape, 1, 0.8 smooth)`), its relief is `1 - 0.6 smooth` of what
-    it was, and the fine noise takes `1 - 0.8 smooth` of `CF_ERODE`.
+  - `smooth` (0 to 1): from a sheet of cells (stratocumulus) to one even
+    sheet (stratus). At 1:
+    - *Depth*: 0.85 of it is the depth of the sheets of the region (the
+      map's mip 6.5), the rest the place's own. (Under a depth that changed
+      every few km, the base was mottled dark and light like a
+      stratocumulus's.)
+    - *Shape*: no cells. The top stands in long swells, up to some 100 m
+      over 8 km and half of that over 2 km (the Perlin-Worley noise at both
+      sizes, in place of the cells' relief and within its bound, which the
+      map of the tops takes). The fine noise takes a quarter of `CF_ERODE`:
+      soft billows that a low sun shows.
+    - *Amount*: gaps open where that same noise is low. The sheet thins out
+      to nothing over 0.2 of the noise about a mark, 0.72 at an amount of
+      0.69 (half the sea covered) and 0.06 less for each 0.1 of amount; over
+      `CF_CLOSE` the floor closes the gaps, and they are shallow hollows in
+      the top. So at `cloud` 0.6 to 0.9 an even sheet has rounded gaps of a
+      few km, not cells or heaps. (With the cells only filled in, the sheet
+      stayed whole at every amount.)
+    - *Edge*: no sharper near the eye than far off (a sheet's fringe is
+      else up to twice as dense where a pixel is finer than 24 m: a pale
+      blob under the eye from 11 km).
+    - *The march*: far off (from 12 to 30 km on), steps in clear air just
+      over the sheet are no shorter than `ds`. A ray that skims a level top
+      for tens of km crept along it, ran out of steps and showed the sea: a
+      dark band with blocks under the horizon from just above the tops.
+    - *The light*: its first step is 50 m at every distance (`LIGHT_MIN`
+      near the eye left the billows of the fine noise unshaded within a few
+      km under a low sun: a flat zone that met the textured sheet in an
+      arc). From below, the cells of the base show 0.3 as much.
+  - An even or a thin sheet (`even`: `smooth`, or twice what `depth` is
+    under 1) has a level top, and on it the depth over the light's first
+    two steps (`tauF`) was all or nothing: the first step's middle, 25 m
+    towards the light, lies inside the cloud where the view is steep and
+    over it where the view grazes. From 11 km that was a ring round the
+    eye, darker and bluer inside, with blocks where the depth changed (the
+    patch reported at `low.depth` 0.5; no sea shows through: a picture of
+    what the sheet lets through was dark all over). So those steps start anywhere in the first step, new for
+    each pixel and frame (`jit`), and `tauF` comes from the first stage at
+    every distance. What is left is a smooth fall of a tenth from far to
+    straight down, as over a deck of the default record.
   - `towers` (0 to 1): a factor on `tower`.
 
   `setLow` keeps the record within the shell: what stands over `CT` is cut
