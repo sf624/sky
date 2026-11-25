@@ -1043,6 +1043,26 @@
    "bad": "4dfadd8",
    "fixed": "7230a28",
    "note": "The heap's upper right part, over the cut: cover 0.51 bad (the same at 4725dbf and 9de3e45), 0.99 fixed, as with the stride over the tops turned off."
+  },
+  {
+   "name": "mid-lattice-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&at=19.184,16.539&yaw=49.04&pitch=-31.49&heading=49.23&bank=0&climb=0&cloud=0.02&mid=1&cirrus=0.1&haze=0.9&wind=5&moon=16&quality=high&pixels=wqhd",
+   "reported": "2026-11-26",
+   "wrong": "the middle clouds' cells on a regular lattice over the whole layer from 40 km: rows and columns of equal gaps in the sun's glitter, a repeating tile over the rest",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "region": [
+      0.3,
+      0.15,
+      0.35,
+      0.6
+     ],
+     "max": 32
+    }
+   ],
+   "bad": "4dfadd8",
+   "fixed": null
   }
  ]
 }

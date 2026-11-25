@@ -2990,6 +2990,17 @@ const float MID_KM = 6.4;            // its tile of the noise (a whole share of 
 const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's, the cells'
 const float MID_FULL = 0.5;          // the density (0 to 1) that is as dense as that
 const float MID_DETAIL = 5.0;        // its fine noise: tiles per tile
+// The cut through the noise that the cells are read on: not a level slice of
+// its tile but an oblique one (two vectors at right angles, of 256 / 39.8 and
+// 256 / 32.1 km to the tile, and the cut's normal), whose depth in the noise
+// wanders with the weather map. A level slice showed the same 6.4 by 8 km of
+// cells at every tile, the cells of 1.6 km in the same places: from 40 km,
+// with thousands of them in view, a lattice over the whole layer. The
+// vectors are whole numbers over the weather map's 256 km, so the cut still
+// repeats with the map (and only with it: no nearer place in the cut is
+// within 0.08 of a tile of the same place in the noise for 19 km, and the
+// wandering depth takes those apart).
+const vec3 MID_CUT_X = vec3(8.0, -26.0, 29.0) / 256.0, MID_CUT_Z = vec3(28.0, -7.0, -14.0) / 256.0, MID_CUT_UP = vec3(27.0, 44.0, 32.0) / 60.737;
 // (midLump: the lumps of the cells at the place of the last call with `fine`, 0 to 1, 0.5 at a tuft's rim; see there.)
 // (midGap, of the last call: how far the place is, in km straight up or down, from where the column at the place has
 // cloud; 1 where the column has none at all. Nought within it. The march strides only where this allows.)
@@ -3011,7 +3022,8 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
   // run together, and its edge is cells that shrink and stand apart. The
   // map's other channels move the place in the noise by up to 2 km over
   // some 4 km, and one of them says which cells lead, those of 400 m or
-  // those of 800 m: cells of unlike sizes, and no tile shows twice alike.
+  // those of 800 m: cells of unlike sizes. (That alone left the noise's tile
+  // in view, slid about: see MID_CUT_X.)
   float wa = wm.r, grow = clamp(1.5 * (uMid.x - 0.5 + 2.5 * (wa - 0.5)), -1.6, mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)));
   if (grow <= -1.55) return 0.0;
   // (The cells' level, from place to place over some 4 km: they fill 0.65 of the layer's depth, anywhere between its
@@ -3022,8 +3034,10 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
     midGap = span * uMid.w * max(-t, t - 1.0);
     return 0.0;
   }
-  vec2 xs = vec2(x.x, 0.8 * x.y) / MID_KM + 0.6 * (wm.gb - 0.5);
-  vec4 n = textureLod(uNoise, vec3(xs.x, h / MID_KM + 2.0 * wr, xs.y) + vec3(0.41, 0.0, 0.77), max(lod, 0.0));
+  vec2 xs = x + 0.6 * MID_KM * vec2(wm.g - 0.5, 1.25 * (wm.b - 0.5));
+  // (cut: how deep in the noise the cut lies here, in tiles; see MID_CUT_X.)
+  float cut = 2.0 * wr + 0.6 * (wm.b - wm.g) + 0.4 * wm.r;
+  vec4 n = textureLod(uNoise, xs.x * MID_CUT_X + xs.y * MID_CUT_Z + (h / MID_KM + cut) * MID_CUT_UP + vec3(0.41, 0.0, 0.77), max(lod, 0.0));
   // (?midrolls: ranks of small elements, two waves of 300 and 420 m that cross, bent by the map and the noise.)
   float roll = 0.65 * sin((0.8 * x.x + 0.6 * x.y + 0.6 * wm.g + 0.3 * n.r) * (2.0 * PI / 0.3)) + 0.45 * sin((0.9 * x.y - 0.44 * x.x + 0.6 * wm.b) * (2.0 * PI / 0.42));
   float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + uMidRolls * (0.8 * roll - 0.2);
@@ -3049,7 +3063,8 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
   // cell is a lumpy heap, where from kilometres under it its rim is a soft fringe.)
   float er = 0.5, near2 = fine ? clamp(-3.0 - lod, 0.0, 1.0) : 0.0;
   if (fine) {
-    vec3 qd = vec3(x.x, h, 0.6 * x.y) * (MID_DETAIL / MID_KM);
+    // (Aslant through its tile too, 61 and -37 tiles up in 256 km, and by the cut's depth: its tile of 1.28 km.)
+    vec3 qd = vec3(x.x, h + (61.0 * x.x - 37.0 * x.y) * (MID_KM / MID_DETAIL / 256.0) + 0.5 * cut, 0.6 * x.y) * (MID_DETAIL / MID_KM);
     vec4 e = textureLod(uNoise, qd + vec3(0.13, 0.57, 0.29), max(lod + 2.3, 0.0));
     er = 0.2 * e.g + 0.45 * e.b + 0.35 * e.a;
     {
@@ -3064,7 +3079,9 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
       // sqrt(5) in 256 km) and bent by the cells' own noise, by up to 250
       // m, so that neither its rows nor its tile show.
       vec2 xl = (x + 0.5 * (warp - 0.5) + 0.1 * (e.ba - 0.5)) * (90.0 / 256.0);
-      vec4 hd = textureLod(uHeads, vec3(2.0 * xl.x + xl.y, 0.3 * h, 2.0 * xl.y - xl.x) + vec3(0.29, 0.43, 0.61), max(lod + 2.3, 0.0));
+      // (And aslant through their tile of 1.27 km, 53 and -29 tiles up in 256 km, at a depth that wanders with the cut's:
+      // the same lumps at every tile were a finer lattice, of 570 and 640 m, over a field seen from far above.)
+      vec4 hd = textureLod(uHeads, vec3(2.0 * xl.x + xl.y, 0.3 * h + (53.0 * x.x - 29.0 * x.y) / 256.0 + 1.5 * cut, 2.0 * xl.y - xl.x) + vec3(0.29, 0.43, 0.61), max(lod + 2.3, 0.0));
       // (None within some 200 m of the eye, and all from 800 m: flown through, a tuft's thin outside was a round disc of
       // haze about the eye.)
       midLump = mix(0.5, 0.25 * hd.r + 0.3 * hd.g + 0.25 * hd.b + 0.2 * hd.a, smoothstep(0.2, 0.8, length(p)));
