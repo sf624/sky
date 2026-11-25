@@ -226,6 +226,38 @@ export function regularity(img, { region: box, n } = {}) {
   return best;
 }
 
+// spectrumPeak: the sharpest peak of the power spectrum of the luma, over windows of the region (as
+// regularity's, under a Hann window): the power of a frequency over the median of the frequencies about it
+// (within `k` bins each way, default 4), the largest over the periods of `pmin` to `pmax` px (6 to 40) and over
+// the windows. A pattern that repeats exactly (a tile of noise shown again and again) puts its power in single
+// frequencies, tens of times over their neighbours'; natural cloud spreads it, and its largest is the chance
+// of one periodogram (10 to 25). It needs several repeats in a window, and tells a tile that the rebound of
+// the autocorrelation misses when the tile's content is irregular.
+export function spectrumPeak(img, { region: box, n, pmin = 6, pmax = 40, k = 4 } = {}) {
+  const R = region(img, box);
+  n = n || Math.min(128, pow2(Math.min(R.w, R.h) / 1.5));
+  const hann = Float64Array.from({ length: n }, (_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * (i + 0.5) / n));
+  let best = 0;
+  for (const [x, y] of windows(R, n)) {
+    const f = detrend(R, x, y, n), re = new Float64Array(n * n), im = new Float64Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) re[j * n + i] = f[j * n + i] * hann[i] * hann[j];
+    fft2(re, im, n, false);
+    const P = (u, v) => { const i = ((v + n) % n) * n + ((u + n) % n); return re[i] * re[i] + im[i] * im[i]; };
+    const near = new Float64Array((2 * k + 1) ** 2);
+    for (let v = 0; v <= n / pmin; v++) {
+      for (let u = -Math.floor(n / pmin); u <= n / pmin; u++) {
+        const r = Math.hypot(u, v);
+        if (r < n / pmax || r > n / pmin || (v === 0 && u < 0)) continue;
+        let c = 0;
+        for (let b = -k; b <= k; b++) for (let a = -k; a <= k; a++) near[c++] = P(u + a, v + b);
+        const med = median(near);
+        if (med > 0) best = Math.max(best, P(u, v) / med);
+      }
+    }
+  }
+  return best;
+}
+
 // detailScale: the typical size of the detail, as a share of the picture's width: over windows of the region,
 // the median of the lag (px) at which the radial mean of the autocorrelation first falls below 0.5, divided by
 // the picture's width. Larger blobs, smoother clouds: larger.
@@ -441,4 +473,4 @@ export function stars(img, { region: box, k = 4, t = 12 } = {}) {
   return n / (w * h) * 1e4;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars };

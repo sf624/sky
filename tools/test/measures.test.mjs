@@ -37,6 +37,13 @@ test('regularity: a lattice and rows score high, value noise low', () => {
   assert.ok(n < 0.7, `noise ${n}`);
 });
 
+test('spectrumPeak: a tile of noise shown again and again scores high, the noise itself low', () => {
+  const n = noise(5), tiled = pic(W, H, (x, y) => 120 + 220 * (n(x % 24, y % 32) - 0.5));
+  const t = M.spectrumPeak(tiled), f = M.spectrumPeak(natural);
+  assert.ok(t > 60, `tiled ${t}`);
+  assert.ok(f < 30, `noise ${f}`);
+});
+
 test('specksCv: equal dots give a small spread of sizes, dots of every size a large one', () => {
   const equal = pic(W, H, (x, y) => (Math.hypot((x % 16) - 8, (y % 16) - 8) < 3 ? 60 : 200));
   let s = 7;
