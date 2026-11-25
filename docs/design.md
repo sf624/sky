@@ -2615,7 +2615,12 @@ on the map.
   shadow from 10 km behind it just over the eye's level and from 10 km
   before it just under, a razor-straight dark line across the tower at
   dusk with a pale cap above; and a tower's edge is hard, so its mean
-  place does not jump. It reads the mean
+  place does not jump. Nor does it move on rays within some 3 to 9 degrees
+  of level (`s` from 0.05 to 0.15, by degrees): there a jump along the ray
+  moves the place little in height. The move ran from 8 km behind the
+  cloud to 8 km before it over the few rows round the eye's level, and a
+  heap seen level from 1.66 km wore a level band at the eye's height, with
+  flat dark slabs among the far heaps. It reads the mean
   of the two decks over 0.5 km (`cirrusDepth`), or over what the sun's
   disc covers if that is more (0.0093 of the way to the cirrus: 1.5 km
   with the sun 3 degrees high, where 50 m of a tower's height are 1 km of
