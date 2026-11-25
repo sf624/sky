@@ -17,7 +17,7 @@ blocks. It loads no other file.
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
-| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. |
+| `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. On a page with middle clouds, more programs with their lines in the text (see [Middle clouds](#middle-clouds)). |
 | `mean` | fragment shader | Joins each new frame of the aircraft's view to the picture so far. |
 | `show` | fragment shader | Copies that picture to the canvas, with dither. |
 | `enlarge` | fragment shader | Shows that picture on a canvas with more pixels, enlarged and sharpened, with dither (at `high` and `max`; see [The drawing size](#the-drawing-size)). |
@@ -1657,6 +1657,10 @@ The light of the sky in the air below 2 km is dimmed by the cloud amount,
 to `UNDER` = 30 % under a full deck: else the air under a deck, a hundred
 km of it towards the horizon, glowed as a pale-blue band.
 
+With middle clouds, the light's map has a fifth layer, their depth
+straight up, and the air, the sea, the low clouds and the glare read
+their shade from it (see [Middle clouds](#middle-clouds)).
+
 ## The sea
 
 `addSea`, where the ray meets the sphere `RG`:
@@ -1741,6 +1745,112 @@ depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
 (`ciSea`) towards the light. It hides the glitter and the direct
 light on the water; the light that a cloud lets through diffusely
 (`soft`) falls more slowly.
+
+With middle clouds, the mirror shows them too (`midMirror`), in the same
+four directions (with or without low clouds): each reads the layer's
+depth straight up, smoothed over a kilometre, where it meets the layer's
+middle. From that depth: what is left of the sky behind, and the base's
+light as their pass lights a base from below (two streams), seen through
+the air under the layer (half the molecules, all the haze; what the air
+takes, its own light gives back, lit through the layer). They stand
+behind the low clouds in the mirror and dim the low bases. So the sea
+under an altostratus is grey, not the blue of a clear sky. Their shadow
+(`midShadow`) joins `tau`.
+
+## Middle clouds
+
+`midDensity`, `midClouds`. A second shell of cloud over the low clouds':
+altocumulus and altostratus, from `midbase` = 5.2 km up, 0.4 km deep as
+cells and 1.2 km as a sheet. The panel's slider "Middle clouds" (`mid`)
+sets its amount, 0 at first. Its form, base and depth have no control
+yet: `midform`, `midbase`, `middepth` and `midrolls` in the address set
+them (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
+
+- **Only where there are any.** A page that never shows middle clouds
+  compiles and draws what it did before they existed, call for call. In
+  the text of `fs`, their lines stand between a line `//[ middle clouds`
+  and a line `//]`; lines after `//| without` in such a block are those of
+  a program without them. `midLines` in the JS gives `link` the one text or
+  the other, so the text without them is the old one, byte for byte. Their
+  programs are `fs` with their lines: the scene (which joins the layer
+  in), `MID_PASS` (the layer along each ray), `MID_MAP` (its depth
+  straight up) and, where the level has the air's table, `AIR_LUT`.
+  - A page that starts with `mid` over 0 compiles them with the others,
+    and its scene and its air's table are theirs (`midFirst`).
+  - On any other page they are compiled when the slider is first raised
+    (`midWanted`, called by each frame while the amount is over 0): linked
+    at once, then asked a frame at a time whether they are done
+    (`KHR_parallel_shader_compile`), while the frames go on without the
+    layer; a picture that has settled stays, and the frames go on undrawn.
+    Then `midSetup` sets their uniforms, makes the light's map anew with a
+    fifth layer, and the next frame draws the layer (a change of `look`).
+    Without the extension the first frame after waits for the compilers,
+    once, as for the cirrus. If a program fails, the page stays without
+    middle clouds (the error goes to the console).
+  - With the amount back at 0, the frame is drawn by the programs without
+    them again; the passes' third layer and the map's fifth stay.
+- **The density** (`midDensity`), from the noise of the low clouds
+  (`uNoise`, `uHeads`) and the weather map read elsewhere on it:
+  - *cells* (`midCells`, `midform` = 1): the noise's Worley cells in a tile
+    of `MID_KM` = 6.4 km (1.6 km, 800 m and 400 m), each a dome over a
+    shallower bowl. A threshold of the field (the amount, the map over 4 km
+    and more, the noise's swell) says where cells stand, run together or
+    shrink apart; the map's other channels move the place in the noise and
+    say which size leads. The cells fill 0.65 of the layer's depth, at a
+    level that varies over some 4 km. Over its widest level a cell is a
+    crisp heap of lumps (the heaps' heads, in upright columns); under it a
+    soft slab whose density falls off outwards, in fibres where it is thin,
+    and a thin veil lies at the margins of a patch. `midrolls` adds ranks
+    of small elements (two crossing waves of 300 and 420 m);
+  - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
+    wind, a parabola over the layer's depth less what the amount takes,
+    with fine noise on its thin places;
+  - *between them* both are there, each with its share of its own
+    extinction (`MID_SIGMA`: 8 per km for a sheet, 45 for cells): a sheet
+    that thins as cells grow in it, with no step at any form. A depth not
+    given goes with the form too (1.2 - 0.8 `midform` km).
+- **The pass** (`MID_PASS`, `midClouds`): up to 128 steps along the ray
+  through the shell, 20 m at the shortest (40 m from within), growing with
+  the distance; strides of 2.5 steps through clear air only where the
+  column has no cloud near (`midGap`), and back a stride when one lands in
+  cloud. It writes the third layer of `uPasses`: the mean distance
+  (`tMid`), the light per unit of the light's (`sSun`) and of the sky's
+  (`sAmb`), how far about the mean the light comes from, and what gets
+  through (`Tm`) as the depth. The sun's disc shows through a depth of up
+  to 10.
+- **The light**, from optical depths alone: three steps towards the light
+  (each 3 to 5 times the one before, by the form), then the rest of the
+  column aslant; scattered once, an aureole and two wider octaves through
+  thin cloud; and two streams through the layer as a slab that keeps all
+  it scatters (`midThrough`): what goes on to the far side (a base by day:
+  white where thin, grey where deep) and what comes back (the tops). The
+  sky's light likewise, from above and from what lies below. In the scene
+  the layer takes the colours of the light at its place as the low clouds
+  do (`uLight`, the sun or the moon, through the air above; the sky's
+  light of the sun and of the moon, and the night sky's), so it goes
+  through dusk into a moonlit night with them, with no switch. The cirrus
+  shades it (`ciMid`).
+- **Its depth straight up** (`MID_MAP`, `midColumns`): layer 4 of the
+  light's map (`uShadow`), on a level plane through the eye, warped as the
+  others: as it is, smoothed over some 300 m and over a kilometre. Drawn
+  for a frame whose layer has changed, and again once the aircraft has
+  flown `SHADOW_STALE` (when no other layer is drawn in that frame).
+- **What lies under it.** The low clouds: the sun's light by the layer's
+  depth towards it (read at two places within 150 m, anew each frame), the
+  sky's as a slab lets it through, and a share of what the layer scatters
+  downwards. The air under it: its shade on the light scattered once
+  (`midLight`), and the sky's light there by its amount (`midUnder`, as
+  `UNDER` for the low clouds; in the air's table too). The sea: its shadow
+  (`midShadow`), and its base in the mirror (`midMirror`, see
+  [The sea](#the-sea)). The glare of the sun is dimmed by it.
+- **In the scene** the layers are sorted by distance (`tOrd`, `iOrd`) and
+  joined nearest first. Within 2 km of the layer the scene reads the mean
+  of the pass over three by three pixels for cloud nearer than 2 km, and
+  the pixel's distance for the mean over frames follows near cloud only by
+  degrees (see the comments at `midAstray`).
+
+How it compares with photographs, and what is still wrong, is in issue
+#84.
 
 ## Cirrus
 
@@ -3282,7 +3392,8 @@ textures for it, each with a second texture beside it (`aux`):
 - `passes` (`passTarget`): the cirrus's pass and the low clouds' (`fs`
   with `CIRRUS_PASS` and `CLOUD_PASS`), the two layers of a texture of
   RGBA32UI on unit 16 and of their depths (32-bit floats) on unit 17, of
-  the frame's size, drawn before it and read by the scene at its pixel;
+  the frame's size, drawn before it and read by the scene at its pixel
+  (three layers once the page has middle clouds: their pass is the third);
 - `shot`: the new frame, drawn by `fs`: the colour with the level in alpha
   (`outColor`), and the distance of what each pixel shows as its depth
   (`gl_FragDepth`, a 32-bit float texture: one target, see the loading);
@@ -3415,7 +3526,7 @@ count, capped by `uTrust`, which the JS sets per frame:
 | Situation | `uTrust` | New frame weighs |
 |---|---|---|
 | First frame, canvas resized, or a jump of more than 1 km | 0 | 1 |
-| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud), for `RELIGHT` + 1 = 7 frames. A climb in flight, less than `CLIMB_STEP` = 50 m a frame, is motion, not a change: the past is moved along (`uWay.y`) | 1 | 1/2 |
+| The light changed (`look`: time, date, moon, haze, wind, cirrus, altitude, cloud, the middle clouds), for `RELIGHT` + 1 = 7 frames. A climb in flight, less than `CLIMB_STEP` = 50 m a frame, is motion, not a change: the past is moved along (`uWay.y`) | 1 | 1/2 |
 | The view moves, the aircraft flies, or the exposure moves | `IN_MOTION - 1` = 9 | 1/10 |
 | At rest | 63 | 1/(n + 1): the plain mean |
 
