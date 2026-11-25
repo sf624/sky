@@ -6359,8 +6359,13 @@ void main() {
       // shadow from 10 km behind it just over the eye's level and from 10 km before it just under, and a
       // razor-straight dark line crossed the tower there at dusk, with a pale cap above it. A tower's edge is hard:
       // its mean place does not jump.)
+      // (Not on rays within some 3 to 9 degrees of level (s under 0.05 to 0.15): there the place a ray takes moves
+      // little in height as it jumps along the ray, so it needs no move, and the move ran from 8 km behind the cloud
+      // to 8 km before it over the few rows round the eye's level. A heap seen level from 1.66 km took the cirrus's
+      // shadow from a streak of a different place on each row: a level band at the eye's height across it, and flat
+      // dark slabs among the far heaps.)
       float s = dot(normalize(p), d), dh = length(p) - RG - CB - 0.5, lev = 0.03 + 0.15 * max(abs(dh) - 1.0, 0.0);
-      p += d * (1.0 - smoothstep(1.0, 1.4, abs(dh))) * clamp(-s * dh / (s * s + lev * lev), -min(tBar, 10.0), 10.0);
+      p += d * smoothstep(0.05, 0.15, abs(s)) * (1.0 - smoothstep(1.0, 1.4, abs(dh))) * clamp(-s * dh / (s * s + lev * lev), -min(tBar, 10.0), 10.0);
     }
     float far = raySphere(p, uLight, RG + 0.5 * (CI_LO + CI_HI)).y;
     vec3 pc = i == 2 ? glarePc : p + uLight * far;
