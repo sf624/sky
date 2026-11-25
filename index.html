@@ -10136,7 +10136,13 @@ const SkySound = (() => {
     gl.useProgram(topsProg);
     const uCloudTops = gl.getUniformLocation(topsProg, 'uCloud'), uTopsPass = gl.getUniformLocation(topsProg, 'uTopsPass');
     const uLowTops = gl.getUniformLocation(topsProg, 'uLow'), uLowTowersTops = gl.getUniformLocation(topsProg, 'uLowTowers');
-    gl.uniform1i(gl.getUniformLocation(topsProg, 'uWeather'), 3);
+    // (Its textures' units, the weather map's and the noise's, are the fixed
+    // uniforms, set below as on the other programs of fs. Set here by hand,
+    // the noise's was left out from #113 on: the map read the heaps' discs
+    // from unit 0, which holds no 3D texture, and stood at the smallest
+    // domes' height. The march strode through every heap above it, and a
+    // heap or a tower beyond the eye's height was cut off flat, see-through
+    // above the cut, with blocks along it.)
     gl.uniform1i(gl.getUniformLocation(topsProg, 'uTopsIn'), 24);
     const tops = [24, 23].map(unit => {
       const t = { texture: gl.createTexture(), target: gl.createFramebuffer() };
@@ -10175,7 +10181,7 @@ const SkySound = (() => {
     };
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
-    for (const p of [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
+    for (const p of [ciProg, cloudProg, skyProg, airProg, topsProg]) if (p) fixedFor(p);
     // The middle clouds, once their programs are compiled: the fixed
     // uniforms, the map's own, and a fifth layer in the light's map for
     // their depth straight up (the map is made anew, and drawn again).
