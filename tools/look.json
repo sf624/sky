@@ -645,6 +645,28 @@
    "fixed": "efd2b2f"
   },
   {
+   "name": "eye-band-cirrus-shadow-1.66km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=1.66&at=11.151,9.613&yaw=-116.44&pitch=-6.31&heading=49.23&bank=0&climb=0&speed=0&cloud=0.5&mid=0&cirrus=0.4&haze=1&wind=6&moon=16&quality=high&pixels=wqhd&hud=1&lang=en",
+   "reported": "2026-11-26",
+   "wrong": "a level band at the eye's height across a heap, as if the horizon showed through, and flat dark slabs among the far heaps at the same height: the cirrus's shadow on the low clouds was read at a place that ran along the ray by up to 8 km either way over the rows round the eye's level",
+   "measures": [
+    {
+     "measure": "lineDip",
+     "region": [
+      0.03,
+      0.36,
+      0.22,
+      0.07
+     ],
+     "cols": 4,
+     "max": 0.02
+    }
+   ],
+   "note": "The far heaps at the left, where the slabs stood: lineDip 0.038 bad, 0.003 fixed (0.003 with the shadow's place not moved at all, and with no cirrus). The band across the central heap is an edge, dark over light, not a dip, and lineDip does not separate it there (0.014 both); its row contrast (rows 291 to 296 against their neighbours) fell from 7.8 to 2.5 levels, the noise of the view without cirrus.",
+   "bad": "7121d70",
+   "fixed": "9611f9e"
+  },
+  {
    "name": "heaps-clustered-40km-half",
    "q": "date=172&time=15.5&alt=40&cloud=0.5&yaw=0&pitch=-35&cirrus=0",
    "reported": "2026-11-23",
