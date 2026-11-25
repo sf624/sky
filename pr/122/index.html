@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="5b3f82e PR #122">
+<meta name="build" content="2a79d49 PR #122">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -401,6 +401,10 @@
       <input id="cloud" type="range" min="0" max="1" step="0.01" value="0.5">
     </label>
     <label>
+      <span class="row"><span data-t="mid">中層の雲</span><output id="midOut"></output></span>
+      <input id="mid" type="range" min="0" max="1" step="0.01" value="0">
+    </label>
+    <label>
       <span class="row"><span data-t="cirrus">薄雲</span><output id="cirrusOut"></output></span>
       <input id="cirrus" type="range" min="0" max="1" step="0.01" value="0.4">
     </label>
@@ -479,7 +483,7 @@ const TEXT = {
     lonSolar: '時計が UTC のときに使う',
     latText: l => (l < 0 ? '南緯 ' : l > 0 ? '北緯 ' : '') + Math.abs(l).toFixed(1) + '°',
     lonText: l => (Math.abs(l) >= 180 || l === 0 ? '' : l < 0 ? '西経 ' : '東経 ') + Math.abs(l).toFixed(1) + '°',
-    alt: '高度', altField: '高度（m または km）', speed: '速度', cloud: '雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
+    alt: '高度', altField: '高度（m または km）', speed: '速度', cloud: '雲', mid: '中層の雲', cirrus: '薄雲', pixels: '解像度', fhd: 'フルHD',
     quality: '画質', qualityAuto: '自動', qualityLow: '低', qualityMid: '中', qualityHigh: '高', qualityMax: '最高',
     qualityAutoAt: level => '自動（' + level + '）',
     noWebGL: 'このブラウザでは WebGL2 が使えません',
@@ -516,7 +520,7 @@ const TEXT = {
     lonSolar: 'Used when the clock is UTC',
     latText: l => Math.abs(l).toFixed(1) + '°' + (l < 0 ? ' S' : l > 0 ? ' N' : ''),
     lonText: l => Math.abs(l).toFixed(1) + '°' + (Math.abs(l) >= 180 || l === 0 ? '' : l < 0 ? ' W' : ' E'),
-    alt: 'Altitude', altField: 'Altitude (m or km)', speed: 'Speed', cloud: 'Clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
+    alt: 'Altitude', altField: 'Altitude (m or km)', speed: 'Speed', cloud: 'Clouds', mid: 'Middle clouds', cirrus: 'Thin clouds', pixels: 'Resolution', fhd: 'Full HD',
     quality: 'Quality', qualityAuto: 'Auto', qualityLow: 'Low', qualityMid: 'Medium', qualityHigh: 'High', qualityMax: 'Max',
     qualityAutoAt: level => 'Auto (' + level + ')',
     noWebGL: 'This browser has no WebGL2',
@@ -1547,9 +1551,6 @@ precision highp int;
 #ifndef Q_CI_STEPS
 #define Q_CI_STEPS 12     // steps of the cirrus's march near the eye (CI_STEPS)
 #endif
-#ifndef Q_MID
-#define Q_MID 0           // 1: the page has middle clouds (see uMid); the scene then joins them in, and is a longer program
-#endif
 #ifndef Q_PASS
 #define Q_PASS 1.0        // the passes before the scene (the low clouds', the cirrus's) draw a pixel for Q_PASS by Q_PASS of the frame's
 #endif
@@ -1612,7 +1613,11 @@ uniform vec2 uPassJitter;
 #endif
 #if defined(CIRRUS_PASS)
 #define PASS_PIX Q_CI_PASS
+//[ middle clouds
 #elif defined(CLOUD_PASS) || defined(MID_PASS)
+//| without
+#elif defined(CLOUD_PASS)
+//]
 #define PASS_PIX Q_PASS   // (a pixel's width, in the frame's pixels, where the passes draw)
 #else
 #define PASS_PIX 1.0
@@ -1718,18 +1723,22 @@ layout(location = 6) out vec4 outLut6;
 // their light as seven half floats; in the second, tBar, sOne + sMany, sAmb
 // and sLean as their bits, and Tc as the depth.
 layout(location = 0) out uvec4 outClouds;
+//[ middle clouds
 #elif defined(MID_PASS)
 // The middle clouds' pass (see midClouds): tMid, the sun's light, the sky's
-// and nothing, as their bits, and Tm as the depth.
+// and how far about tMid the light comes from, as their bits, and Tm as the depth.
 layout(location = 0) out uvec4 outMid;
+//]
 #else
 layout(location = 0) out vec4 outColor;
 #endif
 // The passes before the scene, which it reads: layer 0 the cirrus's (the
-// bits of tHigh and lk, and Th), layer 1 the low clouds' (see CLOUD_PASS),
-// layer 2 the middle clouds' where there are any (see MID_PASS).
+// bits of tHigh and lk, and Th), layer 1 the low clouds' (see CLOUD_PASS).
 // (One texture of two layers for both, and one for their depths: Direct3D
 // 11 gives a program 16 textures.)
+//[ middle clouds
+// (And a third layer, the middle clouds': see MID_PASS.)
+//]
 uniform highp usampler2DArray uPasses;
 uniform highp sampler2DArray uPassDepth;
 // The aircraft's frames go on to the shader that joins them into a picture
@@ -2450,7 +2459,9 @@ Layer cloudLayer(vec2 x, float lod) {
   // None where next to no air rises for some 20 km around (A of the map's mip 6.5): a third of the map, where the
   // field then skips the towers' cells altogether.
   a.tower = smoothstep(0.15, 0.4, uCloud) * smoothstep(0.6, 0.95, a.form) * smoothstep(0.01, 0.025, wide.a) * uLowTowers;
-  a.depth = mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), 0.6 + 1.2 * w.g * w.g, a.form) * uLow.y;
+  // (The record's smooth: an even sheet is as deep as the sheets of its region, mip 6.5, with a little of the place's
+  // own: under a depth that changed every few km, its base was mottled like a stratocumulus's.)
+  a.depth = mix(mix((0.5 + 0.5 * w.g) * (0.55 + 0.9 * w.r), (0.5 + 0.5 * wide.g) * (0.55 + 0.9 * wide.r), 0.85 * uLow.w), 0.6 + 1.2 * w.g * w.g, a.form) * uLow.y;
   return a;
 }
 // The heads of four sizes in one read of uHeads (h), the largest `cell` km: how far they move a surface out, km. Each size
@@ -2652,14 +2663,23 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       c = mix(n, c, smoothstep(0.35, 0.65, far.g));
       float cells = 0.4 * (0.6 * m.g + 0.4 * m.b) + 0.6 * (0.45 * c.g + 0.35 * c.b + 0.2 * c.a);
       shape = mix(clamp((cells - 0.2) / 0.5, 0.0, 1.0), shape, a.form);
-      // (The record's smooth: the cells fill in towards one even sheet, with less relief and less taken by the fine
-      // noise, see cloudField.)
-      shape = mix(shape, 1.0, 0.8 * uLow.w);
+      // (The record's smooth: the cells go, and one even sheet is left, with less taken by the fine noise, see
+      // cloudField. Its amount opens gaps in it where the Perlin-Worley noise of 8 km and of 2 km is low: the sheet
+      // thins out towards a gap over the 0.2 of the noise about the mark thr, which falls as the amount rises; over
+      // CF_CLOSE the floor below closes them, and they are shallow hollows in its top. Filled in to 1 everywhere, the
+      // sheet stayed whole at every amount.)
+      // (pn, pm: the Perlin-Worley noise swollen by its cells, sn and sm above, written another way. With sn and sm
+      // themselves read here, the compiler summed the heaps' shape above otherwise, and a still of main's views moved
+      // by 2 levels in a few pixels; so did the swells mixed in with mix().)
+      float thr = 0.72 - 0.6 * (a.amount - 0.69), pn = 1.0 - (1.0 - n.r) / (2.0 - wn), pm = 1.0 - (1.0 - m.r) / (2.0 - wm);
+      shape = mix(shape, 1.0 - am + am * smoothstep(thr - 0.1, thr + 0.1, 0.7 * pm + 0.3 * pn), uLow.w);
       // The top of a sheet stands higher over its cells of 4 km to 1 km and
       // over the largest of them, by up to 0.7 CF_RELIEF of its height (some 100 m): relief
       // without holes, which a low sun shows and a high one hardly. (A lower
       // floor under the shape gave relief too, and pits: specks from 40 km.)
-      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form) * (1.0 - 0.6 * uLow.w);
+      // (The record's smooth: long swells in place of the cells' relief, from the same Perlin-Worley noise, some 100 m
+      // over 8 km and half of that over 2 km; within the same bound, 0.7 CF_RELIEF, that the map of the tops takes.)
+      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form) * (1.0 - uLow.w) + CF_RELIEF * clamp(0.8 * (pm - 0.3) + 0.4 * (pn - 0.3), 0.0, 0.7) * (1.0 - a.form) * uLow.w;
     }
   }
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
@@ -2813,7 +2833,7 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     // under 0.2, creases go in elsewhere; its mean is 0.54): billows on its
     // whole outside, a cauliflower.
     e = clamp(e, 0.0, 1.0);
-    float er = CF_ERODE * e * (1.0 - 0.8 * uLow.w);
+    float er = CF_ERODE * e * (1.0 - 0.75 * uLow.w);
     float dn = mix((max(co, 0.0) / CF_K - er) / (1.0 - er), co / CF_K - CF_KNOB * ((carve ? e : 0.54) - 0.2), formAt);
     // A heap is dense right behind its surface (a sheet thickens slowly):
     // what is left after the carving is CF_SHARP times as dense, up to 1.
@@ -2840,7 +2860,9 @@ float cloudField(vec3 p, float lod, bool fine, out float y, out float bump, out 
     // of the light take the full sharpness whatever their level: thinner,
     // they let the sun through a heap, which glowed evenly from behind.)
     float sharp = mix(0.5, 1.0, formAt) * CF_SHARP;
-    if (dn > 0.0) dn = min(dn * (fine ? clamp(0.39 * exp2(-lod), 1.0, sharp) : sharp), 1.0);
+    // (The record's smooth: an even sheet is no sharper near the eye than far off. Twice as dense in its fringe within
+    // some 15 km, it was lit otherwise there: a pale blob under the eye from 11 km.)
+    if (dn > 0.0) dn = min(dn * (fine ? clamp(0.39 * exp2(-lod), 1.0, mix(sharp, 1.0, uLow.w * (1.0 - formAt))) : sharp), 1.0);
     bump = CF_K * dn - c;
   }
   return veil > 0.0 ? max(c + bump, under) : c + bump;
@@ -2945,106 +2967,92 @@ float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p
   return mix(tau.x, tau.y, mix(z - float(k), 1.0, up));
 }
 
-// ---------- The middle clouds (a prototype) ----------
+//[ middle clouds
+// ---------- The middle clouds ----------
 // A second shell, over the low clouds' (its base at CT or higher, so the two
-// never share a place): altocumulus and altostratus, one density as the low
-// clouds' (a shape from the noise times a profile over the layer's depth,
-// less what the amount takes; finer noise on its edge), marched in a pass of
+// never share a place): altocumulus and altostratus, a density from the
+// noise (cells, a sheet, or both: midCells, midSheet), marched in a pass of
 // its own (MID_PASS, midClouds) and joined to the scene as a third layer.
+// These lines are in the programs only on a page that has middle clouds:
+// makeSky takes the lines between "//[ middle clouds" and "//]" out of the
+// others' text (and puts those after "//| without" in their place), so a
+// page without them compiles the text it had before there were any.
 // The layer's record, one uniform: its amount (0: none), its form (0: a
-// sheet, altostratus, to 1: cells, altocumulus), its base and its depth (km).
+// sheet, altostratus, to 1: cells, altocumulus; between them both, each by
+// its share), its base and its depth (km).
 uniform vec4 uMid;
 uniform float uMidRolls;
 // Its depth straight up over each place is layer 4 of uShadow (on a level
-// plane through the eye, warped as the others; see midColumn), read where
-// things were when it was drawn.
+// plane through the eye, warped as the others; see MID_MAP and midColumn),
+// read where things were when it was drawn.
 uniform vec2 uMidShift;
 const float MID_KM = 6.4;            // its tile of the noise (a whole share of the weather map): cells of 1.6 km, 800 and 400 m
 const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's, the cells'
 const float MID_FULL = 0.5;          // the density (0 to 1) that is as dense as that
 const float MID_DETAIL = 5.0;        // its fine noise: tiles per tile
-// The density at p (from the eye), 0 to 1. lod as cloudShape's; fine: with
-// the fine noise (else its mean); fibres: and the cells' fibres and veil
-// (the eye's own samples: on the way to the light they are a read too many).
 // (midLump: the lumps of the cells at the place of the last call with `fine`, 0 to 1, 0.5 at a tuft's rim; see there.)
 // (midGap, of the last call: how far the place is, in km straight up or down, from where the column at the place has
 // cloud; 1 where the column has none at all. Nought within it. The march strides only where this allows.)
 float midLump, midGap;
-float midDensity(vec3 p, float lod, bool fine, bool fibres) {
-  midLump = 0.5;
-  midGap = 1.0;
-  float h = heightAt(p), t = (h - uMid.z) / uMid.w;
-  if (t <= 0.0 || t >= 1.0) return 0.0;
-  vec2 x = p.xz + uDrift, xw = x.yx / WEATHER_KM + vec2(0.21, 0.63);
-  float form = uMid.y;
-  // Where: the weather map's amount, elsewhere on it, over 4 km and more
-  // (patches and sheets, with clear lanes), and over some 20 km.
-  vec4 wm = textureLod(uWeather, xw, 4.0);
-  float wa = wm.r, wr = textureLod(uWeather, xw, 6.5).r;
-  float am = clamp(uMid.x + 0.7 * (1.0 - 0.8 * smoothstep(0.75, 1.0, uMid.x)) * (wa - 0.5), 0.0, 1.0);
-  // (Of cells: the noise's widest swell, the veil's share at this place and height, and the level where a cell is widest.)
+// The cells' density at p (from the eye), 0 to 1: h its height, t its share
+// of the layer's depth, x its place on the map, wm and wr the weather map
+// there (see midDensity, which has the other arguments too).
+float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, bool fine, bool fibres) {
+  // (The noise's widest swell, the veil's share at this place and height, and the level where a cell is widest.)
   float swell = 0.5, veil = 0.0, t0 = 0.25, dB = 0.0;
   vec2 warp = vec2(0.5);
   float d;
-  if (form > UNSEEN(0.5)) {
-    // Cells: the noise's Worley cells, each a cell of cloud: a dome as high
-    // as the cell's own height over a threshold, and a shallower bowl under
-    // it. The threshold is the field's, not the cell's: the amount, the map
-    // (patches and lanes), the noise's cells of 1.6 km and its swell of some
-    // 2 km (thick and thin places in a patch) raise or lower it, so a patch
-    // is a field of cells with seams between them, thick places are cells
-    // run together, and its edge is cells that shrink and stand apart. The
-    // map's other channels move the place in the noise by up to 2 km over
-    // some 4 km, and one of them says which cells lead, those of 400 m or
-    // those of 800 m: cells of unlike sizes, and no tile shows twice alike.
-    float grow = clamp(1.5 * (uMid.x - 0.5 + 2.5 * (wa - 0.5)), -1.6, mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)));
-    if (grow <= -1.55) return 0.0;
-    // (The cells' level, from place to place over some 4 km: they fill 0.65 of the layer's depth, anywhere between its
-    // base and its top. All on one base, the layer seen from just under it, on edge, had a ruled line for a base.)
-    float span = 0.65;
-    t = (t - (1.0 - span) * clamp(0.5 + 2.5 * (wm.g - 0.5), 0.0, 1.0)) / span;
-    if (t <= 0.0 || t >= 1.0) {
-      midGap = span * uMid.w * max(-t, t - 1.0);
-      return 0.0;
-    }
-    vec2 xs = vec2(x.x, 0.8 * x.y) / MID_KM + 0.6 * (wm.gb - 0.5);
-    vec4 n = textureLod(uNoise, vec3(xs.x, h / MID_KM + 2.0 * wr, xs.y) + vec3(0.41, 0.0, 0.77), max(lod, 0.0));
-    // (?midrolls: ranks of small elements, two waves of 300 and 420 m that cross, bent by the map and the noise.)
-    float roll = 0.65 * sin((0.8 * x.x + 0.6 * x.y + 0.6 * wm.g + 0.3 * n.r) * (2.0 * PI / 0.3)) + 0.45 * sin((0.9 * x.y - 0.44 * x.x + 0.6 * wm.b) * (2.0 * PI / 0.42));
-    float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + uMidRolls * (0.8 * roll - 0.2);
-    float e = mix((n.a - 0.22) / 0.3 + 1.5 * (n.b - 0.5), (n.b - 0.22) / 0.3 + 0.6 * (n.a - 0.5), smoothstep(0.3, 0.7, wm.b));
-    // (The level where a cell is widest, from place to place: all at one level, the layer seen from within it, on edge,
-    // was a ruled line at the eye's height.)
-    t0 = 0.1 + 0.35 * n.g;
-    float u = t < t0 ? (t0 - t) / t0 : (t - t0) / (1.0 - t0);
-    d = 0.65 * (e + wide - u);
-    dB = 0.65 * (e + wide - max(t - t0, 0.0) / (1.0 - t0));
-    swell = n.r;
-    warp = n.rg;
-    // A veil, thin and in fibres, at the cells' widest level where the field
-    // is too thin for more than scattered cells: the margins of a patch.
-    // (Round every cell, it was a blur about each one from above.)
-    veil = smoothstep(-1.1, -0.6, wide) * (1.0 - smoothstep(-0.3, 0.1, wide)) * smoothstep(0.2, 0.45, n.b) * smoothstep(-1.55, -1.3, grow);
-    midGap = dB <= 0.1 && veil <= 0.0 ? 1.0 : span * uMid.w * max(max(min(0.3 * t0, t0 - 0.2) - t, t - t0 - max((1.0 - t0) * (e + wide + 0.1), 0.35)), 0.0);
-    if (midGap > 0.0) return 0.0;
-    veil *= 0.6 * smoothstep(0.0, 1.0, 1.0 - abs(t - t0) / 0.2);
-  } else {
-    // A sheet: slow swells, drawn out along the wind.
-    vec3 q = vec3(0.125 * x.x, 0.0, 0.5 * x.y) / MID_KM + vec3(0.0, 0.61 + 0.5 * t * uMid.w / MID_KM + wr, 0.0);
-    vec4 n = textureLod(uNoise, q, max(lod - 2.0, 0.0));
-    float u = 2.0 * t - 1.0;
-    d = ((0.62 + 0.38 * n.r) * (1.0 - u * u) - (1.0 - am)) / max(am, 0.05);
+  // Cells: the noise's Worley cells, each a cell of cloud: a dome as high
+  // as the cell's own height over a threshold, and a shallower bowl under
+  // it. The threshold is the field's, not the cell's: the amount, the map
+  // (patches and lanes), the noise's cells of 1.6 km and its swell of some
+  // 2 km (thick and thin places in a patch) raise or lower it, so a patch
+  // is a field of cells with seams between them, thick places are cells
+  // run together, and its edge is cells that shrink and stand apart. The
+  // map's other channels move the place in the noise by up to 2 km over
+  // some 4 km, and one of them says which cells lead, those of 400 m or
+  // those of 800 m: cells of unlike sizes, and no tile shows twice alike.
+  float wa = wm.r, grow = clamp(1.5 * (uMid.x - 0.5 + 2.5 * (wa - 0.5)), -1.6, mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)));
+  if (grow <= -1.55) return 0.0;
+  // (The cells' level, from place to place over some 4 km: they fill 0.65 of the layer's depth, anywhere between its
+  // base and its top. All on one base, the layer seen from just under it, on edge, had a ruled line for a base.)
+  float span = 0.65;
+  t = (t - (1.0 - span) * clamp(0.5 + 2.5 * (wm.g - 0.5), 0.0, 1.0)) / span;
+  if (t <= 0.0 || t >= 1.0) {
+    midGap = span * uMid.w * max(-t, t - 1.0);
+    return 0.0;
   }
-  if (form > 0.5 ? dB <= 0.1 && (!fibres || veil <= 0.0) : d <= -0.35) return 0.0;
+  vec2 xs = vec2(x.x, 0.8 * x.y) / MID_KM + 0.6 * (wm.gb - 0.5);
+  vec4 n = textureLod(uNoise, vec3(xs.x, h / MID_KM + 2.0 * wr, xs.y) + vec3(0.41, 0.0, 0.77), max(lod, 0.0));
+  // (?midrolls: ranks of small elements, two waves of 300 and 420 m that cross, bent by the map and the noise.)
+  float roll = 0.65 * sin((0.8 * x.x + 0.6 * x.y + 0.6 * wm.g + 0.3 * n.r) * (2.0 * PI / 0.3)) + 0.45 * sin((0.9 * x.y - 0.44 * x.x + 0.6 * wm.b) * (2.0 * PI / 0.42));
+  float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + uMidRolls * (0.8 * roll - 0.2);
+  float e = mix((n.a - 0.22) / 0.3 + 1.5 * (n.b - 0.5), (n.b - 0.22) / 0.3 + 0.6 * (n.a - 0.5), smoothstep(0.3, 0.7, wm.b));
+  // (The level where a cell is widest, from place to place: all at one level, the layer seen from within it, on edge,
+  // was a ruled line at the eye's height.)
+  t0 = 0.1 + 0.35 * n.g;
+  float u = t < t0 ? (t0 - t) / t0 : (t - t0) / (1.0 - t0);
+  d = 0.65 * (e + wide - u);
+  dB = 0.65 * (e + wide - max(t - t0, 0.0) / (1.0 - t0));
+  swell = n.r;
+  warp = n.rg;
+  // A veil, thin and in fibres, at the cells' widest level where the field
+  // is too thin for more than scattered cells: the margins of a patch.
+  // (Round every cell, it was a blur about each one from above.)
+  veil = smoothstep(-1.1, -0.6, wide) * (1.0 - smoothstep(-0.3, 0.1, wide)) * smoothstep(0.2, 0.45, n.b) * smoothstep(-1.55, -1.3, grow);
+  midGap = dB <= 0.1 && veil <= 0.0 ? 1.0 : span * uMid.w * max(max(min(0.3 * t0, t0 - 0.2) - t, t - t0 - max((1.0 - t0) * (e + wide + 0.1), 0.35)), 0.0);
+  if (midGap > 0.0) return 0.0;
+  veil *= 0.6 * smoothstep(0.0, 1.0, 1.0 - abs(t - t0) / 0.2);
+  if (dB <= 0.1 && (!fibres || veil <= 0.0)) return 0.0;
   // The fine noise takes the thin places first.
   // (near2: within some 5 km of the eye, where the finest noise counts more and the edge is crisper: from so near a
   // cell is a lumpy heap, where from kilometres under it its rim is a soft fringe.)
   float er = 0.5, near2 = fine ? clamp(-3.0 - lod, 0.0, 1.0) : 0.0;
-  if (fine && (d < 0.9 || form > 0.5)) {
-    vec3 qd = form > 0.5 ? vec3(x.x, h, 0.6 * x.y) * (MID_DETAIL / MID_KM) : vec3(0.25 * x.x, 2.0 * h, x.y) * (MID_DETAIL / MID_KM);
+  if (fine) {
+    vec3 qd = vec3(x.x, h, 0.6 * x.y) * (MID_DETAIL / MID_KM);
     vec4 e = textureLod(uNoise, qd + vec3(0.13, 0.57, 0.29), max(lod + 2.3, 0.0));
-    er = form > 0.5 ? 0.2 * e.g + 0.45 * e.b + 0.35 * e.a : 0.5 * e.g + 0.3 * e.b + 0.2 * e.a;
-    if (form > 0.5) {
+    er = 0.2 * e.g + 0.45 * e.b + 0.35 * e.a;
+    {
       // Lumps: a cell is a clump of round tufts of some 350 to 45 m (the
       // heaps' heads, uHeads, four sizes in one read), nearly upright
       // columns of them (read almost in one level layer): what stands
@@ -3071,7 +3079,6 @@ float midDensity(vec3 p, float lod, bool fine, bool fibres) {
   }
   // (On cells it also makes lumps of the surface, in and out.)
   er = clamp(0.5 + 2.0 * (er - 0.5), 0.0, 1.0);
-  if (form <= 0.5) return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0);
   // Cells, two ways, by the height in the cell:
   //  - over its widest level a crisp heap: the noise takes what is under a
   //    share of it, lumps stand on the rest, and nothing stands outside the
@@ -3110,6 +3117,55 @@ float midDensity(vec3 p, float lod, bool fine, bool fibres) {
   base = max(base, 0.07 * veil * smoothstep(0.4, 0.75, fb + 0.3 * (veil - 0.5)));
   base *= mix(max(smoothstep(0.3, 0.55, midLump), 0.25), 1.0, 1.0 - smoothstep(0.8, 2.5, length(p)));
   return clamp(mix(base, heap, top), 0.0, 1.0);
+}
+// The sheet's density at p, 0 to 1 (the arguments as midCells'; fine: with
+// the fine noise).
+float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fine) {
+  // Where: the weather map's amount, elsewhere on it, over 4 km and more
+  // (patches and sheets, with clear lanes), and over some 20 km (wr).
+  float am = clamp(uMid.x + 0.7 * (1.0 - 0.8 * smoothstep(0.75, 1.0, uMid.x)) * (wa - 0.5), 0.0, 1.0);
+  float d;
+  // A sheet: slow swells, drawn out along the wind.
+  vec3 q = vec3(0.125 * x.x, 0.0, 0.5 * x.y) / MID_KM + vec3(0.0, 0.61 + 0.5 * t * uMid.w / MID_KM + wr, 0.0);
+  vec4 n = textureLod(uNoise, q, max(lod - 2.0, 0.0));
+  float u = 2.0 * t - 1.0;
+  d = ((0.62 + 0.38 * n.r) * (1.0 - u * u) - (1.0 - am)) / max(am, 0.05);
+  if (d <= -0.35) return 0.0;
+  // The fine noise takes the thin places first.
+  float er = 0.5;
+  if (fine && d < 0.9) {
+    vec3 qd = vec3(0.25 * x.x, 2.0 * h, x.y) * (MID_DETAIL / MID_KM);
+    vec4 e = textureLod(uNoise, qd + vec3(0.13, 0.57, 0.29), max(lod + 2.3, 0.0));
+    er = 0.5 * e.g + 0.3 * e.b + 0.2 * e.a;
+    // (Near the eye, the same 5 times finer: cells of 64 to 16 m.)
+    float near = clamp(-0.5 - lod, 0.0, 1.0), near2 = clamp(-3.0 - lod, 0.0, 1.0);
+    if (near > 0.0 && d < 0.6) {
+      e = textureLod(uNoise, qd * 5.0 + vec3(0.71, 0.23, 0.47), max(lod + 4.6, 0.0));
+      er += (1.05 * near + 0.7 * near2) * (0.5 * e.g + 0.3 * e.b + 0.2 * e.a - 0.5);
+    }
+  }
+  er = clamp(0.5 + 2.0 * (er - 0.5), 0.0, 1.0);
+  return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0);
+}
+// The density at p (from the eye), 0 to 1. lod as cloudShape's; fine: the
+// cells with their fine noise (else its mean); eye: the eye's own samples,
+// with the cells' fibres and veil and the sheet's fine noise (on the way to
+// the light they are a read too many).
+// Between a sheet and cells (uMid.y), both are there, each with its share of
+// its own extinction: a sheet that thins as cells grow in it. The density
+// is the one that midExtinction turns into the sum of the two.
+float midDensity(vec3 p, float lod, bool fine, bool eye) {
+  midLump = 0.5;
+  midGap = 1.0;
+  float h = heightAt(p), t = (h - uMid.z) / uMid.w;
+  if (t <= 0.0 || t >= 1.0) return 0.0;
+  vec2 x = p.xz + uDrift, xw = x.yx / WEATHER_KM + vec2(0.21, 0.63);
+  vec4 wm = textureLod(uWeather, xw, 4.0);
+  float wr = textureLod(uWeather, xw, 6.5).r, form = uMid.y, cells = 0.0, sheet = 0.0;
+  if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, wm, wr, lod, fine, eye), MID_FULL);
+  if (form < UNSEEN(1.0)) sheet = min(midSheet(h, t, x, wm.r, wr, lod, eye), MID_FULL);
+  midLump = mix(0.5, midLump, form);
+  return (MID_SIGMA.x * (1.0 - form) * sheet + MID_SIGMA.y * form * cells) / mix(MID_SIGMA.x, MID_SIGMA.y, form);
 }
 float midExtinction(float den) {
   return mix(MID_SIGMA.x, MID_SIGMA.y, uMid.y) * min(den / MID_FULL, 1.0);
@@ -3159,14 +3215,33 @@ float midLight(vec3 p, float share) {
   float col = midColumns(pc).y, m = max(dot(normalize(pc), uLight), 0.06), dir = exp(-col / m);
   return -log(dir + share * max(midThrough(col, m) - dir, 0.0));
 }
-#if Q_MID
-#define MID_AIR(p) midLight(p, 0.3)
-#define MID_SHADOW(p) midShadow(p)
-#else
-#define MID_AIR(p) 0.0
-#define MID_SHADOW(p) 0.0
-#endif
+// What the layer leaves of the sky's light in the air under it (h: the
+// height, km), by its amount, as UNDER does for the low clouds: under a
+// full layer, what a slab half as deep and dense throughout lets through
+// (two streams). The low air under an altostratus is lit through it.
+float midUnder(float h) {
+  float through = 1.0 / (1.0 + COLUMN * 0.5 * midExtinction(MID_FULL) * uMid.w);
+  return mix(1.0, through, smoothstep(0.4, 1.0, uMid.x) * (1.0 - smoothstep(uMid.z - 1.0, uMid.z, h)));
+}
+// The layer in the sea's mirror (see addSea), along uk from ps on the sea
+// (ck: uk's cosine to the vertical; c: the light's): what it leaves of the
+// sky behind it, and its base's light there as midClouds lights a base seen
+// from below, from the column smoothed over a kilometre (the mirror shows
+// the mean of a wide patch, never single cells): the light's part, per unit
+// of the light (x: what the slab lets through less what comes straight
+// through, which the glitter has), the sky's per unit of twice the sky's
+// mean (y: what comes through, and a share of what the sea and the low
+// clouds send back up), and what it leaves of both for what lies under it
+// (z; the low clouds' bases in the mirror).
+float midMirror(vec3 ps, vec3 uk, float ck, float c, out vec3 base) {
+  base = vec3(0.0, 0.0, 1.0);
+  if (uMid.x <= 0.0) return 1.0;
+  float col = midColumns(ps + uk * ((uMid.z + 0.5 * uMid.w) / ck)).z, m = max(c, 0.35), thru = 1.0 / (1.0 + COLUMN * col);
+  base = vec3(m / PI * max(midThrough(col, m) - exp(-col / m), 0.0), thru + (0.12 + 0.3 * uCloud) * (1.0 - thru), thru);
+  return exp(-col / ck);
+}
 
+//]
 // The optical depth of the clouds from p towards the light.
 float cloudShadow(vec3 p) {
   return mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0);
@@ -3510,7 +3585,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         }
         lit = false;
         fog = false;
-        next = clamp(-0.6 * f, FINE * dsIn, COARSE * dsAir);
+        // (Over an even sheet, the record's smooth, the steps far off are no shorter than ds: a ray that skims its
+        // level top for tens of km crept along it, ran out of steps, and showed the sea in a dark band under the
+        // horizon. Only beyond 12 to 30 km: nearer, such steps left a thin ring on the sheet seen from 11 km.)
+        next = clamp(-0.6 * f, mix(FINE, 1.0, uLow.w * (1.0 - formAt) * smoothstep(12.0, 30.0, t)) * dsIn, COARSE * dsAir);
         // Over the tops round here (uTops), the ray meets no cloud before it
         // has come down to them or gone as far sideways as they hold: it
         // strides there, less a share of a stride new for each pixel and
@@ -3544,7 +3622,17 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // The steps towards the light shrink with the distance below 8 km (to
       // 15 m): a near cloud shows its small billows lit and shaded as a far
       // one shows its big ones.
-      float step = max(clamp(0.00625 * tE, LIGHT_MIN, 0.05), 0.6 * ds);
+      // (Not over an even sheet, the record's smooth: its billows are those of the fine noise at every distance, and
+      // with short steps near the eye they no longer shaded one another there: under a low sun the sheet was flat
+      // within a few km, textured beyond, and the two met in an arc.)
+      float step = max(clamp(0.00625 * tE, mix(LIGHT_MIN, 0.05, uLow.w), 0.05), 0.6 * ds);
+      // even: a sheet that is smooth or thin by its record (low.smooth, low.depth under 1). On its level top the depth
+      // over the light's first two steps (tauF) is all or nothing as the first step's middle falls inside the cloud or
+      // over it, and that follows the angle of the view: from 11 km a ring round the eye, darker inside, with blocks.
+      // So those steps start anywhere in the first step (jit, new for each pixel and frame: the mean over the frames
+      // is the integral), and tauF comes from the first stage at every distance (worked out here within some 10 km,
+      // it was lighter there: a pale blob with a crisp edge).
+      float even = clamp(max(uLow.w, 2.0 * (1.0 - uLow.y)), 0.0, 1.0);
       // The offsets of the light's later steps turn from frame to frame by
       // interleaved gradient noise, which covers the circle evenly over the
       // frames (white noise left a grain in the settled picture).
@@ -3618,7 +3706,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           above = A.z;
           sky = A.w;
           skyLean = B.x / ws;
-          if (0.8 * pix * tE > 0.01) tauF = B.y / ws;
+          if (0.8 * pix * tE > 0.01 * (1.0 - even)) tauF = B.y / ws;
           tauN = B.z / ws;
           tauNn = B.w / ws;
         }
@@ -3723,6 +3811,10 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // a wide part of it.
       bool skyOn = !mapped && !under0, backOn = uStage > 0.5 && !fog && basal * smoothstep(2.0, 6.0, above) <= 0.999, wantF = tauF < 0.0 && !slab, wantCM = !mapped && !slab;
       float overMap = smoothstep(0.25, 0.45, uLight.y);
+      // (By a hash of its own: by interleaved gradient noise the mean kept a diagonal hatch, as for offB above. And as
+      // a vector chosen with offL below: added to the steps' place in a term of its own, with a factor of 0, the
+      // compiler still summed the place otherwise, and the default picture moved by a few levels in a few pixels.)
+      vec3 jit = uLight * (even * (hash(gl_FragCoord.yx + 9.37 * uPass + 3.3) - 0.5) * step);
       float tw = 0.0, sw = 0.0, dw = 0.03, sb = 0.0, db = 0.025, tauL = 0.0, crisp = 0.0;
       // (The depth away from the light strays by off turned at random: by
       // the same interleaved gradient noise as the point and the steps
@@ -3761,7 +3853,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           if (sl >= reach || j >= i1) continue;
           moved = sl > moveAt;
           l = max(lod, kl - 1.0);
-          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : vec3(0.0));
+          x = ps + uLight * (sl + 0.5 * dl) + (moved ? offL * min(1.0 + tauL / STRAY_TAU, STRAY_MAX) : jit);
           fine = !moved;
           wt = dl;
         }
@@ -3936,7 +4028,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         vec3 qs = q.xyz + vec3(ps.x - p.x, heightAt(ps) - heightAt(p), ps.z - p.z) / BASE_KM;
         vec4 cn = textureLod(uNoise, vec3(qs.x * 3.5, 0.37, qs.z * 3.5), max(lod + 1.8, 0.0));
         float cell = 0.65 * cn.g * (2.0 - cn.g) + 0.35 * textureLod(uNoise, vec3(qs.x * 10.0, 0.61, qs.z * 10.0), max(lod + 3.3, 0.0)).g;
+        // (An even sheet, the record's smooth, shows 0.3 of them: a ceiling faintly mottled.)
         cells = mix(1.0, clamp(exp(-5.5 * (cell - 0.66)), 0.5, 1.6), 1.0 - smoothstep(2.0, 6.0, tE));
+        cells += 0.7 * uLow.w * (1.0 - cells);
       }
       many = ms + mix(diffuse, cells * deck.x, below);
       // The sky's light, by how much of the sky the place sees; less where
@@ -4333,7 +4427,12 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   vec4 mir[3];
   float seen = 1.0;
   for (int k = 0; k < 3; k++) mir[k] = 0.75 * (uSunI * msS[k] + uMoonI * msM[k]) + 0.035 * soft * c * lit[k];
+//[ middle clouds
+  // (With middle clouds alone too: the same four directions, and no read of the low clouds.)
+  if (uCloud > 0.0 || uMid.x > 0.0) {
+//| without
   if (uCloud > 0.0) {
+//]
     float wsum = 0.0;
     vec2 e1 = sigma * ua, e2 = vec2(-e1.y, e1.x);
     mir[0] = vec4(0.0); mir[1] = vec4(0.0); mir[2] = vec4(0.0);
@@ -4366,7 +4465,11 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       float lodk = log2(max(2.0 * sigma * dist / ck, 0.06) / TEXEL_KM);
       vec3 xk = ps - eye() + uk * dist;
       float tv = 0.0;
+//[ middle clouds
+      for (int i = 0; i < LONG_N(uCloud > 0.0 ? 4 : 0); i++) {
+//| without
       for (int i = 0; i < LONG_N(4); i++) {
+//]
         vec2 h = i == 0 ? vec2(-0.275, 0.25) : i == 1 ? vec2(0.0, 0.3) : i == 2 ? vec2(0.375, 0.45) : vec2(1.3, 1.4);
         float y, bump, body, edge;
         float f = cloudField(xk + n * h.x, lodk, false, y, bump, body, edge);
@@ -4374,10 +4477,23 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       }
       vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
       float sk = exp(-tv / ck);
+//[ middle clouds
+      // (Behind the low clouds, the middle clouds: their base over what is left of the sky; and they dim the low bases.)
+      // (Their base through the air under them, aslant: what the air takes of it, the air's own light gives back, lit
+      // through the layer. Half the air's molecules lie under the layer, and nearly all its haze.)
+      vec3 mb, ola = depthToTop(ps, up) * (dot(up, n) / ck);
+      float sm = midMirror(ps, uk, ck, c, mb);
+      for (int k = 0; k < 3; k++) {
+        vec4 sky2 = 2.0 * (uSunI * msS[k] + uMoonI * msM[k]), ta = exp(-(0.5 * uBR[k] * ola.x + extM * uMA[k] * ola.y));
+        vec4 base = mb.z * (deck.x * lit[k] + deck.y * sky2);
+        mir[k] += wk * mix(base, mix(mix(mb.z * S[k], mb.x * lit[k] + mb.y * sky2, ta), S[k], sm), sk);
+      }
+//| without
       for (int k = 0; k < 3; k++) {
         vec4 base = deck.x * lit[k] + deck.y * 2.0 * (uSunI * msS[k] + uMoonI * msM[k]);
         mir[k] += wk * mix(base, S[k], sk);
       }
+//]
       wsum += wk;
     }
     for (int k = 0; k < 3; k++) mir[k] /= max(wsum, 1e-6);
@@ -5538,23 +5654,6 @@ void main() {
 void main() {
   vec3 ax, ay;
   mapAxes(uDir, ax, ay);
-  if (uLayer > 3.5) {
-    // (Layer 4 of the light's map: the middle clouds' depth straight up, see midColumn.)
-    vec2 w = gl_FragCoord.xy / uRes * 2.0 - 1.0, v = SHADOW_K * w / (1.0 - abs(w));
-    vec2 texel = (SHADOW_K + abs(v)) * (SHADOW_K + abs(v)) / SHADOW_K * 2.0 / uRes;
-    // (v along the axes of midColumn: -z and -x; the plane lies level at the eye, the layer on its sphere.)
-    vec3 q = vec3(-v.y, -dot(v, v) / (2.0 * RG), -v.x);
-    float lod = max(log2(0.5 * max(texel.x, texel.y) / TEXEL_KM), 0.0);
-    vec3 tau = vec3(0.0);
-    const int N = 8;
-    for (int i = 0; i < 3 * N + int(min(uRes.x, 0.0)); i++) {
-      float hh = uMid.z + uMid.w * (float(i / 3) + 0.5) / float(N);
-      float den = midExtinction(midDensity(q + vec3(0.0, hh - uAlt, 0.0), max(lod, i % 3 == 0 ? 0.0 : i % 3 == 1 ? 1.8 : 4.0), false, false)) * uMid.w / float(N);
-      tau += den * vec3(equal(ivec3(i % 3), ivec3(0, 1, 2)));
-    }
-    outColor = vec4(tau / (tau + SHADOW_ENC), 0.0);
-    return;
-  }
   outColor = shadowTexel(gl_FragCoord.xy / uRes * 2.0 - 1.0, uDir, ax, ay, int(uLayer));
 }
 #elif defined(TOPS_MAP)
@@ -5720,7 +5819,11 @@ void main() {
       if (uMoonI > 0.0) addSharp(p, od, dens, scM, extM, moonD, uMoonI * gain * (sunLight ? 1.0 : direct), M);
     } else {
       for (int k = 0; k < 3; k++) Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
+//[ middle clouds
+      float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low) * midUnder(h);
+//| without
       float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
+//]
       onceOn = sunLight;
       if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, sunD, uSunI * gain, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
       onceOn = !sunLight;
@@ -5816,6 +5919,26 @@ void main() {
     gl_FragDepth = Tc;
   }
 }
+//[ middle clouds
+#elif defined(MID_MAP)
+// The middle clouds' depth straight up, layer 4 of the light's map (see
+// midColumns), uRes texels square: of the field as it is (x), smoothed
+// over some 300 m (y) and over a kilometre (z).
+void main() {
+  vec2 w = gl_FragCoord.xy / uRes * 2.0 - 1.0, v = SHADOW_K * w / (1.0 - abs(w));
+  vec2 texel = (SHADOW_K + abs(v)) * (SHADOW_K + abs(v)) / SHADOW_K * 2.0 / uRes;
+  // (v along the axes of midColumns: -z and -x; the plane lies level at the eye, the layer on its sphere.)
+  vec3 q = vec3(-v.y, -dot(v, v) / (2.0 * RG), -v.x);
+  float lod = max(log2(0.5 * max(texel.x, texel.y) / TEXEL_KM), 0.0);
+  vec3 tau = vec3(0.0);
+  const int N = 8;
+  for (int i = 0; i < LONG_N(3 * N); i++) {
+    float hh = uMid.z + uMid.w * (float(i / 3) + 0.5) / float(N);
+    float den = midExtinction(midDensity(q + vec3(0.0, hh - uAlt, 0.0), max(lod, i % 3 == 0 ? 0.0 : i % 3 == 1 ? 1.8 : 4.0), false, false)) * uMid.w / float(N);
+    tau += den * vec3(equal(ivec3(i % 3), ivec3(0, 1, 2)));
+  }
+  outColor = vec4(tau / (tau + SHADOW_ENC), 0.0);
+}
 #elif defined(MID_PASS)
 // The middle clouds along each ray, before the scene, which reads them as
 // its third layer: what gets through (Tm), the light they send to the eye
@@ -5906,18 +6029,20 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
     if (Tm > 0.03) {
       vec3 P = o + p, upv = normalize(P);
       float sunUp = dot(upv, uLight);
-      bool cells = uMid.y > 0.5;
       float tf = clamp((heightAt(p) - uMid.z) / uMid.w, 0.0, 1.0);
       // (The steps end where the light's line leaves the layer, at the latest: grown with the distance alone, the last and
       // longest stood outside it from some 10 km on, and the layer was lit there as if thin, from an arc across the sky on.)
       float reach = (sunUp > 0.0 ? 1.0 - tf : tf) * uMid.w / max(abs(sunUp), 0.1);
-      float tauS = 0.0, s = min(max(0.03, 0.004 * t), reach / (cells ? 13.0 : 31.0)), acc = 0.0;
-      // (None for the thinnest cloud, a veil or a rim: it is lit as the layer's column says.)
-      for (int k = 0; k < (den < 0.1 && cells ? 0 : Tm < 0.3 ? 2 : 3) + int(min(uRes.x, 0.0)); k++) {
-        // (The first with the fine noise: the lumps shade one another.)
-        tauS += midExtinction(midDensity(p + uLight * (acc + 0.5 * s), lod + 1.5 + float(k), cells && k < 1, false)) * s;
+      // (Each step `longer` times the one before, 5 in a sheet, which is smooth, and 3 among cells, by the form; the
+      // first so long that three of them reach as far.)
+      float longer = mix(5.0, 3.0, uMid.y);
+      float tauS = 0.0, s = min(max(0.03, 0.004 * t), reach / (1.0 + longer + longer * longer)), acc = 0.0;
+      // (None for the cells' thinnest cloud, a veil or a rim: it is lit as the layer's column says.)
+      for (int k = 0; k < LONG_N(den < 0.1 * uMid.y ? 0 : Tm < 0.3 ? 2 : 3); k++) {
+        // (The first with the cells' fine noise: the lumps shade one another.)
+        tauS += midExtinction(midDensity(p + uLight * (acc + 0.5 * s), lod + 1.5 + float(k), k < 1, false)) * s;
         acc += s;
-        s *= cells ? 3.0 : 5.0;
+        s *= longer;
       }
       // (Past the steps, the rest of the layer on that side as a slab.)
       vec3 pe = p + uLight * acc;
@@ -6002,6 +6127,7 @@ void main() {
   outMid = floatBitsToUint(vec4(tMid, sSun, sAmb, tWide));
   gl_FragDepth = Tm;
 }
+//]
 #else
 void main() {
   shadowAxes();
@@ -6022,7 +6148,10 @@ void main() {
   // sOne + sMany): added once the thin cloud's shadow on them is known.
   bool cloudLit = false;
   vec3 cloudOl = vec3(0.0);
-  float cloudSun = 0.0, cloudAmb = 0.0, midDown = 0.0;
+  float cloudSun = 0.0;
+//[ middle clouds
+  float cloudAmb = 0.0, midDown = 0.0;
+//]
   vec4 C[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
   vec4 H[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), HM[3] = H;
   if (uCloud > 0.0) {
@@ -6031,7 +6160,9 @@ void main() {
     Tc = texelFetch(uPassDepth, here, 0).r;
     tBar = uintBitsToFloat(cl.x);
     float sAmb = uintBitsToFloat(cl.z), sLean = uintBitsToFloat(cl.w);
+//[ middle clouds
     cloudAmb = sAmb;
+//]
     if (tBar > 0.0) {
       // The colours of the light there: sunlight through the air above,
       // and skylight (the multiple-scattering table is the mean sky).
@@ -6068,12 +6199,12 @@ void main() {
     tHigh = uintBitsToFloat(ci.x);
     if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, uintBitsToFloat(ci.yzw), H, HM);
   }
+//[ middle clouds
   // The middle clouds: a third layer, tMid, M, Tm (see MID_PASS).
   float Tm = 1.0, tMid = -1.0, midSun = 0.0, midWide = 0.0;
   bool midLit = false;
   vec3 midOl = vec3(0.0);
   vec4 M[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
-#if Q_MID
   if (uMid.x > 0.0) {
     ivec3 here = ivec3(gl_FragCoord.xy / Q_PASS, 2);
     uvec4 mi = texelFetch(uPasses, here, 0);
@@ -6128,7 +6259,7 @@ void main() {
       }
     }
   }
-#endif
+//]
   float mu = dot(d, uSun);
   vec3 phaseSun = phases(mu);
   vec3 phaseMoon = phases(dot(d, uMoon));
@@ -6143,17 +6274,17 @@ void main() {
   // air's scattering there), or reads the map once if none does.
   const int SHAFTS = Q_SHAFTS;
   float ca = 0.0, cb = -1.0;
-#if Q_MID
+//[ middle clouds
   if ((uCloud > 0.0 || uMid.x > 0.0) && uLightI > 0.0) {
     // (With middle clouds, the air below them.)
     float shTop = uMid.x > 0.0 ? uMid.z : CT;
     vec2 ct = eyeSphere(o, d, shTop);
     if (uAlt < shTop) cb = ct.y;
-#else
+//| without
   if (uCloud > 0.0 && uLightI > 0.0) {
     vec2 ct = eyeSphere(o, d, CT);
     if (uAlt < CT) cb = ct.y;
-#endif
+//]
     else if (ct.x >= 0.0 && ct.x < 1e8) { ca = ct.x; cb = ct.y; }
     cb = min(cb, tmax);
   }
@@ -6173,14 +6304,26 @@ void main() {
   // One loop reads them all: each call of cirrusDepth is a copy of the
   // cirrus's code for the compiler, and Microsoft's (ANGLE on Direct3D 11)
   // took 13.7 s over the scene's program with three copies, 8 s with one.
-  float ciCloud = 0.0, ciSea = 0.0, ciGlare = 0.0, ciMid = 0.0;
+  float ciCloud = 0.0, ciSea = 0.0, ciGlare = 0.0;
+//[ middle clouds
+  float ciMid = 0.0;
+//]
   bool glareCi = uSunI > 0.0 && mu > 0.9 && raySphere(o, uSun, RG).y < 0.0 && uCirrus > 0.0 && uAlt < CI_HI;
   vec3 glarePc = o + uSun * raySphere(o, uSun, RG + max(0.5 * (CI_LO + CI_HI), uAlt)).y;
 #if Q_CI_SHADE
-  for (int i = 0; i < CI_N(3 + Q_MID); i++) {
+//[ middle clouds
+  for (int i = 0; i < CI_N(4); i++) {
     bool want = i == 0 ? cloudLit && uCirrus > 0.0 : i == 1 ? uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0 : i == 2 ? glareCi : midLit && uCirrus > 0.0;
+//| without
+  for (int i = 0; i < CI_N(3); i++) {
+    bool want = i == 0 ? cloudLit && uCirrus > 0.0 : i == 1 ? uCirrus > 0.0 && uLightI > 0.0 && ground && Tc > 0.0 : glareCi;
+//]
     if (!want) continue;
+//[ middle clouds
     vec3 p = i == 0 ? o + d * tBar : i == 3 ? o + d * tMid : o + d * tmax;
+//| without
+    vec3 p = i == 0 ? o + d * tBar : o + d * tmax;
+//]
     // (On the low clouds, from near where the ray crosses 1.1 km, not from
     // the mean place it met them: with the sun at 3 degrees a place 50 m
     // higher takes the shadow of cirrus 1 km farther off, and on a soft
@@ -6207,22 +6350,26 @@ void main() {
     // (On the low clouds the cirrus's shadow is as soft as the sun's disc makes it, 0.0093 of the way to the cirrus:
     // 1.5 km with the sun 3 degrees high. There 50 m of a tower's height are 1 km of cirrus, and read over 0.5 km
     // each streak of the cirrus drew a dark level band across the tower.)
+//[ middle clouds
     // (On the middle clouds, read over half as far as the pixel's light comes from about its mean place (midWide, at most
     // 8 km): where a near cell's rim lies over far cloud, the mean place runs from the one to the other over a few pixels,
     // and across the shadows of every streak between them: thin dark lines along the rims.)
-#if Q_MID
     float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : i == 0 ? max(0.5, 0.0093 * far) : i == 3 ? clamp(0.5 * midWide, 0.5, 8.0) : 0.5);
-#else
+//| without
     float depth = cirrusDepth(pc.xz + uDrift, i == 2 ? 0.3 : i == 0 ? max(0.5, 0.0093 * far) : 0.5);
-#endif
+//]
     float shade = 0.5 * depth / max(dot(normalize(pc), uLight), 0.05);
     if (i == 0) ciCloud = shade;
     else if (i == 1) ciSea = shade;
+//[ middle clouds
     else if (i == 2) ciGlare = depth;
     else ciMid = shade;
+//| without
+    else ciGlare = depth;
+//]
   }
 #endif
-#if Q_MID
+//[ middle clouds
   if (midLit) {
     float dim = exp(-ciMid);
     for (int k = 0; k < 3; k++) M[k] += uLightI * midSun * dim * exp(-(uBR[k] * midOl.x + extM * uMA[k] * midOl.y + uBO[k] * midOl.z));
@@ -6246,16 +6393,16 @@ void main() {
     // (Half of it: the other half lights them from the sun's side, with the light that came straight through; see midLight.)
     midDown = 0.5 * cloudAmb * slant / PI * max(midThrough(col, slant) - exp(-col / slant), 0.0);
   }
-#endif
+//]
   if (cloudLit) {
     float dim = exp(-ciCloud);   // the thin cloud above shades them
     for (int k = 0; k < 3; k++) C[k] += uLightI * cloudSun * dim * exp(-(uBR[k] * cloudOl.x + extM * uMA[k] * cloudOl.y + uBO[k] * cloudOl.z));
   }
-#if Q_MID
+//[ middle clouds
   if (cloudLit && midDown > 0.0) {
     for (int k = 0; k < 3; k++) C[k] += uLightI * midDown * exp(-(uBR[k] * cloudOl.x + extM * uMA[k] * cloudOl.y + uBO[k] * cloudOl.z));
   }
-#endif
+//]
   float ciShade = exp(-ciSea);
   // The map is the light's: in twilight the sun still lights the air
   // while the moon lights the clouds and the sea.
@@ -6277,7 +6424,7 @@ void main() {
   float tLayer = cloudsFirst ? tBar : tHigh;         // the next layer; negative: none
   if (tLayer < 0.0) tLayer = 1e9;
   int layer = 0;
-#if Q_MID
+//[ middle clouds
   // The layers in order, nearest first: which (0: the low clouds, 1: the
   // thin cloud, 2: the middle clouds) and how far (1e9: none).
     vec3 tOrd = vec3(tLayer, tSecond > 0.0 ? tSecond : 1e9, 1e9);
@@ -6292,7 +6439,7 @@ void main() {
     } else tOrd.z = tMid;
     tLayer = tOrd.x;
   }
-#endif
+//]
 #if Q_AIR_LUT
   // The air from the table (see airSlice and lutZ). The segments between
   // the eye, the layers and the end: the light of each is the table's at
@@ -6333,9 +6480,15 @@ void main() {
     }
     bool shade = sb0 > sa0;
     float tA = 0.0;
-    for (int s = 0; s < 3 + Q_MID; s++) {
-      float tEnd = s == 2 + Q_MID ? tmax : tLayer;
-      bool atLayer = s < 2 + Q_MID && tEnd < tmax;
+//[ middle clouds
+    for (int s = 0; s < 4; s++) {
+      float tEnd = s == 3 ? tmax : tLayer;
+      bool atLayer = s < 3 && tEnd < tmax;
+//| without
+    for (int s = 0; s < 3; s++) {
+      float tEnd = s == 2 ? tmax : tLayer;
+      bool atLayer = s < 2 && tEnd < tmax;
+//]
       if (!atLayer) tEnd = tmax;
       // (The ray's end from its own slice: mixed from the slices of distance
       // on either side, a ray that met the sea between them lost the light
@@ -6353,7 +6506,11 @@ void main() {
           float f = (float(m) + shaftJitter) / float(Q_LUT_SHADE), ts = a + (b - a) * f * f;
           float h = length(o + d * ts) - RG;
           // (The thin cloud's shade on the low air too, as the march takes it.)
-          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - MID_AIR(o + d * ts)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
+//[ middle clouds
+          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - midLight(o + d * ts, 0.3)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
+//| without
+          float lit = mix(1.0, exp(-cloudShadow(o + d * ts)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
+//]
           float mean = mix(1.0, mix(1.0, 0.15, smoothstep(0.4, 1.0, uCloud) * (1.0 - smoothstep(CB, CT, h))), uLightShare);
           f = float(m + 1) / float(Q_LUT_SHADE);
           zf = m + 1 == Q_LUT_SHADE && b >= tEnd && !atLayer ? vec2(LUT_END, 1.0) : lutZ(a + (b - a) * f * f);
@@ -6365,7 +6522,7 @@ void main() {
       tA = tEnd;
       od = odb;
       if (!atLayer) break;
-#if Q_MID
+//[ middle clouds
       int which = layer == 0 ? iOrd.x : layer == 1 ? iOrd.y : iOrd.z;
       for (int k = 0; k < 3; k++) {
         vec4 to = visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
@@ -6377,7 +6534,7 @@ void main() {
       layer++;
       tLayer = layer == 1 ? tOrd.y : layer == 2 ? tOrd.z : 1e9;
       if (vis <= 0.0) break;
-#else
+//| without
       bool isClouds = (layer == 0) == cloudsFirst;
       for (int k = 0; k < 3; k++) {
         vec4 to = visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
@@ -6389,7 +6546,7 @@ void main() {
       layer++;
       tLayer = layer == 1 && tSecond > 0.0 ? tSecond : 1e9;
       if (vis <= 0.0) break;
-#endif
+//]
       La = Lb;
     }
   }
@@ -6441,22 +6598,34 @@ void main() {
         vec3 ps = o + d * ts;
         vec3 w = density(length(ps) - RG);
         float wt = uBR[1].z * w.x + betaM * w.y;
-        lit += wt * exp(-cloudShadow(ps) - MID_AIR(ps));
+//[ middle clouds
+        lit += wt * exp(-cloudShadow(ps) - midLight(ps, 0.3));
+//| without
+        lit += wt * exp(-cloudShadow(ps));
+//]
         sum += wt;
       }
-      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - MID_AIR(p));
+//[ middle clouds
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - midLight(p, 0.3));
+//| without
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
+//]
     }
     // Under a deck the light of the sky reaches the low air only through
     // the deck: else the air under it, a hundred km of it towards the
     // horizon, glowed as a thin pale blue band.
+//[ middle clouds
+    float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low) * midUnder(h);
+//| without
     float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
+//]
     direct *= mix(1.0, ciShade, low);
     direct = mix(1.0, direct, uLightShare);          // the clouds' shadows come and go with their light
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
     if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * visX, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
     od += 0.5 * dens.xyz;
     if (atLayer) {
-#if Q_MID
+//[ middle clouds
       int which = layer == 0 ? iOrd.x : layer == 1 ? iOrd.y : iOrd.z;
       for (int k = 0; k < 3; k++) {
         vec4 to = visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
@@ -6468,7 +6637,7 @@ void main() {
       layer++;
       tLayer = layer == 1 ? tOrd.y : layer == 2 ? tOrd.z : 1e9;
       if (vis <= 0.0) break;
-#else
+//| without
       bool isClouds = (layer == 0) == cloudsFirst;
       for (int k = 0; k < 3; k++) {
         vec4 to = visX * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
@@ -6480,7 +6649,7 @@ void main() {
       layer++;
       tLayer = layer == 1 && tSecond > 0.0 ? tSecond : 1e9;
       if (vis <= 0.0) break;
-#endif
+//]
     }
   }
 #endif
@@ -6490,7 +6659,11 @@ void main() {
   } else if (ground) {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
-    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + MID_SHADOW(pg) + ciSea) : 0.0;
+//[ middle clouds
+    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + midShadow(pg) + ciSea) : 0.0;
+//| without
+    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea) : 0.0;
+//]
     addSea(pg, d, tmax, od, betaM, extM, visX, shadow, L, G);
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way,
@@ -6626,7 +6799,11 @@ void main() {
     float t2 = deg * deg + pow(degrees(SUN_R), 2.0);
     float glare = GLARE * min(1.0, exp2(GLARE_EXPO) / uExposure)
                 * SUN_L * PI * SUN_R * SUN_R * glareShape(t2);
-    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o) - MID_SHADOW(o));   // the map is the sun's
+//[ middle clouds
+    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o) - midShadow(o));   // the map is the sun's
+//| without
+    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
+//]
     if (uCirrus > 0.0 && uAlt < CI_HI) {
       // The thin cloud towards the sun: read where that ray crosses it.
       // (ciGlare: read above.)
@@ -6747,7 +6924,7 @@ void main() {
   // cloud flies past, and trail behind a near cloud in streaks.
   bool cloudLight = dot(C[1], vec4(1.0)) > 0.05 * dot(L[1], vec4(1.0));
   float tSeen = tBar > 0.0 && (wCloud > 0.1 || cloudLight) ? tBar : ground ? tmax : -1.0;
-#if Q_MID
+//[ middle clouds
   // The middle clouds, where they are the nearer: the pixel moves with them
   // by degrees, as far as they hide the rest (from 0.05 to 0.15) or give
   // twice that share of the light, one over its distance between theirs and
@@ -6782,7 +6959,7 @@ void main() {
     float inv = mix(tSeen > 0.0 ? 1.0 / tSeen : 0.0, 1.0 / tMid, share);
     tSeen = inv > 0.0 ? 1.0 / inv : -1.0;
   }
-#endif
+//]
   // Against the sky, a sheet too thin to hide much still gives much of the
   // light, and its streaks would smear if they stayed put: it counts by
   // its share of the light (the sun, the moon and stars behind it, by far
@@ -6807,9 +6984,9 @@ void main() {
       astray = clamp(1.0 - lit, 0.0, 1.0);
     }
   } else if (wHigh > 0.5) tSeen = tHigh;
-#if Q_MID
+//[ middle clouds
   astray = max(astray, midAstray);
-#endif
+//]
   gl_FragDepth = distanceCode(tSeen) + 0.75 / 65536.0 * astray;
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
@@ -8235,6 +8412,16 @@ const SkySound = (() => {
   // depth maps, the look of the frame).
   const lowUniform = () => [state.low.base, state.low.depth, state.low.form, state.low.smooth];
   const lowKey = () => [...lowUniform(), state.low.towers].join();
+  // The middle layer's record within its bounds (setMid), as the low layer's. Its base is at least the low shell's
+  // top (CT in fs), so that the two never share a place.
+  const MID_RANGE = { form: [0, 1], base: [5, 9], depth: [0.1, 2.5], rolls: [0, 1] };
+  const setMid = mid => {
+    for (const k in MID_RANGE) if (k in mid) state.midLayer[k] = Math.min(MID_RANGE[k][1], Math.max(MID_RANGE[k][0], mid[k]));
+  };
+  // The record as fs takes it (uMid, with the amount), and as a key for what is built from the layer.
+  // (A depth not given goes with the form: a sheet's 1.2 km, the cells' 0.4.)
+  const midUniform = () => [state.mid, state.midLayer.form, state.midLayer.base, state.midLayer.depth ?? 1.2 - 0.8 * state.midLayer.form];
+  const midKey = () => [...midUniform(), state.midLayer.rolls].join();
   const state = {
     time: 15, day: 80, moonAge: 13, haze: 1, yaw: 45 * RAD, pitch: -8 * RAD,
     elev: 0, sun: [0, 1, 0], sunOn: 1, moon: [0, 1, 0], moonI: 0, sky: new Float32Array(9),
@@ -8247,6 +8434,11 @@ const SkySound = (() => {
     // heaps into a sheet (-1: heaps at every amount, 1: a sheet); smooth: how even a sheet is; towers: the share of
     // the towers that grow. These values are the page's: with them the picture is as it was before the record.
     low: { base: 0, depth: 1, form: 0, smooth: 0, towers: 1 },
+    // The middle clouds: their amount (the panel's slider; 0: none, and nothing of them is built until it is raised),
+    // and the layer's record beside it, what midDensity in fs makes the layer of (uMid, uMidRolls). form: 0 a sheet
+    // (altostratus) to 1 cells (altocumulus); base, km; depth, km (null: by the form, see midUniform); rolls: how
+    // far the cells stand in ranks of small elements.
+    mid: 0, midLayer: { form: 1, base: 5.2, depth: null, rolls: 0 },
     // Days the sun has moved on beyond state.day while the time ran (see
     // tick): playing past midnight then turns the sky on smoothly. 0 once the
     // date or the time is set.
@@ -8256,18 +8448,6 @@ const SkySound = (() => {
     // matter) or 'utc' (see celestial).
     lat: 35, lon: 135, clock: 'solar',
   };
-  // The middle clouds (a prototype: none unless the address has ?mid=): the
-  // layer's record, as uMid in fs: its amount (0 to 1), its form (?midform,
-  // 0: a sheet, altostratus, to 1: cells, altocumulus), its base (?midbase,
-  // km: at least the low shell's top) and its depth (?middepth, km).
-  // And ?midrolls (0 to 1, as uMidRolls): how far its cells stand in ranks of small elements.
-  {
-    const q = new URLSearchParams(location.search);
-    const num = (k, d, lo, hi) => Math.min(hi, Math.max(lo, q.get(k) !== null && q.get(k) !== '' && isFinite(q.get(k)) ? +q.get(k) : d));
-    const form = num('midform', 1, 0, 1);
-    state.midRolls = num('midrolls', 0, 0, 1);
-    state.mid = [num('mid', 0, 0, 1), form, num('midbase', 5.2, 5, 9), num('middepth', form > 0.5 ? 0.4 : 1.2, 0.1, 2.5)];
-  }
   let builtHaze = null;
 
   // Local direction of a point at declination dec and hour angle H, seen
@@ -8912,6 +9092,13 @@ const SkySound = (() => {
   // tell it (EXT_disjoint_timer_query_webgl2); asked only if given.
   // memory: an object whose `bytes` this renderer keeps up to date (its
   // textures, and the canvas's own buffers as 12 bytes a pixel), for ?stats.
+  // fs with the lines of the middle clouds (on) or without them: between a
+  // line "//[ middle clouds" and a line "//]", the lines before a line
+  // "//| without" (or all of them) are theirs, and those after it stand in
+  // their place in a program that has none. Without them the text is what
+  // it was before there were middle clouds, so a page that never shows any
+  // compiles the same programs as then (see `mid` in makeSky).
+  const midLines = (src, on) => src.replace(/^\/\/\[ middle clouds\n([^]*?)(?:^\/\/\| without\n([^]*?))?^\/\/\]\n/gm, (all, mid, plain) => on ? mid : plain || '');
   async function makeSky(canvas, view, { done, shown, level, timed, gpuTimed, memory, pictured, parts, marks, wake }) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
@@ -8976,12 +9163,14 @@ const SkySound = (() => {
       return s;
     };
     // `defs`: lines put after the #version line of the fragment shader.
-    const link = (id, defs) => {
+    // `mid`: fs with the middle clouds' lines (see midLines).
+    const link = (id, defs, mid = false) => {
       const prog = gl.createProgram(), shaders = [];
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
-      names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : ''));
-      if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(state.mid[0] > 0 ? { Q_MID: 1 } : {}), ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : '') + (mid ? ' with middle clouds' : ''));
+      if (id === 'fs') fsrc = midLines(fsrc, mid);
+      if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
         [gl.FRAGMENT_SHADER, fsrc]]) {
@@ -9011,11 +9200,23 @@ const SkySound = (() => {
     // and the ice program only if the page starts with cirrus (see
     // buildIce): a sky without cirrus does not wait for their compiler.
     let ciProg = state.cirrus > 0 ? link('fs', '#define CIRRUS_PASS') : null;
-    const prog = link('fs');
+    // (With the middle clouds' lines if the page starts with middle clouds: see `mid`.)
+    const midFirst = state.mid > 0;
+    const prog = link('fs', '', midFirst);
     // fs as the low clouds' pass (see CLOUD_PASS).
     const cloudProg = link('fs', '#define CLOUD_PASS');
-    // And as the middle clouds' pass (see MID_PASS), where the page has them.
-    const midProg = state.mid[0] > 0 ? link('fs', '#define MID_PASS') : null;
+    // The middle clouds' programs, all of fs with their lines: the scene
+    // that joins them in, their pass (see MID_PASS) and the map of their
+    // depth straight up (see MID_MAP). On a page that starts with middle
+    // clouds they are compiled with the others, and the scene is theirs. On
+    // any other page nothing of them is made until the slider is first
+    // raised (see midWanted): such a page compiles and draws what it did
+    // before there were middle clouds, call for call.
+    // (ready: compiled and set up, see midSetup; for, at: what the map was drawn for, and where.)
+    let mid = null;
+    // (air: the table of the air's light under them, in place of airProg while there are any; see midUnder in fs.)
+    const midLink = () => ({ scene: midFirst ? prog : link('fs', '', true), pass: link('fs', '#define MID_PASS', true), map: link('fs', '#define MID_MAP', true),
+      air: !airProg ? null : midFirst ? airProg : link('fs', '#define AIR_LUT', true), ready: false, failed: false, U: {}, for: '', at: [0, 0] });
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const noiseProgram = link('noise'), wavesProgram = link('waves');
     const mean = link('mean', [Q.frame < 1 ? '#define UPSCALE' : '', Q.keys ? '#define KEYS' : ''].filter(Boolean).join('\n')), show = link('show'), meter = link('meter');
@@ -9026,7 +9227,8 @@ const SkySound = (() => {
     const topsProg = link('fs', '#define TOPS_MAP'), skyProg = link('fs', '#define SKY_LIGHT');
     // And as the table of the air's light (see Q_AIR_LUT), where the level
     // reads it (`airLut`) and the GPU can draw half floats.
-    const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT') : null;
+    const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT', midFirst) : null;
+    if (midFirst) mid = midLink();
     // The two passes of the enlargement, where the level has it (see the
     // shader "enlarge" and shownSize).
     const enlarge = Q.enlarge && !NO_ENLARGE ? [link('enlarge'), link('enlarge', '#define SHARPEN')] : null;
@@ -9540,8 +9742,6 @@ const SkySound = (() => {
         ['uniform1f', 'uLightI', state.lightI],
         ['uniform1f', 'uLightShare', state.lightShare],
         ['uniform1f', 'uStage', stage],
-        ['uniform4fv', 'uMid', state.mid],
-        ['uniform1f', 'uMidRolls', state.midRolls],
         ...each,
       ];
       // The depth test lets the shaders' depth be written (Th, Tc, the distance).
@@ -9553,22 +9753,24 @@ const SkySound = (() => {
         set(p, view);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       };
-      if (stage === 1 && ((state.cirrus > 0 && ciProg) || v.cloud > 0 || midProg)) {
+      const midOn = !!mid && mid.ready && state.mid > 0;
+      if (stage === 1 && ((state.cirrus > 0 && ciProg) || v.cloud > 0 || midOn)) {
         // (A pixel of the passes for Q.pass by Q.pass of the frame's: see Q_PASS in fs.)
-        passes = passTarget(passes, Math.ceil(full[0] / Q.pass), Math.ceil(full[1] / Q.pass));
+        passes = passTarget(passes, Math.ceil(full[0] / Q.pass), Math.ceil(full[1] / Q.pass), mid && mid.ready ? 3 : 2);
         // (The cirrus's may be coarser still: ciPass, Q_CI_PASS in fs.)
         const ciPass = Q.ciPass || Q.pass;
         if (ciPass > 1) gl.viewport(0, 0, Math.ceil(w / ciPass), Math.ceil(h / ciPass));
         if (state.cirrus > 0 && ciProg) pass(ciUse || ciProg, 0);
         if (ciPass !== Q.pass) gl.viewport(0, 0, Math.ceil(w / Q.pass), Math.ceil(h / Q.pass));
         if (v.cloud > 0) pass(cloudUse, 1);
-        if (midProg) pass(midProg, 2);
+        if (midOn) pass(mid.pass, 2);
         if (ciPass > 1) gl.viewport(0, 0, vw, vh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
       }
       // The first stage of the clouds' light is the clouds' pass's, the
       // sky's light on the clouds skyProg's (into the bound framebuffer).
-      const p = stage === 0 ? cloudUse : stage === 2 ? skyProg : stage === 3 ? airProg : sceneUse;
+      // (The scene with the middle clouds only while there are any.)
+      const p = stage === 0 ? cloudUse : stage === 2 ? skyProg : stage === 3 ? (midOn ? mid.air : airProg) : sceneUse !== prog ? sceneUse : midOn ? mid.scene : prog;
       gl.useProgram(p);
       set(p, view);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -9577,9 +9779,10 @@ const SkySound = (() => {
     };
     // The passes before the scene for a frame of w by h pixels (see
     // uPasses in fs): `old` if it has that size, else a new one in its
-    // place. Two layers, the cirrus's and the low clouds': their numbers
-    // on unit 16, their depths (Th, Tc) on unit 17, where the scene reads
-    // them; a framebuffer for each layer.
+    // place. Two layers, the cirrus's and the low clouds' (and a third, the
+    // middle clouds', once the page has those): their numbers on unit 16,
+    // their depths (Th, Tc, Tm) on unit 17, where the scene reads them; a
+    // framebuffer for each layer.
     // Throws if the bound framebuffer cannot be drawn into: else every draw
     // into it would fail, and the page would show nothing, or black.
     const complete = what => {
@@ -9587,18 +9790,18 @@ const SkySound = (() => {
       if (status !== gl.FRAMEBUFFER_COMPLETE && !gl.isContextLost()) throw new Error(`The GPU cannot draw into ${what}: framebuffer status 0x${status.toString(16)}.`);
     };
     let passes = null;
-    const passTarget = (old, w, h) => {
-      if (old && old.w === w && old.h === h) return old;
+    const passTarget = (old, w, h, layers) => {
+      if (old && old.w === w && old.h === h && old.targets.length === layers) return old;
       if (old) {
         old.targets.forEach(t => gl.deleteFramebuffer(t));
         gl.deleteTexture(old.bits);
         gl.deleteTexture(old.depth);
       }
-      const c = { w, h, targets: [gl.createFramebuffer(), gl.createFramebuffer(), ...(midProg ? [gl.createFramebuffer()] : [])], bits: gl.createTexture(), depth: gl.createTexture() };
+      const c = { w, h, targets: Array.from({ length: layers }, () => gl.createFramebuffer()), bits: gl.createTexture(), depth: gl.createTexture() };
       for (const [unit, texture, format] of [[16, c.bits, gl.RGBA32UI], [17, c.depth, gl.DEPTH_COMPONENT32F]]) {
         gl.activeTexture(gl.TEXTURE0 + unit);
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, format, w, h, c.targets.length);
+        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, format, w, h, layers);
         gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       }
@@ -9813,20 +10016,19 @@ const SkySound = (() => {
     const SHADOW = Q.shadow, COLUMN = Q.column, SHADOW_STALE = Q.stale || 0.5;
     const S = {};
     gl.useProgram(shadowProg);
-    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud', 'uLow', 'uLowTowers', 'uMid', 'uMidRolls']) S[n] = gl.getUniformLocation(shadowProg, n);
+    for (const n of ['uRes', 'uAlt', 'uDir', 'uColumnMap', 'uLayer', 'uDrift', 'uCloud', 'uLow', 'uLowTowers']) S[n] = gl.getUniformLocation(shadowProg, n);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uNoise'), 2);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uHeads'), 22);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uTower'), 30);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
-    const depthMap = (unit, size, column) => {
-      const m = { size, column, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
+    // (layered: a map's texture, of n layers, on its unit.)
+    const layered = (m, n) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
-      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.activeTexture(gl.TEXTURE0 + m.unit);
       for (const format of fine ? [gl.RGBA16F, gl.RGBA8] : [gl.RGBA8]) {
         m.texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, m.texture);
-        // (A fifth layer of the light's map with middle clouds: their depth straight up, see midColumn in fs.)
-        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, format, size, size, !column && midProg ? 5 : 4);
+        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, format, m.size, m.size, n);
         for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
           [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
           gl.texParameteri(gl.TEXTURE_2D_ARRAY, k, v);
@@ -9837,6 +10039,10 @@ const SkySound = (() => {
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.activeTexture(gl.TEXTURE0);
+    };
+    const depthMap = (unit, size, column) => {
+      const m = { size, column, unit, target: gl.createFramebuffer(), texture: null, for: '', at: [[0, 0], [0, 0], [0, 0], [0, 0]] };
+      layered(m, 4);
       gl.useProgram(prog);
       C('uniform1i', column ? 'uColumn' : 'uShadow', unit);
       gl.useProgram(shadowProg);
@@ -9969,7 +10175,54 @@ const SkySound = (() => {
     };
     C('uniform1i', 'uPasses', 16);
     C('uniform1i', 'uPassDepth', 17);
-    for (const p of [ciProg, cloudProg, midProg, skyProg, airProg]) if (p) fixedFor(p);
+    for (const p of [ciProg, cloudProg, skyProg, airProg]) if (p) fixedFor(p);
+    // The middle clouds, once their programs are compiled: the fixed
+    // uniforms, the map's own, and a fifth layer in the light's map for
+    // their depth straight up (the map is made anew, and drawn again).
+    const midSetup = () => {
+      // (The table's program drawn once into as many targets as the table has: see warm. On a unit that holds
+      // nothing: warm binds its pixels there, and leaves none bound.)
+      if (mid.air && mid.air !== airProg) {
+        gl.activeTexture(gl.TEXTURE31);
+        warm(mid.air, LUT_MRT);
+        gl.activeTexture(gl.TEXTURE0);
+      }
+      for (const p of [mid.scene, mid.pass, mid.air]) if (p && p !== prog && p !== airProg) fixedFor(p);
+      gl.useProgram(mid.map);
+      for (const n of ['uRes', 'uAlt', 'uDrift', 'uMid', 'uMidRolls']) mid.U[n] = gl.getUniformLocation(mid.map, n);
+      for (const [n, unit] of [['uNoise', 2], ['uHeads', 22], ['uWeather', 3]]) gl.uniform1i(gl.getUniformLocation(mid.map, n), unit);
+      gl.useProgram(prog);
+      gl.deleteTexture(shadowMap.texture);
+      layered(shadowMap, 5);
+      shadowMap.for = '';
+      mid.ready = true;
+    };
+    if (mid) midSetup();
+    // The slider raised from 0 on a page that began without middle clouds:
+    // their programs are compiled now, and the frames go on without the
+    // layer until all of them are done (asked a frame at a time, as while the
+    // page loads: with KHR_parallel_shader_compile nothing waits for the
+    // compiler; without it the first frame after waits, once, as for the
+    // cirrus). If one fails, the page stays without middle clouds.
+    // Returns true while they are waited for.
+    const midWanted = () => {
+      if (!mid) {
+        mid = midLink();
+        gl.flush();
+      }
+      if (mid.ready || mid.failed) return false;
+      const progs = [mid.scene, mid.pass, mid.map, mid.air].filter(Boolean);
+      if (parallel && progs.some(p => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR))) return true;
+      try {
+        for (const entry of programs) if (progs.includes(entry[0])) check(entry);
+        midSetup();
+        mark('middle clouds built');
+      } catch (err) {
+        mid.failed = true;
+        console.error(err);
+      }
+      return false;
+    };
     // (The scene's and the low clouds' programs that draw uses: other
     // variants only for ?stats=bench3.)
     let sceneUse = prog, cloudUse = cloudProg, ciUse = null, benchRepeat = 1, benchSkip = {};
@@ -10114,10 +10367,12 @@ const SkySound = (() => {
       restart = false;
       const flying = state.speed > 0;
       if (!flying || Math.abs(way[1]) > CLIMB_STEP) altSeen = v.alt;
-      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, lowKey()].join();
+      // (The middle clouds: none until they are built, see midWanted.)
+      const midWait = state.mid > 0 && midWanted(), midOn = !!mid && mid.ready && state.mid > 0;
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
-      if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return false;   // settled
+      if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return midWait;   // settled (the frames go on, undrawn, while the middle clouds' programs compile)
       if (moved || lit) lastStir = now;
       const small = now - lastStir < 150 ? scale : 1;
       // The picture (pw by ph), and the frame (w by h): smaller by the
@@ -10167,26 +10422,29 @@ const SkySound = (() => {
       const k = drawn++ % 1024 + 1;
       const jitter = [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
       const each = [['uniform2f', 'uJitter', ...jitter], ['uniform1f', 'uPass', pass],
-        ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : [])];
+        ...(Q.ciPass > 1 ? [['uniform2f', 'uPassJitter', halton(k, 5) - 0.5, halton(k, 7) - 0.5]] : []),
+        // (The middle clouds' record, once they are built, an amount of 0 too: the scene of a page that began with
+        // them reads it. uSteps: the scene's own program has it set below.)
+        ...(mid && mid.ready ? [['uniform4fv', 'uMid', midUniform()], ['uniform1f', 'uMidRolls', state.midLayer.rolls], ['uniform1f', 'uSteps', steps]] : [])];
       gl.uniform1f(uSteps, steps);
       // The map of the tops, for this frame's clouds.
       const topsKey = [v.cloud, lowKey()].join();
       if (v.cloud > 0 && topsKey !== topsFor) drawTops(v.cloud, topsKey);
       // The table of the air's light, for this frame's light, air and height.
-      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare].join() : '';
+      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare, midOn ? midKey() : ''].join() : '';
       if (lut && lutKey !== lut.for) {
         // (Not read while drawn into.)
         gl.activeTexture(gl.TEXTURE29);
         gl.bindTexture(gl.TEXTURE_3D, null);
         gl.activeTexture(gl.TEXTURE0);
         // (The view's uniforms once, with the first draw; then only the slice.)
-        const draws = LUT_DRAWS.length, uSlice = place(airProg, 'uLutSlice'), uPart = place(airProg, 'uLutPart');
+        const air = midOn ? mid.air : airProg, draws = LUT_DRAWS.length, uSlice = place(air, 'uLutSlice'), uPart = place(air, 'uLutPart');
         lut.targets.forEach((t, i) => {
           const sl = Math.floor(i / draws), part = i % draws;
           gl.bindFramebuffer(gl.FRAMEBUFFER, t);
           if (!i) draw(v, cam, LUT_AZ, LUT_EL, [...each, ['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)], ['uniform1f', 'uLutSlice', 0], ['uniform1f', 'uLutPart', 0]], 3);
           else {
-            gl.useProgram(airProg);
+            gl.useProgram(air);
             gl.uniform1f(uSlice, sl);
             gl.uniform1f(uPart, part);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -10200,7 +10458,7 @@ const SkySound = (() => {
         lut.for = lutKey;
       }
       // The sky's light on the clouds, for this frame's sun and haze.
-      const skyKey = v.cloud > 0 || midProg ? [...state.sun, state.sunOn, state.haze].join() : '';
+      const skyKey = v.cloud > 0 || midOn ? [...state.sun, state.sunOn, state.haze].join() : '';
       if (skyKey && skyKey !== skyLightFor) {
         // (Its unit is free while the draw writes it; draw expects unit 0.)
         bind(27, null);
@@ -10232,16 +10490,34 @@ const SkySound = (() => {
         gl.uniform1f(S.uCloud, v.cloud);
         gl.uniform4fv(S.uLow, lowUniform());
         gl.uniform1f(S.uLowTowers, state.low.towers);
-        gl.uniform4fv(S.uMid, state.mid);
-        gl.uniform1f(S.uMidRolls, state.midRolls);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.useProgram(prog);
         gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
         m.at[layer] = [state.drift[0], state.drift[1]];
       };
-      // (The middle clouds' depth straight up, layer 4 of the light's map:
-      // at first, and when flown too far, as any layer.)
-      if (midProg && !shadowMap.at[4]) drawLayer(shadowMap, [0, 1, 0], 4);
+      // The middle clouds' depth straight up, layer 4 of the light's map
+      // (see MID_MAP in fs): for this frame's layer, and when flown too far,
+      // as any layer.
+      const drawMid = () => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowMap.target);
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, shadowMap.texture, 0, 4);
+        gl.viewport(0, 0, shadowMap.size, shadowMap.size);
+        gl.useProgram(mid.map);
+        gl.uniform2f(mid.U.uRes, shadowMap.size, shadowMap.size);
+        gl.uniform1f(mid.U.uAlt, v.alt);
+        gl.uniform2fv(mid.U.uDrift, state.drift);
+        gl.uniform4fv(mid.U.uMid, midUniform());
+        gl.uniform1f(mid.U.uMidRolls, state.midLayer.rolls);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.useProgram(prog);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shot.target);
+        mid.at = [state.drift[0], state.drift[1]];
+      };
+      const midFor = midOn ? [midKey(), altSeen].join() : '';
+      if (midOn && midFor !== mid.for) {
+        drawMid();
+        mid.for = midFor;
+      }
       let stale = null;
       for (const [m, key, dir] of maps) {
         if (!key) continue;
@@ -10254,11 +10530,12 @@ const SkySound = (() => {
           if (Math.hypot(x, z) > SHADOW_STALE) stale = [m, dir, layer];
         }
       }
-      if (midProg && !stale && Math.hypot(...shiftOf(shadowMap.at[4])) > SHADOW_STALE) stale = [shadowMap, [0, 1, 0], 4];
       if (stale && !benchSkip.maps) drawLayer(...stale);
+      else if (midOn && !benchSkip.maps && Math.hypot(...shiftOf(mid.at)) > SHADOW_STALE) drawMid();
       // (Where things were when each layer was drawn, for every program
       // that reads the maps.)
-      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.slice(0, 4).flatMap(shiftOf)]), ...(midProg ? [['uniform2fv', 'uMidShift', shiftOf(shadowMap.at[4])]] : [])];
+      const frame = [...each, ...(lut ? [['uniform1f', 'uLutScale', lutScale(v.alt)], ['uniform3fv', 'uLutLight', lutLight(v.alt)]] : []), ...maps.map(([m]) => ['uniform2fv', m.column ? 'uColumnShift' : 'uShadowShift', m.at.flatMap(shiftOf)]),
+        ...(mid && mid.ready ? [['uniform2fv', 'uMidShift', shiftOf(mid.at)]] : [])];
       lap('maps');
       // The first stage of the clouds' light, then the frame, which reads it.
       // (benchRepeat, benchSkip: ?stats=bench3 only.)
@@ -10311,7 +10588,7 @@ const SkySound = (() => {
       // meter is read at once: the only frame that waits for the GPU.
       if (logE === null) {
         const from = [pw, ph, w, h, cam, v.fov, v.alt, v.cloud, v.look, state.sun, state.sunOn, state.moon, state.moonI,
-          state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, state.lightShare, builtHaze, fine].join();
+          state.sky, state.haze, state.wind, state.drift, state.cirrus, state.light, state.lightI, state.lightShare, builtHaze, fine, midOn ? midKey() : ''].join();
         if (!probe) meterPicture(cur, from === primed ? null : 'now');
         if (probe) {
           primed = from;
@@ -10393,7 +10670,7 @@ const SkySound = (() => {
         else if (ms < 24) scale = Math.min(1, scale * 1.12);
         span = count = 0;
       }
-      chained = flying || adapting || calm < settleFrames + RELIGHT;
+      chained = flying || adapting || calm < settleFrames + RELIGHT || midWait;
       sizes = { shown: [W, H], picture: [pw, ph], frame: [w, h], passes: [Math.ceil(w / Q.pass), Math.ceil(h / Q.pass)], light: [Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass))],
         scale: small, level: levelName };
       return chained;
@@ -10427,7 +10704,7 @@ const SkySound = (() => {
     // a frame draws its passes and its scene, and which it skips.)
     render.variants = async list => {
       const made = {};
-      for (const [name, pass, defs] of list) made[name] = link('fs', (pass ? `#define ${pass}\n` : '') + defs);
+      for (const [name, pass, defs] of list) made[name] = link('fs', (pass ? `#define ${pass}\n` : '') + defs, midFirst);
       const progs = programs.slice(-list.length);
       for (let i = 0; i < 900 && parallel && progs.some(([p]) => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR)); i++) await new Promise(r => setTimeout(r, 100));
       for (const [name] of list) {
@@ -10619,6 +10896,7 @@ const SkySound = (() => {
   const wind = document.getElementById('wind'), windOut = document.getElementById('windOut');
   const speed = document.getElementById('speed'), speedOut = document.getElementById('speedOut');
   const cirrus = document.getElementById('cirrus'), cirrusOut = document.getElementById('cirrusOut');
+  const midOut = document.getElementById('midOut');
   const lat = document.getElementById('lat'), latOut = document.getElementById('latOut');
   const lon = document.getElementById('lon'), lonOut = document.getElementById('lonOut');
   const clockSelect = document.getElementById('clock');
@@ -10646,6 +10924,7 @@ const SkySound = (() => {
     windOut.textContent = state.wind.toFixed(0) + ' m/s';
     speedOut.textContent = state.speed.toFixed(0) + ' km/h';
     cirrusOut.textContent = T.cirri[state.cirrus < 0.02 ? 0 : state.cirrus < 0.35 ? 1 : state.cirrus < 0.7 ? 2 : 3];
+    midOut.textContent = T.cirri[state.mid < 0.02 ? 0 : state.mid < 0.35 ? 1 : state.mid < 0.7 ? 2 : 3];
   }
   // The date slider covers this year. The moon's age follows the date (mean
   // lunation, counted from the new moon of 6 January 2000), until it is moved.
@@ -10666,7 +10945,7 @@ const SkySound = (() => {
   // Each slider sets its own part of the state: moving one does not round
   // the others (while playing, the time and the moon's age run unrounded).
   const sliders = { time: 'time', date: 'day', moon: 'moonAge', haze: 'haze',
-    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus', lat: 'lat', lon: 'lon' };
+    cloud: 'cloud', wind: 'wind', speed: 'speed', cirrus: 'cirrus', mid: 'mid', lat: 'lat', lon: 'lon' };
   const read = id => {
     state[sliders[id]] = +document.getElementById(id).value;
     if (id === 'time' || id === 'date') state.dayShift = 0;
@@ -10690,6 +10969,12 @@ const SkySound = (() => {
     const low = {};
     for (const k in state.low) if (params.has('low.' + k) && isFinite(parseFloat(params.get('low.' + k)))) low[k] = parseFloat(params.get('low.' + k));
     setLow(low);
+  }
+  // And the middle layer's (midform, midbase, middepth, midrolls): its amount has a slider, the rest does not yet.
+  {
+    const mid = {};
+    for (const k in MID_RANGE) if (params.has('mid' + k) && isFinite(parseFloat(params.get('mid' + k)))) mid[k] = parseFloat(params.get('mid' + k));
+    setMid(mid);
   }
   // The drawing limit of the hero: the address, else the last choice, else WQHD.
   const pixels = document.getElementById('pixels');
@@ -12121,7 +12406,7 @@ const SkySound = (() => {
       at: rounded(wrap(state.drift[0]), 3) + ',' + rounded(wrap(state.drift[1]), 3),
       yaw: deg(state.yaw), pitch: rounded(state.pitch / RAD, 2),
       heading: deg(state.heading), bank: rounded(state.bank / RAD, 2), climb: rounded(state.climb / RAD, 2),
-      speed: rounded(state.speed, 1), cloud: rounded(state.cloud, 3), cirrus: rounded(state.cirrus, 3),
+      speed: rounded(state.speed, 1), cloud: rounded(state.cloud, 3), mid: rounded(state.mid, 3), cirrus: rounded(state.cirrus, 3),
       haze: rounded(state.haze, 2), wind: rounded(state.wind, 1), moon: rounded(state.moonAge, 3),
       quality: level || (named(choice) ? choice : 'auto'), pixels: pixels.value,
       hud: hudOn ? 1 : 0, lang: LANG,

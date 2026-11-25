@@ -43,6 +43,7 @@ debug overlay shows them so).
 | `alt` | 0.3 to 40, any | 11 | Altitude of the eye, km. The slider is even in km (20 m a step) up to 13 km and even in log(h) above; the value beside it takes a number typed in m or km |
 | `speed` | 0 to 3000, 50 | 900 | Speed, km/h. 0 stands still, and drawing stops once the picture is clean |
 | `cloud` | 0 to 1, 0.01 | 0.5 | Amount of low cloud |
+| `mid` | 0 to 1, 0.01 | 0 | Amount of middle cloud (altocumulus, altostratus; see [design.md](design.md#middle-clouds)). Nothing of it is compiled until it is over 0 |
 | `cirrus` | 0 to 1, 0.01 | 0.4 | Amount of high, thin cloud |
 
 These are read directly.
@@ -85,8 +86,23 @@ and the towers to what fits under the top of the low clouds' shell.
 | `low.base` | 0 to 2.25 | 0 | km added to the level of the low clouds' bases (0.75 to 0.9 km at 0) |
 | `low.depth` | 0.4 to 1.5 | 1 | A factor on the layer's depth; at most `(3.8 - low.base) / 1.8` |
 | `low.form` | -1 to 1 | 0 | A bias on the amount that turns heaps into a sheet: -1 heaps at every amount, 1 a sheet |
-| `low.smooth` | 0 to 1 | 0 | How even a sheet is: 0 cells, 1 one smooth sheet |
+| `low.smooth` | 0 to 1 | 0 | How even a sheet is: 0 cells (stratocumulus), 1 one even sheet with long swells (stratus) |
 | `low.towers` | 0 to 1 | 1 | The share of the towers that grow; 0 with `low.base` over 0.1 |
+
+Stratus, for tests: `cloud=1&low.form=1&low.smooth=1`, with `low.base` and
+`low.depth` as they are (a base at 0.75 to 0.9 km, the lowest the shell
+holds, and a sheet some 0.6 km deep, an optical depth of about 20). With
+`cloud` from 0.6 to 0.9 the sheet has gaps. `low.depth=0.5` gives a thin
+sheet, greyer from above and lighter from below.
+
+The middle layer's record, likewise for tests (no control sets it yet):
+
+| Parameter | Range | Default | Meaning |
+|---|---|---|---|
+| `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
+| `midbase` | 5 to 9 | 5.2 | The layer's base, km |
+| `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
+| `midrolls` | 0 to 1 | 0 | How far the cells stand in ranks of small elements |
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
@@ -123,7 +139,7 @@ monospace text appears at the top left, over a dark backing, and the title is hi
   drawn, the time between frames (smoothed; `at rest` when nothing is drawn) and the exposure (log2);
 - the query line: every parameter that shapes the picture, with the values now (date, time, clock,
   `lat`, `lon`, `alt`, the place `at`, `yaw`, `pitch`, `heading`, `bank`, `climb`, `speed`, `cloud`,
-  `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
+  `mid`, `cirrus`, `haze`, `wind`, `moon`, `quality`, `pixels`, `hud`, `lang`, and `res` when it was given);
 - a `Copy URL` button, which puts the whole address on the clipboard.
 
 To see what a screenshot showed, type its query line after `?`, add `speed=0` (the line has the
@@ -713,6 +729,19 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
   the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
   2026-11-24).
+- **A factor of 0 does not keep the picture.** A term that a uniform
+  switches off at the page's defaults (`x += even * jitter`) still changes
+  what the compiler makes of the code round it. Three cases, on this
+  machine's GL (the stratus step of #84): a second `hash(gl_FragCoord.xy + 7.13 * uPass + c)`
+  beside the light's own moved that one's value in its last bit, and a
+  few pixels of the default still by up to 8 levels; with another
+  argument (`gl_FragCoord.yx + 9.37 * uPass + c`) the still is main's.
+  A second use of the heaps' noise (`sn`, `sm`) in the sheet's branch
+  moved a still by 2 levels (written another way, `1 - (1 - r) / (2 -
+  w)`, it does not), and so did the sheet's relief as `mix(cells, swells,
+  smooth)` in place of two terms with their own factors.
+  So check every view against main after such an edit (`check stills`),
+  and change one expression at a time when it fails.
 - **Each program small enough for Microsoft's compiler.** ANGLE on
   Direct3D 11 (Chrome and Edge on Windows) gives each program to
   Microsoft's HLSL compiler (FXC), which inlines every call: each call of
