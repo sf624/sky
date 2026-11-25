@@ -721,11 +721,15 @@ The shaders must run on any WebGL2. The code keeps these rules:
   2026-11-24).
 - **A factor of 0 does not keep the picture.** A term that a uniform
   switches off at the page's defaults (`x += even * jitter`) still changes
-  what the compiler makes of the code round it. Two cases, on this
+  what the compiler makes of the code round it. Three cases, on this
   machine's GL (the stratus step of #84): a second `hash(gl_FragCoord.xy + 7.13 * uPass + c)`
   beside the light's own moved that one's value in its last bit, and a
   few pixels of the default still by up to 8 levels; with another
   argument (`gl_FragCoord.yx + 9.37 * uPass + c`) the still is main's.
+  A second use of the heaps' noise (`sn`, `sm`) in the sheet's branch
+  moved a still by 2 levels (written another way, `1 - (1 - r) / (2 -
+  w)`, it does not), and so did the sheet's relief as `mix(cells, swells,
+  smooth)` in place of two terms with their own factors.
   So check every view against main after such an edit (`check stills`),
   and change one expression at a time when it fails.
 - **Each program small enough for Microsoft's compiler.** ANGLE on
