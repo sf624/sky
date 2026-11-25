@@ -2651,15 +2651,18 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       // thins out towards a gap over the 0.2 of the noise about the mark thr, which falls as the amount rises; over
       // CF_CLOSE the floor below closes them, and they are shallow hollows in its top. Filled in to 1 everywhere, the
       // sheet stayed whole at every amount.)
-      float thr = 0.72 - 0.6 * (a.amount - 0.69);
-      shape = mix(shape, 1.0 - am + am * smoothstep(thr - 0.1, thr + 0.1, 0.7 * sm + 0.3 * sn), uLow.w);
+      // (pn, pm: the Perlin-Worley noise swollen by its cells, sn and sm above, written another way. With sn and sm
+      // themselves read here, the compiler summed the heaps' shape above otherwise, and a still of main's views moved
+      // by 2 levels in a few pixels; so did the swells mixed in with mix().)
+      float thr = 0.72 - 0.6 * (a.amount - 0.69), pn = 1.0 - (1.0 - n.r) / (2.0 - wn), pm = 1.0 - (1.0 - m.r) / (2.0 - wm);
+      shape = mix(shape, 1.0 - am + am * smoothstep(thr - 0.1, thr + 0.1, 0.7 * pm + 0.3 * pn), uLow.w);
       // The top of a sheet stands higher over its cells of 4 km to 1 km and
       // over the largest of them, by up to 0.7 CF_RELIEF of its height (some 100 m): relief
       // without holes, which a low sun shows and a high one hardly. (A lower
       // floor under the shape gave relief too, and pits: specks from 40 km.)
       // (The record's smooth: long swells in place of the cells' relief, from the same Perlin-Worley noise, some 100 m
       // over 8 km and half of that over 2 km; within the same bound, 0.7 CF_RELIEF, that the map of the tops takes.)
-      rise = CF_RELIEF * mix(max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0), clamp(0.8 * (sm - 0.3) + 0.4 * (sn - 0.3), 0.0, 0.7), uLow.w) * (1.0 - a.form);
+      rise = CF_RELIEF * max(0.35 * m.b + 0.35 * c.g + 0.3 * c.b - 0.3, 0.0) * (1.0 - a.form) * (1.0 - uLow.w) + CF_RELIEF * clamp(0.8 * (pm - 0.3) + 0.4 * (pn - 0.3), 0.0, 0.7) * (1.0 - a.form) * uLow.w;
     }
   }
   swirl = CF_SWIRL * (1.0 - 0.7 * heapUp) * (n.gba - n.bag);
@@ -3734,7 +3737,8 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         vec4 cn = textureLod(uNoise, vec3(qs.x * 3.5, 0.37, qs.z * 3.5), max(lod + 1.8, 0.0));
         float cell = 0.65 * cn.g * (2.0 - cn.g) + 0.35 * textureLod(uNoise, vec3(qs.x * 10.0, 0.61, qs.z * 10.0), max(lod + 3.3, 0.0)).g;
         // (An even sheet, the record's smooth, shows 0.3 of them: a ceiling faintly mottled.)
-        cells = mix(1.0, clamp(exp(-5.5 * (cell - 0.66)), 0.5, 1.6), (1.0 - smoothstep(2.0, 6.0, tE)) * (1.0 - 0.7 * uLow.w));
+        cells = mix(1.0, clamp(exp(-5.5 * (cell - 0.66)), 0.5, 1.6), 1.0 - smoothstep(2.0, 6.0, tE));
+        cells += 0.7 * uLow.w * (1.0 - cells);
       }
       many = ms + mix(diffuse, cells * deck.x, below);
       // The sky's light, by how much of the sky the place sees; less where

@@ -959,8 +959,8 @@ the joins between its kinds drew flat-topped blocks, walls and rims.)
     towards the light, lies inside the cloud where the view is steep and
     over it where the view grazes. From 11 km that was a ring round the
     eye, darker and bluer inside, with blocks where the depth changed (the
-    patch reported at `low.depth` 0.5; the sheet lets no sea through, less
-    than 1 %). So those steps start anywhere in the first step, new for
+    patch reported at `low.depth` 0.5; no sea shows through: a picture of
+    what the sheet lets through was dark all over). So those steps start anywhere in the first step, new for
     each pixel and frame (`jit`), and `tauF` comes from the first stage at
     every distance. What is left is a smooth fall of a tenth from far to
     straight down, as over a deck of the default record.
