@@ -895,6 +895,133 @@
    "bad": "685878f",
    "fixed": "09320cc",
    "note": "No measure separates the two (relief 0.008 bad, 0.007 fixed). The ring's edge and the blocks went (the spread of the green in the patch, rows at 0.35 to 0.9 of the height: 2.8 to 4.1 bad, 1.5 to 2.9 fixed); a smooth fall from far to near stays (the red at 0.8 over that at 0.05 of the height: 0.84 bad, 0.87 fixed; 0.91 over a deck of the default record). Kept for the contact sheet."
+  },
+  {
+   "name": "mid-night-full-moon-11km",
+   "q": "date=172&time=22&moon=14&cirrus=0&alt=11&yaw=60&pitch=-30&cloud=0&mid=1&midform=0",
+   "reported": "2026-11-25",
+   "wrong": "the middle layer under a full moon was reported nearly black: a sheet of it from 11 km is to be lit by the moon as a low deck is",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.15,
+      0.4,
+      0.7,
+      0.55
+     ],
+     "p": 50,
+     "min": 12
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.15,
+      0.4,
+      0.7,
+      0.55
+     ],
+     "p": 50,
+     "max": 40
+    }
+   ],
+   "bad": null,
+   "fixed": null,
+   "note": "The median luma of the sheet: 21, on the prototype of the layer too (the pictures did not bear the report out: the layer takes the moon's and the sky's light as the low clouds do; a low deck in this view gives 20 to 30). Kept so that it stays so."
+  },
+  {
+   "name": "mid-night-full-moon-0.3km",
+   "q": "date=172&time=22&moon=14&cirrus=0&alt=0.3&yaw=60&pitch=40&cloud=0&mid=1",
+   "reported": "2026-11-25",
+   "wrong": "the same from below: cells under a full moon are to be lit through, not black",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.15,
+      0.1,
+      0.7,
+      0.6
+     ],
+     "p": 50,
+     "min": 12
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.15,
+      0.1,
+      0.7,
+      0.6
+     ],
+     "p": 50,
+     "max": 45
+    }
+   ],
+   "bad": null,
+   "fixed": null,
+   "note": "The median luma of the cells and the gaps between them: 23, on the prototype too."
+  },
+  {
+   "name": "mid-sheet-sea-mirror-0.3km",
+   "q": "date=172&time=13&cirrus=0&alt=0.3&yaw=20&pitch=-3&cloud=0&mid=0.9&midform=0",
+   "reported": "2026-11-25",
+   "wrong": "the sea under a middle sheet mirrored a clear blue sky: it is to be grey, as the sheet over it",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0.55,
+      1,
+      0.4
+     ],
+     "of": "bg",
+     "p": 50,
+     "max": 1.2
+    }
+   ],
+   "bad": null,
+   "fixed": null,
+   "reference": {
+    "the prototype (before the mirror)": {
+     "brightColour bg": 1.621
+    }
+   },
+   "note": "The blue over the green of the brighter half of the sea: 1.62 while it mirrored a clear sky, 0.97 with the sheet in the mirror."
+  },
+  {
+   "name": "mid-form-sheet-to-cells-11km-down",
+   "q": "date=172&time=15.5&cirrus=0&cloud=0&alt=11&yaw=0&pitch=-60&mid=0.8",
+   "sweep": {
+    "param": "midform",
+    "values": [
+     0,
+     0.2,
+     0.4,
+     0.5,
+     0.6,
+     0.8,
+     0.9,
+     1
+    ]
+   },
+   "reported": "2026-11-25",
+   "wrong": "between a sheet and cells (midform) the layer changed at once at 0.5: it is to blend",
+   "measures": [
+    {
+     "measure": "coverFall",
+     "max": 0.4
+    }
+   ],
+   "bad": null,
+   "fixed": null,
+   "reference": {
+    "the prototype (a switch at 0.5)": {
+     "coverFall": 0.642
+    }
+   },
+   "note": "The cover (the rough cloud mask, which takes a grey veil for cloud) straight down from 11 km at eight forms: the largest fall between neighbours. 0.64 where the layer switched from a sheet to cells at 0.5; 0.24 with the two blended (the last of the sheet goes between 0.8 and 1)."
   }
  ]
 }
