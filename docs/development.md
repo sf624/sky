@@ -85,8 +85,14 @@ and the towers to what fits under the top of the low clouds' shell.
 | `low.base` | 0 to 2.25 | 0 | km added to the level of the low clouds' bases (0.75 to 0.9 km at 0) |
 | `low.depth` | 0.4 to 1.5 | 1 | A factor on the layer's depth; at most `(3.8 - low.base) / 1.8` |
 | `low.form` | -1 to 1 | 0 | A bias on the amount that turns heaps into a sheet: -1 heaps at every amount, 1 a sheet |
-| `low.smooth` | 0 to 1 | 0 | How even a sheet is: 0 cells, 1 one smooth sheet |
+| `low.smooth` | 0 to 1 | 0 | How even a sheet is: 0 cells (stratocumulus), 1 one even sheet with long swells (stratus) |
 | `low.towers` | 0 to 1 | 1 | The share of the towers that grow; 0 with `low.base` over 0.1 |
+
+Stratus, for tests: `cloud=1&low.form=1&low.smooth=1`, with `low.base` and
+`low.depth` as they are (a base at 0.75 to 0.9 km, the lowest the shell
+holds, and a sheet some 0.6 km deep, an optical depth of about 20). With
+`cloud` from 0.6 to 0.9 the sheet has gaps. `low.depth=0.5` gives a thin
+sheet, greyer from above and lighter from below.
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
@@ -713,6 +719,15 @@ The shaders must run on any WebGL2. The code keeps these rules:
   `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
   the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
   2026-11-24).
+- **A factor of 0 does not keep the picture.** A term that a uniform
+  switches off at the page's defaults (`x += even * jitter`) still changes
+  what the compiler makes of the code round it. Two cases, on this
+  machine's GL (the stratus step of #84): a second `hash(gl_FragCoord.xy + 7.13 * uPass + c)`
+  beside the light's own moved that one's value in its last bit, and a
+  few pixels of the default still by up to 8 levels; with another
+  argument (`gl_FragCoord.yx + 9.37 * uPass + c`) the still is main's.
+  So check every view against main after such an edit (`check stills`),
+  and change one expression at a time when it fails.
 - **Each program small enough for Microsoft's compiler.** ANGLE on
   Direct3D 11 (Chrome and Edge on Windows) gives each program to
   Microsoft's HLSL compiler (FXC), which inlines every call: each call of
