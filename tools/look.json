@@ -1022,6 +1022,27 @@
     }
    },
    "note": "The cover (the rough cloud mask, which takes a grey veil for cloud) straight down from 11 km at eight forms: the largest fall between neighbours. 0.64 where the layer switched from a sheet to cells at 0.5; 0.24 with the two blended (the last of the sheet goes between 0.8 and 1)."
+  },
+  {
+   "name": "heap-cut-at-eye-1.66km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=1.66&at=11.151,9.613&yaw=-116.44&pitch=-6.31&heading=49.23&bank=0&climb=0&speed=0&cloud=0.5&mid=0&cirrus=0.4&haze=1&wind=6&moon=16&quality=high&pixels=wqhd&hud=1&lang=en",
+   "reported": "2026-11-26",
+   "wrong": "a cumulus in the middle distance cut off by a flat level plane at about the eye's height, see-through above it, with blocks along the cut: the map of the tops read the noise from unit 0 and stood too low, and the march strode through the heap",
+   "measures": [
+    {
+     "measure": "cover",
+     "region": [
+      0.52,
+      0.3,
+      0.04,
+      0.09
+     ],
+     "min": 0.8
+    }
+   ],
+   "bad": "4dfadd8",
+   "fixed": "7230a28",
+   "note": "The heap's upper right part, over the cut: cover 0.51 bad (the same at 4725dbf and 9de3e45), 0.99 fixed, as with the stride over the tops turned off."
   }
  ]
 }
