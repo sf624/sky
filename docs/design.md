@@ -3490,6 +3490,14 @@ its share, `astray` (1 minus the sheet's share of the light), goes with
 the distance, in the fraction of the frame's depth below the next code
 (`0.75 / 65536` times the share, kept to 1/256 of a step).
 
+A star stays put, and so does a pixel that its light fills: by the
+stars' share of the pixel's light (`starL` against `L`), from 0.05 to
+0.25, the pixel's nearness falls to none. The cloud in front, which
+gives the rest, is soft. (Moved with a thin moonlit sheet by what the
+sheet hides, each frame a star took its past from where the sheet had
+been: in flight it lost half its light and was drawn out along the
+sheet's way.)
+
 **Reprojection** (`whence` in `mean`): each pixel finds where what it shows
 now was a frame ago. Clouds and sea have come nearer by the eye's way since
 (`uWay`, from the change of `state.drift` and altitude), at the same height
@@ -3497,7 +3505,11 @@ over the curved ground; the sky stays (the air moves with the eye). The
 old camera (`uCamPast`) gives the old pixel. If something nearer was there
 a frame ago (the ragged edge of a cloud), the pixel reads the past instead
 where a thing at that nearer distance, on this pixel's ray now, was a
-frame ago.
+frame ago. Where that nearer thing is not found there (sea the cloud has
+just uncovered, sky beside it), what is read is a stand-in: it is in
+doubt (below) as far as a thing at the nearer distance would be. (Taken
+whole, a star beside a cloud under the moon was copied a cloud's step
+further each frame, and drew a dotted streak in flight.)
 
 **The read** of the past is a Catmull-Rom filter in nine bilinear reads
 (Jimenez, 2016), clamped to the four texels around, which also give the
@@ -3531,7 +3543,11 @@ far as it fits the 3 by 3 neighbourhood of the new frame (clamped to its
 minimum and maximum). A past that had to change much was something else:
 its count drops to 1. The same check holds the light that stays put in a
 pixel that moves: the past is in doubt as far as `astray` times the
-pixel's own parallax slips. Under a thin sheet near the eye (just below
+pixel's own parallax slips, from 0.02 pixels a frame on (fully from
+0.06): the mean in flight holds some ten frames, so a slip of 0.1 a frame
+smears that light over a pixel. (From 0.1 on, as for things at other
+distances, a star behind a moonlit sheet, which gives most of the light
+round the star, was drawn out along the sheet's way.) Under a thin sheet near the eye (just below
 its base at 12.2 km), the pixels round the sun move with the sheet by
 their share, pixels a frame, while the glare and the sun's disc stay.
 Without the check they took their past from where the sheet had been: in

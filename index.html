@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="8446078 main">
+<meta name="build" content="5aa9d12 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -6735,6 +6735,7 @@ void main() {
   }
 #endif
 
+  float starL = 0.0;                                 // the stars' light in L[1] (below)
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
@@ -6859,6 +6860,7 @@ void main() {
       G[k] += tk[k] * sun;
       L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
+    starL = stars * dot(tk[1] * st[1], vec4(1.0));
   }
   // Glare: light of the sun strayed inside the eye or the lens. Its shape is
   // the eye's, the CIE general disability glare function (CIE 146:2002;
@@ -7068,6 +7070,14 @@ void main() {
 //[ middle clouds
   astray = max(astray, midAstray);
 //]
+  // A star stays put, and a pixel that its light fills stays with it, by
+  // its share of the light from 0.05 to 0.25: the cloud in front, which
+  // gives the rest, is soft. Moved with a sheet by what the sheet hides,
+  // a star behind thin moonlit cloud lost half its light in flight, read
+  // each frame from where the sheet had been, and was drawn out along the
+  // sheet's way.
+  float stay = smoothstep(0.05, 0.25, starL / max(dot(L[1], vec4(1.0)), 1e-30));
+  if (tSeen > 0.0 && stay > 0.0) tSeen = stay < 1.0 ? tSeen / (1.0 - stay) : -1.0;
   gl_FragDepth = distanceCode(tSeen) + 0.75 / 65536.0 * astray;
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
@@ -7197,10 +7207,19 @@ void main() {
   // If something nearer was there, this pixel may show its ragged edge,
   // where one frame hits the cloud and the next misses it. Then look where
   // that nearer thing was: for a miss, it leads to the same edge; for sea
-  // that the cloud has just uncovered, to the sea next to the cloud.
+  // that the cloud has just uncovered, to the sea next to the cloud; for
+  // sky, to the sky next to it. Where the nearer thing is not found there,
+  // that is a stand-in, not this pixel's past: it is in doubt as far as a
+  // thing at the nearer distance (`invLed`) would be (below). Taken whole,
+  // in flight a star beside a cloud was copied a cloud's step further each
+  // frame, into a dotted streak.
+  float invLed = 0.0;
   if (uTrust > 0.0 && parallax > 0.0 && st == clamp(st, 0.0, 1.0)) {
     float invWas = nearness(decode(textureLod(uPastAux, st, 0.0).rg));
-    if (parallax * (0.8 * invWas - inv) > 0.1) st = whence(invWas);
+    if (parallax * (0.8 * invWas - inv) > 0.1) {
+      st = whence(invWas);
+      invLed = invWas;
+    }
   }
 
   // The mean of n frames takes this one as the next. Without a past (the
@@ -7282,9 +7301,15 @@ void main() {
     // that moves: that light slips by the pixel's own way. Next to the sun,
     // under a thin sheet near the eye, the glare and the sun's disc slipped
     // so by pixels a frame, and in flight the disc drew a streak and the
-    // glow banded copies of its edge.
-    float invWas = nearness(codeWas);
-    float doubt = smoothstep(0.1, 0.3, parallax * max(max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0), astray * inv));
+    // glow banded copies of its edge. The mean in flight holds some ten
+    // frames, so light that slips 0.1 pixels a frame is smeared over a
+    // pixel: that light is in doubt from a slip of 0.02 pixels a frame
+    // (fully from 0.06). From 0.1, a star behind a moonlit sheet, which
+    // gives most of the light round the star, was drawn out along the
+    // sheet's way.
+    float invWas = max(nearness(codeWas), invLed);
+    float doubt = max(smoothstep(0.1, 0.3, parallax * max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0)),
+                      smoothstep(0.02, 0.06, parallax * astray * inv));
     if (doubt > 0.0) {
 #ifdef UPSCALE
       ivec2 edge = ivec2(uFrameRes) - 1;
