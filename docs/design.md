@@ -2562,7 +2562,7 @@ on the map.
   10 km, from which the glow round the sun and the moon is drawn (the
   ice's, the veil's median and the thin veil's); it
   weighs the kinds by the bands and fields evened out by 0.8 (by the
-  local ones, the moonlit veil, which follows it at night, stood in
+  local ones, the moonlit veil, which followed it at night before PR #136, stood in
   lanes). It reads the ice over a footprint of some 10 km along the ray's
   way (`ciIceWide`): the mean of eight reads, four along the footprint
   and two across, each at the level of half their spacing. Read by the
@@ -2662,15 +2662,21 @@ on the map.
   cirrus farther on.
 - **At night** (`nightK`, up to 0.9 as the light goes over from the sun to
   the moon: no switch, `0.9 (1 - smoothstep(0.02, 0.3, uLightI))`; the
-  halo blends between its day and night strengths by the same) the light
-  that the sheet scatters, its share of the sky's light and the share
-  scattered many times follow its depth over some 10 km by that much, the
-  aureole follows the ice in front of the moon by less (0.1 for 0.4), and
-  a broader aureole (some 7 degrees) is added: photographs of a lunar
-  halo show a smooth sheet, a bright aureole and a clear ring, where the
-  moonlit decks stood as dark lanes across a grey veil with only a faint
-  ring (round 15), and at 0.65 of the depth over 10 km, still as lanes
-  at `cirrus` 0.5 (round 16).
+  halo blends between its day and night strengths by the same) the ring
+  fades by the depth over some 10 km by that much, the aureole follows the
+  ice in front of the moon by less (0.1 for 0.4), and a broader aureole
+  (some 7 degrees) is added: photographs of a lunar halo show a bright
+  aureole and a clear ring. The sheet's own light (scattered once and many
+  times, and its share of the sky's light) keeps the depth at the pixel,
+  by night as by day, so that moonlit cirrus shows the streaks and veils
+  of the day, by its own light. Before PR #136 that light followed the
+  depth over some 10 km by 0.9 too (since round 16, so that the lanes
+  between bands would not stand dark across a grey veil): under the moon
+  only the halo and faint streaks showed, and from some 4 degrees under
+  the horizon on, where the light is the moon's (`uLightI` near 0) and the
+  cirrus is lit by the twilight's sky, the cirrus was one flat veil with
+  no streaks (the texture of the luma, `texture` in `look`, 0.003 looking
+  up at the sun's -9 degrees, against 0.057 now).
 - **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
   extinction is diffraction by its crystals: light turned by less than a
   degree, which goes on as if not scattered. The march through the air
