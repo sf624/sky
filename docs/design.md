@@ -1855,7 +1855,7 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       map's systems (read over some 20 km) and four times its detail
       under that (clusters, lanes, its streets) are set against the
       amount, and the cells shrink apart over a narrow margin. Half the
-      map is field at an amount of 0.6. (Until #NNN the threshold fell
+      map is field at an amount of 0.6. (Until #130 the threshold fell
       off over three times as wide a range of the map read over 4 km:
       most of the map was margin, an even sprinkle of shrunken cells
       from the nadir to the horizon, with no field in it.)
