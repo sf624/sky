@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="1c60496 PR #135">
+<meta name="build" content="6f1726b PR #135">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3164,20 +3164,20 @@ const float MID_RAG = 1.2;
 // Rolls: over regions of the map (its B elsewhere, over some 10 km, from MID_RANK.x to y), the field is rolls, not
 // cells: there the cells' height is read from the noise on a second cut (MID_ROLL_X, MID_ROLL_Z: whole numbers over the
 // map's 256 km, as MID_CUT_X), 5.8 times as long one way as the other, so its Worley cells are 0.5 and 1.1 km wide and
-// 3 to 6 km long: long lumps side by side that begin, end, fork and join. A wave across them adds MID_RANK.z to their
-// height (little: at 0.85 the rolls of a region were as even as ripples in sand, a peak of 49 in the spectrum from 40 km;
-// 31 at 0.5, 24 at 0.4 with the rolls steeper) (MID_WAVE, xy and zw: cycles per km, whole numbers in the map's 256 km; of 0.65 km where the small cells lead
-// and of 1.5 km where the large ones do), so they keep an even distance, bent with the place in the noise (the map moves
-// it by up to 2 km over some 4 km) and by the noise itself (MID_BEND: x cycles by the long cut's swell, which changes
-// slowly along a roll, y by the cells' own; z: the wide wave's share). MID_ROLL: the noise less x, over y (less steep
-// than a cell: a roll's sides are thin; and by MID_ROLL_SOFT its heap is soft-edged from above too, where a cell's is crisp), z times the cells' own noise (lumps along a roll), and w: how much of what
-// widens and narrows the cells of a field counts in a roll. Altocumulus undulatus, and the ranks of a mackerel sky.
-// (Tried before: a wave on the threshold as ?midrolls had it, 300 and 420 m straight across the whole map, ruled rows;
-// a wave that the cells only roughened, bent by the map alone, a corduroy of straight stripes; and, in #135's first
-// state, two waves added to round cells' heights: short ranks of dots from above, with no cell joined to the next.)
+// 3 to 6 km long: long lumps side by side that begin, end, fork and join, bent with the place in the noise (the map
+// moves it by up to 2 km over some 4 km). MID_ROLL: the noise less x, over y (less steep than a cell: a roll's sides
+// are thin; and by MID_ROLL_SOFT its heap is soft-edged from above too, where a cell's is crisp), z times the cells'
+// own noise (lumps along a roll), and w: how much of what widens and narrows the cells of a field counts in a roll.
+// Altocumulus undulatus, and the ranks of a mackerel sky.
+// (Tried before, each a wave: on the threshold as ?midrolls had it, 300 and 420 m straight across the whole map, ruled
+// rows; one that the cells only roughened, bent by the map alone, a corduroy of straight stripes; two added to round
+// cells' heights, in #135's first state, short ranks of dots from above with no cell joined to the next; and one
+// across these rolls, of 0.65 and 1.5 km, bent by the noise, which kept them at an even distance: where it counted
+// 0.85, the rolls of a region were as even as ripples in sand, a peak of 49 in the spectrum from 40 km (34 at 0.4);
+// where it counted 0.3 and less, it changed nothing that could be seen or measured (24 with it and without).)
 const vec3 MID_ROLL_X = vec3(25.0, -17.0, -1.0) / 256.0, MID_ROLL_Z = vec3(-42.0, 21.0, 20.0) / 256.0;
-const vec4 MID_WAVE = vec4(-195.0, 342.0, -85.0, 148.0) / 256.0, MID_ROLL = vec4(0.42, 0.25, 0.9, 0.3);
-const vec3 MID_RANK = vec3(0.495, 0.525, 0.4), MID_BEND = vec3(1.5, 0.8, 0.6);
+const vec4 MID_ROLL = vec4(0.42, 0.25, 0.9, 0.3);
+const vec2 MID_RANK = vec2(0.495, 0.525);
 const float MID_ROLL_SOFT = 0.8;
 // How much greyer the pass shades a cell than its optical depth alone would (x, see midClouds), and how much the map's
 // detail (what makes the fields' bodies and margins) deepens or thins the cells' columns for that (y): the body of a
@@ -3245,15 +3245,11 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   // (By degrees: where the one size gave way to the other within a kilometre or two, a line crossed the field.)
   float coarse = smoothstep(0.3, 0.7, wq.g), lead = clamp(coarse + 1.2 * (wm.b - 0.5), 0.0, 1.0);
   float e = mix((n.a - MID_CELL.x) / MID_CELL.y + MID_CELL.z * (n.b - 0.5), (n.b - MID_CELL.x) / MID_CELL.y + 0.5 * MID_CELL.z * (n.a - 0.5), lead);
-  // Rolls (MID_ROLL_X). (seen: a wave finer than two samples of the noise here
-  // is left out, by degrees: far off it was a moire.)
+  // Rolls (MID_ROLL_X).
   float rk = clamp(smoothstep(MID_RANK.x, MID_RANK.y, wq.b) + uMidRolls, 0.0, 1.0);
   if (rk > 0.0) {
     vec4 m = textureLod(uNoise, xs.x * MID_ROLL_X + xs.y * MID_ROLL_Z + cut * MID_CUT_UP + vec3(0.58, 0.17, 0.94), max(lod + 0.58, 0.0));
-    vec2 seen = 1.0 - smoothstep(vec2(0.2), vec2(0.5), TEXEL_KM * exp2(lod) * vec2(length(MID_WAVE.xy), length(MID_WAVE.zw)));
-    float bend = MID_BEND.x * m.r + MID_BEND.y * n.r;
-    vec2 ph = vec2(dot(fract(xs * MID_WAVE.xy), vec2(1.0)) + bend, dot(fract(xs * MID_WAVE.zw), vec2(1.0)) + MID_BEND.z * bend);
-    float er = (mix(m.b, m.g, lead) - MID_ROLL.x) / MID_ROLL.y + MID_ROLL.z * (n.a - 0.5) + MID_RANK.z * dot(vec2(1.0 - coarse, coarse) * seen, sin(2.0 * PI * ph));
+    float er = (mix(m.b, m.g, lead) - MID_ROLL.x) / MID_ROLL.y + MID_ROLL.z * (n.a - 0.5);
     e = mix(e, er, rk);
     wide *= 1.0 - (1.0 - MID_ROLL.w) * rk;
   }

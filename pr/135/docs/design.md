@@ -1928,22 +1928,19 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
       inside a field too: bands and lanes.
-    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`, `MID_WAVE`, `MID_RANK`,
-      `MID_BEND`): over regions of the map the field is rolls, not cells.
-      There the height is read from the noise on a second cut, 5.8 times
-      as long one way as the other: its Worley cells are 0.5 and 1.1 km
-      wide and 3 to 6 km long, long lumps side by side that begin, end,
-      fork and join. A wave across them adds a little to their height, so
-      they tend to an even distance (0.65 km where the small cells lead, 1.5 km where
-      the large ones do; whole numbers of cycles in the map's 256 km); it
-      bends with the place in the noise, which the map moves by up to 2 km
-      over some 4 km, and with the noise itself. A roll is less steep than
-      a cell and soft-edged from above too; the cells' own noise makes
-      lumps along it. A wave finer than two samples of the noise is left
-      out by degrees (far off it was a moire). Altocumulus undulatus.
-      `midrolls` adds to the regions (1: rolls everywhere). (In #135's
-      first state two waves were added to round cells' heights: from above,
-      short ranks of dots, no cell joined to the next.)
+    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`, `MID_RANK`): over regions of the
+      map the field is rolls, not cells. There the height is read from the
+      noise on a second cut, 5.8 times as long one way as the other: its
+      Worley cells are 0.5 and 1.1 km wide and 3 to 6 km long, long lumps
+      side by side that begin, end, fork and join, bent with the place in
+      the noise, which the map moves by up to 2 km over some 4 km. A roll
+      is less steep than a cell and soft-edged from above too; the cells'
+      own noise makes lumps along it. Altocumulus undulatus. `midrolls`
+      adds to the regions (1: rolls everywhere). (In #135's first state
+      two waves were added to round cells' heights: from above, short ranks
+      of dots, no cell joined to the next. A wave across these rolls made
+      them as even as ripples in sand where it counted much, and changed
+      nothing where it counted little.)
     - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
       (not in its fringe), no place is lower than a floor a little over
       the threshold, higher where the cells stand closest, lower among
