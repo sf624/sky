@@ -1928,27 +1928,29 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
       inside a field too: bands and lanes.
-    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`, `MID_RANK`): over regions of the
-      map the field is rolls, not cells. There the height is read from the
-      noise on a second cut, 5.8 times as long one way as the other: its
-      Worley cells are 0.5 and 1.1 km wide and 3 to 6 km long, long lumps
-      side by side that begin, end, fork and join, bent with the place in
-      the noise, which the map moves by up to 2 km over some 4 km. A roll
-      is less steep than a cell and soft-edged from above too; the cells'
-      own noise makes lumps along it. Altocumulus undulatus. `midrolls`
-      adds to the regions (1: rolls everywhere). (In #135's first state
-      two waves were added to round cells' heights: from above, short ranks
-      of dots, no cell joined to the next. A wave across these rolls made
+    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`), by `midrolls` alone (0 at
+      first): the height is read from the noise on a second cut, 5.8
+      times as long one way as the other: its Worley cells are 0.5 and
+      1.1 km wide and 3 to 6 km long, long lumps side by side that begin,
+      end, fork and join. They are not in the page's own picture: they
+      read as smears, not as rolls at an even distance (regions of them
+      stood in the fields in a state of #135; a wave across them made
       them as even as ripples in sand where it counted much, and changed
-      nothing where it counted little.)
+      nothing where it counted little). At 0 the branch costs nothing on
+      Direct3D 11.
     - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
       (not in its fringe), no place is lower than a floor a little over
       the threshold, higher where the cells stand closest, lower among
-      rolls, higher at the top of the slider. The seams between the cells
+      rolls, higher at the top of the slider. With it a field's body is
+      whole, so the fields' edge takes the amount as 0.18 less up to 0.6,
+      and the whole of it from 0.9 (`MID_LESS`): the same amount covers
+      about what it did (0.37 of the view straight down from 40 km at
+      the altocumulus weather's 0.55; 0.34 before the floor, 0.53 with it
+      and without this). The seams between the cells
       and the troughs between the rolls are thin low cloud there, not
       clear air, and the lumps and the fine noise count a third on it. So
       a field's body is a deck with relief: from above, tops with shaded
-      seams, and rolls with dark troughs; from below, grey cells in a pale
+      seams; from below, grey cells in a pale
       sheet that lets the blue through in places; cells apart, with clear
       air between them, stand in the fringes only. (Without it, and with
       half the regions open, a field from 11 km was equal white dots side

@@ -105,7 +105,7 @@ weather of the list sets it, and these win over the weather):
 | `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
 | `midbase` | 5 to 9 | 5.2 | The layer's base, km |
 | `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
-| `midrolls` | 0 to 1 | 0 | Adds to the regions where the field is rolls, not cells (1: rolls everywhere) |
+| `midrolls` | 0 to 1 | 0 | How far the cells of the middle clouds are long lumps, not round ones (1: everywhere). A trial: they read as smears, not as rolls |
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
