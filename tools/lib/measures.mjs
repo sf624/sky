@@ -458,6 +458,17 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
+// columnJump: a straight seam down the region: the mean luma of each column, and the largest step between
+// neighbouring columns, in levels. A seam fixed in the world that a view crosses upright steps at one column; the
+// edges of clouds, which wander, step a little in many.
+export function columnJump(img, { region: box } = {}) {
+  const R = region(img, box), c = new Float32Array(R.w);
+  for (let x = 0; x < R.w; x++) { let s = 0; for (let y = 0; y < R.h; y++) s += R.l[y * R.w + x]; c[x] = s / R.h; }
+  let best = 0;
+  for (let x = 1; x < R.w; x++) best = Math.max(best, Math.abs(c[x] - c[x - 1]));
+  return best;
+}
+
 // The points of light of a region (R, from region()): pixels at least t levels of luma above the mean of their
 // surroundings ((2k+1)^2 px) and the brightest in their 5 x 5 px, each { x, y, over } (over: levels above that mean).
 function lightPoints(R, k, t) {
@@ -515,4 +526,4 @@ export function starShape(img, { region: box, k = 4, t = 30, n = 12, r = 6 } = {
   return median(ratios);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars, starShape };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape };

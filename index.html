@@ -5304,9 +5304,10 @@ float cirrusDepth(vec2 x, float foot) {
 // Light scattered once by a sheet of depth te along the view, lit through a
 // depth ts: the sheet sends te times the mean of exp(-t - ts(t)) along the
 // view, lit on the side the eye is on (sameSide), or through it.
-float ciOnce(float te, float ts, bool sameSide) {
-  return sameSide ? te * (1.0 - exp(-te - ts)) / max(te + ts, 1e-6)
-       : abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
+// (sameSide: 0 to 1, a mix of the two: see highCloud.)
+float ciOnce(float te, float ts, float sameSide) {
+  float same = te * (1.0 - exp(-te - ts)) / max(te + ts, 1e-6), through = abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
+  return sameSide >= 1.0 ? same : sameSide <= 0.0 ? through : mix(through, same, sameSide);
 }
 
 // The phase of ice crystals without their diffraction peak: rough compact
@@ -5601,7 +5602,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // A fibre in a thick body of ice is lit through the body. A low sun
   // does not cross the whole sheet edgewise: it finds its way in between
   // the clouds within some seven times the sheet's thickness.
-  bool sameSide = (dot(d, up) < 0.0) == (mus > 0.0);
+  // (By degrees, over 3 degrees each way of the light's level: switched there, the sheet lit from above met the sheet
+  // lit from below in a straight seam, fixed in the world, while the sun stood at 0 degrees.)
+  float sameSide = smoothstep(-0.05, 0.05, dot(d, up) < 0.0 ? mus : -mus);
   // Near the eye, the march's own sum, and the flat reads behind it.
   float li = 1.0 / max(abs(mus), 0.15);
   // A low sun (from some 30 degrees down) runs along the decks: its light
@@ -6161,10 +6164,15 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
     if (Tm > 0.03) {
       vec3 P = o + p, upv = normalize(P);
       float sunUp = dot(upv, uLight);
+      // (fromUp: how far the light comes from above the level here, 0 to 1, over 3 degrees each way. The column the light
+      // goes through is the share over the place (from above) or under it (from below): switched at the level, the side
+      // of the layer that the light had set just over the horizon met the side that it had just under it in a straight
+      // seam across the layer, pink against lavender, fixed in the world, while the sun stood at 0 degrees.)
+      float fromUp = smoothstep(-0.05, 0.05, sunUp);
       float tf = clamp((heightAt(p) - uMid.z) / uMid.w, 0.0, 1.0);
       // (The steps end where the light's line leaves the layer, at the latest: grown with the distance alone, the last and
       // longest stood outside it from some 10 km on, and the layer was lit there as if thin, from an arc across the sky on.)
-      float reach = (sunUp > 0.0 ? 1.0 - tf : tf) * uMid.w / max(abs(sunUp), 0.1);
+      float reach = mix(tf, 1.0 - tf, fromUp) * uMid.w / max(abs(sunUp), 0.1);
       // (Each step `longer` times the one before, 5 in a sheet, which is smooth, and 3 among cells, by the form; the
       // first so long that three of them reach as far.)
       float longer = mix(5.0, 3.0, uMid.y);
@@ -6180,7 +6188,7 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       vec3 pe = p + uLight * acc;
       float te = clamp((heightAt(pe) - uMid.z) / uMid.w, 0.0, 1.0), slant = max(abs(sunUp), 0.1);
       // (Less among cells: light comes in through the gaps between them.)
-      tauS += mix(1.0, 0.4, uMid.y) * midColumn(o + pe) * (sunUp > 0.0 ? 1.0 - te : te) / slant;
+      tauS += mix(1.0, 0.4, uMid.y) * midColumn(o + pe) * mix(te, 1.0 - te, fromUp) / slant;
       float cv = dot(d, upv);
       // (The column by the lumps: the map of the columns is of the field without them. Only seen from under or over the
       // layer and from some way off: from within and aslant, a lump's column showed as a grey disc.)
@@ -6200,11 +6208,11 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // in its thick middle.
       // (The depth behind a place is the less of its own share of the column and the depth along the light, upright: the
       // lumps shade one another, and along a low sun's line the depth is many cells', not the layer's.)
-      float over = min(tauS * m, col * (sunUp > 0.0 ? 1.0 - tf : tf)), e0 = midThrough(col, m);
+      float over = min(tauS * m, col * mix(tf, 1.0 - tf, fromUp)), e0 = midThrough(col, m);
       // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly.)
       float shade = 1.0 / (1.0 + 3.0 * K * max(tauS * m - over, 0.0));
       float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = shade * e0 * K * (col - over);
-      float c = clamp(0.5 + 0.9 * dot(d, normalize(sign(sunUp) * upv + uLight)), 0.0, 1.0);
+      float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
       // Scattered once; the aureole (the droplets send half of what they
       // scatter on within a degree: that light fades half as fast, and is
       // the small glow round a sun seen through a veil); then the next
