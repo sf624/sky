@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="6a93479 main">
+<meta name="build" content="03b0a75 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2291,10 +2291,16 @@ float hash(vec2 p) {
 }
 
 // After Jimenez (2014), "Next Generation Post Processing in Call of Duty: Advanced Warfare".
-// Interleaved gradient noise: spreads the start of a march evenly over
-// neighbouring pixels.
+// Interleaved gradient noise, from a phase of its own for each pixel (a
+// hash of the pixel): each pixel steps through IGN's values over the frames
+// as before (p shifted by 5.588238 a frame), and the draws of one pixel
+// stay tied to each other (offsets of p). Without the phase, all of a
+// pixel's draws over the frames were a function of one linear phase across
+// the picture, dot(p, k), and so was what their mean missed: the mean over
+// frames kept a regular lattice of dots 2 to 3 pixels apart, on the bases
+// of low clouds seen from below, faint at rest and plain in flight.
 float ign(vec2 p) {
-  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + hash(gl_FragCoord.xy * 0.731 + 3.1)));
 }
 
 // The view from the aircraft: clouds below and a sea under them.
