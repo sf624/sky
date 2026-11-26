@@ -1,5 +1,5 @@
 {
- "about": "Look invariants: one entry per flaw the owner reported, each a view (q, a still: speed=0 is added) with absolute measures and limits (tools/lib/measures.mjs). Fields: reported (the date), wrong (what was wrong, in one line), measures (each: measure, region [x, y, w, h] as fractions of the picture, its options, and min and/or max), bad and fixed (commits where it was bad and where it was fixed: the proof), sweep ({param, values}: one still for each value of that parameter of the page, measured together by the sweep measures), expected ('fail': a known open flaw; it is reported as KNOWN, and passing fails the run so that the mark is removed), reference (values measured on other commits, for reading only). The stills are of size (unless --size; the limits hold at this size). A limit changes only on purpose, in a commit that says why.",
+ "about": "Look invariants: one entry per flaw the owner reported, each a view (q, a still: speed=0 is added, unless q sets the speed: then its frames are flown) with absolute measures and limits (tools/lib/measures.mjs). Fields: reported (the date), wrong (what was wrong, in one line), measures (each: measure, region [x, y, w, h] as fractions of the picture, its options, and min and/or max), bad and fixed (commits where it was bad and where it was fixed: the proof), sweep ({param, values}: one still for each value of that parameter of the page, measured together by the sweep measures), expected ('fail': a known open flaw; it is reported as KNOWN, and passing fails the run so that the mark is removed), reference (values measured on other commits, for reading only). The stills are of size (unless --size; the limits hold at this size). A limit changes only on purpose, in a commit that says why.",
  "size": "1280x720",
  "frames": 46,
  "ms": 50,
@@ -1085,6 +1085,58 @@
    ],
    "bad": "4dfadd8",
    "fixed": "91fd886"
+  },
+  {
+   "name": "stars-through-mid-cloud-moon-4km-flown",
+   "q": "weather=altocumulus&date=80&alt=4&time=20.5&moon=14.75&yaw=24&pitch=50&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "in flight under a moon, stars beside the middle clouds drawn as short dotted streaks, all leaning one way",
+   "measures": [
+    {
+     "measure": "starShape",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "max": 1.8
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h. The median elongation of the 12 brightest points. main 8446078: 4.33 (each frame the mean copied a star a cloud's step further, where a pixel's past was read at the cloud's place and found sky); the fix: 1.43; a still at the place reached: 1.12, a flight without the middle clouds 1.17."
+  },
+  {
+   "name": "stars-through-cirrus-moon-0.3km-flown",
+   "q": "weather=cirrus&date=80&alt=0.3&time=20.5&moon=14.75&yaw=24&pitch=50&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "in flight under a moon, looking up through cirrus: the stars drawn out along the sheet's way, at half their light",
+   "measures": [
+    {
+     "measure": "starShape",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "max": 1.7
+    },
+    {
+     "measure": "stars",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 0.45
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h. main 8446078: starShape 2.19, stars 0.21 (the moonlit sheet moved the pixels, and the stars with them); the fix: 1.28 and 0.62; a still at the place reached: 1.25 and 0.62."
   }
  ]
 }
