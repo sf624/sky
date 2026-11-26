@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="c3c0298 main">
+<meta name="build" content="517494b main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2299,8 +2299,20 @@ float hash(vec2 p) {
 // the picture, dot(p, k), and so was what their mean missed: the mean over
 // frames kept a regular lattice of dots 2 to 3 pixels apart, on the bases
 // of low clouds seen from below, faint at rest and plain in flight.
+float ignAt(vec2 p, float phase) {
+  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + phase));
+}
 float ign(vec2 p) {
-  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + hash(gl_FragCoord.xy * 0.731 + 3.1)));
+  return ignAt(p, hash(gl_FragCoord.xy * 0.731 + 3.1));
+}
+// The same, from a phase of its own, for a draw that must not be tied to
+// ign's at the pixel: the second number of a direction (its angle against
+// the first's radius). (Drawn as ign of the pixel's coordinates swapped,
+// gl_FragCoord.yx, the two phases differed by 0.0613 (x - y), which IGN's
+// 52.98 turned into a quarter of a turn a pixel: the mean kept diagonal
+// stripes 4 pixels apart on the low clouds lit through a middle layer.)
+float ign2(vec2 p) {
+  return ignAt(p, hash(gl_FragCoord.xy * 0.519 + 7.7));
 }
 
 // The view from the aircraft: clouds below and a sea under them.
@@ -3634,7 +3646,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   int i = 0;
   for (int pass = 0; pass < LONG_N(CLOUD_STEPS); pass++) {
     bool need = false;
-    float y, bump, body, edge, lump, fb, lod, f, next, a;
+    float y, bump, body, edge, lump, fb, lod, f, next, a, fbIn = -1.0;
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
@@ -3686,6 +3698,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             tIn = t0;
             wIn = pend;
             tsIn = tsum;
+            fbIn = fb;
 #if Q_GOLD
             // (By the plastic number's step, so that it runs apart from the
             // start's jitter.)
@@ -3793,14 +3806,25 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // interleaved gradient noise, which covers the circle evenly over the
       // frames (white noise left a grain in the settled picture).
       vec3 side = normalize(cross(uLight, abs(uLight.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-      float ang = 2.0 * PI * ign(gl_FragCoord.yx + 5.588238 * uPass + 11.0);
+      float ang = 2.0 * PI * ign2(gl_FragCoord.xy + 5.588238 * uPass + 11.0);
       vec3 off = PENUMBRA * sqrt(hash(gl_FragCoord.xy + 3.71 * uPass + 19.1)) * (cos(ang) * side + sin(ang) * cross(uLight, side));
       vec3 eastL = normalize(cross(upL, abs(upL.x) < 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0)));
       vec3 northL = cross(upL, eastL);
       // The lower part of a cloud, where its base bounds it: what faces
       // down there sees the sea, and under a deck the light that came down
       // through it. (The heaps' 3D body has no base of its own there.)
-      float basal = smoothstep(0.0, 0.1, fb);
+      // Where the ray came into the cloud through its base, the whole of
+      // its first few metres is (fbIn, the field at the entry): the point
+      // lies at a depth drawn anew each frame, and some tens of metres in,
+      // where the base's field no longer bounds the cloud, it took the
+      // light of the cloud's inside, far darker under a deck (a base at
+      // civil twilight 20 levels as shown, against 97 at a depth of 1).
+      // Drawn there in one frame in twenty-five, those dark frames left
+      // the bases seen from below a grain of dark dots in flight. (fbIn is
+      // declared in the pass, as the cloud's entry and its point fall in
+      // one: declared with the march's state, it was held through the whole
+      // march, and the overcast deck took 1.4 ms more on Direct3D 11.)
+      float basal = smoothstep(0.0, 0.1, max(fb, fbIn));
       // The slow parts of the light change little across the picture: the
       // depth towards the light
       // past its first two steps (tauCM, with the long shadows), the depth
@@ -3900,7 +3924,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         sunSide = uSun - dot(uSun, upL) * upL;
         sunSide /= max(length(sunSide), 1e-4);
         u1 = ign(gl_FragCoord.xy + 5.588238 * uPass + 61.0);
-        float u2 = ign(gl_FragCoord.yx + 5.588238 * uPass + 73.0);
+        float u2 = ign2(gl_FragCoord.xy + 5.588238 * uPass + 73.0);
         h = sqrt(u1) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2));
         sky = 0.0;
         skyLean = 0.0;
