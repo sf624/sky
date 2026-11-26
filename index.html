@@ -4758,6 +4758,7 @@ const float CI_METER = 12.0;               // ...and for the meter, towards this
 // clouds) shows through by that share as well, softened; a point (the
 // sun, the moon, a star) is spread into the glow round it instead.
 const float CI_FWD = 0.4;
+const float CI_REFR = 0.02;     // radians: the bend of a ray that grazes the ground, both ways (see cirrusLight)
 // The way a low sun's light runs through the shell to reach the ice (km
 // a unit of 1 / sin of its height), how wide that read is, and the phase of
 // the light that has spread through the sheet (see highCloud).
@@ -4853,6 +4854,11 @@ float ciBody = 0.0;
 float ciVeil = 0.0;
 // And its depth over some 10 km, for the glow next to the sun and the moon.
 float ciWide = 0.0;
+// The share of the glow on the sheet's horizon (the mean light less the
+// light through its faces, ciSky) that reaches the ice: it comes in level,
+// as a low sun does, between the strands, through the depth over the way
+// towards the sun (tauP, ciLowSun), as the low sun's light scattered once.
+float ciGlow = 1.0;
 
 // The ice's tile for deck k at uv on the map: the upper deck (1) along
 // (3, 1) and across (-1, 3), two tiles to a unit of 81 km; the lower (0)
@@ -5421,7 +5427,9 @@ vec2 ciLowSun(vec3 pc) {
   vec3 up = normalize(pc);
   float mus = dot(up, uSun), li = 1.0 / max(abs(mus), 0.15);
   float duskK = uCiLights.x > 0.0 ? smoothstep(2.0, 6.0, li) : 0.0, tauP = 0.0;
-  if (duskK > 0.0) {
+  // (Also with the sun under the sheet's horizon, for the glow there: see
+  // ciGlow.)
+  if (duskK > 0.0 || (uSunI > 0.0 && mus < 0.0)) {
     vec2 sh = uSun.xz - up.xz * mus;
     sh = length(sh) > 1e-6 ? normalize(sh) : vec2(1.0, 0.0);
     float L = CI_PATH * li;
@@ -5583,6 +5591,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
   // the same cirrus lit gold farther off.
   float tPre = tau > 0.0 ? wtt / tau : tSum / max(nSum, 1.0);
   vec2 lowSun = ciLowSun(o + d * mix(tPre, 0.5 * (t0 + tE), wn));
+  ciGlow = exp(-0.6 * lowSun.y / 0.15);
 #if Q_CI_STEPS > 0
   if (tE > t0) {
     float dt = (tE - t0) / float(CI_STEPS), jit = ign(gl_FragCoord.xy + 2.718 * uPass + 5.0);
@@ -5805,14 +5814,28 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
 // of its pass (see highCloud).
 void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H[3], out vec4 HM[3]) {
   vec3 pc = o + d * tHigh, up = normalize(pc);
-  float a = uintBitsToFloat(bits.x);
+  vec2 aG = unpackUnorm2x16(bits.x);
+  float a = aG.x;
   vec4 lkL = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? vec4(unpackHalf2x16(bits.y), unpackHalf2x16(bits.z))
            : uCiLights.x > 0.0 ? vec4(uintBitsToFloat(bits.yz), 0.0, 0.0) : vec4(0.0, 0.0, uintBitsToFloat(bits.yz));
   float wBelow = 0.5 + 0.35 * dot(d, up);
   vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS, F[3] = msS, B[3] = msS;
   float rc = length(pc);
-  if (uSunI > 0.0) ciSky(rc - RG, dot(pc, uSun) / rc, msS);
-  if (uMoonI > 0.0) ciSky(rc - RG, dot(pc, uMoon) / rc, msM);
+  // The sky's light through the sheet's faces (ciSky), and the share
+  // ciGlow (aG.y) of the rest of the mean light, the glow on the sheet's
+  // horizon, that finds its way to the ice between the strands.
+  if (uSunI > 0.0) {
+    vec4 mS[3];
+    ciSky(rc - RG, dot(pc, uSun) / rc, msS);
+    multiScatter(rc - RG, dot(pc, uSun) / rc, mS);
+    for (int k = 0; k < 3; k++) msS[k] += aG.y * (mS[k] - msS[k]);
+  }
+  if (uMoonI > 0.0) {
+    vec4 mM[3];
+    ciSky(rc - RG, dot(pc, uMoon) / rc, msM);
+    multiScatter(rc - RG, dot(pc, uMoon) / rc, mM);
+    for (int k = 0; k < 3; k++) msM[k] += aG.y * (mM[k] - msM[k]);
+  }
   // Each light (uCiLights): the sun's, where it reaches the sheet past the
   // planet, through the air above (reddened low), and the moon's.
   for (int l = 0; l < 2; l++) {
@@ -5820,8 +5843,17 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H
     if (uCiLights[l] <= 0.0) continue;
     vec3 L = l == 0 ? uSun : uMoon;
     vec2 lk = l == 0 ? lkL.xy : lkL.zw;
-    float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
+    // Refraction: a ray that passes low over the planet is bent round it,
+    // by CI_REFR where it grazes the ground (twice the 34' of the horizon
+    // seen from the ground) and less as the air it grazes thins (HR), so
+    // that seen from the sheet in the twilight the light stands higher and
+    // its rays reach the sheet past the planet for a degree longer. From
+    // 1.5 degrees under the sheet's horizon (as ciSky), by degrees.
     float mus = dot(up, L);
+    float graze = rc * sqrt(max(1.0 - mus * mus, 0.0)) - RG;
+    L = normalize(L + CI_REFR * exp(-max(graze, 0.0) / HR) * smoothstep(-0.026, -0.05, mus) * up);
+    mus = dot(up, L);
+    float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
     if (raySphere(pc, L, RG).y >= 0.0) continue;
     vec3 ol = depthToTop(pc, L);
     // Light from below: the low clouds, lit by the same light, add to the
@@ -5892,7 +5924,7 @@ void main() {
   // numbers as halves; with one, as floats.
   uvec2 lb = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? uvec2(packHalf2x16(lkL.xy), packHalf2x16(lkL.zw))
                                                      : floatBitsToUint(uCiLights.x > 0.0 ? lkL.xy : lkL.zw);
-  outCirrus = uvec4(floatBitsToUint(tHigh), floatBitsToUint(lkA), lb);
+  outCirrus = uvec4(floatBitsToUint(tHigh), packUnorm2x16(vec2(lkA, ciGlow)), lb);
   gl_FragDepth = Th;
 }
 #elif defined(SHADOW_MAP)
@@ -8962,7 +8994,8 @@ const SkySound = (() => {
   // to 2 degrees under the horizon: while the sun is up, its light on the
   // cirrus is under a thousandth of the sky's.
   const CI_TOP = 12.8, CI_DIP = Math.acos(RG / (RG + CI_TOP)) / RAD;   // CI_HI in the shader; 3.6 degrees
-  const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD) ? 1 : 0,
+  const CI_REFR = 0.02;   // as in the shader: the most refraction lifts the sun seen from the cirrus, radians
+  const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD + CI_REFR / RAD) ? 1 : 0,
                               state.moonI * smooth01(-state.elev / 2)];
 
   // The white balance (uBalance). By day a camera's for daylight. In
