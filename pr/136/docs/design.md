@@ -2562,7 +2562,7 @@ on the map.
   10 km, from which the glow round the sun and the moon is drawn (the
   ice's, the veil's median and the thin veil's); it
   weighs the kinds by the bands and fields evened out by 0.8 (by the
-  local ones, the moonlit veil, which followed it at night up to PR #NNN, stood in
+  local ones, the moonlit veil, which followed it at night before PR #136, stood in
   lanes). It reads the ice over a footprint of some 10 km along the ray's
   way (`ciIceWide`): the mean of eight reads, four along the footprint
   and two across, each at the level of half their spacing. Read by the
@@ -2669,7 +2669,7 @@ on the map.
   aureole and a clear ring. The sheet's own light (scattered once and many
   times, and its share of the sky's light) keeps the depth at the pixel,
   by night as by day, so that moonlit cirrus shows the streaks and veils
-  of the day, by its own light. Up to PR #NNN that light followed the
+  of the day, by its own light. Before PR #136 that light followed the
   depth over some 10 km by 0.9 too (since round 16, so that the lanes
   between bands would not stand dark across a grey veil): under the moon
   only the halo and faint streaks showed, and from some 4 degrees under
