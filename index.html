@@ -9414,8 +9414,8 @@ const SkySound = (() => {
     // a quarter as wide (40 m a texel), and the hairs drawn in the
     // scene make up for most of it. The name, not a timing, decides, so
     // that one renderer always draws the same.
-    const info = gl.getExtension('WEBGL_debug_renderer_info');
-    const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    const info = gl.getExtension('WEBGL_debug_renderer_info'), renderer = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+    const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer);
     const iceSize = Math.min(Q.ice, software ? ICE_SOFT : ICE, gl.getParameter(gl.MAX_TEXTURE_SIZE));
     // The aircraft's view reads its tables through the GPU's filter: full
     // floats where it can filter them, else half floats (rounded to within 5e-4).
@@ -9438,18 +9438,22 @@ const SkySound = (() => {
       gl.compileShader(s);
       return s;
     };
-    // `defs`: lines put after the #version line of the fragment shader.
-    // `mid`: fs with the middle clouds' lines (see midLines).
-    const link = (id, defs, mid = false) => {
-      const prog = gl.createProgram(), shaders = [];
+    // The vertex shader of every program, and the text of a fragment
+    // shader: `defs`, lines put after the #version line; `mid`, fs with the
+    // middle clouds' lines (see midLines).
+    const VS = '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }';
+    const fragment = (id, defs, mid) => {
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
-      names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : '') + (mid ? ' with middle clouds' : ''));
       if (id === 'fs') fsrc = midLines(fsrc, mid);
       if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
-      for (const [type, src] of [[gl.VERTEX_SHADER, '#version 300 es\nlayout(location = 0) in vec2 p;\nvoid main() { gl_Position = vec4(p, 0.0, 1.0); }'],
-        [gl.FRAGMENT_SHADER, fsrc]]) {
+      return fsrc;
+    };
+    const link = (id, defs, mid = false) => {
+      const prog = gl.createProgram(), shaders = [];
+      names.set(prog, id + (defs ? ' (' + defs.replace('#define ', '') + ')' : '') + (mid ? ' with middle clouds' : ''));
+      for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, fragment(id, defs, mid)]]) {
         shaders.push(compile(type, src));
         gl.attachShader(prog, shaders[shaders.length - 1]);
       }
@@ -9509,6 +9513,106 @@ const SkySound = (() => {
     // shader "enlarge" and shownSize).
     const enlarge = Q.enlarge && !NO_ENLARGE ? [link('enlarge'), link('enlarge', '#define SHARPEN')] : null;
     gl.flush();
+
+    // On ANGLE's Direct3D 11 (Chrome and Edge on Windows) the middle
+    // clouds' scene takes some 11 s to compile, and the first draw of their
+    // air's table into its seven targets compiles it again, while the GPU
+    // process (which draws the whole browser) waits 0.6 s. Both are done
+    // ahead, on a page that does not start with middle clouds, in a WebGL
+    // context of a worker of its own: Chromium's GPU process keeps the
+    // programs it has compiled, and their variants, for every context of
+    // the page, so that when the slider is first raised, this context's
+    // own programs (see midWanted) come from that store in some 0.1 s.
+    // This context makes the same calls as without it, call for call. The
+    // three small programs, and the table's draw, while the page loads
+    // (the GPU process waits for the draw while the long programs still
+    // compile); the scene once the first picture is shown (compiled while
+    // the page loads, it held the first picture back by 3 s). Elsewhere a
+    // program compiles in a second or two (or not into a store that the
+    // contexts share), and nothing is done ahead.
+    // (ahead: the worker, and whether it is done; see midWanted.)
+    let ahead = null;
+    if (!midFirst && !software && parallel && /Direct3D ?11|D3D11/i.test(renderer) && navigator.userAgentData && self.OffscreenCanvas && self.Worker) {
+      const code = `let gl = null, par = null, busy = false;
+        const queue = [];
+        // Draws a program into a pixel of n targets, on a unit that holds nothing (see warm in the page).
+        const draw = (p, n) => {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
+          for (let i = 0; i < n; i++) {
+            gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+            gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, gl.getParameter(gl.TEXTURE_BINDING_2D), 0);
+          }
+          gl.bindTexture(gl.TEXTURE_2D, null);
+          gl.drawBuffers([...Array(n).keys()].map(i => gl.COLOR_ATTACHMENT0 + i));
+          gl.viewport(0, 0, 1, 1);
+          gl.useProgram(p);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        };
+        const next = () => {
+          const job = queue.shift();
+          if (!job) return void (busy = false);
+          busy = true;
+          if (!gl) {
+            gl = new OffscreenCanvas(1, 1).getContext('webgl2');
+            par = gl && gl.getExtension('KHR_parallel_shader_compile');
+            if (!gl || !par) return postMessage('done');
+            gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+          }
+          const made = job.list.map(([fs, n]) => {
+            const p = gl.createProgram();
+            for (const [type, src] of [[gl.VERTEX_SHADER, job.vs], [gl.FRAGMENT_SHADER, fs]]) {
+              const s = gl.createShader(type);
+              gl.shaderSource(s, src);
+              gl.compileShader(s);
+              gl.attachShader(p, s);
+            }
+            gl.linkProgram(p);
+            return [p, n];
+          });
+          gl.flush();
+          const poll = () => {
+            if (gl.isContextLost()) return postMessage('done');
+            if (made.some(([p]) => !gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR))) return setTimeout(poll, 100);
+            for (const [p, n] of made) if (n > 1 && gl.getProgramParameter(p, gl.LINK_STATUS)) draw(p, n);
+            // (Asked, so that the draws are done before the page is told.)
+            gl.getError();
+            if (job.last) {
+              const lose = gl.getExtension('WEBGL_lose_context');
+              if (lose) lose.loseContext();
+              return postMessage('done');
+            }
+            postMessage(job.list.length);
+            next();
+          };
+          poll();
+        };
+        onmessage = e => {
+          queue.push(e.data);
+          if (!busy) next();
+        };`;
+      const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+      ahead = { worker, done: false, at: 0 };
+      const end = () => {
+        if (ahead.done) return;
+        ahead.done = true;
+        worker.terminate();
+        mark('middle clouds compiled ahead');
+      };
+      worker.onmessage = e => (e.data === 'done' ? end() : mark(`${e.data} programs of the middle clouds compiled ahead`));
+      worker.onerror = end;
+      worker.postMessage({ vs: VS, list: [[fragment('fs', '#define MID_PASS', true), 1], [fragment('fs', '#define MID_MAP', true), 1],
+        ...(airProg ? [[fragment('fs', '#define AIR_LUT', true), LUT_MRT]] : [])] });
+      // The scene, once the first picture is shown (see drawFrame).
+      ahead.scene = () => {
+        ahead.at = performance.now();
+        worker.postMessage({ vs: VS, list: [[fragment('fs', '', true), 1]], last: true });
+        ahead.scene = null;
+      };
+    }
 
     // Waits, a frame at a time, until the GPU has done all that it was
     // given (at least a frame: a fence is seen to be passed only in a later task).
@@ -10493,6 +10597,9 @@ const SkySound = (() => {
     // Returns true while they are waited for.
     const midWanted = () => {
       if (!mid) {
+        // (While the worker compiles them, this context waits for it; for a
+        // minute at most.)
+        if (ahead && !ahead.done && (!ahead.at || performance.now() - ahead.at < 60000)) return true;
         mid = midLink();
         gl.flush();
       }
@@ -10934,6 +11041,7 @@ const SkySound = (() => {
         mark('first picture shown');
         shown();
         shown = null;
+        if (ahead && ahead.scene) setTimeout(ahead.scene, 0);
       }
 
       lap('show');

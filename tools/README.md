@@ -30,7 +30,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `look [--only a,b] [--page DIR\|REV] [--size WxH] [--from DIR] [--sheet [--base DIR\|REV]]` | The look invariants: a still of each view of `look.json`, measured against its limits. See [Look invariants](#look-invariants). |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs `look` on the GPU (unless names are given without `look`; on SwiftShader it is skipped, with a line saying so), then the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `d3d [page\|programs] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]` | On WSL only: the start on Windows Chrome's Direct3D 11 (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3d [page\|programs\|switch] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX] [--weather W] [--at S]` | On WSL only: the start on Windows Chrome's Direct3D 11, or the wait for a weather chosen after it (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `d3dperf [--base DIR\|REV] [--rounds N] [--views a,b] [--frames N] [--size WxH] [--speed KMH] [--fail RATIO] [--limit S]` | On WSL only: the frame time on Direct3D 11 of six views, the page against the base (default `origin/main`) in turns, a verdict for each and one line for the pull request (see [Frame time on Direct3D 11](#frame-time-on-direct3d-11-d3dperf)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
@@ -236,6 +236,16 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   time) after the first picture, at the canvas's size (the page's own
   drawing size at this window's device pixel ratio of 1; no `res=1`), written to `PREFIX-<page>-<run>.png`. In flight, that is a
   picture of S s flown on Direct3D 11.
+- `d3d switch`: the page as for `page`; `--at` s (default 5) after the
+  first picture it chooses the weather `--weather` (default
+  `altocumulus`) in the panel, and prints how long after the choice the
+  console says `middle clouds built` (a weather without middle clouds
+  waits 8 s), the longest gap between animation frames from the choice to
+  1 s after that, and every gap over 100 ms. With `--runs` over 1, a last
+  line per page gives the median and range of the first picture, the wait
+  and the longest gap. The control is a weather without middle clouds
+  (`--weather fair`, whose haze is the page's own: another haze rebuilds
+  a table, some 0.3 s).
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
   with their defines), alone: the time to compile and link it, and of its
   first draw into one target and into all its outputs (ANGLE compiles a

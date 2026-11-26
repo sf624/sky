@@ -25,8 +25,8 @@ const USAGE = `usage: node tools/sky.mjs <command> [options]
   drive       SCRIPT.json      a scripted capture (steps, eval, shot, size, mouse; see README)
   perf        [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]
               real time: time to the first draw, frame rate, GPU time per draw
-  d3d         [page|programs] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX]
-              on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, or the page's ?timing)
+  d3d         [page|programs|switch] [--base DIR|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX] [--weather W] [--at S]
+              on WSL: the start on Windows Chrome's Direct3D 11 (each program's compile, the page's ?timing, or the wait for a weather chosen)
   d3dperf     [--base DIR|REV] [--rounds N] [--views a,b] [--frames N] [--size WxH] [--speed KMH] [--fail RATIO] [--limit S]
               on WSL: the frame time on Direct3D 11 against the base (default origin/main), in turns; one line to paste
 common:       --page DIR (the page to test; default: this repository)
@@ -136,10 +136,10 @@ async function main() {
     const pages = [{ name: 'page', dir: page }];
     if (opt.base) pages.unshift({ name: `base ${opt.base}`, dir: resolveBase(opt.base, REPO) });
     const mode = opt._[0] || 'page';
-    if (!['page', 'programs'].includes(mode)) throw new Error(`d3d: no mode ${mode} (page, programs)`);
+    if (!['page', 'programs', 'switch'].includes(mode)) throw new Error(`d3d: no mode ${mode} (page, programs, switch)`);
     if (opt.shot && (mode !== 'page' || !opt.out)) throw new Error('d3d: --shot needs the mode page and --out PREFIX');
     await d3d(pages, { mode, q: opt.q || '', runs: +(opt.runs || 1), limit: +(opt.limit || 300), frames: +(opt.frames || 60),
-      size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null });
+      size: parseSize(opt.size || '1920x1080'), shot: +(opt.shot || 0), out: opt.out || null, weather: opt.weather || 'altocumulus', at: +(opt.at || 5) });
     return 0;
   }
   if (cmd === 'd3dperf') {
