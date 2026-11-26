@@ -49,7 +49,11 @@ today: there is no stratus (`low.smooth`) in it, and no `low.*` field.
   without its past (`reset` in the frame, a move of more than 1 km).
   Middle clouds raised from 0 are built as when their slider is raised
   (`midWanted`, see [Middle clouds](#middle-clouds)): the frames go on
-  without the layer until its programs are ready.
+  without the layer until its programs are ready (on Direct3D 11 they are
+  compiled ahead, from the first picture on).
+  A weather with another haze also rebuilds `msData` (see the frame loop
+  in [From the address bar to the first frame](#from-the-address-bar-to-the-first-frame)):
+  one frame after the choice takes some 0.3 s longer.
 - The die draws a weather from a seed: one of the table by weight, then
   each value between its low and its high, and any whole-km place on the
   map. The seed's numbers are xorshift32 started from the seed through
@@ -1828,6 +1832,24 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     at once, then asked a frame at a time whether they are done
     (`KHR_parallel_shader_compile`), while the frames go on without the
     layer; a picture that has settled stays, and the frames go on undrawn.
+  - On ANGLE's Direct3D 11 in Chromium (Chrome and Edge on Windows), the
+    same programs are compiled ahead in a WebGL context of a worker of the
+    page's own (`ahead`): there the scene takes some 11 s, and the first
+    draw of the air's table into its seven targets compiles it again while
+    the GPU process waits 0.6 s. The GPU process keeps the programs it has
+    compiled, and such variants, for every context of the page, so the
+    page's own link when the slider is first raised takes some 0.1 s, and
+    its first draw of the table no time. The worker links `MID_PASS`,
+    `MID_MAP` and `AIR_LUT` while the page loads, and draws the table's
+    program into a pixel of seven targets (the GPU process waits for it
+    while the long programs of the page still compile); the scene once the
+    first picture is shown (with the others it held the first picture back
+    by 3 s). Then the worker loses its context and ends. A slider raised
+    before it is done waits for it (`midWanted`; at most a minute), then
+    links. The page's own context makes the same calls as without the
+    worker, call for call. Elsewhere (Linux, macOS, Firefox, software
+    renderers) nothing is done ahead: the programs compile in a second or
+    two, or into no store that the contexts share.
     Then `midSetup` sets their uniforms, makes the light's map anew with a
     fifth layer, and the next frame draws the layer (a change of `look`).
     Without the extension the first frame after waits for the compilers,
@@ -1847,7 +1869,7 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     likewise. On a level slice the same tile of cells stood everywhere
     (the map only slid it), and the lumps repeated every 1.27 km: from 20
     to 40 km up the field was a lattice, and ranks ran to the horizon from
-    any height. (Until #PRNUM the cut was read at the sample's height too:
+    any height. (Until #135 the cut was read at the sample's height too:
     cells cut from noise in three dimensions, torn every way, an even
     popcorn of crumbs from above and white lumps from below.)
     - *A cell* (`MID_CELL`) is the part of a Worley cell over the field's
@@ -1904,7 +1926,8 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     crisp heap of lumps (the heaps' heads, in upright columns); under it a
     soft slab whose density falls off outwards, in fibres where it is
     thin. The slab is 0.6 as dense between the lumps (at a quarter, the
-    lumps were what showed from below, not the cells);
+    lumps were what showed from below, not the cells), and its outline
+    goes in and out with the lumps and the fine noise (`MID_RAG`);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
     with fine noise on its thin places, and thick and thin places in it: its
@@ -1944,8 +1967,13 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   cell's column for this is its own, from its map at the very place
   (`midCol`), not the light's map's, which is too coarse for cells some
   kilometres off (with it, a field from below was white lumps with grey
-  blots that kept to no cell), and counted `MID_SHADE` = 2 times: a
-  cell's sides let light out, and its middle is the greyer for it. So a
+  blots that kept to no cell), and counted `MID_SHADE` = 6 times: a
+  cell's sides let light out, and its middle is the greyer for it. It is
+  deeper in a field's body than at its margins (by the map's detail), and
+  the steps towards the light span the cell the place is in (planned to
+  the layer's top, the last step stood over a cell of 150 m, the depth
+  towards the light came out a third too small, and a cell from below was
+  white to its middle). So a
   cell from below is grey in its thick middle and white at its thin rim,
   and from above its thin parts are dimmer than its thick ones. The
   sky's light likewise, from above and from what lies below, in the unit
