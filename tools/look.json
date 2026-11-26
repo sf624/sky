@@ -1414,11 +1414,24 @@
       1,
       0.8
      ],
-     "min": 0.025
+     "min": 0.007,
+     "max": 0.035
+    },
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0,
+      1,
+      0.8
+     ],
+     "p": 90,
+     "of": "rg",
+     "max": 0.9
     }
    ],
    "bad": "6a93479",
-   "note": "0.003 on main 6a93479 and a7fbb75 (one smooth veil), 0.047 once the sheet's own light keeps the depth at the pixel by night."
+   "note": "0.003 on main 6a93479 and a7fbb75 (one smooth veil), 0.047 once the sheet's own light keeps the depth at the pixel by night. Lowered to 0.007, with a ceiling and a colour, when the cirrus in the Earth's shadow took the sky's light through its faces (ciSky): ca77500 drew lavender streaks (texture 0.047, r/g of the brightest 1.05), too contrasty and purple where photographs show faint blue-grey streaks; 0.011 and 0.82 after."
   },
   {
    "name": "cirrus-streaks-moon-0.3km",
@@ -1709,6 +1722,35 @@
    "bad": null,
    "fixed": null,
    "note": "The sheet under the horizon: patchStops less the best plane 0.130 on main 517494b, 0.447 with thick and thin places about twice main's depth (0.6 to 1.0, and the 5th percentile of the luma under 150, about main's own depth, where the thin places let the sea through); p5 of the luma 207 on main, 184 now."
+  },
+  {
+   "name": "cirrus-shadow-glow-clear-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.5704&yaw=94.9&pitch=12&expo=9.4&cirrus=0",
+   "reported": "2026-11-26",
+   "wrong": "the clear sky of cirrus-shadow-glow-0.3km at the same exposure: what its cirrus is measured against",
+   "measures": []
+  },
+  {
+   "name": "cirrus-shadow-glow-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.5704&yaw=94.9&pitch=12&expo=9.4",
+   "reported": "2026-11-26",
+   "wrong": "cirrus in the Earth's shadow, seen towards the twilight glow with the sun 7 degrees down, paler and lavender against the brighter sky behind it, where photographs show dark grey streaks: the cirrus was lit by the mean light at its height, most of which is the glow on its own horizon",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.05,
+      1,
+      0.3
+     ],
+     "p": 50,
+     "against": "cirrus-shadow-glow-clear-0.3km",
+     "max": 1.0
+    }
+   ],
+   "bad": "ca77500",
+   "note": "The upper sky over the glow, cirrus against the same view without it: 1.135 on ca77500 (92 % of the pixels lighter), 0.961 once the cirrus in the Earth's shadow takes the sky's light through its faces (ciSky)."
   }
  ]
 }

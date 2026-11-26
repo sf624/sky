@@ -501,6 +501,13 @@ the overlays; it takes no pointer, so a drag on it turns the eye.
   go with the share. In between, both lights are faint beside the light of
   the twilight's sky. Before, the light turned from the sun to the moon at
   once at -3 degrees, and with it the shadows on the sea.
+- The cirrus has two lights of its own, with no hand-over (`ciLightsFor`,
+  `uCiLights`; see [Cirrus](#cirrus)): the sun, while its rays can reach any
+  cirrus in view past the planet (the sun higher than `2 CI_DIP` plus the
+  dip of the eye's horizon under it: some 7.8 degrees from 0.3 km, 11 from
+  13 km), and the moon, faded in as the sun goes from 0 to 2 degrees down
+  (while the sun is up the moon's light on the cirrus is under a thousandth
+  of the sky's).
 - The eye's night vision (`nightEyeFor`, `uNightEye`) follows the eye's
   adaptation, not the hour: it comes in from 0 to 1 as the exposure (log2)
   goes from 5.5 to 9 (`NIGHT_EYE`, a smoothstep). In a view away from the
@@ -713,9 +720,21 @@ positive keeps the views away from the light as they were (the first
 moment taken there too left the sky away from the sun 0.65 of the
 reference's).
 
-One value per wavelength. The texture is `NMU` by `12 * NH`: the three
+A fifth holds the sky's light on the cirrus (`ciSky`): the mean light
+while the sun is over the sheet's horizon; as it goes from 1.5 to 4.5
+degrees under it (`CI_SKY`, at the cirrus's own place), the light that
+enters the sheet through its two faces, `4 up - 2 lean up` (the light
+from above and from below on a level surface over 2 pi: the mean light
+where the sky is even). In twilight most of the mean light at 12 km
+comes from the glow on the sheet's own horizon, which reaches the sheet
+edgewise, through tens of km of its ice, and is spent on the way. Lit by
+the mean light, cirrus in the Earth's shadow stood paler than the glow
+behind it and lavender overhead (the glow's red with the sky's blue),
+where photographs show it darker than the glow and blue-grey overhead.
+
+One value per wavelength. The texture is `NMU` by `15 * NH`: the three
 groups of four wavelengths of the air stacked in y, then those of the
-clouds, then the lean towards the sun's side and up. It depends on the haze, so `frame` rebuilds it when the haze
+clouds, then the lean towards the sun's side and up, then the cirrus's. It depends on the haze, so `frame` rebuilds it when the haze
 changes, and the renderer uploads it again. `fs` reads it through the
 GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
 
@@ -2682,12 +2701,36 @@ on the map.
   sheet was as bright away from the sun as near it, a milky veil. A lobe
   of its own keeps dense ice next to the moon from standing dark against
   the thin ice round it.) At dusk it goes evenly (below). And the sheet
-  sends skylight, from the multiple-scattering table (less the share `CI_FWD`,
-  below), and light from the low clouds below, at the mean distance of
-  the decks seen.
+  sends skylight, from its own table (`ciSky`, less the share `CI_FWD`,
+  below: by day the mean light, in the Earth's shadow the light through
+  its faces; see [The air](#the-air)), and light from the low clouds
+  below, at the mean distance of the decks seen. Measured with the sun 6
+  and 9 degrees down from 0.3 km, against the same views without cirrus
+  at the same exposure: looking towards the glow, 21 to 84 % of the
+  pixels were lighter than the sky behind them with the mean light (up to
+  1.6 times it), 1 % at most with the light through the faces; with no
+  light of its own at all, 78 to 99 % were darker. Looking up, the
+  streaks went from lavender, up to 2.3 times the sky, to blue-grey, up to
+  1.2 times it.
+- **Two lights** (`uCiLights`): the sheet is lit by the sun
+  and by the moon at once, each with its own single and multiple
+  scattering, its own march sums near the eye (the vectors `onceN`,
+  `onceDN`, `tsS`) and its own two numbers in the pass (`lkL`): the sun
+  wherever its rays reach the sheet past the planet (`raySphere`, and
+  reddened through `depthToTop`), the moon with its ring and aureole as
+  by night (`nightK`). As the sun sets, the Earth's shadow sweeps across
+  the sheet: cirrus overhead goes grey from some 3 to 3.5 degrees down,
+  while cirrus far towards the sun stays lit, dimmer and redder on its
+  long way past the planet, low over the glow from 0.3 km and 11 km, and
+  as a red band towards the horizon seen from 40 km with the sun some 4
+  degrees down. (Up to this change the cirrus shared the low clouds' one
+  light, `uLight`, which hands over from the sun to the moon between 3
+  and 4.5 degrees down: the pink cirrus faded over the whole sky at once.)
+  The pass keeps each light's two numbers as floats, or as halves when
+  both lights are on.
 - **A low sun** (`duskK`, a `smoothstep` of `li`, 1 over the sine of the
   sun's height where it is capped at 0.15, from 2 to 6: the sun from some
-  30 degrees down; and by day only) runs along the decks: its light
+  30 degrees down; while the sun lights the cirrus) runs along the decks: its light
   reaches the ice through the ice on its way in, not through the column
   above it alone. The depth it meets, for the light scattered once and the
   light scattered many times, is read over the way towards the sun
@@ -2705,9 +2748,9 @@ on the map.
   on, where the flat reads put the ice): each step's column blends to it
   by `duskK`, so that the cirrus near the eye at dusk is lit as the same
   cirrus farther on.
-- **At night** (`nightK`, up to 0.9 as the light goes over from the sun to
-  the moon: no switch, `0.9 (1 - smoothstep(0.02, 0.3, uLightI))`; the
-  halo blends between its day and night strengths by the same) the ring
+- **By the moon** (`nightK` = 0.9 for the moon's light, 0 for the sun's;
+  the halo takes its night strength for the moon's light and its day
+  strength for the sun's) the ring
   fades by the depth over some 10 km by that much, the aureole follows the
   ice in front of the moon by less (0.1 for 0.4), and a broader aureole
   (some 7 degrees) is added: photographs of a lunar halo show a bright
@@ -2721,7 +2764,9 @@ on the map.
   the horizon on, where the light is the moon's (`uLightI` near 0) and the
   cirrus is lit by the twilight's sky, the cirrus was one flat veil with
   no streaks (the texture of the luma, `texture` in `look`, 0.003 looking
-  up at the sun's -9 degrees, against 0.057 now).
+  up at the sun's -9 degrees, against 0.047 after PR #136: lavender
+  streaks lit by the mean light; 0.011 since the cirrus in the Earth's
+  shadow takes the light through its faces: faint blue-grey streaks).
 - **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
   extinction is diffraction by its crystals: light turned by less than a
   degree, which goes on as if not scattered. The march through the air

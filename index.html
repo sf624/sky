@@ -1715,10 +1715,11 @@ uniform vec4 uWS[3];    // spectrum -> what the rods see (WS in the JS)
 // The air's tables, one texture of AIR_TABLES texels (Direct3D 11 gives a
 // program 16 textures, and the scene's reads 16 with the air's table at
 // high and max). From y = 0, multiple scattering per unit of scattering
-// coefficient: NMU x (12 * NH) texels, the three wavelength groups stacked
+// coefficient: NMU x (15 * NH) texels, the three wavelength groups stacked
 // in y; then the same for the light of the sky on the low clouds
 // (cloudSky); then the light's mean direction, towards the sun's side and
-// up (msLean). From y = 12 * NH, the depths of depthToTop.
+// up (msLean); then the sky's light on the cirrus (ciSky). From y = 15 *
+// NH, the depths of depthToTop.
 uniform sampler2D uMS;
 uniform vec4 uWL[3];    // wavelength / 550 nm
 uniform vec4 uMA[3];    // the aerosol by wavelength, relative to 550 nm (ANGSTROM in the JS)
@@ -1732,6 +1733,9 @@ uniform float uWind;    // wind over the sea, m/s
 uniform vec3 uLight;    // what lights the clouds and the sea: the sun, or the moon at night
 uniform float uLightI;
 uniform float uLightShare;   // how far that light has come in, 0 to 1, as the sun hands over to the moon (see celestial)
+// The cirrus's own two lights (uCiLights): x, 1 while the sun can reach
+// cirrus in view (else 0); y, the moon's light on it (0 while the sun is up).
+uniform vec2 uCiLights;
 // The view from the aircraft is a mean over frames: each frame shifts the
 // rays within the pixel (uJitter, in pixels) and the samples through the
 // clouds (uPass, the number of the frame).
@@ -1935,7 +1939,7 @@ vec3 density(float h) { return densities(h).xyz; }
 // most at that height, and the distance to the horizon. They keep the
 // table smooth near the horizon.
 const int DEPTH_MU = 512, DEPTH_R = 128;
-const vec2 AIR_TABLES = vec2(DEPTH_MU, 12 * NH + DEPTH_R);
+const vec2 AIR_TABLES = vec2(DEPTH_MU, 15 * NH + DEPTH_R);
 const float H_TOP = 1132.2544;  // distance from the ground to the top, along the horizon: sqrt(RT^2 - RG^2)
 
 // Optical depth (per species) from p to the top of the atmosphere.
@@ -1945,7 +1949,7 @@ vec3 depthToTop(vec3 p, vec3 d) {
   float lo = RT - r, hi = rho + H_TOP;
   vec2 x = vec2(clamp((raySphere(p, d, RT).y - lo) / (hi - lo), 0.0, 1.0), clamp(rho / H_TOP, 0.0, 1.0));
   const vec2 N = vec2(DEPTH_MU, DEPTH_R);
-  return textureLod(uMS, (x * (N - 1.0) + vec2(0.5, 0.5 + float(12 * NH))) / AIR_TABLES, 0.0).rgb;
+  return textureLod(uMS, (x * (N - 1.0) + vec2(0.5, 0.5 + float(15 * NH))) / AIR_TABLES, 0.0).rgb;
 }
 
 // Bilinear lookup of the multiple-scattering table: the groups from `first`.
@@ -1966,6 +1970,9 @@ void cloudSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 3, ms); }
 // Where that light comes from: its mean over the sphere times the
 // direction it comes from, towards the sun's side (lh) and up (lv).
 void msLean(float h, float mus, out vec4 lh[3], out vec4 lv[3]) { msTable(h, mus, 6, lh); msTable(h, mus, 9, lv); }
+// The sky's light on the cirrus: what enters the sheet through its faces
+// once the sun is under its horizon (see buildMultiScatter).
+void ciSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 12, ms); }
 
 // hash13 of "Hash without Sine" by David Hoskins (MIT): see THIRD_PARTY_NOTICES.md.
 float hash3(vec3 p) {
@@ -5405,16 +5412,17 @@ float ciGeo(float mu) {
 }
 
 // How much a low sun runs along the decks at pc (x, from some 30 degrees
-// down: a smoothstep of 1 / sin of its height, by day only), and the depth
+// down: a smoothstep of 1 / sin of its height, while the sun lights the
+// cirrus: uCiLights), and the depth
 // its light meets on its way in there (y, tauP: both decks, read over
 // CI_PATH km a unit of that towards the sun, CI_PATHW across; see
 // highCloud).
 vec2 ciLowSun(vec3 pc) {
   vec3 up = normalize(pc);
-  float mus = dot(up, uLight), li = 1.0 / max(abs(mus), 0.15);
-  float duskK = smoothstep(2.0, 6.0, li) * smoothstep(0.02, 0.3, uLightI), tauP = 0.0;
+  float mus = dot(up, uSun), li = 1.0 / max(abs(mus), 0.15);
+  float duskK = uCiLights.x > 0.0 ? smoothstep(2.0, 6.0, li) : 0.0, tauP = 0.0;
   if (duskK > 0.0) {
-    vec2 sh = uLight.xz - up.xz * mus;
+    vec2 sh = uSun.xz - up.xz * mus;
     sh = length(sh) > 1e-6 ? normalize(sh) : vec2(1.0, 0.0);
     float L = CI_PATH * li;
     vec2 f1 = sh * (0.5 * L), f2 = vec2(-sh.y, sh.x) * CI_PATHW, xs = pc.xz + uDrift + sh * (0.5 * L);
@@ -5425,11 +5433,12 @@ vec2 ciLowSun(vec3 pc) {
 
 // The cirrus along the ray (drawn by its own pass, CIRRUS_PASS): what it
 // lets through (Th), the distance its light comes from (tHigh; negative:
-// none), and three numbers of that light (lk, see cirrusLight).
-void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out vec3 lk) {
+// none), and the numbers of that light (lkA, lkL; see cirrusLight).
+void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out float lkA, out vec4 lkL) {
   Th = 1.0;
   tHigh = -1.0;
-  lk = vec3(0.0);
+  lkA = 0.0;
+  lkL = vec4(0.0);
   // Where the ray is inside the shell: t0 to t1. From its base, a ray down
   // leaves it at once (lo.x is 0).
   vec2 lo = eyeSphere(o, d, CI_LO), hi = eyeSphere(o, d, CI_HI);
@@ -5564,7 +5573,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // The steps' bounds move from frame to frame by a fraction of a step
   // (the first and the last step are parts of one): on a fixed grid, the
   // edge of a band seen along a grazing ray stood in stairs, a step each.
-  float tauN = 0.0, onceN = 0.0, onceDN = 0.0, wttN = 0.0;
+  // (Two lights, x the sun and y the moon: see uCiLights.)
+  float tauN = 0.0, wttN = 0.0;
+  vec2 onceN = vec2(0.0), onceDN = vec2(0.0);
   // A low sun's light reaches the ice near the eye through the depth on its
   // way in as well (tauP, read once, at the middle of the march; farther
   // on, where the flat reads put the ice): through the columns above the
@@ -5605,7 +5616,8 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       float tmid = 0.5 * (ta + tb), dts = tb - ta;
       vec3 pm = o + d * tmid, up = normalize(pm);
       float ha = length(o + d * ta) - RG, hb = length(o + d * tb) - RG, hmid = length(pm) - RG;
-      float cv = dot(d, up), mus = dot(up, uLight);
+      float cv = dot(d, up);
+      vec2 mus = vec2(dot(up, uSun), dot(up, uMoon));
       vec2 dh = d.xz - up.xz * cv;
       float lh = length(dh);
       vec2 dn = lh > 1e-6 ? dh / lh : vec2(1.0, 0.0);
@@ -5616,14 +5628,15 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
       // half of it, low sunlit ice near the eye was brighter than the same
       // ice farther off, a patch with the outline of the ice; and a sharp
       // switch at the sun's height 0 drew a seam.
-      float fromAbove = smoothstep(-0.1, 0.1, mus), steep = smoothstep(0.1, 0.35, abs(mus));
-      float tauS = 0.0, tsS = 0.0;
+      vec2 fromAbove = smoothstep(-0.1, 0.1, mus), steep = smoothstep(0.1, 0.35, abs(mus));
+      float tauS = 0.0;
+      vec2 tsS = vec2(0.0);
       for (int k = 0; k < CI_N(CI_LAYERS); k++) {
         float lo = CI_DECK[k].x, hi = CI_DECK[k].y;
         if (min(ha, hb) >= hi || max(ha, hb) <= lo) {
           // The deck lies wholly above or below the step: its column shades
           // the step if the light comes from that side.
-          tsS += mix(bodyK[k], max(colK[k], bodyK[k]), CI_SHADE) * mix(1.0, hmid < lo ? fromAbove : 1.0 - fromAbove, steep);
+          tsS += mix(bodyK[k], max(colK[k], bodyK[k]), CI_SHADE) * mix(vec2(1.0), hmid < lo ? fromAbove : 1.0 - fromAbove, steep);
           continue;
         }
         vec2 x = pm.xz + uDrift;
@@ -5644,11 +5657,12 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
         float per = dz > 1e-4 * sg ? abs(qb - qa) / dz : 0.39894 * exp(-0.5 * z * z) / sg;
         tauS += col * per / nrm * dts;
         float qm = ciPhi(z);
-        tsS += mix(bodyK[k], max(col, bodyK[k]), CI_SHADE) * mix(1.0, mix(qm - pl, ph - qm, fromAbove) / nrm, steep);
+        tsS += mix(bodyK[k], max(col, bodyK[k]), CI_SHADE) * mix(vec2(1.0), mix(vec2(qm - pl), vec2(ph - qm), fromAbove) / nrm, steep);
       }
       if (tauS <= 0.0) continue;
-      float li = 1.0 / max(abs(mus), 0.15), tr = exp(-tauN - 0.5 * tauS) * tauS;
-      tsS = mix(tsS, lowSun.y, lowSun.x);
+      vec2 li = 1.0 / max(abs(mus), 0.15);
+      float tr = exp(-tauN - 0.5 * tauS) * tauS;
+      tsS.x = mix(tsS.x, lowSun.y, lowSun.x);
       onceN += tr * exp(-0.6 * tsS * li);
       onceDN += tr * exp(-0.15 * tsS * li);
       wttN += tauS * tmid;
@@ -5673,140 +5687,159 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // glow round the sun stays small), CI_FWD of the light, and the rest by
   // refraction and reflection (ciGeo); and the halo at 22 degrees from the
   // sun, red inside, which a min-deviation prism of ice draws.
-  float mu = dot(d, uLight);
-  float ph = (1.0 - CI_FWD) * ciGeo(mu), peak = CI_FWD * hg(mu, 0.99);
-  float mus = dot(up, uLight);
-  // Sunlight dims on its way into the sheet (less the forward peak, which
-  // goes on as if not scattered): its depth ts there, against te along
-  // the view. Scattered once, the sheet sends to the eye te times the mean
-  // of exp(-t - ts(t)) along the view: lit on the side the eye is on, or
-  // through it. A low sun lights it from below.
-  // A fibre in a thick body of ice is lit through the body. A low sun
-  // does not cross the whole sheet edgewise: it finds its way in between
-  // the clouds within some seven times the sheet's thickness.
-  // (By degrees, over 3 degrees each way of the light's level: switched there, the sheet lit from above met the sheet
-  // lit from below in a straight seam, fixed in the world, while the sun stood at 0 degrees.)
-  float sameSide = smoothstep(-0.05, 0.05, dot(d, up) < 0.0 ? mus : -mus);
-  // Near the eye, the march's own sum, and the flat reads behind it.
-  float li = 1.0 / max(abs(mus), 0.15);
-  // A low sun (from some 30 degrees down) runs along the decks: its light
-  // reaches the ice through the ice on its way in, CI_PATH km a unit of
-  // li towards the sun, not through the column above it alone. So the
-  // light it meets, and the share of it scattered more than once, which
-  // spreads through the sheet, follow the depth over that way (tauP, read
-  // over it, CI_PATHW across), smooth over km: at dusk a whole band glows,
-  // its thin parts with its dense ones. Read through the local column, only
-  // the dense cores were lit by the light scattered many times (it grew as
-  // the cube of the depth), and dusk stood as a field of bright dashes and
-  // hooked heads. The light so scattered goes about evenly (CI_DIFF, the
-  // isotropic phase).
-  // (Read before the march, ciLowSun.)
-  float duskK = lowSun.x, tauP = lowSun.y;
-  float tsV = mix(mix(bodyT, max(tauV, bodyT), CI_SHADE), tauP, duskK);
-  float once = mix(ciOnce(tauF, 0.6 * tsV * li, sameSide),
-                   onceN + exp(-tauN) * ciOnce(tauR, 0.6 * tsV * li, sameSide), wn);
-  // The narrow peak, a few degrees round the sun or the moon, is a round
-  // glow (an aureole): it follows the sheet's depth over some 10 km, and
-  // the ice just in front of the light only by 0.4 (0.1 at night: by
-  // more, a band through the moon stood as a bright streak). Drawn from the
-  // ice in front (round 8), a plume round the moon lit up as a bright
-  // patch of its own shape; from the depth over 2.5 km (round 7), as a
-  // smooth bright lens.
-  float onceW = ciOnce(wideT, 0.6 * wideT / max(abs(mus), 0.15), sameSide);
-  // Along a long path most light is scattered more than once, which
-  // spreads the peak and the halo out; a thicker sheet sends more back.
-  // Scattered twice or more, the light still goes mostly forward, as by a
-  // lobe of mean cosine 0.5 that widens as the sheet thickens round about
-  // (phM, by the body: by the depth at the pixel, each dense strand next to
-  // the sun stood as a dark stroke on the bright veil): next
-  // to the moon or the sun dense ice glows, and does not stand dark against
-  // thinner ice. CI_MANY sets its amount so that the sheet sends out the
-  // sunlight it takes. (Up to round 19 most of it went evenly, as much back
-  // as forward: a thick sheet was as bright away from the sun as near it,
-  // a milky veil without depth.) At dusk, where the low sun's light has
-  // spread along the sheet, it goes about evenly (CI_DIFF, below).
-  // (At night the halo and the aureole follow the sheet over some 10 km:
-  // nightK, below.)
-  float dayK = smoothstep(0.02, 0.3, uLightI), nightK = 0.9 * (1.0 - dayK);
-  float many = mix(1.0 - exp(-0.3 * tau), 1.0 - exp(-0.3 * tauP * li), duskK);
-  float phM = mix(CI_MANY * hg(mu, 0.5 / (1.0 + 0.25 * bodyT)), CI_DIFF + 0.3 * hg(mu, 0.5), duskK);
-  // The light scattered many times has mostly gone forward at each step: on
-  // its way in it fades with a quarter of the depth that the light
-  // scattered once feels (1 - g of ice). With the depth of the single
-  // scattering, thick ice towards a low sun went darker than the sky behind
-  // it.
-  float onceD = mix(ciOnce(tauF, 0.15 * tsV * li, sameSide),
-                    onceDN + exp(-tauN) * ciOnce(tauR, 0.15 * tsV * li, sameSide), wn);
-  // The halo needs smooth hexagonal crystals, which thin cirrus has: it
-  // shows faintly in thin fibrous cirrus (as in photographs of halos in
-  // cirrus fibratus), more in the thin, even veil (ciThin: veilT is its
-  // depth along the ray), the more as that veil grows at the top of the
-  // slider (ciHaloGrow: the strands there are thick and the space between
-  // them clear, and without it the ring at 1 lost 6 % of its contrast),
-  // and fades where the ice is thick enough to scatter the light again. By
-  // day it is faint (0.03) and only in a veil: photographs of much cirrus towards
-  // the sun mostly show none, and 0.05 to 0.17 drew a clear coloured ring
-  // in any veil. At night (the moon's light) it is as before.
-  // (The light scattered more than once loses it: F takes the halo by
-  // 1 - many, as the rest of the light scattered once. Taken by it twice,
-  // as before, the ring did not show through a veil at night, where the
-  // photographs show it.)
-  // At night (nightK) the ring is 0.17 in thin cirrus, up to 0.25 in a
-  // veil, and fades by the depth over some 10 km as much as by the depth
-  // here, and a broader aureole (some 7 degrees) is added: photographs of a
-  // lunar halo show a bright aureole and a clear ring. The sheet's own light
-  // keeps the depth here, by night as by day: photographs of moonlit cirrus
-  // show its streaks and veils, as by day. (Before PR #136 that light, too,
-  // followed the depth over some 10 km by 0.9, so that the lanes between
-  // bands would not stand dark across a grey veil: the moonlit cirrus, and
-  // from 4 degrees under the horizon on the cirrus of the twilight's sky,
-  // stood as one smooth veil with no streaks.)
-  // (By how much the light is the sun's: uLightI is the sun's share of its
-  // light, 0 to 1, and some 1e-6 for the moon; no switch, so that the look
-  // goes over smoothly in the twilight as the light hands over.)
-  float haloW = mix(0.17 + 0.08 * smoothstep(CI_HALOT.x, CI_HALOT.y, veilT) + 0.08 * ciHaloGrow(uCirrus), 0.03 * smoothstep(CI_HALOT.z, CI_HALOT.w, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
-  // The light scattered forward, by wavelength, is uLightI times the
-  // sunlight that reaches the sheet times lk.y + lk.z times the halo's
-  // shape there (cirrusLight); lk.x is the share of the light from round
-  // about (a).
-  // Where the halo shows, a share haloW of the crystals is smooth, and
-  // smooth prisms send no light between their diffraction peak and the
-  // ring: the light scattered once is less there. (With the rough ice's
-  // lobe there in full, the inside of the moon's ring filled up, and from
-  // 11 km the ring lost half its contrast; with twice haloW, it stood out
-  // three times as much as in a photograph of a lunar halo.)
-  float u = (1.0 - many) * once;
-  ph *= 1.0 - haloW * smoothstep(0.92, 0.94, mu) * (1.0 - smoothstep(0.985, 0.995, mu));
-  lk = vec3(a, ph * u + phM * many * onceD + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
+  // The light, by each of the two lights (uCiLights): the sun, by day
+  // and wherever it still reaches the sheet in the twilight, and the moon;
+  // the moon's ring and aureole as by night (nightK), the sun's as by day.
+  // The light scattered forward, by wavelength, is that light where it
+  // reaches the sheet times lkL.x + lkL.y times the halo's shape there for
+  // the sun, lkL.z + lkL.w for the moon (cirrusLight); lkA is the share of
+  // the light from round about (a).
+  lkA = a;
+  for (int l = 0; l < 2; l++) {
+    if (uCiLights[l] <= 0.0) continue;
+    vec3 L = l == 0 ? uSun : uMoon;
+    float dayK = l == 0 ? 1.0 : 0.0, nightK = 0.9 * (1.0 - dayK);
+    float mu = dot(d, L);
+    float ph = (1.0 - CI_FWD) * ciGeo(mu), peak = CI_FWD * hg(mu, 0.99);
+    float mus = dot(up, L);
+    // Sunlight dims on its way into the sheet (less the forward peak, which
+    // goes on as if not scattered): its depth ts there, against te along
+    // the view. Scattered once, the sheet sends to the eye te times the mean
+    // of exp(-t - ts(t)) along the view: lit on the side the eye is on, or
+    // through it. A low sun lights it from below.
+    // A fibre in a thick body of ice is lit through the body. A low sun
+    // does not cross the whole sheet edgewise: it finds its way in between
+    // the clouds within some seven times the sheet's thickness.
+    // (By degrees, over 3 degrees each way of the light's level: switched there, the sheet lit from above met the sheet
+    // lit from below in a straight seam, fixed in the world, while the sun stood at 0 degrees.)
+    float sameSide = smoothstep(-0.05, 0.05, dot(d, up) < 0.0 ? mus : -mus);
+    // Near the eye, the march's own sum, and the flat reads behind it.
+    float li = 1.0 / max(abs(mus), 0.15);
+    // A low sun (from some 30 degrees down) runs along the decks: its light
+    // reaches the ice through the ice on its way in, CI_PATH km a unit of
+    // li towards the sun, not through the column above it alone. So the
+    // light it meets, and the share of it scattered more than once, which
+    // spreads through the sheet, follow the depth over that way (tauP, read
+    // over it, CI_PATHW across), smooth over km: at dusk a whole band glows,
+    // its thin parts with its dense ones. Read through the local column, only
+    // the dense cores were lit by the light scattered many times (it grew as
+    // the cube of the depth), and dusk stood as a field of bright dashes and
+    // hooked heads. The light so scattered goes about evenly (CI_DIFF, the
+    // isotropic phase).
+    // (Read before the march, ciLowSun.)
+    float duskK = l == 0 ? lowSun.x : 0.0, tauP = l == 0 ? lowSun.y : 0.0;
+    float tsV = mix(mix(bodyT, max(tauV, bodyT), CI_SHADE), tauP, duskK);
+    float once = mix(ciOnce(tauF, 0.6 * tsV * li, sameSide),
+                     onceN[l] + exp(-tauN) * ciOnce(tauR, 0.6 * tsV * li, sameSide), wn);
+    // The narrow peak, a few degrees round the sun or the moon, is a round
+    // glow (an aureole): it follows the sheet's depth over some 10 km, and
+    // the ice just in front of the light only by 0.4 (0.1 at night: by
+    // more, a band through the moon stood as a bright streak). Drawn from the
+    // ice in front (round 8), a plume round the moon lit up as a bright
+    // patch of its own shape; from the depth over 2.5 km (round 7), as a
+    // smooth bright lens.
+    float onceW = ciOnce(wideT, 0.6 * wideT / max(abs(mus), 0.15), sameSide);
+    // Along a long path most light is scattered more than once, which
+    // spreads the peak and the halo out; a thicker sheet sends more back.
+    // Scattered twice or more, the light still goes mostly forward, as by a
+    // lobe of mean cosine 0.5 that widens as the sheet thickens round about
+    // (phM, by the body: by the depth at the pixel, each dense strand next to
+    // the sun stood as a dark stroke on the bright veil): next
+    // to the moon or the sun dense ice glows, and does not stand dark against
+    // thinner ice. CI_MANY sets its amount so that the sheet sends out the
+    // sunlight it takes. (Up to round 19 most of it went evenly, as much back
+    // as forward: a thick sheet was as bright away from the sun as near it,
+    // a milky veil without depth.) At dusk, where the low sun's light has
+    // spread along the sheet, it goes about evenly (CI_DIFF, below).
+    // (At night the halo and the aureole follow the sheet over some 10 km:
+    // nightK, below.)
+    float many = mix(1.0 - exp(-0.3 * tau), 1.0 - exp(-0.3 * tauP * li), duskK);
+    float phM = mix(CI_MANY * hg(mu, 0.5 / (1.0 + 0.25 * bodyT)), CI_DIFF + 0.3 * hg(mu, 0.5), duskK);
+    // The light scattered many times has mostly gone forward at each step: on
+    // its way in it fades with a quarter of the depth that the light
+    // scattered once feels (1 - g of ice). With the depth of the single
+    // scattering, thick ice towards a low sun went darker than the sky behind
+    // it.
+    float onceD = mix(ciOnce(tauF, 0.15 * tsV * li, sameSide),
+                      onceDN[l] + exp(-tauN) * ciOnce(tauR, 0.15 * tsV * li, sameSide), wn);
+    // The halo needs smooth hexagonal crystals, which thin cirrus has: it
+    // shows faintly in thin fibrous cirrus (as in photographs of halos in
+    // cirrus fibratus), more in the thin, even veil (ciThin: veilT is its
+    // depth along the ray), the more as that veil grows at the top of the
+    // slider (ciHaloGrow: the strands there are thick and the space between
+    // them clear, and without it the ring at 1 lost 6 % of its contrast),
+    // and fades where the ice is thick enough to scatter the light again. By
+    // day it is faint (0.03) and only in a veil: photographs of much cirrus towards
+    // the sun mostly show none, and 0.05 to 0.17 drew a clear coloured ring
+    // in any veil. At night (the moon's light) it is as before.
+    // (The light scattered more than once loses it: F takes the halo by
+    // 1 - many, as the rest of the light scattered once. Taken by it twice,
+    // as before, the ring did not show through a veil at night, where the
+    // photographs show it.)
+    // At night (nightK) the ring is 0.17 in thin cirrus, up to 0.25 in a
+    // veil, and fades by the depth over some 10 km as much as by the depth
+    // here, and a broader aureole (some 7 degrees) is added: photographs of a
+    // lunar halo show a bright aureole and a clear ring. The sheet's own light
+    // keeps the depth here, by night as by day: photographs of moonlit cirrus
+    // show its streaks and veils, as by day. (Before PR #136 that light, too,
+    // followed the depth over some 10 km by 0.9, so that the lanes between
+    // bands would not stand dark across a grey veil: the moonlit cirrus, and
+    // from 4 degrees under the horizon on the cirrus of the twilight's sky,
+    // stood as one smooth veil with no streaks.)
+    float haloW = mix(0.17 + 0.08 * smoothstep(CI_HALOT.x, CI_HALOT.y, veilT) + 0.08 * ciHaloGrow(uCirrus), 0.03 * smoothstep(CI_HALOT.z, CI_HALOT.w, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
+    // Where the halo shows, a share haloW of the crystals is smooth, and
+    // smooth prisms send no light between their diffraction peak and the
+    // ring: the light scattered once is less there. (With the rough ice's
+    // lobe there in full, the inside of the moon's ring filled up, and from
+    // 11 km the ring lost half its contrast; with twice haloW, it stood out
+    // three times as much as in a photograph of a lunar halo.)
+    float u = (1.0 - many) * once;
+    ph *= 1.0 - haloW * smoothstep(0.92, 0.94, mu) * (1.0 - smoothstep(0.985, 0.995, mu));
+    vec2 r = vec2(ph * u + phM * many * onceD + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
+    if (l == 0) lkL.xy = r;
+    else lkL.zw = r;
+  }
 }
 
 // The light of the cirrus (H) at tHigh along the ray, from the numbers lk
 // of its pass (see highCloud).
-void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, vec3 lk, out vec4 H[3], out vec4 HM[3]) {
+void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H[3], out vec4 HM[3]) {
   vec3 pc = o + d * tHigh, up = normalize(pc);
-  float mu = dot(d, uLight), th = acos(clamp(mu, -1.0, 1.0));
-  float mus = dot(up, uLight);
-  bool lit = uLightI > 0.0 && raySphere(pc, uLight, RG).y < 0.0;
-  vec3 ol = lit ? depthToTop(pc, uLight) : vec3(0.0);
-  // Light from below: the low clouds, lit by the same sun, add to the sea
-  // that the mean sky already holds. Forward scattering sends more of it
-  // to an eye below the sheet.
-  float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
+  float a = uintBitsToFloat(bits.x);
+  vec4 lkL = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? vec4(unpackHalf2x16(bits.y), unpackHalf2x16(bits.z))
+           : uCiLights.x > 0.0 ? vec4(uintBitsToFloat(bits.yz), 0.0, 0.0) : vec4(0.0, 0.0, uintBitsToFloat(bits.yz));
   float wBelow = 0.5 + 0.35 * dot(d, up);
-  vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS;
+  vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS, F[3] = msS, B[3] = msS;
   float rc = length(pc);
-  if (uSunI > 0.0) multiScatter(rc - RG, dot(pc, uSun) / rc, msS);
-  if (uMoonI > 0.0) multiScatter(rc - RG, dot(pc, uMoon) / rc, msM);
-  vec4 F[3];
-  for (int k = 0; k < 3; k++) {
-    vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
-    vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
-    vec4 halo = mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
-    vec4 sun = lit ? exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z)) : vec4(0.0);
-    H[k] = lk.x * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k] + uNight * pow(uWL[k], vec4(-3.0)))
-                + uLightI * sun * wBelow * below);
-    F[k] = uLightI * sun * (lk.y + lk.z * halo);
+  if (uSunI > 0.0) ciSky(rc - RG, dot(pc, uSun) / rc, msS);
+  if (uMoonI > 0.0) ciSky(rc - RG, dot(pc, uMoon) / rc, msM);
+  // Each light (uCiLights): the sun's, where it reaches the sheet past the
+  // planet, through the air above (reddened low), and the moon's.
+  for (int l = 0; l < 2; l++) {
+    float I = l == 0 ? 1.0 : uCiLights.y;
+    if (uCiLights[l] <= 0.0) continue;
+    vec3 L = l == 0 ? uSun : uMoon;
+    vec2 lk = l == 0 ? lkL.xy : lkL.zw;
+    float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
+    float mus = dot(up, L);
+    if (raySphere(pc, L, RG).y >= 0.0) continue;
+    vec3 ol = depthToTop(pc, L);
+    // Light from below: the low clouds, lit by the same light, add to the
+    // sea that the mean sky already holds. Forward scattering sends more of
+    // it to an eye below the sheet.
+    float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
+    for (int k = 0; k < 3; k++) {
+      vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
+      vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
+      vec4 halo = mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
+      vec4 sun = exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
+      B[k] += I * sun * wBelow * below;
+      F[k] += I * sun * (lk.x + lk.y * halo);
+    }
   }
+  // The sky's light (ciSky), the night's glow, and the light from below.
+  for (int k = 0; k < 3; k++)
+    H[k] = a * ((1.0 - CI_FWD) * (uSunI * msS[k] + uMoonI * msM[k] + uNight * pow(uWL[k], vec4(-3.0))) + B[k]);
   // Towards the sun the sheet sends far more light than the sky round it
   // (thirty to fifty times, ten degrees off), more than the screen can
   // show: on the screen its thick and thin parts would be one white glow.
@@ -5852,10 +5885,14 @@ void main() {
   float tmax = raySphere(o, d, RT).y;
   vec2 tg = raySphere(o, d, RG);
   if (tg.x > 0.0 && tg.x < 1e8) tmax = tg.x;
-  float Th, tHigh;
-  vec3 lk;
-  highCloud(o, d, tmax, Th, tHigh, lk);
-  outCirrus = floatBitsToUint(vec4(tHigh, lk));
+  float Th, tHigh, lkA;
+  vec4 lkL;
+  highCloud(o, d, tmax, Th, tHigh, lkA, lkL);
+  // With both lights on (the moon in the twilight), each light's two
+  // numbers as halves; with one, as floats.
+  uvec2 lb = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? uvec2(packHalf2x16(lkL.xy), packHalf2x16(lkL.zw))
+                                                     : floatBitsToUint(uCiLights.x > 0.0 ? lkL.xy : lkL.zw);
+  outCirrus = uvec4(floatBitsToUint(tHigh), floatBitsToUint(lkA), lb);
   gl_FragDepth = Th;
 }
 #elif defined(SHADOW_MAP)
@@ -6452,7 +6489,7 @@ void main() {
     uvec4 ci = texelFetch(uPasses, here, 0);
     Th = texelFetch(uPassDepth, here, 0).r;
     tHigh = uintBitsToFloat(ci.x);
-    if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, uintBitsToFloat(ci.yzw), H, HM);
+    if (tHigh >= 0.0) cirrusLight(o, d, extM, tHigh, ci.yzw, H, HM);
   }
 //[ middle clouds
   // The middle clouds: a third layer, tMid, M, Tm (see MID_PASS).
@@ -8535,7 +8572,11 @@ const SkySound = (() => {
   // clouds came out mauve and brown under a blue sky. By day, where the two
   // colours stand in a fixed ratio, it is the mean light itself.
   const NMU = 40, NH = 12, MS_MU_MIN = -0.35;
-  const msData = new Float32Array(NMU * NH * 12 * 4);  // RGBA texels, NMU x (12 * NH): the air, the clouds, the lean
+  // The sun's cosine at the cirrus where its sky's light starts to go over
+  // from the mean light to the light through its faces, and where it has
+  // (1.5 and 4.5 degrees under its horizon; see ciSky).
+  const CI_SKY = [-0.026, -0.078];
+  const msData = new Float32Array(NMU * NH * 15 * 4);  // RGBA texels, NMU x (15 * NH): the air, the clouds, the lean, the cirrus
   // The light of the sky from above on a level surface (all orders, over 4
   // pi, as the table's), by height, sun angle and wavelength: for the white
   // balance in twilight (balanceFor).
@@ -8545,6 +8586,8 @@ const SkySound = (() => {
   // The mean light's lean (msLean in the shader): the light times the
   // direction it comes from, towards the sun's side (side 0) and up (side 1).
   const leanIndex = (side, j, i, w) => msIndex(j, i, w) + (6 + 3 * side) * NH * NMU * 4;
+  // The sky's light on the cirrus (ciSky in the shader).
+  const ciSkyIndex = (j, i, w) => msIndex(j, i, w) + 12 * NH * NMU * 4;
   function* buildMultiScatter(haze) {
     const bMw = MA.map(m => BETA_M * haze * m), bMew = bMw.map(b => b * MIE_EXT);
     // NT bands of the sphere's height, narrower near the horizon (x |x|):
@@ -8676,12 +8719,24 @@ const SkySound = (() => {
     // at a high sun, which kept that day's share of warm light into the
     // twilight: a deck under the blue sky after sunset came out grey-brown,
     // where photographs show it blue-grey.
+    // The cirrus's table (ciSky): by day the mean light; as the sun goes
+    // under the sheet's horizon (CI_SKY, the cosine of its height there),
+    // the light that enters the sheet through its two faces, as bright as
+    // the same light from all round would be: the light from above and from
+    // below on a level surface (upAll, and upAll less the lean up), over
+    // 2 pi. In twilight most of the mean light at the cirrus's height comes
+    // from the glow on its own horizon, which reaches a sheet edgewise, over
+    // tens of km of its ice, and is spent on the way. Lit by the mean light,
+    // the cirrus in the Earth's shadow stood pale against the glow behind it
+    // and lavender overhead (the glow's red with the sky's blue), where
+    // photographs show it dark against the glow and blue-grey overhead.
     const lum = (a, k) => { let y = 0; for (let w = 0; w < NW; w++) y += WY[w] * a[k + w]; return y; };
     const c = new Float64Array(NW);
     for (let j = 0; j < NH; j++) {
       for (let i = 0; i < NMU; i++) {
         const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), k = (j * NMU + i) * NW;
         const cw = Math.min(1, Math.max(0, (0.1 - mus) / 0.15));
+        const ci = Math.min(1, Math.max(0, (CI_SKY[0] - mus) / (CI_SKY[0] - CI_SKY[1])));
         for (let w = 0; w < NW; w++) c[w] = upAll[k + w];
         const y = lum(c, 0), scale = y > 0 ? lum(all, k) / y : 0;
         for (let w = 0; w < NW; w++) {
@@ -8689,6 +8744,7 @@ const SkySound = (() => {
           msData[cloudIndex(j, i, w)] = all[k + w] + cw * (c[w] * scale - all[k + w]);
           msData[leanIndex(0, j, i, w)] = leanH[k + w];
           msData[leanIndex(1, j, i, w)] = leanV[k + w];
+          msData[ciSkyIndex(j, i, w)] = all[k + w] + ci * (4 * upAll[k + w] - 2 * leanV[k + w] - all[k + w]);
         }
       }
     }
@@ -8898,6 +8954,16 @@ const SkySound = (() => {
   // sun goes from DUSK[0] to DUSK[1] degrees (a smoothstep): the exposure
   // (exposureFor) and the white balance.
   const smooth01 = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+  // The cirrus's own two lights (uCiLights), with
+  // no hand-over: the sun, while it can reach any cirrus in view (its rays
+  // reach the shell's top past the planet within CI_DIP of its height
+  // under the horizon there; the eye sees the shell over CI_DIP plus the
+  // dip of its own horizon), and the moon, faded in as the sun goes from 0
+  // to 2 degrees under the horizon: while the sun is up, its light on the
+  // cirrus is under a thousandth of the sky's.
+  const CI_TOP = 12.8, CI_DIP = Math.acos(RG / (RG + CI_TOP)) / RAD;   // CI_HI in the shader; 3.6 degrees
+  const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD) ? 1 : 0,
+                              state.moonI * smooth01(-state.elev / 2)];
 
   // The white balance (uBalance). By day a camera's for daylight. In
   // twilight, as an automatic white balance does and as the eye adapts, it
@@ -10116,8 +10182,8 @@ const SkySound = (() => {
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
       gl.texParameteri(gl.TEXTURE_2D, k, v);
     }
-    gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, 12 * NH + NR, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 12 * NH, NM, NR, gl.RGBA, gl.FLOAT, depths);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, 15 * NH + NR, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 15 * NH, NM, NR, gl.RGBA, gl.FLOAT, depths);
     C('uniform1i', 'uMS', 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
@@ -10159,7 +10225,7 @@ const SkySound = (() => {
     // passTarget), then the frame into shot (see render).
     const draw = (v, cam, w, h, each, stage, vw = w, vh = h) => {
       if (tableHaze !== builtHaze) {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NMU, 12 * NH, gl.RGBA, gl.FLOAT, msData);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NMU, 15 * NH, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, vw, vh);
@@ -10193,6 +10259,7 @@ const SkySound = (() => {
         ['uniform3fv', 'uLight', state.light],
         ['uniform1f', 'uLightI', state.lightI],
         ['uniform1f', 'uLightShare', state.lightShare],
+        ['uniform2fv', 'uCiLights', ciLightsFor(v.alt)],
         ['uniform1f', 'uStage', stage],
         ...each,
       ];
