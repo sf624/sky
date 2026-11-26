@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="3712e00 PR #135">
+<meta name="build" content="1c60496 PR #135">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2299,8 +2299,20 @@ float hash(vec2 p) {
 // the picture, dot(p, k), and so was what their mean missed: the mean over
 // frames kept a regular lattice of dots 2 to 3 pixels apart, on the bases
 // of low clouds seen from below, faint at rest and plain in flight.
+float ignAt(vec2 p, float phase) {
+  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + phase));
+}
 float ign(vec2 p) {
-  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + hash(gl_FragCoord.xy * 0.731 + 3.1)));
+  return ignAt(p, hash(gl_FragCoord.xy * 0.731 + 3.1));
+}
+// The same, from a phase of its own, for a draw that must not be tied to
+// ign's at the pixel: the second number of a direction (its angle against
+// the first's radius). (Drawn as ign of the pixel's coordinates swapped,
+// gl_FragCoord.yx, the two phases differed by 0.0613 (x - y), which IGN's
+// 52.98 turned into a quarter of a turn a pixel: the mean kept diagonal
+// stripes 4 pixels apart on the low clouds lit through a middle layer.)
+float ign2(vec2 p) {
+  return ignAt(p, hash(gl_FragCoord.xy * 0.519 + 7.7));
 }
 
 // The view from the aircraft: clouds below and a sea under them.
@@ -3064,9 +3076,21 @@ uniform float uMidRolls;
 // read where things were when it was drawn.
 uniform vec2 uMidShift;
 const float MID_KM = 6.4;            // the tile of the sheet's noise and of the fine noise (a whole share of the weather map)
-const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's, the cells'
+const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's (times its thick and thin places, MID_THICK), the cells'
 const float MID_FULL = 0.5;          // the density (0 to 1) that is as dense as that
 const float MID_DETAIL = 5.0;        // its fine noise: tiles per tile
+// A sheet's thick and thin places (see midSheet): its extinction is MID_SIGMA.x times a factor that varies from place
+// to place, MID_THICK_MEAN on the mean and between MID_THICK_MIN and MID_THICK_MAX: an optical depth straight up of
+// some 7 to 35, as an altostratus has (the sun's disc shows through the thinnest places only). The factor is 2 to the
+// power of MID_THICK_GAIN times a sum of the noise's scales about their means, each with its weight (MID_THICK: x
+// patches of some 4 to 8 km, y of 1.6 to 3 km, z of 0.8 to 1 km, w streaks along the wind).
+// Thick on the mean so that the thin places still hide the sea from above: about a mean of 1 (a depth of 2 to 10 in
+// the thin places) the sheet from above was torn, dark grey where the sea showed through.
+const vec4 MID_THICK = vec4(1.6, 1.4, 1.2, 0.25);
+const float MID_THICK_GAIN = 1.5, MID_THICK_MEAN = 2.0, MID_THICK_MIN = 0.7, MID_THICK_MAX = 4.0;
+// The least cosine of the sun's light to a sheet, for the light that falls on it (see midClouds): its top is level,
+// but for its swells. (Cells stand up, and a low sun lights their sides: 0.35.)
+const float MID_SHEET_SUN = 0.2;
 // The cells' map: a cut through the noise, the same at every height. Not a
 // level slice of its tile but an oblique one (two vectors at right angles, of
 // 256 / 58.8 and 256 / 60.2 km to the tile: its Worley cells are of 1.1 km,
@@ -3101,14 +3125,25 @@ float midMottle = 0.5;
 //    and the map read over 4 km, most of the map was the edge: an even sprinkle of shrunken cells everywhere, the same
 //    from the horizon to the nadir, with no field, lane or gap in it.)
 //  - MID_PACK: how closely the cells of a field stand, from region to region (the map's G over some 20 km, times x):
-//    from y less than the amount's own to z more; open cells with wide gaps, and cells packed with seams between them.
+//    from y more than the amount's own to z more: cells with seams between them, wider or narrower. (From 0.3 less,
+//    as until #135's second state, half the regions were open cells with gaps as wide as themselves: from above, white
+//    dots on the sea, side by side.)
 //  - MID_SEAM: over x, what widens the cells counts w times: the seams between packed cells stay, and their domes keep
 //    unlike heights. (Without it packed cells ran together into flat plates with jigsaw outlines.)
 //  - MID_STREET: where the field stands in streets (the map's R elsewhere, over some 10 km, from x to y), the map is
 //    read over z texels (1.1 km, not 4 km: its streets of 5 km and their finer ones show), and its detail widens or
 //    narrows the cells within a field by w: bands, ranks and lanes inside the fields, not only at their edges.
 const vec4 MID_EDGE = vec4(0.6, 1.3, 4.0, 5.0), MID_STREET = vec4(0.45, 0.55, 2.2, 6.0);
-const vec3 MID_PACK = vec3(4.0, 0.3, 0.8);
+const vec3 MID_PACK = vec3(4.0, 0.3, 1.0);
+//  - MID_FLOOR: the floor of a field's body. Where the field is whole (the threshold from z to w, so not in its fringe)
+//    no place is lower than a height of x (where the cells stand widest) to y (closest) over the threshold: the seams
+//    between the cells and the troughs between the rolls are thin low cloud, not clear air, and the field is a deck with
+//    relief: from above, tops with shaded seams, where it was dots on the sea; from below, grey cells in a pale sheet
+//    that lets the blue through only in places. MID_FLOOR_MORE: x, how much of the lumps and the fine noise counts on
+//    a floor (whole, they cut it into crumbs); y, how much lower the floor is among rolls (dark troughs between
+//    them from above); z, how much higher at the top of the slider.
+const vec4 MID_FLOOR = vec4(0.6, 0.9, -0.2, 0.5);
+const vec3 MID_FLOOR_MORE = vec3(0.35, 0.25, 0.3);
 const vec2 MID_SEAM = vec2(0.35, 0.3);
 //  - MID_FRINGE: a field's fringe. Further than x under the field's threshold the cells shrink y times as slowly with
 //    the map: a margin some kilometres wide of cells ever smaller, lower, thinner and further apart, not a coastline
@@ -3123,23 +3158,38 @@ const vec4 MID_SHUT = vec4(0.7, 0.25, 1.0, 0.5);
 // (so that the tallest do not all end at the layer's top, a ruled line). So steep, the lowest sixth of the noise is
 // under the threshold of the closest field: packed cells keep clear seams between them, the net of blue gaps of a
 // perlucidus. (At 0.22 and 0.3, as until #135, a field was cells apart or one plate, with nothing between.)
+// (In a field's body the seams are not clear air but thin low cloud: MID_FLOOR.)
 const vec4 MID_CELL = vec4(0.39, 0.2, 0.8, 0.6);
 const float MID_RAG = 1.2;
-// Ranks: over regions of the map (its B elsewhere, over some 10 km, from MID_RANK.x to y), the cells stand in ranks:
-// a wave across the layer adds to their height by z, so that on its crests they are large and run together, lumpy
-// rolls, and in its troughs they are small and few. Two waves, MID_WAVE (xy, zw: cycles per km along x and z, whole
-// numbers in the map's 256 km), of 0.5 km where the small cells lead and of 0.9 km where the large ones do, 74
-// degrees apart, each bent by the map (MID_BEND.xy cycles, over some 4 km: ranks that curve, crowd and spread, branch
-// and end) and by the noise (zw cycles, over a kilometre or two: no rank is straight, and none keeps step with the next for
-// long; at 1 and 0.8 cycles the ranks were a weave as even as a cloth's from 40 km, a peak of 80 in the spectrum). Altocumulus undulatus, and the
-// ranks of a mackerel sky. (A wave on the threshold as ?midrolls had it, 300 and 420 m straight across the whole map,
-// gave ruled rows; and a wave that the cells only roughened, bent by the map alone, a corduroy of straight stripes.)
-const vec4 MID_WAVE = vec4(410.0, 307.0, -100.0, 266.0) / 256.0, MID_BEND = vec4(5.0, 3.0, 1.8, 1.4);
-const vec3 MID_RANK = vec3(0.46, 0.56, 1.0);
+// Rolls: over regions of the map (its B elsewhere, over some 10 km, from MID_RANK.x to y), the field is rolls, not
+// cells: there the cells' height is read from the noise on a second cut (MID_ROLL_X, MID_ROLL_Z: whole numbers over the
+// map's 256 km, as MID_CUT_X), 5.8 times as long one way as the other, so its Worley cells are 0.5 and 1.1 km wide and
+// 3 to 6 km long: long lumps side by side that begin, end, fork and join. A wave across them adds MID_RANK.z to their
+// height (little: at 0.85 the rolls of a region were as even as ripples in sand, a peak of 49 in the spectrum from 40 km;
+// 31 at 0.5, 24 at 0.4 with the rolls steeper) (MID_WAVE, xy and zw: cycles per km, whole numbers in the map's 256 km; of 0.65 km where the small cells lead
+// and of 1.5 km where the large ones do), so they keep an even distance, bent with the place in the noise (the map moves
+// it by up to 2 km over some 4 km) and by the noise itself (MID_BEND: x cycles by the long cut's swell, which changes
+// slowly along a roll, y by the cells' own; z: the wide wave's share). MID_ROLL: the noise less x, over y (less steep
+// than a cell: a roll's sides are thin; and by MID_ROLL_SOFT its heap is soft-edged from above too, where a cell's is crisp), z times the cells' own noise (lumps along a roll), and w: how much of what
+// widens and narrows the cells of a field counts in a roll. Altocumulus undulatus, and the ranks of a mackerel sky.
+// (Tried before: a wave on the threshold as ?midrolls had it, 300 and 420 m straight across the whole map, ruled rows;
+// a wave that the cells only roughened, bent by the map alone, a corduroy of straight stripes; and, in #135's first
+// state, two waves added to round cells' heights: short ranks of dots from above, with no cell joined to the next.)
+const vec3 MID_ROLL_X = vec3(25.0, -17.0, -1.0) / 256.0, MID_ROLL_Z = vec3(-42.0, 21.0, 20.0) / 256.0;
+const vec4 MID_WAVE = vec4(-195.0, 342.0, -85.0, 148.0) / 256.0, MID_ROLL = vec4(0.42, 0.25, 0.9, 0.3);
+const vec3 MID_RANK = vec3(0.495, 0.525, 0.4), MID_BEND = vec3(1.5, 0.8, 0.6);
+const float MID_ROLL_SOFT = 0.8;
 // How much greyer the pass shades a cell than its optical depth alone would (x, see midClouds), and how much the map's
 // detail (what makes the fields' bodies and margins) deepens or thins the cells' columns for that (y): the body of a
 // field is grey from below over kilometres, its margins white.
-const vec2 MID_SHADE = vec2(6.0, 3.0);
+// z: among cells the steps towards the light reach this far up, in km, at the least (see midClouds).
+const vec3 MID_SHADE = vec3(6.0, 3.0, 0.08);
+// The cells' relief (see midClouds): the sky's light and the light that comes back are x in the seams and troughs, and
+// whole from y km over a cell's floor; what lies towards the light beyond the place's own column shades z times as
+// much as its depth alone (once in a sheet), the wide octaves too, by w; and MID_SHADOW of the light is left in the
+// deepest shade (the deck's own light, scattered many times: white, where the sky's alone made the shade blue).
+const vec4 MID_RELIEF = vec4(0.25, 0.12, 20.0, 0.9);
+const float MID_SHADOW = 0.4;
 // The cells' density at p (from the eye), 0 to 1: h its height, t its share
 // of the layer's depth, x its place on the map, xw that in the weather map,
 // wm, wf and wq the weather map there (see midDensity, which has the other
@@ -3169,7 +3219,8 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   if (street > 0.0) wa = mix(wa, textureLod(uWeather, xw, MID_STREET.z).r, street);
   // (shut, full: the top of the slider, see MID_SHUT.)
   float full = smoothstep(MID_SHUT.x, 1.0, uMid.x), shut = 1.0 - (1.0 - MID_SHUT.y) * full;
-  float cap = mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)) + MID_SHUT.z * full + mix(-MID_PACK.y, MID_PACK.z, clamp(0.5 + MID_PACK.x * (wf.g - 0.5), 0.0, 1.0));
+  float pack = clamp(0.5 + MID_PACK.x * (wf.g - 0.5), 0.0, 1.0);
+  float cap = mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)) + MID_SHUT.z * full + mix(MID_PACK.y, MID_PACK.z, pack);
   float edge = MID_EDGE.w * (MID_EDGE.y * (uMid.x - MID_EDGE.x) + shut * (2.5 * (wr - 0.5) + MID_EDGE.z * (wa - wr)));
   // (The fringe, see MID_FRINGE.)
   edge = max(edge, MID_FRINGE.y * (edge + MID_FRINGE.x) - MID_FRINGE.x);
@@ -3188,27 +3239,36 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   float cut = 2.0 * wr + 0.6 * (wm.b - wm.g) + 0.4 * wm.r;
   // (Its texels are two thirds of those the level of detail is counted in.)
   vec4 n = textureLod(uNoise, xs.x * MID_CUT_X + xs.y * MID_CUT_Z + cut * MID_CUT_UP + vec3(0.41, 0.0, 0.77), max(lod + 0.58, 0.0));
-  float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + shut * MID_STREET.w * clamp(wa - wr, -0.25, 0.25);
-  wide = min(wide, MID_SEAM.x + MID_SEAM.y * (wide - MID_SEAM.x));
+  float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66));
   // (Which cells lead, those of 270 m or those of 540 m: by the map's G elsewhere over some 10 km, so whole regions
   // of a field are fine or coarse, and by its gusts over 4 km.)
   // (By degrees: where the one size gave way to the other within a kilometre or two, a line crossed the field.)
   float coarse = smoothstep(0.3, 0.7, wq.g), lead = clamp(coarse + 1.2 * (wm.b - 0.5), 0.0, 1.0);
-  float e = mix((n.a - MID_CELL.x) / MID_CELL.y + MID_CELL.z * (n.b - 0.5), (n.b - MID_CELL.x) / MID_CELL.y + 0.5 * MID_CELL.z * (n.a - 0.5), lead) + MID_SHUT.w * full;
-  // Ranks (MID_WAVE). (seen: a wave finer than two samples of the noise here
-  // is left out, by degrees: far off it was a moire. Less at the top of the
-  // slider, where the troughs were lanes through a layer that is to be closed.)
+  float e = mix((n.a - MID_CELL.x) / MID_CELL.y + MID_CELL.z * (n.b - 0.5), (n.b - MID_CELL.x) / MID_CELL.y + 0.5 * MID_CELL.z * (n.a - 0.5), lead);
+  // Rolls (MID_ROLL_X). (seen: a wave finer than two samples of the noise here
+  // is left out, by degrees: far off it was a moire.)
   float rk = clamp(smoothstep(MID_RANK.x, MID_RANK.y, wq.b) + uMidRolls, 0.0, 1.0);
   if (rk > 0.0) {
+    vec4 m = textureLod(uNoise, xs.x * MID_ROLL_X + xs.y * MID_ROLL_Z + cut * MID_CUT_UP + vec3(0.58, 0.17, 0.94), max(lod + 0.58, 0.0));
     vec2 seen = 1.0 - smoothstep(vec2(0.2), vec2(0.5), TEXEL_KM * exp2(lod) * vec2(length(MID_WAVE.xy), length(MID_WAVE.zw)));
-    vec2 ph = vec2(dot(fract(x * MID_WAVE.xy), vec2(1.0)), dot(fract(x * MID_WAVE.zw), vec2(1.0))) + MID_BEND.xy * wm.gb + MID_BEND.zw * n.rg;
-    e += MID_RANK.z * (1.0 - 0.4 * full) * rk * dot(vec2(1.0 - coarse, coarse) * seen, sin(2.0 * PI * ph));
+    float bend = MID_BEND.x * m.r + MID_BEND.y * n.r;
+    vec2 ph = vec2(dot(fract(xs * MID_WAVE.xy), vec2(1.0)) + bend, dot(fract(xs * MID_WAVE.zw), vec2(1.0)) + MID_BEND.z * bend);
+    float er = (mix(m.b, m.g, lead) - MID_ROLL.x) / MID_ROLL.y + MID_ROLL.z * (n.a - 0.5) + MID_RANK.z * dot(vec2(1.0 - coarse, coarse) * seen, sin(2.0 * PI * ph));
+    e = mix(e, er, rk);
+    wide *= 1.0 - (1.0 - MID_ROLL.w) * rk;
   }
+  e += MID_SHUT.w * full;
+  wide += grow - 0.15 + shut * MID_STREET.w * clamp(wa - wr, -0.25, 0.25);
+  wide = min(wide, MID_SEAM.x + MID_SEAM.y * (wide - MID_SEAM.x));
   // (The level where a cell is widest, from place to place: all at one level, the layer seen from within it, on edge,
   // was a ruled line at the eye's height. And how far down its base reaches under that level, bowl, from cell to cell:
   // all down to one floor, packed cells seen on edge had a ruled line for a base.)
   t0 = 0.1 + 0.35 * n.g;
-  float ew = e + wide, bowl = 0.4 + 0.55 * n.b, tall = 1.0 + MID_CELL.w * max(ew, 0.0);
+  float ew = e + wide, bowl = 0.4 + 0.55 * n.b;
+  // (The floor of a field's body, MID_FLOOR: the higher of it and the cell's own height, rounded where they meet.)
+  float fl = mix(-2.0, (1.0 - MID_FLOOR_MORE.y * rk) * mix(MID_FLOOR.x, MID_FLOOR.y, pack) + MID_FLOOR_MORE.z * full, smoothstep(MID_FLOOR.z, MID_FLOOR.w, grow));
+  ew = 0.5 * (ew + fl + sqrt((ew - fl) * (ew - fl) + 0.05));
+  float tall = 1.0 + MID_CELL.w * max(ew, 0.0);
   d = 0.65 * (t < t0 ? bowl * min(ew, 1.0) - (t0 - t) / t0 : ew - tall * (t - t0) / (1.0 - t0));
   dB = 0.65 * (ew - tall * max(t - t0, 0.0) / (1.0 - t0));
   swell = n.r;
@@ -3300,9 +3360,10 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   // depth, a low dome was all base, some 3 deep whatever its size; and the noise took 0.6 of a heap, now 0.3.)
   float rise = max(0.5 * (1.0 - t0) * max(ew, 0.0) / tall, 0.06);
   float top = max(near2, smoothstep(t0 - 0.1 * over, t0 + rise * (1.0 - 0.6 * over), t));
-  float heap = (1.0 + 1.2 * near2) * mix(0.25, 1.0, smoothstep(0.1, 0.6, length(p))) * smoothstep(-0.05, 0.1, d) * (d + 0.5 * (er - 0.5) - 0.3 * (1.0 - er)) / (1.0 - 0.3 * (1.0 - er));
-  heap *= mix(smoothstep(0.0, 0.6, d), 1.0, max(max(near2, over), smoothstep(t0 + 0.4 * rise, t0 + 1.6 * rise, t)));
-  float rim = smoothstep(0.05, 0.65, dB), thin = 1.0 - smoothstep(0.05, 0.6, dB), fb = 0.5;
+  float heap = (1.0 + 1.2 * near2) * mix(0.25, 1.0, smoothstep(0.1, 0.6, length(p))) * smoothstep(-0.05, 0.1, d) * (d + mix(1.0, MID_FLOOR_MORE.x, smoothstep(0.0, 0.5, fl)) * (0.5 * (er - 0.5) - 0.3 * (1.0 - er))) / (1.0 - 0.3 * (1.0 - er));
+  heap *= mix(smoothstep(0.0, 0.6, d), 1.0, max(max(near2, over * (1.0 - MID_ROLL_SOFT * rk)), (1.0 - MID_ROLL_SOFT * rk) * smoothstep(t0 + 0.4 * rise, t0 + 1.6 * rise, t)));
+  // (No fibres on a floor: there the base is a sheet, and their read was a tenth of the frame from below on Direct3D 11.)
+  float rim = smoothstep(0.05, 0.65, dB), thin = (1.0 - smoothstep(0.05, 0.6, dB)) * (1.0 - smoothstep(0.0, 0.5, fl)), fb = 0.5;
   // (The base's floor: at the cell's own depth under its widest level in its body, bowl; higher towards its rim.)
   float tb = t0 * (1.0 - bowl * rim), base = MID_FULL * rim * rim * rim * smoothstep(tb, tb + 0.2, t);
   if (fibres && top < 1.0 && (thin > 0.0 || veil > 0.0)) {
@@ -3318,21 +3379,29 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   base *= mix(max(smoothstep(0.3, 0.55, midLump), 0.6), 1.0, 1.0 - smoothstep(0.8, 2.5, length(p)));
   return clamp(mix(base, heap, top), 0.0, 1.0);
 }
-// The sheet's density at p, 0 to 1 (the arguments as midCells'; fine: with
-// the fine noise).
+// The sheet's density at p (the arguments as midCells'; fine: with the fine
+// noise): 0 to MID_FULL, times its thick and thin places (up to
+// MID_THICK_MAX).
 float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fine) {
   // Where: the weather map's amount, elsewhere on it, over 4 km and more
   // (patches and sheets, with clear lanes), and over some 20 km (wr).
   float am = clamp(uMid.x + 0.7 * (1.0 - 0.8 * smoothstep(0.75, 1.0, uMid.x)) * (wa - 0.5), 0.0, 1.0);
-  // Thick and thin places in it, as the amount there: patches of some 3 to
-  // 6 km drawn out along the wind, and a mottle of some 200 to 400 m (read
-  // at a depth in the noise that wanders with the patches, so that its tile
-  // of 1.6 km does not show). From below an altostratus is a grey sheet,
-  // darker where it is thicker and finely mottled: in photographs the luma
-  // varies by some 2 % over a few degrees and 3 to 5 % over tens of them.
-  // With the slow swells alone it was an even white veil, 0.3 and 0.8 %.
-  vec4 m = textureLod(uNoise, vec3(0.5 * x.x, 0.0, x.y) / (2.0 * MID_KM) + vec3(0.37, 0.19 + 0.25 * t * uMid.w / MID_KM + wr, 0.71), max(lod - 1.0, 0.0));
-  vec4 mn = textureLod(uNoise, vec3(0.6 * x.x, 0.5 * h, x.y) * (2.0 / MID_KM) + vec3(0.53, 1.7 * m.b + 0.9 * m.a, 0.29), max(lod, 0.0));
+  // Thick and thin places in it: patches of some 4 to 8 km drawn out along
+  // the wind, and a mottle of some 200 to 400 m (read at a depth in the
+  // noise that wanders with the patches, smoothly, so that its tile of 1.6
+  // km does not show; by the patches' cells of 1.6 km, whose creases are
+  // sharp, the mottle curled along them like the veins of marble). From
+  // below an altostratus is a grey sheet, darker where it is thicker and
+  // finely mottled: in photographs the luma varies by some 2 % over a few
+  // degrees, and by 0.6 to 2 stops across the frame (0.35 to 1.2 once a
+  // gradient across it is taken off). They are in the sheet twice:
+  //  - th, on the thin fringes of the sheet, over and under its body;
+  //  - thick (the last lines), the extinction of the body itself: what
+  //    is seen from below is how much the whole depth lets through. With
+  //    the fringes alone the body was as dense everywhere, and the sheet a
+  //    flat grey card (0.2 to 0.3 stops once the gradient is taken off).
+  vec4 m = textureLod(uNoise, vec3(0.65 * x.x, 0.0, x.y) / (2.0 * MID_KM) + vec3(0.37, 0.19 + 0.25 * t * uMid.w / MID_KM + wr, 0.71), max(lod - 1.0, 0.0));
+  vec4 mn = textureLod(uNoise, vec3(0.6 * x.x, 0.5 * h, x.y) * (2.0 / MID_KM) + vec3(0.53, 1.7 * m.r, 0.29), max(lod, 0.0));
   midMottle = 0.5 * mn.b + 0.5 * mn.a;
   float th = clamp(1.0 + 1.4 * (m.r - 0.5) + 2.5 * (midMottle - 0.5), 0.3, 1.8);
   float d;
@@ -3356,7 +3425,10 @@ float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fin
     }
   }
   er = clamp(0.5 + 2.0 * (er - 0.5), 0.0, 1.0);
-  return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0) * 0.8 * th;
+  // (No read more: the scales of the three reads above.)
+  float thick = MID_THICK.x * (m.r - 0.62) + MID_THICK.y * (0.6 * (m.g - 0.5) + 0.4 * (m.b - 0.5)) + MID_THICK.z * (0.5 * (m.a - 0.5) + 0.5 * (mn.r - 0.62))
+              + MID_THICK.w * (0.6 * (n.b - 0.5) + 0.4 * (n.a - 0.5)) + 0.5 * (midMottle - 0.5);
+  return min(clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0) * 0.8 * th, MID_FULL) * clamp(MID_THICK_MEAN * exp2(MID_THICK_GAIN * thick), MID_THICK_MIN, MID_THICK_MAX);
 }
 // The density at p (from the eye), 0 to 1. lod as cloudShape's; fine: the
 // cells with their fine noise (else its mean); eye: the eye's own samples,
@@ -3377,12 +3449,12 @@ float midDensity(vec3 p, float lod, bool fine, bool eye) {
   vec4 wm = textureLod(uWeather, xw, 4.0), wf = textureLod(uWeather, xw, 6.5);
   float wr = wf.r, form = uMid.y, cells = 0.0, sheet = 0.0;
   if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, xw, wm, wf, textureLod(uWeather, xw + vec2(0.43, 0.29), 5.5), lod, fine, eye), MID_FULL);
-  if (form < UNSEEN(1.0)) sheet = min(midSheet(h, t, x, wm.r, wr, lod, eye), MID_FULL);
+  if (form < UNSEEN(1.0)) sheet = midSheet(h, t, x, wm.r, wr, lod, eye);
   midLump = mix(midMottle, midLump, form);
   return (MID_SIGMA.x * (1.0 - form) * sheet + MID_SIGMA.y * form * cells) / mix(MID_SIGMA.x, MID_SIGMA.y, form);
 }
 float midExtinction(float den) {
-  return mix(MID_SIGMA.x, MID_SIGMA.y, uMid.y) * min(den / MID_FULL, 1.0);
+  return mix(MID_SIGMA.x, MID_SIGMA.y, uMid.y) * min(den / MID_FULL, MID_THICK_MAX);
 }
 // What a column of the layer lets through of the light on it, direct and
 // scattered together, as a slab that keeps all it scatters (Eddington's two
@@ -3711,7 +3783,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
   int i = 0;
   for (int pass = 0; pass < LONG_N(CLOUD_STEPS); pass++) {
     bool need = false;
-    float y, bump, body, edge, lump, fb, lod, f, next, a;
+    float y, bump, body, edge, lump, fb, lod, f, next, a, fbIn = -1.0;
     vec3 p;
     vec4 q;
     for (; i < LONG_N(CLOUD_STEPS); i++) {
@@ -3763,6 +3835,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
             tIn = t0;
             wIn = pend;
             tsIn = tsum;
+            fbIn = fb;
 #if Q_GOLD
             // (By the plastic number's step, so that it runs apart from the
             // start's jitter.)
@@ -3870,14 +3943,25 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
       // interleaved gradient noise, which covers the circle evenly over the
       // frames (white noise left a grain in the settled picture).
       vec3 side = normalize(cross(uLight, abs(uLight.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-      float ang = 2.0 * PI * ign(gl_FragCoord.yx + 5.588238 * uPass + 11.0);
+      float ang = 2.0 * PI * ign2(gl_FragCoord.xy + 5.588238 * uPass + 11.0);
       vec3 off = PENUMBRA * sqrt(hash(gl_FragCoord.xy + 3.71 * uPass + 19.1)) * (cos(ang) * side + sin(ang) * cross(uLight, side));
       vec3 eastL = normalize(cross(upL, abs(upL.x) < 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0)));
       vec3 northL = cross(upL, eastL);
       // The lower part of a cloud, where its base bounds it: what faces
       // down there sees the sea, and under a deck the light that came down
       // through it. (The heaps' 3D body has no base of its own there.)
-      float basal = smoothstep(0.0, 0.1, fb);
+      // Where the ray came into the cloud through its base, the whole of
+      // its first few metres is (fbIn, the field at the entry): the point
+      // lies at a depth drawn anew each frame, and some tens of metres in,
+      // where the base's field no longer bounds the cloud, it took the
+      // light of the cloud's inside, far darker under a deck (a base at
+      // civil twilight 20 levels as shown, against 97 at a depth of 1).
+      // Drawn there in one frame in twenty-five, those dark frames left
+      // the bases seen from below a grain of dark dots in flight. (fbIn is
+      // declared in the pass, as the cloud's entry and its point fall in
+      // one: declared with the march's state, it was held through the whole
+      // march, and the overcast deck took 1.4 ms more on Direct3D 11.)
+      float basal = smoothstep(0.0, 0.1, max(fb, fbIn));
       // The slow parts of the light change little across the picture: the
       // depth towards the light
       // past its first two steps (tauCM, with the long shadows), the depth
@@ -3977,7 +4061,7 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
         sunSide = uSun - dot(uSun, upL) * upL;
         sunSide /= max(length(sunSide), 1e-4);
         u1 = ign(gl_FragCoord.xy + 5.588238 * uPass + 61.0);
-        float u2 = ign(gl_FragCoord.yx + 5.588238 * uPass + 73.0);
+        float u2 = ign2(gl_FragCoord.xy + 5.588238 * uPass + 73.0);
         h = sqrt(u1) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2));
         sky = 0.0;
         skyLean = 0.0;
@@ -5755,9 +5839,10 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // as forward: a thick sheet was as bright away from the sun as near it,
   // a milky veil without depth.) At dusk, where the low sun's light has
   // spread along the sheet, it goes about evenly (CI_DIFF, below).
-  // (At night the eye sees the moonlit sheet over some 10 km: nightK, below.)
+  // (At night the halo and the aureole follow the sheet over some 10 km:
+  // nightK, below.)
   float dayK = smoothstep(0.02, 0.3, uLightI), nightK = 0.9 * (1.0 - dayK);
-  float many = mix(1.0 - exp(-0.3 * mix(tau, wideT, nightK)), 1.0 - exp(-0.3 * tauP * li), duskK);
+  float many = mix(1.0 - exp(-0.3 * tau), 1.0 - exp(-0.3 * tauP * li), duskK);
   float phM = mix(CI_MANY * hg(mu, 0.5 / (1.0 + 0.25 * bodyT)), CI_DIFF + 0.3 * hg(mu, 0.5), duskK);
   // The light scattered many times has mostly gone forward at each step: on
   // its way in it fades with a quarter of the depth that the light
@@ -5780,33 +5865,33 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // 1 - many, as the rest of the light scattered once. Taken by it twice,
   // as before, the ring did not show through a veil at night, where the
   // photographs show it.)
-  // At night the eye sees moonlit cirrus as a soft, even veil (photographs
-  // of a lunar halo show a smooth sheet, a bright aureole and a clear ring):
-  // the light scattered by the sheet, and the share scattered many times,
-  // follow its depth over some 10 km by 0.9 (nightK), so that the lanes
-  // between bands do not stand as dark stripes across a grey veil (by
-  // 0.65, round 16, they still did at cirrus 0.5), and the ring (0.17 in
-  // thin cirrus, up to 0.25 in a veil) and a broader aureole (some 7
-  // degrees) show on it.
+  // At night (nightK) the ring is 0.17 in thin cirrus, up to 0.25 in a
+  // veil, and fades by the depth over some 10 km as much as by the depth
+  // here, and a broader aureole (some 7 degrees) is added: photographs of a
+  // lunar halo show a bright aureole and a clear ring. The sheet's own light
+  // keeps the depth here, by night as by day: photographs of moonlit cirrus
+  // show its streaks and veils, as by day. (Before PR #136 that light, too,
+  // followed the depth over some 10 km by 0.9, so that the lanes between
+  // bands would not stand dark across a grey veil: the moonlit cirrus, and
+  // from 4 degrees under the horizon on the cirrus of the twilight's sky,
+  // stood as one smooth veil with no streaks.)
   // (By how much the light is the sun's: uLightI is the sun's share of its
   // light, 0 to 1, and some 1e-6 for the moon; no switch, so that the look
   // goes over smoothly in the twilight as the light hands over.)
   float haloW = mix(0.17 + 0.08 * smoothstep(CI_HALOT.x, CI_HALOT.y, veilT) + 0.08 * ciHaloGrow(uCirrus), 0.03 * smoothstep(CI_HALOT.z, CI_HALOT.w, veilT), dayK) * smoothstep(0.02, 0.15, mix(tau, wideT, nightK));
-  float aL = mix(a, 1.0 - exp(-wideT), nightK);
-  float onceL = mix(once, onceW, nightK);
   // The light scattered forward, by wavelength, is uLightI times the
   // sunlight that reaches the sheet times lk.y + lk.z times the halo's
   // shape there (cirrusLight); lk.x is the share of the light from round
-  // about (aL).
+  // about (a).
   // Where the halo shows, a share haloW of the crystals is smooth, and
   // smooth prisms send no light between their diffraction peak and the
   // ring: the light scattered once is less there. (With the rough ice's
   // lobe there in full, the inside of the moon's ring filled up, and from
   // 11 km the ring lost half its contrast; with twice haloW, it stood out
   // three times as much as in a photograph of a lunar halo.)
-  float u = (1.0 - many) * onceL;
+  float u = (1.0 - many) * once;
   ph *= 1.0 - haloW * smoothstep(0.92, 0.94, mu) * (1.0 - smoothstep(0.985, 0.995, mu));
-  lk = vec3(aL, ph * u + phM * many * mix(onceD, onceW, nightK) + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
+  lk = vec3(a, ph * u + phM * many * onceD + (peak + nightK * 0.45 * hg(mu, 0.9)) * exp(-0.3 * wideT) * mix(onceW, once, 0.4 - 0.3 * nightK), haloW * u);
 }
 
 // The light of the cirrus (H) at tHigh along the ray, from the numbers lk
@@ -6294,15 +6379,22 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // the place is in, whatever its height. Planned to the layer's top, the last and longest step stood over a cell of
       // 150 m, the depth towards the light came out a third too small, and a cell from below was white to its middle.)
       float towards = mix(sides.x, sides.y, fromUp), share = mix(mix(tf, 1.0 - tf, fromUp), towards / (sides.x + sides.y), uMid.y);
-      float reach = mix(mix(tf, 1.0 - tf, fromUp) * uMid.w, towards, uMid.y) / max(abs(sunUp), 0.1);
+      // (And MID_SHADE.z up at the least: a place on a cell's top or side has its column's top just over it, the steps
+      // ended there, and no cell shaded its neighbour or its own far side: from above at a low sun the field was white
+      // all over, without relief.)
+      float reach = mix(tf, 1.0 - tf, fromUp) * uMid.w;
+      reach = mix(reach, max(towards, min(reach, MID_SHADE.z)), uMid.y) / max(abs(sunUp), 0.1);
       // (Each step `longer` times the one before, 5 in a sheet, which is smooth, and 3 among cells, by the form; the
-      // first so long that three of them reach as far.)
+      // first so long that three of them reach as far. Among cells two, which reach as far: a cell is a few steps deep,
+      // and with the floor under the cells the third was a twelfth of the frame from below on Direct3D 11.)
       float longer = mix(5.0, 3.0, uMid.y);
-      float tauS = 0.0, s = min(max(0.03, 0.004 * t), reach / (1.0 + longer + longer * longer)), acc = 0.0;
+      float tauS = 0.0, s = min(max(0.03, 0.004 * t), reach / mix(1.0 + longer + longer * longer, 1.0 + longer, uMid.y)), acc = 0.0;
       // (None for the cells' thinnest cloud, a veil or a rim: it is lit as the layer's column says.)
-      for (int k = 0; k < LONG_N(den < 0.1 * uMid.y ? 0 : Tm < 0.3 ? 2 : 3); k++) {
+      for (int k = 0; k < LONG_N(den < 0.1 * uMid.y ? 0 : Tm < mix(0.3, 1.01, uMid.y) ? 2 : 3); k++) {
         // (The first with the cells' fine noise: the lumps shade one another.)
-        tauS += midExtinction(midDensity(p + uLight * (acc + 0.5 * s), lod + 1.5 + float(k), k < 1, false)) * s;
+        // (Among cells half a level and a level finer than in a sheet: read over three and more cells, the depth towards
+        // the light was the same on a cell's lit side and on its far side.)
+        tauS += midExtinction(midDensity(p + uLight * (acc + 0.5 * s), lod + mix(1.5 + float(k), 0.5 + 0.5 * float(k), uMid.y), k < 1, false)) * s;
         acc += s;
         s *= longer;
       }
@@ -6320,7 +6412,9 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // More than its depth alone says: a cell's sides let light out, and its middle is the greyer for it.)
       float greyer = mix(1.0, MID_SHADE.x, uMid.y);
       float col = mix(uMid.y < UNSEEN(1.0) ? midColumn(P) : 0.0, MID_SHADE.x * colCells, uMid.y) * mix(1.0, max(2.0 * lump, 0.1), 0.4 * smoothstep(0.15, 0.5, abs(cv)) * smoothstep(0.3, 1.5, t));
-      float m = max(abs(sunUp), 0.35);
+      // (The light's cosine to the layer, for the light that falls on it: no less than 0.35 for cells, whose sides a low
+      // light falls on; for a sheet no less than MID_SHEET_SUN.)
+      float m = max(abs(sunUp), mix(MID_SHEET_SUN, 0.35, uMid.y));
       // Two streams through the layer as a slab that keeps all it scatters
       // (Eddington's): of the light on its sun side, e0 / (1 + K col) comes
       // out of the far side; at a place with `over` of the column behind it
@@ -6335,12 +6429,28 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // in its thick middle.
       // (The depth behind a place is the less of its own share of the column and the depth along the light, upright: the
       // lumps shade one another, and along a low sun's line the depth is many cells', not the layer's.)
-      // (greyer: the depth towards the light counts as often as the cell's column does, MID_SHADE.)
-      float over = min(greyer * tauS * m, col * share), e0 = midThrough(col, m);
-      // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly.)
-      float shade = 1.0 / (1.0 + 3.0 * K * max(greyer * tauS * m - over, 0.0));
-      float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = shade * e0 * K * (col - over);
+      // (Upright: times the cosine that the column aslant was divided by, for a sheet. Times m, whose floor is higher,
+      // the depth of an even sheet under a sun lower than 20 degrees came out more than its own column, as if a
+      // neighbour shaded it: the sun's light through it fell away as the sun sank (to a fifth at 8 degrees, through a
+      // depth of 8), the sky's stayed, and the sheet turned blue. Cells keep m: their look was set with it.)
+      // (greyer: among cells the depth towards the light counts as often as the cell's column does, MID_SHADE.)
+      float upright = greyer * tauS * mix(slant, m, uMid.y);
+      float over = min(upright, col * share), e0 = midThrough(col, m);
+      // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly. Little
+      // in a sheet: the light spreads sideways in it on its way through, and a thick place does not shade the
+      // base of its neighbour as a cell shades a cell.)
+      // (Among cells much, and with some light left in the deepest shade; low: less of the sky's light and of what
+      // comes back in the seams and troughs, which the cells about them hide from the sky. MID_RELIEF.)
+      float shade = 1.0 / (1.0 + mix(1.0, MID_RELIEF.z, uMid.y) * K * max(upright - over, 0.0));
+      shade += MID_SHADOW * uMid.y * (1.0 - shade);
+      float low = 1.0 - (1.0 - MID_RELIEF.x) * uMid.y * (1.0 - smoothstep(0.0, MID_RELIEF.y, sides.x));
+      float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = low * shade * e0 * K * (col - over);
       float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
+      // (A sheet seen from the side away from the light shows what came through it whichever way the eye looks: its
+      // base, looking up and away from a low sun, took a share of the stream that goes back, nothing there, and was
+      // darker and bluer than towards the sun. wd: how far the view looks up.)
+      float wd = smoothstep(-0.25, 0.25, cv);
+      c = mix(c, 1.0, mix(1.0 - wd, wd, fromUp) * (1.0 - uMid.y));
       // Scattered once; the aureole (the droplets send half of what they
       // scatter on within a degree: that light fades half as fast, and is
       // the small glow round a sun seen through a veil); then the next
@@ -6348,16 +6458,26 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // light, through 0.4 of the depth, with half the forward lean): the
       // glow of thin cloud about the sun and the light in a cell's rim;
       // then the two streams.
-      float sun = ph * exp(-tauS) + 0.2 * hg(mu, 0.98) * (exp(-0.5 * tauS) - exp(-tauS)) + (0.5 * phWide * exp(-0.4 * tauS) + 0.25 * hg(mu, 0.2) * exp(-0.16 * tauS)) + m / PI * mix(up, onD, c);
+      float sun = ph * exp(-tauS) + 0.2 * hg(mu, 0.98) * (exp(-0.5 * tauS) - exp(-tauS)) + mix(1.0, shade, MID_RELIEF.w * uMid.y) * (0.5 * phWide * exp(-0.4 * tauS) + 0.25 * hg(mu, 0.2) * exp(-0.16 * tauS)) + m / PI * mix(up, onD, c);
       // The sky's light, as two streams too: from above, and what the sea,
       // the low clouds and the air below send up.
       float above = col * (1.0 - tf), under = col * tf, thru = 1.0 / (1.0 + K * col);
       float down = (1.0 + K * under) * thru, upG = (1.0 + K * above) * thru;
-      float wd = smoothstep(-0.25, 0.25, cv), ground = 0.12 + 0.3 * uCloud;
+      float ground = 0.12 + 0.3 * uCloud;
       // (In the unit the low clouds' sky light was set in against photographs, SKYV.x: with the slab's alone, a fifth
       // to a half of theirs, the middle clouds at dusk, lit by the sky alone, were darker than the low cumulus under
       // them and than the sea between them, though higher up and nearer the light.)
-      float amb = SKYV.x * (mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd));
+      float amb = SKYV.x * (low * mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd));
+      // A sheet seen from below (sheet: by the form and the view) is lit through itself alone: of the sky's light on
+      // its top, what the slab lets through, once, not SKYV.x times; and of all that came down through it, the sun's
+      // and the sky's, what the sea and the low clouds send back up and the sheet sends down again (back), each in
+      // its own colour. (With SKYV.x and the ground's share counted in the sky's light alone, the sky's blue was 2.5
+      // times what a slab lets through: a third to a half of the sheet's light with the sun at 19 degrees, where
+      // photographs of an altostratus from below are grey at every height of the sun. Cells keep it: the sky lights
+      // their bases through the gaps between them.)
+      float back = ground * (upG - thru), sheet = wd * (1.0 - uMid.y);
+      amb = mix(amb, down + thru * back, sheet);
+      sun += sheet * fromUp * m / PI * shade * e0 * back;
       sSun += w * sun;
       sAmb += w * amb;
       sunPrev = sun;
@@ -8498,9 +8618,9 @@ const SkySound = (() => {
   const TH = 48, TM = 96, TMU_MIN = -0.2;
   const odTable = new Float32Array(TH * TM * 3);
   // The tables made at start are jobs: generators that yield every little
-  // while, so that the loading (see Loading) can spread them over frames.
-  // finish(job) runs one to its end at once.
-  const finish = job => { while (!job.next().done); };
+  // while, so that the loading (see Loading) can spread them over frames
+  // (`slices`); so is the table of multiple scattering made again later
+  // (see hazeJob).
   function* buildDepths() {
     const STEPS = 64;
     for (let j = 0; j < TH; j++) {
@@ -10849,7 +10969,7 @@ const SkySound = (() => {
       if (!flying || Math.abs(way[1]) > CLIMB_STEP) altSeen = v.alt;
       // (The middle clouds: none until they are built, see midWanted.)
       const midWait = state.mid > 0 && midWanted(), midOn = !!mid && mid.ready && state.mid > 0;
-      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, builtHaze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
       if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return midWait;   // settled (the frames go on, undrawn, while the middle clouds' programs compile)
@@ -10911,7 +11031,7 @@ const SkySound = (() => {
       const topsKey = [v.cloud, lowKey()].join();
       if (v.cloud > 0 && topsKey !== topsFor) drawTops(v.cloud, topsKey);
       // The table of the air's light, for this frame's light, air and height.
-      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare, midOn ? midKey() : ''].join() : '';
+      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, builtHaze, v.alt, v.cloud, ...state.light, state.lightShare, midOn ? midKey() : ''].join() : '';
       if (lut && lutKey !== lut.for) {
         // (Not read while drawn into.)
         gl.activeTexture(gl.TEXTURE29);
@@ -10938,7 +11058,7 @@ const SkySound = (() => {
         lut.for = lutKey;
       }
       // The sky's light on the clouds, for this frame's sun and haze.
-      const skyKey = v.cloud > 0 || midOn ? [...state.sun, state.sunOn, state.haze].join() : '';
+      const skyKey = v.cloud > 0 || midOn ? [...state.sun, state.sunOn, state.haze, builtHaze].join() : '';
       if (skyKey && skyKey !== skyLightFor) {
         // (Its unit is free while the draw writes it; draw expects unit 0.)
         bind(27, null);
@@ -11299,11 +11419,32 @@ const SkySound = (() => {
   let queued = false, changed = false, running = false, lastFrame = 0;
   // ?debug=1: the smoothed time between frames (ms) while they run, and when it was last updated.
   const debug = { on: false, ms: 0, at: 0 };
-  // The table of multiple scattering takes about a quarter of a second to
-  // build: while the haze slider moves it waits, and is built HAZE_WAIT ms
-  // after the last move (the first frame builds it at once).
+  // The table of multiple scattering takes 0.1 to 0.4 s of script to build.
+  // While the haze slider moves it waits; HAZE_WAIT ms after the last move
+  // (on the first frame, at once) it is built as a job, run by `slices`
+  // between the frames (hazeJob), and the frames draw the old table until
+  // it is done: built in one go, in a frame, it held the picture for 0.32
+  // to 0.47 s on Direct3D 11 at each change of the weather. The job writes
+  // the tables (msData, upData) only in its last slice; then builtHaze
+  // takes its haze, which draws the picture, the air's table and the sky's
+  // light on the clouds again (see `look` in render). A change of the haze
+  // while it runs ends it (return), and the wait begins again.
   const HAZE_WAIT = 250;
-  let seenHaze = null, hazeAt = -Infinity;
+  let seenHaze = null, hazeAt = -Infinity, hazeJob = null;
+  const buildHaze = haze => {
+    const job = hazeJob = buildMultiScatter(haze);
+    job.haze = haze;
+    slices([job], () => {}, soon).then(() => {
+      if (hazeJob !== job) return;
+      hazeJob = null;
+      builtHaze = haze;
+      update();
+    });
+  };
+  const dropHaze = () => {
+    if (hazeJob) hazeJob.return();
+    hazeJob = null;
+  };
   function frame(now) {
     queued = false;
     if (document.hidden) {
@@ -11319,12 +11460,15 @@ const SkySound = (() => {
       }
       if (render && builtHaze !== state.haze) {
         if (now - hazeAt >= HAZE_WAIT) {
-          finish(buildMultiScatter(state.haze));
-          builtHaze = state.haze;
+          if (!hazeJob || hazeJob.haze !== state.haze) {
+            dropHaze();
+            buildHaze(state.haze);
+          }
         } else {
+          dropHaze();
           setTimeout(update, HAZE_WAIT - (now - hazeAt));
         }
-      }
+      } else dropHaze();
       celestial();
       showLabels();
     }
@@ -12434,8 +12578,8 @@ const SkySound = (() => {
       else requestAnimationFrame(() => resolve());
     });
   }
-  // Runs jobs (see finish) to their ends in slices of about SLICE_MS, a
-  // slice a frame; report(share) after each job.
+  // Runs jobs (generators: see buildDepths) to their ends in slices of
+  // about SLICE_MS, a slice a wait; report(share) after each job.
   const SLICE_MS = 8;
   // The next task (a frame in a hidden tab, where timers are slowed anyway).
   const soon = () => document.hidden ? nextFrame() : new Promise(resolve => setTimeout(resolve, 0));

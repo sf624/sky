@@ -53,7 +53,7 @@ today: there is no stratus (`low.smooth`) in it, and no `low.*` field.
   compiled ahead, from the first picture on).
   A weather with another haze also rebuilds `msData` (see the frame loop
   in [From the address bar to the first frame](#from-the-address-bar-to-the-first-frame)):
-  one frame after the choice takes some 0.3 s longer.
+  in slices between the frames, while the frames draw the old table.
 - The die draws a weather from a seed: one of the table by weight, then
   each value between its low and its high, and any whole-km place on the
   map. The seed's numbers are xorshift32 started from the seed through
@@ -147,8 +147,7 @@ The JS then runs once, at load, and does little:
      it, asking waits, so the page asks for one program a frame. A failed
      program throws the compiler's or the linker's message.
    - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
-     (`slices`). Each is a generator (a job) that yields every little while;
-     `finish(job)` runs one at once.
+     (`slices`). Each is a generator (a job) that yields every little while.
      - `odTable` (`buildDepths`): optical depth to the top of the air
        towards the sun, over altitude (48 rows, squared spacing) and the
        cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
@@ -243,10 +242,20 @@ which asks for one `requestAnimationFrame(frame)`.
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed (at
-  once, with `finish`; it takes about a quarter of a second: while the haze
-  slider moves, it is built `HAZE_WAIT` = 250 ms after the last move), runs
-  `celestial()` and sets the panel's labels;
+- if something changed: starts to rebuild `msData` and `upData` when the
+  haze has changed (`buildHaze`). While the haze slider moves it waits,
+  and starts `HAZE_WAIT` = 250 ms after the last move (on the first frame
+  at once). The job takes 0.1 to 0.4 s of script (0.26 s for its first
+  gathering and 0.10 s for its second on Direct3D 11): `slices` runs it in
+  slices of about 8 ms, one a task, between the frames, which draw the old
+  table meanwhile. Built in one go, in one frame, it held the picture for
+  0.32 to 0.47 s on Direct3D 11. Its last slice writes both tables; then
+  `builtHaze` takes the new haze and `update()` asks for a frame: the
+  table is uploaded, and the picture, the air's table and the sky's light
+  on the clouds are drawn again, as at a change of the light (`builtHaze`
+  is in their keys). A change of the haze while the job runs ends it, and
+  the wait begins again. Then `frame` runs `celestial()` and sets the
+  panel's labels;
 - flies the aircraft (`fly`, see [Steering](#steering)): the controls,
   the turn, the climb, and `state.drift` grows by `speed / 3600 * dt`
   along `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the
@@ -1574,6 +1583,15 @@ each cloud, not on its surface; no normal of the field enters it.
   aslant they made streaks); they are read in one level layer of the
   noise (where a read crossed from one layer to the next, the bends of
   the GPU's filter drew long straight lines).
+  Whether the point is in the lower part goes by the field at the point
+  or where the ray came into the cloud, whichever is more (`fbIn`): the
+  point lies at a depth drawn anew each frame, and some tens of metres
+  into a deck the base's field no longer bounds the cloud. There the point
+  took the light of the cloud's inside, far darker under a deck (at civil
+  twilight, overcast at 0.3 km looking up: 20 levels as shown with the
+  point at a depth of 3.5, against 97 at 1). Drawn that deep in one frame
+  in twenty-five, those frames left the mean over about ten frames in
+  flight a grain of dark dots on the bases (2.7 % of the luma).
 - *Inside a cloud* (the eye in it), the light is that of two streams in a
   slab, one down and one back up: the stream down goes from about all of
   it near the top to `tDown` at the base, as the depth under the place
@@ -1879,7 +1897,7 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       cell (all down to one floor, a packed field seen on edge had a ruled
       line for a base). The noise is taken so steeply that its lowest
       sixth stays under the threshold of the closest field: packed cells
-      keep a net of clear seams between them, as a perlucidus has. The
+      keep a net of seams between them, as a perlucidus has. The
       threshold is the field's (the amount, the map, the noise's cells of
       1.1 km and its swell): it says where cells stand, run together or
       shrink apart; the map's other channels move the place in the noise.
@@ -1910,17 +1928,35 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
       inside a field too: bands and lanes.
-    - *Ranks* (`MID_WAVE`, `MID_RANK`, `MID_BEND`): over regions of the map
-      a wave across the layer adds to the cells' height. On its crests
-      they are large and run together into lumpy rolls; in its troughs
-      they are small and few. Two waves, of 0.5 km where the small cells
-      lead and of 0.9 km where the large ones do, 74 degrees apart (whole
-      numbers of cycles in the map's 256 km), each bent by the map over
-      some 4 km (ranks that curve, crowd and spread, branch and end) and
-      by the noise over a kilometre or two (no rank is straight). A wave
-      finer than two samples of the noise is left out by degrees (far off
-      it was a moire). Altocumulus undulatus, and the ranks of a mackerel
-      sky. `midrolls` adds to the regions (1: ranks everywhere).
+    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`, `MID_WAVE`, `MID_RANK`,
+      `MID_BEND`): over regions of the map the field is rolls, not cells.
+      There the height is read from the noise on a second cut, 5.8 times
+      as long one way as the other: its Worley cells are 0.5 and 1.1 km
+      wide and 3 to 6 km long, long lumps side by side that begin, end,
+      fork and join. A wave across them adds a little to their height, so
+      they tend to an even distance (0.65 km where the small cells lead, 1.5 km where
+      the large ones do; whole numbers of cycles in the map's 256 km); it
+      bends with the place in the noise, which the map moves by up to 2 km
+      over some 4 km, and with the noise itself. A roll is less steep than
+      a cell and soft-edged from above too; the cells' own noise makes
+      lumps along it. A wave finer than two samples of the noise is left
+      out by degrees (far off it was a moire). Altocumulus undulatus.
+      `midrolls` adds to the regions (1: rolls everywhere). (In #135's
+      first state two waves were added to round cells' heights: from above,
+      short ranks of dots, no cell joined to the next.)
+    - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
+      (not in its fringe), no place is lower than a floor a little over
+      the threshold, higher where the cells stand closest, lower among
+      rolls, higher at the top of the slider. The seams between the cells
+      and the troughs between the rolls are thin low cloud there, not
+      clear air, and the lumps and the fine noise count a third on it. So
+      a field's body is a deck with relief: from above, tops with shaded
+      seams, and rolls with dark troughs; from below, grey cells in a pale
+      sheet that lets the blue through in places; cells apart, with clear
+      air between them, stand in the fringes only. (Without it, and with
+      half the regions open, a field from 11 km was equal white dots side
+      by side on the sea, and from 40 km at the top of the slider an even
+      grain.)
     The cells fill 0.65 of the layer's depth, at a
     level that varies over some 4 km. Over its widest level a cell is a
     crisp heap of lumps (the heaps' heads, in upright columns); under it a
@@ -1930,15 +1966,24 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     goes in and out with the lumps and the fine noise (`MID_RAG`);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
-    with fine noise on its thin places, and thick and thin places in it: its
-    density times patches of some 3 to 6 km and a mottle of some 200 to 400
-    m (`midMottle`, which also stands for the cells' lumps where the pass
-    reads the column). From below it is a grey sheet, darker where it is
-    thicker and finely mottled, as in photographs (the luma varies by some
-    2 % over a few degrees and 3 to 5 % over tens of them); before, it was
-    an even white veil (0.3 and 0.8 % from 4 km under it);
+    with fine noise on its thin places, and thick and thin places in it:
+    patches of some 4 to 8 km and a mottle of some 200 to 400 m
+    (`midMottle`, which also stands for the cells' lumps where the pass
+    reads the column). They shape its thin fringes, and they set the
+    extinction of its body: 8 per km times a factor of 0.7 to 4, 2 on the
+    mean (`MID_THICK`: 2 to the power of a sum of the noise's scales, from
+    8 km down to the mottle, with a little drawn out along the wind), an
+    optical depth straight up of some 7 to 35. From below it is a grey
+    sheet with darker and lighter patches, as in photographs (0.6 to 2
+    stops across the frame, 0.35 to 1.2 once a gradient is taken off; the
+    render 0.7 to 1.1 and 0.4 to 0.9 from 0.3 and 4 km), and the sun shows
+    through its thinnest places only, as a dim disc. With the fringes alone
+    the body was as dense everywhere: a flat grey card from below (0.2 to
+    0.4 stops). The thin places are still deep enough to hide the sea from
+    above;
   - *between them* both are there, each with its share of its own
-    extinction (`MID_SIGMA`: 8 per km for a sheet, 45 for cells): a sheet
+    extinction (`MID_SIGMA`: 8 per km for a sheet, times its thick and
+    thin places, 45 for cells): a sheet
     that thins as cells grow in it, with no step at any form. A depth not
     given goes with the form too (1.2 - 0.8 `midform` km).
 - **The pass** (`MID_PASS`, `midClouds`): up to 128 steps along the ray
@@ -1956,7 +2001,8 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   through (`Tm`) as the depth. The sun's disc shows through a depth of up
   to 10.
 - **The light**, from optical depths alone: three steps towards the light
-  (each 3 to 5 times the one before, by the form), then the rest of the
+  in a sheet and two among cells (each 3 to 5 times the one before, by
+  the form), then the rest of the
   column aslant, on the side the light comes from (over the place or under
   it, mixed over 3 degrees each way of the light's level: switched there, a
   straight seam crossed the layer while the sun stood at 0 degrees, and
@@ -1975,12 +2021,42 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   towards the light came out a third too small, and a cell from below was
   white to its middle). So a
   cell from below is grey in its thick middle and white at its thin rim,
-  and from above its thin parts are dimmer than its thick ones. The
+  and from above its thin parts are dimmer than its thick ones.
+  *Relief* (`MID_RELIEF`, `MID_SHADOW`, `MID_SHADE.z`): among cells the
+  steps towards the light reach 80 m up at the least and read the noise
+  half a level and more finer than in a sheet, so a cell shades its far
+  side and its neighbour (a place on a cell's top has its column's top
+  just over it: ending there, and read over three cells and more, the
+  depth towards the light was the same everywhere, and the field from
+  above at a low sun was white all over). What lies towards the light
+  beyond the place's own column shades more than in a sheet, with 0.4 of
+  the light left in the deepest shade (the deck's own, scattered many
+  times: with the sky's light alone the shade was blue); and the sky's
+  light and the light that comes back are a quarter in the seams and
+  troughs, whole from 120 m over a cell's floor. The
   sky's light likewise, from above and from what lies below, in the unit
   that the low clouds' sky light was set in against photographs (`SKYV.x`:
   with the slab's alone, a fifth to a half of theirs, middle clouds at
   dusk, lit by the sky alone, were darker than the low cumulus under them
-  and the sea between them). In the scene
+  and the sea between them).
+  - *A sheet from below* is lit through itself alone, as a slab: the sun's
+    light by the cosine of its height (no less than `MID_SHEET_SUN`; 0.35
+    for cells, whose sides a low sun lights), the sky's light on its top
+    once (not `SKYV.x` times), and of both what the sea and the low
+    clouds send back up and the sheet down again, each in its own colour;
+    the same whichever way the eye looks. So it is grey at every height
+    of the sun by day (a saturation of 0.02 to 0.09 looking up from 0.3
+    and 4 km, from noon down to a sun 4 degrees up; photographs 0.02 to
+    0.11), a little warm with the sun at 4 degrees, salmon at sunset and
+    slate blue after. Before, the sky's share was 2.5 times the slab's,
+    and under a sun lower than 20 degrees an even sheet shaded itself
+    (the depth towards the light, upright, by another cosine than the
+    column aslant): with the sun at 19 degrees the sheet was blue (0.21
+    to 0.24), and bluer below that. Cells keep the wider share: the sky
+    lights their bases through the gaps between them. A thick place
+    shades its neighbour a third as much as a cell shades a cell.
+
+  In the scene
   the layer takes the colours of the light at its place as the low clouds
   do (`uLight`, the sun or the moon, through the air above; the sky's
   light of the sun and of the moon, and the night sky's), so it goes
@@ -2606,7 +2682,7 @@ on the map.
   10 km, from which the glow round the sun and the moon is drawn (the
   ice's, the veil's median and the thin veil's); it
   weighs the kinds by the bands and fields evened out by 0.8 (by the
-  local ones, the moonlit veil, which follows it at night, stood in
+  local ones, the moonlit veil, which followed it at night before PR #136, stood in
   lanes). It reads the ice over a footprint of some 10 km along the ray's
   way (`ciIceWide`): the mean of eight reads, four along the footprint
   and two across, each at the level of half their spacing. Read by the
@@ -2706,15 +2782,21 @@ on the map.
   cirrus farther on.
 - **At night** (`nightK`, up to 0.9 as the light goes over from the sun to
   the moon: no switch, `0.9 (1 - smoothstep(0.02, 0.3, uLightI))`; the
-  halo blends between its day and night strengths by the same) the light
-  that the sheet scatters, its share of the sky's light and the share
-  scattered many times follow its depth over some 10 km by that much, the
-  aureole follows the ice in front of the moon by less (0.1 for 0.4), and
-  a broader aureole (some 7 degrees) is added: photographs of a lunar
-  halo show a smooth sheet, a bright aureole and a clear ring, where the
-  moonlit decks stood as dark lanes across a grey veil with only a faint
-  ring (round 15), and at 0.65 of the depth over 10 km, still as lanes
-  at `cirrus` 0.5 (round 16).
+  halo blends between its day and night strengths by the same) the ring
+  fades by the depth over some 10 km by that much, the aureole follows the
+  ice in front of the moon by less (0.1 for 0.4), and a broader aureole
+  (some 7 degrees) is added: photographs of a lunar halo show a bright
+  aureole and a clear ring. The sheet's own light (scattered once and many
+  times, and its share of the sky's light) keeps the depth at the pixel,
+  by night as by day, so that moonlit cirrus shows the streaks and veils
+  of the day, by its own light. Before PR #136 that light followed the
+  depth over some 10 km by 0.9 too (since round 16, so that the lanes
+  between bands would not stand dark across a grey veil): under the moon
+  only the halo and faint streaks showed, and from some 4 degrees under
+  the horizon on, where the light is the moon's (`uLightI` near 0) and the
+  cirrus is lit by the twilight's sky, the cirrus was one flat veil with
+  no streaks (the texture of the luma, `texture` in `look`, 0.003 looking
+  up at the sun's -9 degrees, against 0.057 now).
 - **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
   extinction is diffraction by its crystals: light turned by less than a
   degree, which goes on as if not scattered. The march through the air
@@ -3728,6 +3810,17 @@ settled stills with independent draws stayed the same (1.41 % of the
 luma). Draws that are not tied (a hash for each, or the golden ratio's
 and the plastic number's steps for the start and the light's depth, from
 a hash of the pixel) left an irregular grain twice as strong (3 %).
+The two numbers of a direction (the sky's direction over the hemisphere,
+`u1` and `u2`, and the turn of the light's later steps against the
+others) must not be tied: the second is drawn by `ign2`, the same noise
+from a phase of its own. They were drawn as `ign` of the pixel's
+coordinates and of the same swapped (`gl_FragCoord.yx`), whose phases
+differ by 0.0613 (x - y): IGN's factor 52.98 turns that into a quarter
+of a turn a pixel, and the mean kept diagonal stripes 4 pixels apart on
+the low clouds where the scene works their light out itself (strongest
+under a middle layer: `weather=altostratus` at 0.3 km looking up, the
+sharpest peak over periods of 2 to 5 pixels 188 before, 14 after; 553
+and 20 with the first stage's light map left out).
 
 **The neighbourhood check.** If the past was nearer or further by enough to
 slip a fraction of a pixel (`doubt`, from the parallax), it counts only as

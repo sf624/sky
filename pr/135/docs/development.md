@@ -105,7 +105,7 @@ weather of the list sets it, and these win over the weather):
 | `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
 | `midbase` | 5 to 9 | 5.2 | The layer's base, km |
 | `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
-| `midrolls` | 0 to 1 | 0 | Adds to the regions where the cells stand in ranks (1: ranks everywhere) |
+| `midrolls` | 0 to 1 | 0 | Adds to the regions where the field is rolls, not cells (1: rolls everywhere) |
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
@@ -267,7 +267,8 @@ these rules, and new work at start should too:
   [design.md](design.md#middle-clouds)), and measure the wait with
   `node tools/sky.mjs d3d switch`.
 - CPU work over a few ms is a job (a generator that yields every little
-  while), run by `slices` at start and by `finish` later.
+  while), run by `slices`, at start and later (the table of multiple
+  scattering, when the haze changes): nothing runs a job in one go.
 - GPU work at start goes in `batches`, with a fence after each.
 - No `readPixels`, `getError` or `finish` that waits for the GPU while the
   page loads.
