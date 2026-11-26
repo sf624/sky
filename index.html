@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="ca77500 main">
+<meta name="build" content="c3c0298 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -8411,9 +8411,9 @@ const SkySound = (() => {
   const TH = 48, TM = 96, TMU_MIN = -0.2;
   const odTable = new Float32Array(TH * TM * 3);
   // The tables made at start are jobs: generators that yield every little
-  // while, so that the loading (see Loading) can spread them over frames.
-  // finish(job) runs one to its end at once.
-  const finish = job => { while (!job.next().done); };
+  // while, so that the loading (see Loading) can spread them over frames
+  // (`slices`); so is the table of multiple scattering made again later
+  // (see hazeJob).
   function* buildDepths() {
     const STEPS = 64;
     for (let j = 0; j < TH; j++) {
@@ -10762,7 +10762,7 @@ const SkySound = (() => {
       if (!flying || Math.abs(way[1]) > CLIMB_STEP) altSeen = v.alt;
       // (The middle clouds: none until they are built, see midWanted.)
       const midWait = state.mid > 0 && midWanted(), midOn = !!mid && mid.ready && state.mid > 0;
-      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
+      const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, builtHaze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
       if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return midWait;   // settled (the frames go on, undrawn, while the middle clouds' programs compile)
@@ -10824,7 +10824,7 @@ const SkySound = (() => {
       const topsKey = [v.cloud, lowKey()].join();
       if (v.cloud > 0 && topsKey !== topsFor) drawTops(v.cloud, topsKey);
       // The table of the air's light, for this frame's light, air and height.
-      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, v.alt, v.cloud, ...state.light, state.lightShare, midOn ? midKey() : ''].join() : '';
+      const lutKey = lut ? [...state.sun, state.sunOn, ...state.moon, state.moonI * moonAirFor(), state.haze, builtHaze, v.alt, v.cloud, ...state.light, state.lightShare, midOn ? midKey() : ''].join() : '';
       if (lut && lutKey !== lut.for) {
         // (Not read while drawn into.)
         gl.activeTexture(gl.TEXTURE29);
@@ -10851,7 +10851,7 @@ const SkySound = (() => {
         lut.for = lutKey;
       }
       // The sky's light on the clouds, for this frame's sun and haze.
-      const skyKey = v.cloud > 0 || midOn ? [...state.sun, state.sunOn, state.haze].join() : '';
+      const skyKey = v.cloud > 0 || midOn ? [...state.sun, state.sunOn, state.haze, builtHaze].join() : '';
       if (skyKey && skyKey !== skyLightFor) {
         // (Its unit is free while the draw writes it; draw expects unit 0.)
         bind(27, null);
@@ -11212,11 +11212,32 @@ const SkySound = (() => {
   let queued = false, changed = false, running = false, lastFrame = 0;
   // ?debug=1: the smoothed time between frames (ms) while they run, and when it was last updated.
   const debug = { on: false, ms: 0, at: 0 };
-  // The table of multiple scattering takes about a quarter of a second to
-  // build: while the haze slider moves it waits, and is built HAZE_WAIT ms
-  // after the last move (the first frame builds it at once).
+  // The table of multiple scattering takes 0.1 to 0.4 s of script to build.
+  // While the haze slider moves it waits; HAZE_WAIT ms after the last move
+  // (on the first frame, at once) it is built as a job, run by `slices`
+  // between the frames (hazeJob), and the frames draw the old table until
+  // it is done: built in one go, in a frame, it held the picture for 0.32
+  // to 0.47 s on Direct3D 11 at each change of the weather. The job writes
+  // the tables (msData, upData) only in its last slice; then builtHaze
+  // takes its haze, which draws the picture, the air's table and the sky's
+  // light on the clouds again (see `look` in render). A change of the haze
+  // while it runs ends it (return), and the wait begins again.
   const HAZE_WAIT = 250;
-  let seenHaze = null, hazeAt = -Infinity;
+  let seenHaze = null, hazeAt = -Infinity, hazeJob = null;
+  const buildHaze = haze => {
+    const job = hazeJob = buildMultiScatter(haze);
+    job.haze = haze;
+    slices([job], () => {}, soon).then(() => {
+      if (hazeJob !== job) return;
+      hazeJob = null;
+      builtHaze = haze;
+      update();
+    });
+  };
+  const dropHaze = () => {
+    if (hazeJob) hazeJob.return();
+    hazeJob = null;
+  };
   function frame(now) {
     queued = false;
     if (document.hidden) {
@@ -11232,12 +11253,15 @@ const SkySound = (() => {
       }
       if (render && builtHaze !== state.haze) {
         if (now - hazeAt >= HAZE_WAIT) {
-          finish(buildMultiScatter(state.haze));
-          builtHaze = state.haze;
+          if (!hazeJob || hazeJob.haze !== state.haze) {
+            dropHaze();
+            buildHaze(state.haze);
+          }
         } else {
+          dropHaze();
           setTimeout(update, HAZE_WAIT - (now - hazeAt));
         }
-      }
+      } else dropHaze();
       celestial();
       showLabels();
     }
@@ -12347,8 +12371,8 @@ const SkySound = (() => {
       else requestAnimationFrame(() => resolve());
     });
   }
-  // Runs jobs (see finish) to their ends in slices of about SLICE_MS, a
-  // slice a frame; report(share) after each job.
+  // Runs jobs (generators: see buildDepths) to their ends in slices of
+  // about SLICE_MS, a slice a wait; report(share) after each job.
   const SLICE_MS = 8;
   // The next task (a frame in a hidden tab, where timers are slowed anyway).
   const soon = () => document.hidden ? nextFrame() : new Promise(resolve => setTimeout(resolve, 0));

@@ -267,7 +267,8 @@ these rules, and new work at start should too:
   [design.md](design.md#middle-clouds)), and measure the wait with
   `node tools/sky.mjs d3d switch`.
 - CPU work over a few ms is a job (a generator that yields every little
-  while), run by `slices` at start and by `finish` later.
+  while), run by `slices`, at start and later (the table of multiple
+  scattering, when the haze changes): nothing runs a job in one go.
 - GPU work at start goes in `batches`, with a fence after each.
 - No `readPixels`, `getError` or `finish` that waits for the GPU while the
   page loads.
