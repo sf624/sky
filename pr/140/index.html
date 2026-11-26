@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="ad2d8fd PR #140">
+<meta name="build" content="d44f2a0 PR #140">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3083,9 +3083,21 @@ uniform float uMidRolls;
 // read where things were when it was drawn.
 uniform vec2 uMidShift;
 const float MID_KM = 6.4;            // its tile of the noise (a whole share of the weather map): cells of 1.6 km, 800 and 400 m
-const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's, the cells'
+const vec2 MID_SIGMA = vec2(8.0, 45.0); // extinction of a dense part, per km: a sheet's (times its thick and thin places, MID_THICK), the cells'
 const float MID_FULL = 0.5;          // the density (0 to 1) that is as dense as that
 const float MID_DETAIL = 5.0;        // its fine noise: tiles per tile
+// A sheet's thick and thin places (see midSheet): its extinction is MID_SIGMA.x times a factor that varies from place
+// to place, MID_THICK_MEAN on the mean and between MID_THICK_MIN and MID_THICK_MAX: an optical depth straight up of
+// some 7 to 35, as an altostratus has (the sun's disc shows through the thinnest places only). The factor is 2 to the
+// power of MID_THICK_GAIN times a sum of the noise's scales about their means, each with its weight (MID_THICK: x
+// patches of some 4 to 8 km, y of 1.6 to 3 km, z of 0.8 to 1 km, w streaks along the wind).
+// Thick on the mean so that the thin places still hide the sea from above: about a mean of 1 (a depth of 2 to 10 in
+// the thin places) the sheet from above was torn, dark grey where the sea showed through.
+const vec4 MID_THICK = vec4(1.6, 1.4, 1.2, 0.25);
+const float MID_THICK_GAIN = 1.5, MID_THICK_MEAN = 2.0, MID_THICK_MIN = 0.7, MID_THICK_MAX = 4.0;
+// The least cosine of the sun's light to a sheet, for the light that falls on it (see midClouds): its top is level,
+// but for its swells. (Cells stand up, and a low sun lights their sides: 0.35.)
+const float MID_SHEET_SUN = 0.2;
 // The cut through the noise that the cells are read on: not a level slice of
 // its tile but an oblique one (two vectors at right angles, of 256 / 39.8 and
 // 256 / 32.1 km to the tile, and the cut's normal), whose depth in the noise
@@ -3262,21 +3274,29 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   base *= mix(max(smoothstep(0.3, 0.55, midLump), 0.25), 1.0, 1.0 - smoothstep(0.8, 2.5, length(p)));
   return clamp(mix(base, heap, top), 0.0, 1.0);
 }
-// The sheet's density at p, 0 to 1 (the arguments as midCells'; fine: with
-// the fine noise).
+// The sheet's density at p (the arguments as midCells'; fine: with the fine
+// noise): 0 to MID_FULL, times its thick and thin places (up to
+// MID_THICK_MAX).
 float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fine) {
   // Where: the weather map's amount, elsewhere on it, over 4 km and more
   // (patches and sheets, with clear lanes), and over some 20 km (wr).
   float am = clamp(uMid.x + 0.7 * (1.0 - 0.8 * smoothstep(0.75, 1.0, uMid.x)) * (wa - 0.5), 0.0, 1.0);
-  // Thick and thin places in it, as the amount there: patches of some 3 to
-  // 6 km drawn out along the wind, and a mottle of some 200 to 400 m (read
-  // at a depth in the noise that wanders with the patches, so that its tile
-  // of 1.6 km does not show). From below an altostratus is a grey sheet,
-  // darker where it is thicker and finely mottled: in photographs the luma
-  // varies by some 2 % over a few degrees and 3 to 5 % over tens of them.
-  // With the slow swells alone it was an even white veil, 0.3 and 0.8 %.
-  vec4 m = textureLod(uNoise, vec3(0.5 * x.x, 0.0, x.y) / (2.0 * MID_KM) + vec3(0.37, 0.19 + 0.25 * t * uMid.w / MID_KM + wr, 0.71), max(lod - 1.0, 0.0));
-  vec4 mn = textureLod(uNoise, vec3(0.6 * x.x, 0.5 * h, x.y) * (2.0 / MID_KM) + vec3(0.53, 1.7 * m.b + 0.9 * m.a, 0.29), max(lod, 0.0));
+  // Thick and thin places in it: patches of some 4 to 8 km drawn out along
+  // the wind, and a mottle of some 200 to 400 m (read at a depth in the
+  // noise that wanders with the patches, smoothly, so that its tile of 1.6
+  // km does not show; by the patches' cells of 1.6 km, whose creases are
+  // sharp, the mottle curled along them like the veins of marble). From
+  // below an altostratus is a grey sheet, darker where it is thicker and
+  // finely mottled: in photographs the luma varies by some 2 % over a few
+  // degrees, and by 0.6 to 2 stops across the frame (0.35 to 1.2 once a
+  // gradient across it is taken off). They are in the sheet twice:
+  //  - th, on the thin fringes of the sheet, over and under its body;
+  //  - thick (the last lines), the extinction of the body itself: what
+  //    is seen from below is how much the whole depth lets through. With
+  //    the fringes alone the body was as dense everywhere, and the sheet a
+  //    flat grey card (0.2 to 0.3 stops once the gradient is taken off).
+  vec4 m = textureLod(uNoise, vec3(0.65 * x.x, 0.0, x.y) / (2.0 * MID_KM) + vec3(0.37, 0.19 + 0.25 * t * uMid.w / MID_KM + wr, 0.71), max(lod - 1.0, 0.0));
+  vec4 mn = textureLod(uNoise, vec3(0.6 * x.x, 0.5 * h, x.y) * (2.0 / MID_KM) + vec3(0.53, 1.7 * m.r, 0.29), max(lod, 0.0));
   midMottle = 0.5 * mn.b + 0.5 * mn.a;
   float th = clamp(1.0 + 1.4 * (m.r - 0.5) + 2.5 * (midMottle - 0.5), 0.3, 1.8);
   float d;
@@ -3300,7 +3320,10 @@ float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fin
     }
   }
   er = clamp(0.5 + 2.0 * (er - 0.5), 0.0, 1.0);
-  return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0) * 0.8 * th;
+  // (No read more: the scales of the three reads above.)
+  float thick = MID_THICK.x * (m.r - 0.62) + MID_THICK.y * (0.6 * (m.g - 0.5) + 0.4 * (m.b - 0.5)) + MID_THICK.z * (0.5 * (m.a - 0.5) + 0.5 * (mn.r - 0.62))
+              + MID_THICK.w * (0.6 * (n.b - 0.5) + 0.4 * (n.a - 0.5)) + 0.5 * (midMottle - 0.5);
+  return min(clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0) * 0.8 * th, MID_FULL) * clamp(MID_THICK_MEAN * exp2(MID_THICK_GAIN * thick), MID_THICK_MIN, MID_THICK_MAX);
 }
 // The density at p (from the eye), 0 to 1. lod as cloudShape's; fine: the
 // cells with their fine noise (else its mean); eye: the eye's own samples,
@@ -3319,12 +3342,12 @@ float midDensity(vec3 p, float lod, bool fine, bool eye) {
   vec4 wm = textureLod(uWeather, xw, 4.0), wf = textureLod(uWeather, xw, 6.5);
   float wr = wf.r, form = uMid.y, cells = 0.0, sheet = 0.0;
   if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, xw, wm, wf, textureLod(uWeather, xw + vec2(0.43, 0.29), 5.5), lod, fine, eye), MID_FULL);
-  if (form < UNSEEN(1.0)) sheet = min(midSheet(h, t, x, wm.r, wr, lod, eye), MID_FULL);
+  if (form < UNSEEN(1.0)) sheet = midSheet(h, t, x, wm.r, wr, lod, eye);
   midLump = mix(midMottle, midLump, form);
   return (MID_SIGMA.x * (1.0 - form) * sheet + MID_SIGMA.y * form * cells) / mix(MID_SIGMA.x, MID_SIGMA.y, form);
 }
 float midExtinction(float den) {
-  return mix(MID_SIGMA.x, MID_SIGMA.y, uMid.y) * min(den / MID_FULL, 1.0);
+  return mix(MID_SIGMA.x, MID_SIGMA.y, uMid.y) * min(den / MID_FULL, MID_THICK_MAX);
 }
 // What a column of the layer lets through of the light on it, direct and
 // scattered together, as a slab that keeps all it scatters (Eddington's two
@@ -4735,6 +4758,7 @@ const float CI_METER = 12.0;               // ...and for the meter, towards this
 // clouds) shows through by that share as well, softened; a point (the
 // sun, the moon, a star) is spread into the glow round it instead.
 const float CI_FWD = 0.4;
+const float CI_REFR = 0.02;     // radians: the bend of a ray that grazes the ground, both ways (see cirrusLight)
 // The way a low sun's light runs through the shell to reach the ice (km
 // a unit of 1 / sin of its height), how wide that read is, and the phase of
 // the light that has spread through the sheet (see highCloud).
@@ -4830,6 +4854,11 @@ float ciBody = 0.0;
 float ciVeil = 0.0;
 // And its depth over some 10 km, for the glow next to the sun and the moon.
 float ciWide = 0.0;
+// The share of the glow on the sheet's horizon (the mean light less the
+// light through its faces, ciSky) that reaches the ice: it comes in level,
+// as a low sun does, between the strands, through the depth over the way
+// towards the sun (tauP, ciLowSun), as the low sun's light scattered once.
+float ciGlow = 1.0;
 
 // The ice's tile for deck k at uv on the map: the upper deck (1) along
 // (3, 1) and across (-1, 3), two tiles to a unit of 81 km; the lower (0)
@@ -5398,7 +5427,9 @@ vec2 ciLowSun(vec3 pc) {
   vec3 up = normalize(pc);
   float mus = dot(up, uSun), li = 1.0 / max(abs(mus), 0.15);
   float duskK = uCiLights.x > 0.0 ? smoothstep(2.0, 6.0, li) : 0.0, tauP = 0.0;
-  if (duskK > 0.0) {
+  // (Also with the sun under the sheet's horizon, for the glow there: see
+  // ciGlow.)
+  if (duskK > 0.0 || (uSunI > 0.0 && mus < 0.0)) {
     vec2 sh = uSun.xz - up.xz * mus;
     sh = length(sh) > 1e-6 ? normalize(sh) : vec2(1.0, 0.0);
     float L = CI_PATH * li;
@@ -5560,6 +5591,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
   // the same cirrus lit gold farther off.
   float tPre = tau > 0.0 ? wtt / tau : tSum / max(nSum, 1.0);
   vec2 lowSun = ciLowSun(o + d * mix(tPre, 0.5 * (t0 + tE), wn));
+  ciGlow = exp(-0.6 * lowSun.y / 0.15);
 #if Q_CI_STEPS > 0
   if (tE > t0) {
     float dt = (tE - t0) / float(CI_STEPS), jit = ign(gl_FragCoord.xy + 2.718 * uPass + 5.0);
@@ -5782,14 +5814,28 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
 // of its pass (see highCloud).
 void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H[3], out vec4 HM[3]) {
   vec3 pc = o + d * tHigh, up = normalize(pc);
-  float a = uintBitsToFloat(bits.x);
+  vec2 aG = unpackUnorm2x16(bits.x);
+  float a = aG.x;
   vec4 lkL = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? vec4(unpackHalf2x16(bits.y), unpackHalf2x16(bits.z))
            : uCiLights.x > 0.0 ? vec4(uintBitsToFloat(bits.yz), 0.0, 0.0) : vec4(0.0, 0.0, uintBitsToFloat(bits.yz));
   float wBelow = 0.5 + 0.35 * dot(d, up);
   vec4 msS[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0)), msM[3] = msS, F[3] = msS, B[3] = msS;
   float rc = length(pc);
-  if (uSunI > 0.0) ciSky(rc - RG, dot(pc, uSun) / rc, msS);
-  if (uMoonI > 0.0) ciSky(rc - RG, dot(pc, uMoon) / rc, msM);
+  // The sky's light through the sheet's faces (ciSky), and the share
+  // ciGlow (aG.y) of the rest of the mean light, the glow on the sheet's
+  // horizon, that finds its way to the ice between the strands.
+  if (uSunI > 0.0) {
+    vec4 mS[3];
+    ciSky(rc - RG, dot(pc, uSun) / rc, msS);
+    multiScatter(rc - RG, dot(pc, uSun) / rc, mS);
+    for (int k = 0; k < 3; k++) msS[k] += aG.y * (mS[k] - msS[k]);
+  }
+  if (uMoonI > 0.0) {
+    vec4 mM[3];
+    ciSky(rc - RG, dot(pc, uMoon) / rc, msM);
+    multiScatter(rc - RG, dot(pc, uMoon) / rc, mM);
+    for (int k = 0; k < 3; k++) msM[k] += aG.y * (mM[k] - msM[k]);
+  }
   // Each light (uCiLights): the sun's, where it reaches the sheet past the
   // planet, through the air above (reddened low), and the moon's.
   for (int l = 0; l < 2; l++) {
@@ -5797,8 +5843,17 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H
     if (uCiLights[l] <= 0.0) continue;
     vec3 L = l == 0 ? uSun : uMoon;
     vec2 lk = l == 0 ? lkL.xy : lkL.zw;
-    float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
+    // Refraction: a ray that passes low over the planet is bent round it,
+    // by CI_REFR where it grazes the ground (twice the 34' of the horizon
+    // seen from the ground) and less as the air it grazes thins (HR), so
+    // that seen from the sheet in the twilight the light stands higher and
+    // its rays reach the sheet past the planet for a degree longer. From
+    // 1.5 degrees under the sheet's horizon (as ciSky), by degrees.
     float mus = dot(up, L);
+    float graze = rc * sqrt(max(1.0 - mus * mus, 0.0)) - RG;
+    L = normalize(L + CI_REFR * exp(-max(graze, 0.0) / HR) * smoothstep(-0.026, -0.05, mus) * up);
+    mus = dot(up, L);
+    float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
     if (raySphere(pc, L, RG).y >= 0.0) continue;
     vec3 ol = depthToTop(pc, L);
     // Light from below: the low clouds, lit by the same light, add to the
@@ -5869,7 +5924,7 @@ void main() {
   // numbers as halves; with one, as floats.
   uvec2 lb = uCiLights.x > 0.0 && uCiLights.y > 0.0 ? uvec2(packHalf2x16(lkL.xy), packHalf2x16(lkL.zw))
                                                      : floatBitsToUint(uCiLights.x > 0.0 ? lkL.xy : lkL.zw);
-  outCirrus = uvec4(floatBitsToUint(tHigh), floatBitsToUint(lkA), lb);
+  outCirrus = uvec4(floatBitsToUint(tHigh), packUnorm2x16(vec2(lkA, ciGlow)), lb);
   gl_FragDepth = Th;
 }
 #elif defined(SHADOW_MAP)
@@ -6295,7 +6350,9 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // (The column by the lumps: the map of the columns is of the field without them. Only seen from under or over the
       // layer and from some way off: from within and aslant, a lump's column showed as a grey disc.)
       float col = midColumn(P) * mix(1.0, max(2.0 * lump, 0.1), 0.4 * smoothstep(0.15, 0.5, abs(cv)) * smoothstep(0.3, 1.5, t));
-      float m = max(abs(sunUp), 0.35);
+      // (The light's cosine to the layer, for the light that falls on it: no less than 0.35 for cells, whose sides a low
+      // light falls on; for a sheet no less than MID_SHEET_SUN.)
+      float m = max(abs(sunUp), mix(MID_SHEET_SUN, 0.35, uMid.y));
       // Two streams through the layer as a slab that keeps all it scatters
       // (Eddington's): of the light on its sun side, e0 / (1 + K col) comes
       // out of the far side; at a place with `over` of the column behind it
@@ -6310,11 +6367,23 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // in its thick middle.
       // (The depth behind a place is the less of its own share of the column and the depth along the light, upright: the
       // lumps shade one another, and along a low sun's line the depth is many cells', not the layer's.)
-      float over = min(tauS * m, col * mix(tf, 1.0 - tf, fromUp)), e0 = midThrough(col, m);
-      // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly.)
-      float shade = 1.0 / (1.0 + 3.0 * K * max(tauS * m - over, 0.0));
+      // (Upright: times the cosine that the column aslant was divided by, for a sheet. Times m, whose floor is higher,
+      // the depth of an even sheet under a sun lower than 20 degrees came out more than its own column, as if a
+      // neighbour shaded it: the sun's light through it fell away as the sun sank (to a fifth at 8 degrees, through a
+      // depth of 8), the sky's stayed, and the sheet turned blue. Cells keep m: their look was set with it.)
+      float upright = tauS * mix(slant, m, uMid.y);
+      float over = min(upright, col * mix(tf, 1.0 - tf, fromUp)), e0 = midThrough(col, m);
+      // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly. A third
+      // as much in a sheet: the light spreads sideways in it on its way through, and a thick place does not shade the
+      // base of its neighbour as a cell shades a cell.)
+      float shade = 1.0 / (1.0 + mix(1.0, 3.0, uMid.y) * K * max(upright - over, 0.0));
       float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = shade * e0 * K * (col - over);
       float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
+      // (A sheet seen from the side away from the light shows what came through it whichever way the eye looks: its
+      // base, looking up and away from a low sun, took a share of the stream that goes back, nothing there, and was
+      // darker and bluer than towards the sun. wd: how far the view looks up.)
+      float wd = smoothstep(-0.25, 0.25, cv);
+      c = mix(c, 1.0, mix(1.0 - wd, wd, fromUp) * (1.0 - uMid.y));
       // Scattered once; the aureole (the droplets send half of what they
       // scatter on within a degree: that light fades half as fast, and is
       // the small glow round a sun seen through a veil); then the next
@@ -6327,11 +6396,21 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // the low clouds and the air below send up.
       float above = col * (1.0 - tf), under = col * tf, thru = 1.0 / (1.0 + K * col);
       float down = (1.0 + K * under) * thru, upG = (1.0 + K * above) * thru;
-      float wd = smoothstep(-0.25, 0.25, cv), ground = 0.12 + 0.3 * uCloud;
+      float ground = 0.12 + 0.3 * uCloud;
       // (In the unit the low clouds' sky light was set in against photographs, SKYV.x: with the slab's alone, a fifth
       // to a half of theirs, the middle clouds at dusk, lit by the sky alone, were darker than the low cumulus under
       // them and than the sea between them, though higher up and nearer the light.)
       float amb = SKYV.x * (mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd));
+      // A sheet seen from below (sheet: by the form and the view) is lit through itself alone: of the sky's light on
+      // its top, what the slab lets through, once, not SKYV.x times; and of all that came down through it, the sun's
+      // and the sky's, what the sea and the low clouds send back up and the sheet sends down again (back), each in
+      // its own colour. (With SKYV.x and the ground's share counted in the sky's light alone, the sky's blue was 2.5
+      // times what a slab lets through: a third to a half of the sheet's light with the sun at 19 degrees, where
+      // photographs of an altostratus from below are grey at every height of the sun. Cells keep it: the sky lights
+      // their bases through the gaps between them.)
+      float back = ground * (upG - thru), sheet = wd * (1.0 - uMid.y);
+      amb = mix(amb, down + thru * back, sheet);
+      sun += sheet * fromUp * m / PI * shade * e0 * back;
       sSun += w * sun;
       sAmb += w * amb;
       sunPrev = sun;
@@ -8915,7 +8994,8 @@ const SkySound = (() => {
   // to 2 degrees under the horizon: while the sun is up, its light on the
   // cirrus is under a thousandth of the sky's.
   const CI_TOP = 12.8, CI_DIP = Math.acos(RG / (RG + CI_TOP)) / RAD;   // CI_HI in the shader; 3.6 degrees
-  const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD) ? 1 : 0,
+  const CI_REFR = 0.02;   // as in the shader: the most refraction lifts the sun seen from the cirrus, radians
+  const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD + CI_REFR / RAD) ? 1 : 0,
                               state.moonI * smooth01(-state.elev / 2)];
 
   // The white balance (uBalance). By day a camera's for daylight. In
