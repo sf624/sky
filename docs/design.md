@@ -1916,15 +1916,24 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     of small elements (two crossing waves of 300 and 420 m);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
-    with fine noise on its thin places, and thick and thin places in it: its
-    density times patches of some 3 to 6 km and a mottle of some 200 to 400
-    m (`midMottle`, which also stands for the cells' lumps where the pass
-    reads the column). From below it is a grey sheet, darker where it is
-    thicker and finely mottled, as in photographs (the luma varies by some
-    2 % over a few degrees and 3 to 5 % over tens of them); before, it was
-    an even white veil (0.3 and 0.8 % from 4 km under it);
+    with fine noise on its thin places, and thick and thin places in it:
+    patches of some 4 to 8 km and a mottle of some 200 to 400 m
+    (`midMottle`, which also stands for the cells' lumps where the pass
+    reads the column). They shape its thin fringes, and they set the
+    extinction of its body: 8 per km times a factor of 0.7 to 4, 2 on the
+    mean (`MID_THICK`: 2 to the power of a sum of the noise's scales, from
+    8 km down to the mottle, with a little drawn out along the wind), an
+    optical depth straight up of some 7 to 35. From below it is a grey
+    sheet with darker and lighter patches, as in photographs (0.6 to 2
+    stops across the frame, 0.35 to 1.2 once a gradient is taken off; the
+    render 0.7 to 1.1 and 0.4 to 0.9 from 0.3 and 4 km), and the sun shows
+    through its thinnest places only, as a dim disc. With the fringes alone
+    the body was as dense everywhere: a flat grey card from below (0.2 to
+    0.4 stops). The thin places are still deep enough to hide the sea from
+    above;
   - *between them* both are there, each with its share of its own
-    extinction (`MID_SIGMA`: 8 per km for a sheet, 45 for cells): a sheet
+    extinction (`MID_SIGMA`: 8 per km for a sheet, times its thick and
+    thin places, 45 for cells): a sheet
     that thins as cells grow in it, with no step at any form. A depth not
     given goes with the form too (1.2 - 0.8 `midform` km).
 - **The pass** (`MID_PASS`, `midClouds`): up to 128 steps along the ray
@@ -1954,7 +1963,25 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   that the low clouds' sky light was set in against photographs (`SKYV.x`:
   with the slab's alone, a fifth to a half of theirs, middle clouds at
   dusk, lit by the sky alone, were darker than the low cumulus under them
-  and the sea between them). In the scene
+  and the sea between them).
+  - *A sheet from below* is lit through itself alone, as a slab: the sun's
+    light by the cosine of its height (no less than `MID_SHEET_SUN`; 0.35
+    for cells, whose sides a low sun lights), the sky's light on its top
+    once (not `SKYV.x` times), and of both what the sea and the low
+    clouds send back up and the sheet down again, each in its own colour;
+    the same whichever way the eye looks. So it is grey at every height
+    of the sun by day (a saturation of 0.02 to 0.09 looking up from 0.3
+    and 4 km, from noon down to a sun 4 degrees up; photographs 0.02 to
+    0.11), a little warm with the sun at 4 degrees, salmon at sunset and
+    slate blue after. Before, the sky's share was 2.5 times the slab's,
+    and under a sun lower than 20 degrees an even sheet shaded itself
+    (the depth towards the light, upright, by another cosine than the
+    column aslant): with the sun at 19 degrees the sheet was blue (0.21
+    to 0.24), and bluer below that. Cells keep the wider share: the sky
+    lights their bases through the gaps between them. A thick place
+    shades its neighbour a third as much as a cell shades a cell.
+
+  In the scene
   the layer takes the colours of the light at its place as the low clouds
   do (`uLight`, the sun or the moon, through the air above; the sky's
   light of the sun and of the moon, and the night sky's), so it goes

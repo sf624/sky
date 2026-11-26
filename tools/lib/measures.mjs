@@ -569,4 +569,41 @@ export function texture(img, { region: box, k1 = 2, k2 = 24, m = 2 } = {}) {
   return n ? Math.sqrt(s / n) / Math.max(sb / n, 1) : 0;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape, texture };
+// patchStops: the contrast of light and dark patches across the region, in stops. The region in a grid of
+// opt.nx by opt.ny blocks (24 by 14); each block's mean luminance (linear, from the sRGB levels); blocks with a
+// pixel of luma opt.top (250) or more are left out (the sun's disc and its glare). The 95th less the 5th
+// percentile of log2 of the blocks. With opt.flat, less the plane that fits them best: a smooth gradient across
+// the frame (towards the horizon, away from the sun) does not count, only patches.
+export function patchStops(img, { region: box, nx = 24, ny = 14, top = 250, flat = false } = {}) {
+  const R = region(img, box), lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const pts = [];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x0 = Math.floor(i * R.w / nx), x1 = Math.floor((i + 1) * R.w / nx), y0 = Math.floor(j * R.h / ny), y1 = Math.floor((j + 1) * R.h / ny);
+      let s = 0, n = 0, hi = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const k = y * R.w + x;
+        s += 0.2126 * lin(R.r[k]) + 0.7152 * lin(R.g[k]) + 0.0722 * lin(R.b[k]); n++;
+        hi = Math.max(hi, R.l[k]);
+      }
+      if (n && hi < top) pts.push([i, j, Math.log2(Math.max(s / n, 1e-5))]);
+    }
+  }
+  if (pts.length < 8) return 0;
+  let v = pts.map((q) => q[2]);
+  if (flat) {
+    // (Least squares of v = a x + b y + c: the normal equations, by Cramer's rule.)
+    let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, sxv = 0, syv = 0, sv = 0;
+    for (const [x, y, w] of pts) { sxx += x * x; sxy += x * y; sx += x; syy += y * y; sy += y; sxv += x * w; syv += y * w; sv += w; }
+    const n = pts.length, det3 = (a, b, c, d, e, f, g, h, i) => a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    const D = det3(sxx, sxy, sx, sxy, syy, sy, sx, sy, n);
+    if (Math.abs(D) > 1e-9) {
+      const a = det3(sxv, sxy, sx, syv, syy, sy, sv, sy, n) / D, b = det3(sxx, sxv, sx, sxy, syv, sy, sx, sv, n) / D, c = det3(sxx, sxy, sxv, sxy, syy, syv, sx, sy, sv) / D;
+      v = pts.map(([x, y, w]) => w - (a * x + b * y + c));
+    }
+  }
+  const s = sorted(v);
+  return at(s, 95) - at(s, 5);
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture };
