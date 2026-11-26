@@ -450,27 +450,61 @@ export function lineDip(img, { region: box, cols = 8, k = 4 } = {}) {
   return best;
 }
 
-// stars: the points of light the region shows, per 10 000 px: pixels at least opt.t levels (default 12) of luma
-// above the mean of their surroundings ((2k+1)^2 px, opt.k default 4), and the brightest in their 5 x 5 px. In
-// levels as shown, not relative to the region: a star the screen shows 12 levels over a black sky is seen, one
-// 3 levels over it is not.
-export function stars(img, { region: box, k = 4, t = 12 } = {}) {
-  const R = region(img, box), { w, h, l } = R, I = new Float64Array((w + 1) * (h + 1));
+// The points of light of a region (R, from region()): pixels at least t levels of luma above the mean of their
+// surroundings ((2k+1)^2 px) and the brightest in their 5 x 5 px, each { x, y, over } (over: levels above that mean).
+function lightPoints(R, k, t) {
+  const { w, h, l } = R, I = new Float64Array((w + 1) * (h + 1)), out = [];
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) I[(y + 1) * (w + 1) + x + 1] = l[y * w + x] + I[y * (w + 1) + x + 1] + I[(y + 1) * (w + 1) + x] - I[y * (w + 1) + x];
-  let n = 0;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const v = l[y * w + x];
     const x0 = Math.max(0, x - k), x1 = Math.min(w, x + k + 1), y0 = Math.max(0, y - k), y1 = Math.min(h, y + k + 1);
     const s = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0];
-    if (v - s / ((x1 - x0) * (y1 - y0)) < t) continue;
+    const over = v - s / ((x1 - x0) * (y1 - y0));
+    if (over < t) continue;
     let top = true;
     for (let dy = -2; dy <= 2 && top; dy++) for (let dx = -2; dx <= 2; dx++) {
       const xx = x + dx, yy = y + dy;
       if ((dx || dy) && xx >= 0 && yy >= 0 && xx < w && yy < h && (l[yy * w + xx] > v || (l[yy * w + xx] === v && yy * w + xx < y * w + x))) { top = false; break; }
     }
-    if (top) n++;
+    if (top) out.push({ x, y, over });
   }
-  return n / (w * h) * 1e4;
+  return out;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars };
+// stars: the points of light the region shows, per 10 000 px: pixels at least opt.t levels (default 12) of luma
+// above the mean of their surroundings ((2k+1)^2 px, opt.k default 4), and the brightest in their 5 x 5 px. In
+// levels as shown, not relative to the region: a star the screen shows 12 levels over a black sky is seen, one
+// 3 levels over it is not.
+export function stars(img, { region: box, k = 4, t = 12 } = {}) {
+  const R = region(img, box);
+  return lightPoints(R, k, t).length / (R.w * R.h) * 1e4;
+}
+
+// starShape: how drawn out the brightest points of light are. For each of the opt.n (default 12) points of
+// `stars` that stand furthest over their surroundings (opt.t default 30), in a window of (2r+1)^2 px (opt.r
+// default 6): the luma over the median of the window's rim, where it is at least a quarter of the point's own;
+// the ratio of the long axis of its second moments to the short one (each at least 0.08 px^2, about a
+// pixel's). The median over the points: a point 1.1 to 1.4, a streak 2 and more.
+export function starShape(img, { region: box, k = 4, t = 30, n = 12, r = 6 } = {}) {
+  const R = region(img, box), { w, h, l } = R;
+  const pts = lightPoints(R, k, t).filter((p) => p.x >= r && p.y >= r && p.x < w - r && p.y < h - r);
+  pts.sort((a, b) => b.over - a.over);
+  const ratios = [];
+  for (const p of pts.slice(0, n)) {
+    const rim = [];
+    for (let d = -r; d <= r; d++) rim.push(l[(p.y - r) * w + p.x + d], l[(p.y + r) * w + p.x + d], l[(p.y + d) * w + p.x - r], l[(p.y + d) * w + p.x + r]);
+    const bg = median(rim), peak = l[p.y * w + p.x] - bg;
+    let s = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const v = l[(p.y + dy) * w + p.x + dx] - bg;
+      if (v < 0.25 * peak) continue;
+      s += v; sx += v * dx; sy += v * dy; sxx += v * dx * dx; syy += v * dy * dy; sxy += v * dx * dy;
+    }
+    const cx = sx / s, cy = sy / s, a = sxx / s - cx * cx, c = syy / s - cy * cy, b = sxy / s - cx * cy;
+    const m = (a + c) / 2, q = Math.sqrt(((a - c) / 2) ** 2 + b * b);
+    ratios.push(Math.sqrt(Math.max(m + q, 1e-6) / Math.max(m - q, 0.08)));
+  }
+  return median(ratios);
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars, starShape };

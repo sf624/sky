@@ -97,6 +97,8 @@ The limits are absolute: no base is needed, and a flaw that was merged is still 
 
 It takes about 90 s on the GPU for the 19 entries (18 stills). It is not meant for SwiftShader: there the stills take minutes each, and the limits were set on the GPU.
 
+An entry whose query sets `speed` is not a still: its 46 frames are flown (stars dragged in flight, for example).
+
 A measure with `against: NAME` is divided by the same measure of entry NAME's still (over `againstRegion`, else the same region): a ratio between two views, such as the Earth's band looking up and looking level. `--only` brings that entry along.
 
 The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of the picture), in 8-bit sRGB levels as shown:
@@ -119,6 +121,7 @@ The measures (`lib/measures.mjs`), each on a region `[x, y, w, h]` (fractions of
 | `detailScale` | The lag at which the autocorrelation falls to 0.5, over the picture's width: the size of the detail. | It is dominated by the finest grain; it did not separate the cumulus before and after #104. |
 | `lineDip` | A thin dark line across the region: per row, the dip of rows y, y + 1 below the rows on both sides, the median over `cols` strips, the largest over rows. | A line across less than half the strips; a line that is not darker than both sides. |
 | `stars` | The points of light per 10 000 px: pixels at least `t` levels (default 12) over the mean of their surroundings (`k` px, default 4) and the brightest in 5 x 5 px. Levels as shown, so a darker night that hides the stars lowers it. | Which points are stars: glints and sparkles on the sea count too, so use it on the sky. Like `speckDensity`, it depends on the picture's size. |
+| `starShape` | How drawn out the brightest points of light are: for the `n` (default 12) points of `stars` furthest over their surroundings (at least `t`, default 30), the ratio of the long axis of their light's second moments to the short one (over the median of a window's rim, where at least a quarter of the point's), the median over the points. A point 1.1 to 1.4; a streak 2 and more. | Which points are stars, as for `stars`; two stars within a few pixels are one long point. |
 
 ## The fake clock
 

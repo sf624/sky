@@ -154,6 +154,16 @@ test('stars: points 12 levels or more over their surroundings, per 10 000 px', (
   assert.ok(Math.abs(M.stars(img, { t: 5 }) - 4 / (200 * 50) * 1e4) < 1e-9);
 });
 
+test('starShape: points near 1, dotted streaks well over 2', () => {
+  // Gaussian points of a pixel and a half across, and the same points copied four times, 4 px apart along a slope.
+  const at = (list) => (x, y) => 8 + list.reduce((s, [px, py, v]) => s + v * Math.exp(-((x - px) ** 2 + (y - py) ** 2) / 0.6), 0);
+  const centres = [[20, 20], [60, 30], [100, 20], [140, 35], [180, 25]];
+  const points = pic(200, 60, at(centres.map(([x, y]) => [x, y, 150])));
+  const streaks = pic(200, 60, at(centres.flatMap(([x, y]) => [0, 1, 2, 3].map((i) => [x - 6 + 4 * i, y + 2 - i, 150]))));
+  assert.ok(M.starShape(points) < 1.3, `points ${M.starShape(points)}`);
+  assert.ok(M.starShape(streaks) > 2.5, `streaks ${M.starShape(streaks)}`);
+});
+
 test('judge: a measure against another entry\'s still is their ratio', () => {
   const a = pic(20, 20, () => 40), b = pic(20, 20, () => 20);
   const e = { name: 'up', measures: [{ measure: 'lumaPct', against: 'level', max: 1.5 }] };
