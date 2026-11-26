@@ -1505,6 +1505,210 @@
    "bad": "ca77500",
    "fixed": null,
    "note": "At rest. main ca77500: 188 (the sky's direction drawn as ign of the pixel and of its swapped coordinates, whose phases differ by a quarter of a turn a pixel along x - y); the fix (ign2, a phase of its own): 14.0. With the first stage's light map left out (it hides most of it): 553 and 20."
+  },
+  {
+   "name": "sheet-grey-low-sun-4km",
+   "q": "weather=altostratus&alt=4&date=330&time=15&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "an altostratus overhead with the sun 19 degrees up was clearly blue, where photographs of altostratus from below are neutral grey at every height of the sun by day (saturation 0.02 to 0.11, blue over green 1.0 to 1.1 in levels)",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "label": "saturation",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "sat",
+     "max": 0.14
+    },
+    {
+     "measure": "brightColour",
+     "label": "blue/green",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "bg",
+     "max": 1.13
+    }
+   ],
+   "bad": "517494b",
+   "fixed": null,
+   "note": "Over the sheet's frame, every pixel (p 0): saturation 0.242 and blue/green 1.214 on main 517494b; 0.079 and 1.080 with the sheet lit through itself as a slab (the sky's light once, the sun's by its height, no shade of an even sheet on itself). Without the sky's light on the sheet the picture was warm (blue/green 0.88 in linear light), with it alone deep blue (2.6): the sky's share carried the cast."
+  },
+  {
+   "name": "sheet-grey-sun-8deg-4km",
+   "q": "weather=altostratus&alt=4&date=330&time=16.21&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "the same with the sun 8 degrees up: bluer still (under a sun lower than 20 degrees an even sheet shaded itself from the sun's light, and the sky's was left)",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "label": "saturation",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "sat",
+     "max": 0.16
+    },
+    {
+     "measure": "brightColour",
+     "label": "blue/green",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "bg",
+     "max": 1.13
+    },
+    {
+     "measure": "brightColour",
+     "label": "blue/green",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "bg",
+     "min": 0.9
+    }
+   ],
+   "bad": "517494b",
+   "fixed": null,
+   "note": "Saturation 0.349 and blue/green 1.302 on main 517494b; 0.079 and 1.082 fixed. The lower limit keeps the sheet from turning warm instead: with the sun's light never under a cosine of 0.35 it was 0.98 here, and tan with the sun at 4 degrees."
+  },
+  {
+   "name": "sheet-grey-low-sun-0.3km",
+   "q": "weather=altostratus&cloud=0&alt=0.3&date=330&time=15&yaw=180&pitch=40",
+   "reported": "2026-11-26",
+   "wrong": "the same from 0.3 km, with no low clouds: a blue sheet over the sea with the sun 19 degrees up",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "label": "saturation",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "sat",
+     "max": 0.13
+    }
+   ],
+   "bad": "517494b",
+   "fixed": null,
+   "note": "Saturation 0.212 on main 517494b; 0.060 fixed."
+  },
+  {
+   "name": "sheet-patches-from-below-4km",
+   "q": "weather=altostratus&alt=4&date=172&time=12&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "an altostratus from below at noon was a flat grey card with faint wisps, where photographs show darker and lighter patches, thick and thin places (0.6 to 2 stops across the frame, 0.35 to 1.2 once a gradient is taken off)",
+   "measures": [
+    {
+     "measure": "patchStops",
+     "label": "patchStops flat",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "flat": true,
+     "min": 0.36
+    }
+   ],
+   "bad": "517494b",
+   "fixed": null,
+   "note": "patchStops less the best plane, over the frame: 0.260 on main 517494b; 0.500 with the sheet's body thick and thin from place to place (MID_THICK). Photographs of altostratus and overcast from the ground: 0.35 to 1.2."
+  },
+  {
+   "name": "sheet-patches-from-below-0.3km",
+   "q": "weather=altostratus&cloud=0&alt=0.3&date=172&time=12&yaw=180&pitch=40",
+   "reported": "2026-11-26",
+   "wrong": "the same from 0.3 km, with no low clouds",
+   "measures": [
+    {
+     "measure": "patchStops",
+     "label": "patchStops flat",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "flat": true,
+     "min": 0.5
+    },
+    {
+     "measure": "brightColour",
+     "label": "saturation",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 0,
+     "of": "sat",
+     "max": 0.11
+    }
+   ],
+   "bad": "517494b",
+   "fixed": null,
+   "note": "patchStops less the best plane: 0.399 on main 517494b; 0.728 fixed. The saturation (0.021 on main, 0.047 fixed) keeps the sheet grey at noon."
+  },
+  {
+   "name": "sheet-whole-from-above-11km",
+   "q": "weather=altostratus&alt=11&date=172&time=12&yaw=120&pitch=-20",
+   "reported": "2026-11-26",
+   "wrong": "kept so: an altostratus from above is a whole white sheet; with thick and thin places about a mean depth of 8 its thin places let the sea through, dark grey patches in a torn sheet",
+   "measures": [
+    {
+     "measure": "patchStops",
+     "label": "patchStops flat",
+     "region": [
+      0.05,
+      0.45,
+      0.9,
+      0.5
+     ],
+     "flat": true,
+     "max": 0.6
+    },
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.05,
+      0.45,
+      0.9,
+      0.5
+     ],
+     "p": 5,
+     "min": 150
+    }
+   ],
+   "bad": null,
+   "fixed": null,
+   "note": "The sheet under the horizon: patchStops less the best plane 0.130 on main 517494b, 0.447 with thick and thin places about twice main's depth (0.6 to 1.0, and the 5th percentile of the luma under 150, about main's own depth, where the thin places let the sea through); p5 of the luma 207 on main, 184 now."
   }
  ]
 }

@@ -83,6 +83,23 @@ test('lumaPct and brightColour: levels and the colour of the brightest pixels', 
   assert.ok(M.brightColour(beige, { of: 'sat' }) > 0.1);
 });
 
+test('patchStops: patches of light and dark in stops; a gradient alone does not count when flat', () => {
+  const even = pic(W, H, () => 170);
+  // (Two halves, 188 and 137 in sRGB levels: a stop apart in linear light.)
+  const halves = pic(W, H, (x) => (x < W / 2 ? 188 : 137));
+  const ramp = pic(W, H, (x) => 120 + 80 * x / W);
+  const n = noise(11);
+  const patchy = pic(W, H, (x, y) => 160 + 90 * (n(x, y) - 0.5));
+  assert.ok(M.patchStops(even) < 0.01);
+  assert.ok(Math.abs(M.patchStops(halves) - 1) < 0.05, `halves ${M.patchStops(halves)}`);
+  assert.ok(M.patchStops(ramp) > 0.8, `ramp ${M.patchStops(ramp)}`);
+  assert.ok(M.patchStops(ramp, { flat: true }) < 0.12, `ramp, flat ${M.patchStops(ramp, { flat: true })}`);
+  assert.ok(M.patchStops(patchy, { flat: true }) > 0.2, `patchy ${M.patchStops(patchy, { flat: true })}`);
+  // (A sun's disc: its blocks are left out.)
+  const sun = pic(W, H, (x, y) => ((x - 100) ** 2 + (y - 100) ** 2 < 100 ? 255 : 170));
+  assert.ok(M.patchStops(sun) < 0.01);
+});
+
 test('lineDip: a dark line across the width, not the edge of one blob', () => {
   const n = noise(9);
   const base = (x, y) => 150 + 40 * (n(x, y) - 0.5);
