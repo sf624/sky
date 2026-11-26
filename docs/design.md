@@ -1886,7 +1886,11 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   thin cloud; and two streams through the layer as a slab that keeps all
   it scatters (`midThrough`): what goes on to the far side (a base by day:
   white where thin, grey where deep) and what comes back (the tops). The
-  sky's light likewise, from above and from what lies below. In the scene
+  sky's light likewise, from above and from what lies below, in the unit
+  that the low clouds' sky light was set in against photographs (`SKYV.x`:
+  with the slab's alone, a fifth to a half of theirs, middle clouds at
+  dusk, lit by the sky alone, were darker than the low cumulus under them
+  and the sea between them). In the scene
   the layer takes the colours of the light at its place as the low clouds
   do (`uLight`, the sun or the moon, through the air above; the sky's
   light of the sun and of the moon, and the night sky's), so it goes

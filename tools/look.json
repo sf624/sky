@@ -1077,6 +1077,33 @@
    "note": "The largest step between neighbouring columns: 7.9 levels bad, 0.56 fixed (the cirrus's own edges)."
   },
   {
+   "name": "mid-cells-dusk-11km-down",
+   "q": "weather=altocumulus&date=80&alt=11&time=18.3257&yaw=182.8&pitch=-50&expo=7",
+   "reported": "2026-11-26",
+   "wrong": "with the sun 4 degrees down, the middle clouds seen from 11 km were darker than the low cumulus (and the sea between them): their sky light was a thin slab's, a fifth to a half of the low clouds'",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "p": 95,
+     "min": 98
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "reference": {
+    "the low cumulus, weather=fair&cloud=0.3, same view and exposure": {
+     "lumaPct p95": 110
+    }
+   },
+   "note": "The brightest cells at one exposure: 82 bad, 110 fixed, as the fair weather's cumulus (110)."
+  },
+  {
    "name": "mid-form-sheet-to-cells-11km-down",
    "q": "date=172&time=15.5&cirrus=0&cloud=0&alt=11&yaw=0&pitch=-60&mid=0.8",
    "sweep": {
