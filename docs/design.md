@@ -49,7 +49,11 @@ today: there is no stratus (`low.smooth`) in it, and no `low.*` field.
   without its past (`reset` in the frame, a move of more than 1 km).
   Middle clouds raised from 0 are built as when their slider is raised
   (`midWanted`, see [Middle clouds](#middle-clouds)): the frames go on
-  without the layer until its programs are ready.
+  without the layer until its programs are ready (on Direct3D 11 they are
+  compiled ahead, from the first picture on).
+  A weather with another haze also rebuilds `msData` (see the frame loop
+  in [From the address bar to the first frame](#from-the-address-bar-to-the-first-frame)):
+  one frame after the choice takes some 0.3 s longer.
 - The die draws a weather from a seed: one of the table by weight, then
   each value between its low and its high, and any whole-km place on the
   map. The seed's numbers are xorshift32 started from the seed through
@@ -1828,6 +1832,24 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     at once, then asked a frame at a time whether they are done
     (`KHR_parallel_shader_compile`), while the frames go on without the
     layer; a picture that has settled stays, and the frames go on undrawn.
+  - On ANGLE's Direct3D 11 in Chromium (Chrome and Edge on Windows), the
+    same programs are compiled ahead in a WebGL context of a worker of the
+    page's own (`ahead`): there the scene takes some 11 s, and the first
+    draw of the air's table into its seven targets compiles it again while
+    the GPU process waits 0.6 s. The GPU process keeps the programs it has
+    compiled, and such variants, for every context of the page, so the
+    page's own link when the slider is first raised takes some 0.1 s, and
+    its first draw of the table no time. The worker links `MID_PASS`,
+    `MID_MAP` and `AIR_LUT` while the page loads, and draws the table's
+    program into a pixel of seven targets (the GPU process waits for it
+    while the long programs of the page still compile); the scene once the
+    first picture is shown (with the others it held the first picture back
+    by 3 s). Then the worker loses its context and ends. A slider raised
+    before it is done waits for it (`midWanted`; at most a minute), then
+    links. The page's own context makes the same calls as without the
+    worker, call for call. Elsewhere (Linux, macOS, Firefox, software
+    renderers) nothing is done ahead: the programs compile in a second or
+    two, or into no store that the contexts share.
     Then `midSetup` sets their uniforms, makes the light's map anew with a
     fifth layer, and the next frame draws the layer (a change of `look`).
     Without the extension the first frame after waits for the compilers,
