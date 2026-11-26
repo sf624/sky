@@ -67,6 +67,14 @@ const coverSteps = (imgs, opt) => {
 export const coverRise = (imgs, opt = {}) => Math.max(0, ...coverSteps(imgs, opt));
 export const coverFall = (imgs, opt = {}) => Math.max(0, ...coverSteps(imgs, opt).map((v) => -v));
 
+// exposureStep, of a sweep: the largest change of the exposure the page showed the pictures at (img.exposure,
+// window.__exposure, log2: stops) between neighbouring pictures. A sweep of the sun's height: no jump.
+export function exposureStep(imgs) {
+  const x = imgs.map((img) => img.exposure);
+  if (x.some((v) => typeof v !== 'number')) throw new Error('exposureStep: a still without its exposure (window.__exposure)');
+  return Math.max(0, ...x.slice(1).map((v, i) => Math.abs(v - x[i])));
+}
+
 // flatPlate: the largest connected part (4 neighbours) of the bright pixels (luma at least opt.luma, 150) whose
 // local relief is very low (the mean of |dx| + |dy| of the luma over a box of opt.k px, 7, under opt.grad, 3
 // levels), as a share of the region. Cloud tops are knobbly; a flat pale plate (a closed floor without the relief
@@ -507,4 +515,4 @@ export function starShape(img, { region: box, k = 4, t = 30, n = 12, r = 6 } = {
   return median(ratios);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars, starShape };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, stars, starShape };

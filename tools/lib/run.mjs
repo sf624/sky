@@ -67,7 +67,9 @@ export async function runView(session, root, v, size, { png, traceFile } = {}) {
     }
     await p.step(left, v.ms);
     if (png) await p.shot(png);
-    const r = { errors: p.errors, warnings: p.warnings };
+    // The exposure the page shows the still at (log2; null on a page without window.__exposure).
+    const exposure = png ? await p.eval('typeof window.__exposure === "number" ? window.__exposure : null') : null;
+    const r = { errors: p.errors, warnings: p.warnings, exposure };
     if (traceFile) {
       const dump = await p.trace();
       const text = formatTrace(dump, [`query ?${v.q}`, `size ${w}x${h}${v.dpr ? ' at dpr ' + v.dpr : ''}, ${v.frames} frames of ${v.ms} ms`,

@@ -29,8 +29,15 @@ export function pick(reg, { only } = {}) {
 export const stillsOf = (e) => e.sweep
   ? e.sweep.values.map((v) => ({ file: `${e.name}@${v}.png`, q: `${e.q}&${e.sweep.param}=${v}` }))
   : [{ file: `${e.name}.png`, q: e.q }];
+// Each still's exposure (window.__exposure, log2) is kept beside it (NAME.json) and read into img.exposure.
+const exposureFile = (png) => png.replace(/\.png$/, '.json');
+const readStill = (file) => {
+  const img = readPng(file), side = exposureFile(file);
+  if (fs.existsSync(side)) img.exposure = JSON.parse(fs.readFileSync(side, 'utf8')).exposure;
+  return img;
+};
 const readStills = (e, dir) => {
-  const imgs = stillsOf(e).map((s) => readPng(path.join(dir, s.file)));
+  const imgs = stillsOf(e).map((s) => readStill(path.join(dir, s.file)));
   return e.sweep ? imgs : imgs[0];
 };
 
@@ -67,9 +74,14 @@ export async function render(session, root, list, size, dir, reg = loadRegistry(
     for (const st of stillsOf(e)) {
       const png = path.join(dir, st.file);
       const q = stillQuery(st.q);
-      if (done.has(q)) { fs.copyFileSync(done.get(q), png); continue; }
+      if (done.has(q)) {
+        fs.copyFileSync(done.get(q), png);
+        fs.copyFileSync(exposureFile(done.get(q)), exposureFile(png));
+        continue;
+      }
       const t0 = Date.now();
       const r = await runView(session, root, { name: e.name, q, frames: reg.frames, ms: reg.ms }, size, { png });
+      fs.writeFileSync(exposureFile(png), JSON.stringify({ exposure: r.exposure }) + '\n');
       if (r.errors.length) errors[e.name] = (errors[e.name] || []).concat(r.errors);
       done.set(q, png);
       console.error(`  ${st.file.replace(/\.png$/, '')}: rendered in ${((Date.now() - t0) / 1000).toFixed(1)} s`);

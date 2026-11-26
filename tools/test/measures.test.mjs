@@ -132,6 +132,13 @@ test('coverRise and coverFall: the largest rise and fall of the cover between ne
   assert.equal(M.coverFall([0.1, 0.2].map(grey)), 0);
 });
 
+test('exposureStep: the largest change of the exposure between neighbouring pictures', () => {
+  const at = (exposure) => ({ ...pic(4, 4, () => 0), exposure });
+  assert.ok(Math.abs(M.exposureStep([3.9, 4.7, 5.5, 7.9, 8.8].map(at)) - 2.4) < 1e-9);
+  assert.ok(Math.abs(M.exposureStep([9, 8.5, 8.6].map(at)) - 0.5) < 1e-9);
+  assert.throws(() => M.exposureStep([at(1), pic(4, 4, () => 0)]), /without its exposure/);
+});
+
 test('flatPlate: a large smooth bright part, not knobbly cloud', () => {
   // (Grain at every pixel: knobs, as cloud tops are at this scale.)
   const grain = (x, y) => { let n = (x * 374761393 + y * 668265263) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };

@@ -1137,6 +1137,38 @@
    "bad": "8446078",
    "fixed": null,
    "note": "Flown: 46 frames of 50 ms at 900 km/h. main 8446078: starShape 2.19, stars 0.21 (the moonlit sheet moved the pixels, and the stars with them); the fix: 1.28 and 0.62; a still at the place reached: 1.25 and 0.62."
+  },
+  {
+   "name": "eye-sunset-down-40km",
+   "q": "weather=altocumulus&date=80&clock=solar&lat=35&alt=40&yaw=-175.78&pitch=-50",
+   "sweep": {
+    "param": "time",
+    "values": [
+     18.3664,
+     18.3868,
+     18.4072,
+     18.4276,
+     18.448,
+     18.4684,
+     18.4888,
+     18.5092,
+     18.5296,
+     18.55,
+     18.5704,
+     18.5908,
+     18.6113
+    ]
+   },
+   "reported": "2026-11-26",
+   "wrong": "from 40 km looking down and away from the sun, the exposure jumped by 2.4 stops between stills a quarter of a degree of the sun apart (3.9 to 8.8 from 5 to 6 degrees down), and the Earth from near black to a bright blue, as the sun set where the eye is (6.4 degrees down) and its light at the eye fell by some 11 stops in that degree",
+   "measures": [
+    {
+     "measure": "exposureStep",
+     "max": 1.2
+    }
+   ],
+   "bad": "8446078",
+   "note": "The sun from 4.5 to 7.5 degrees down in steps of 0.25 (date 80, latitude 35: the times). The limit of the day's eye now rises at most EYE_FADE = 3 stops per degree of the sun: 0.75 a step."
   }
  ]
 }
