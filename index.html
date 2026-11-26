@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="e40ef62 main">
+<meta name="build" content="6a93479 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3079,10 +3079,27 @@ float midLump, midGap;
 // (midMottle: the sheet's mottle at the place of the last call of midSheet, 0 to 1, 0.5 on the mean: it takes the
 // place of midLump for a sheet, see midDensity.)
 float midMottle = 0.5;
+// The field's order over tens of km, from the weather map (see midCells):
+//  - MID_EDGE: where cells stand. x, y: the amount at which half the map is field, and how fast the field grows with
+//    the amount; z: how much the map's detail (under some 20 km: clusters, lanes, its streets) counts beside its systems
+//    (2.5); w: how steeply the cells shrink apart at a field's edge. (At 1.5, with the detail counting 2.5 as the systems
+//    and the map read over 4 km, most of the map was the edge: an even sprinkle of shrunken cells everywhere, the same
+//    from the horizon to the nadir, with no field, lane or gap in it.)
+//  - MID_PACK: how closely the cells of a field stand, from region to region (the map's G over some 20 km, times x):
+//    from y less than the amount's own to z more; open cells with wide gaps, and cells packed with seams between them.
+//  - MID_SEAM: over x, what widens the cells counts w times: the seams between packed cells stay, and their domes keep
+//    unlike heights. (Without it packed cells ran together into flat plates with jigsaw outlines.)
+//  - MID_STREET: where the field stands in streets (the map's R elsewhere, over some 10 km, from x to y), the map is
+//    read over z texels (1.1 km, not 4 km: its streets of 5 km and their finer ones show), and its detail widens or
+//    narrows the cells within a field by w: bands, ranks and lanes inside the fields, not only at their edges.
+const vec4 MID_EDGE = vec4(0.6, 1.3, 4.0, 5.0), MID_STREET = vec4(0.45, 0.55, 2.2, 6.0);
+const vec3 MID_PACK = vec3(4.0, 0.3, 0.8);
+const vec2 MID_SEAM = vec2(0.35, 0.3);
 // The cells' density at p (from the eye), 0 to 1: h its height, t its share
-// of the layer's depth, x its place on the map, wm and wr the weather map
-// there (see midDensity, which has the other arguments too).
-float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, bool fine, bool fibres) {
+// of the layer's depth, x its place on the map, xw that in the weather map,
+// wm, wf and wq the weather map there (see midDensity, which has the other
+// arguments too).
+float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4 wq, float lod, bool fine, bool fibres) {
   // (The noise's widest swell, the veil's share at this place and height, and the level where a cell is widest.)
   float swell = 0.5, veil = 0.0, t0 = 0.25, dB = 0.0;
   vec2 warp = vec2(0.5);
@@ -3098,7 +3115,15 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
   // some 4 km, and one of them says which cells lead, those of 400 m or
   // those of 800 m: cells of unlike sizes. (That alone left the noise's tile
   // in view, slid about: see MID_CUT_X.)
-  float wa = wm.r, grow = clamp(1.5 * (uMid.x - 0.5 + 2.5 * (wa - 0.5)), -1.6, mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)));
+  // Fields, over tens of km (MID_EDGE and the others): the map's systems and
+  // its detail say where cells stand, with a steep edge, so the layer is
+  // fields with ragged edges, clear lanes and gaps, not one sprinkle; and
+  // from region to region the cells of a field stand closer or wider
+  // apart (pack), in streets or not (street), and large or small (below).
+  float wa = wm.r, wr = wf.r, street = smoothstep(MID_STREET.x, MID_STREET.y, wq.r);
+  if (street > 0.0) wa = mix(wa, textureLod(uWeather, xw, MID_STREET.z).r, street);
+  float cap = mix(0.2, 0.45, smoothstep(0.6, 1.0, uMid.x)) + mix(-MID_PACK.y, MID_PACK.z, clamp(0.5 + MID_PACK.x * (wf.g - 0.5), 0.0, 1.0));
+  float grow = clamp(cap + MID_EDGE.w * (MID_EDGE.y * (uMid.x - MID_EDGE.x) + 2.5 * (wr - 0.5) + MID_EDGE.z * (wa - wr)), -1.6, cap);
   if (grow <= -1.55) return 0.0;
   // (The cells' level, from place to place over some 4 km: they fill 0.65 of the layer's depth, anywhere between its
   // base and its top. All on one base, the layer seen from just under it, on edge, had a ruled line for a base.)
@@ -3114,8 +3139,11 @@ float midCells(vec3 p, float h, float t, vec2 x, vec4 wm, float wr, float lod, b
   vec4 n = textureLod(uNoise, xs.x * MID_CUT_X + xs.y * MID_CUT_Z + (h / MID_KM + cut) * MID_CUT_UP + vec3(0.41, 0.0, 0.77), max(lod, 0.0));
   // (?midrolls: ranks of small elements, two waves of 300 and 420 m that cross, bent by the map and the noise.)
   float roll = 0.65 * sin((0.8 * x.x + 0.6 * x.y + 0.6 * wm.g + 0.3 * n.r) * (2.0 * PI / 0.3)) + 0.45 * sin((0.9 * x.y - 0.44 * x.x + 0.6 * wm.b) * (2.0 * PI / 0.42));
-  float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + uMidRolls * (0.8 * roll - 0.2);
-  float e = mix((n.a - 0.22) / 0.3 + 1.5 * (n.b - 0.5), (n.b - 0.22) / 0.3 + 0.6 * (n.a - 0.5), smoothstep(0.3, 0.7, wm.b));
+  float wide = 1.8 * (0.8 * (n.g - 0.5) + 1.2 * (n.r - 0.66)) + grow - 0.15 + uMidRolls * (0.8 * roll - 0.2) + MID_STREET.w * clamp(wa - wr, -0.25, 0.25);
+  wide = min(wide, MID_SEAM.x + MID_SEAM.y * (wide - MID_SEAM.x));
+  // (Which cells lead, those of 400 m or those of 800 m: by the map's gusts over 4 km, and more by its G elsewhere
+  // over some 10 km, so whole regions of a field are fine or coarse.)
+  float e = mix((n.a - 0.22) / 0.3 + 1.5 * (n.b - 0.5), (n.b - 0.22) / 0.3 + 0.6 * (n.a - 0.5), smoothstep(0.3, 0.7, mix(wm.b, 0.5 + 4.0 * (wq.g - 0.5), 0.7)));
   // (The level where a cell is widest, from place to place: all at one level, the layer seen from within it, on edge,
   // was a ruled line at the eye's height.)
   t0 = 0.1 + 0.35 * n.g;
@@ -3262,9 +3290,10 @@ float midDensity(vec3 p, float lod, bool fine, bool eye) {
   float h = heightAt(p), t = (h - uMid.z) / uMid.w;
   if (t <= 0.0 || t >= 1.0) return 0.0;
   vec2 x = p.xz + uDrift, xw = x.yx / WEATHER_KM + vec2(0.21, 0.63);
-  vec4 wm = textureLod(uWeather, xw, 4.0);
-  float wr = textureLod(uWeather, xw, 6.5).r, form = uMid.y, cells = 0.0, sheet = 0.0;
-  if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, wm, wr, lod, fine, eye), MID_FULL);
+  // (wm: the map over 4 km; wf: over some 20 km; wq: elsewhere on it over some 10 km, for the cells' regions.)
+  vec4 wm = textureLod(uWeather, xw, 4.0), wf = textureLod(uWeather, xw, 6.5);
+  float wr = wf.r, form = uMid.y, cells = 0.0, sheet = 0.0;
+  if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, xw, wm, wf, textureLod(uWeather, xw + vec2(0.43, 0.29), 5.5), lod, fine, eye), MID_FULL);
   if (form < UNSEEN(1.0)) sheet = min(midSheet(h, t, x, wm.r, wr, lod, eye), MID_FULL);
   midLump = mix(midMottle, midLump, form);
   return (MID_SIGMA.x * (1.0 - form) * sheet + MID_SIGMA.y * form * cells) / mix(MID_SIGMA.x, MID_SIGMA.y, form);
@@ -6103,7 +6132,12 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
   // (Planned to where the ray leaves the layer's top, or twice as far as it goes, if that is less: a ray that just
   // meets the base ends at half the way to the top, and the steps do not jump there, a line across the picture.)
   float rel = max(DS_REL, log(max(plan, knee) / max(ta, knee)) / 88.0);
-  float ds = max(DS_NEAR, ta * rel);
+  // (And ten steps at least through the layer where the ray crosses it (cross): the steps grow with the distance, and
+  // from 20 km over the layer and more one was longer than the ray's whole way through it. A ray then met a cell in
+  // some frames and none in others, by its jitter: from 40 km the cells were a dim grey-blue grain, white and solid from
+  // 11 km, in a checker of the jitter where the mean over the frames holds to the frame.)
+  float cross = (tb - ta) / 10.0;
+  float ds = max(DS_NEAR, min(ta * rel, cross));
   float extPrev = -1.0, sunPrev = 0.0, ambPrev = 0.0, came = jitter * 2.5 * ds, t = ta + came, wsum = 0.0, tsum = 0.0, t2sum = 0.0, walk = 0.0;
   float mu = dot(d, uLight);
   // (A level layer seen aslant: a pixel covers more of it along the view, and the noise is read that much smoother, up to
@@ -6120,7 +6154,7 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
     if (t >= tb || Tm < least) break;
     // (A sheet is smooth: three times the steps, and three steps towards the light.)
     // (Half as long again from some 10 km on: the far field, where a step is still a fraction of a cell.)
-    ds = max(DS_NEAR, t * rel * (1.0 + 0.5 * smoothstep(4.0, 10.0, t))) * mix(3.0, 1.0, uMid.y);
+    ds = max(DS_NEAR, min(t * rel * (1.0 + 0.5 * smoothstep(4.0, 10.0, t)), cross)) * mix(3.0, 1.0, uMid.y);
     // (From over the layer, the noise as fine as a pixel within 1.5 km, by degrees to 5 km, and down to an eighth of a
     // step: the tops just under the eye were smooth, without billows. From within, no finer than a quarter of a step:
     // there the cloud about the eye is most of the picture, and finer noise than the steps meet is its grain. Nor from
