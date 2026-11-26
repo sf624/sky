@@ -1879,7 +1879,10 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   to 10.
 - **The light**, from optical depths alone: three steps towards the light
   (each 3 to 5 times the one before, by the form), then the rest of the
-  column aslant; scattered once, an aureole and two wider octaves through
+  column aslant, on the side the light comes from (over the place or under
+  it, mixed over 3 degrees each way of the light's level: switched there, a
+  straight seam crossed the layer while the sun stood at 0 degrees, and
+  the cirrus's side, lit from above or through, had the same); scattered once, an aureole and two wider octaves through
   thin cloud; and two streams through the layer as a slab that keeps all
   it scatters (`midThrough`): what goes on to the far side (a base by day:
   white where thin, grey where deep) and what comes back (the tops). The

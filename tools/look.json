@@ -1013,6 +1013,70 @@
    "note": "The blue over the green of the brighter half of the sea: 1.62 while it mirrored a clear sky, 0.97 with the sheet in the mirror."
   },
   {
+   "name": "mid-sheet-horizon-band-0.3km",
+   "q": "weather=altostratus&cloud=0&date=80&time=12&alt=0.3&yaw=120&pitch=12",
+   "reported": "2026-11-26",
+   "wrong": "under an altostratus the horizon was a dark blue band, with a brown-pink band over it: the air under the sheet was lit by little but the sky's light through it",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.58,
+      1,
+      0.06
+     ],
+     "p": 50,
+     "min": 145
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "note": "The band just over the sea's horizon: luma 125 bad, 166 with the air lit by what the sheet scatters down (midDeck); the sheet over it some 170."
+  },
+  {
+   "name": "mid-sheet-terminator-seam-4km",
+   "q": "weather=altostratus&date=80&alt=4&time=18&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "with the sun at 0 degrees a straight seam crossed the sheet, pink against lavender, fixed in the world: the column the light went through switched from the share over the place to the share under it at the light's level",
+   "measures": [
+    {
+     "measure": "columnJump",
+     "region": [
+      0,
+      0.1,
+      1,
+      0.8
+     ],
+     "max": 0.6
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "note": "The largest step between neighbouring columns: 1.44 levels bad (4.5 at 960 px wide, where the seam falls between two columns), 0.14 fixed."
+  },
+  {
+   "name": "cirrus-terminator-seam-4km",
+   "q": "weather=cirrus&date=80&alt=4&time=18&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "with the sun at 0 degrees a straight seam crossed the cirrus: lit from above on one side, from below on the other",
+   "measures": [
+    {
+     "measure": "columnJump",
+     "region": [
+      0,
+      0.1,
+      1,
+      0.8
+     ],
+     "max": 3
+    }
+   ],
+   "bad": "8446078",
+   "fixed": null,
+   "note": "The largest step between neighbouring columns: 7.9 levels bad, 0.56 fixed (the cirrus's own edges)."
+  },
+  {
    "name": "mid-form-sheet-to-cells-11km-down",
    "q": "date=172&time=15.5&cirrus=0&cloud=0&alt=11&yaw=0&pitch=-60&mid=0.8",
    "sweep": {
