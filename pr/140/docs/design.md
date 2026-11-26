@@ -504,8 +504,8 @@ the overlays; it takes no pointer, so a drag on it turns the eye.
 - The cirrus has two lights of its own, with no hand-over (`ciLightsFor`,
   `uCiLights`; see [Cirrus](#cirrus)): the sun, while its rays can reach any
   cirrus in view past the planet (the sun higher than `2 CI_DIP` plus the
-  dip of the eye's horizon under it: some 7.8 degrees from 0.3 km, 11 from
-  13 km), and the moon, faded in as the sun goes from 0 to 2 degrees down
+  dip of the eye's horizon plus `CI_REFR` under it: some 9 degrees from
+  0.3 km, 12 from 13 km), and the moon, faded in as the sun goes from 0 to 2 degrees down
   (while the sun is up the moon's light on the cirrus is under a thousandth
   of the sky's).
 - The eye's night vision (`nightEyeFor`, `uNightEye`) follows the eye's
@@ -727,10 +727,14 @@ enters the sheet through its two faces, `4 up - 2 lean up` (the light
 from above and from below on a level surface over 2 pi: the mean light
 where the sky is even). In twilight most of the mean light at 12 km
 comes from the glow on the sheet's own horizon, which reaches the sheet
-edgewise, through tens of km of its ice, and is spent on the way. Lit by
-the mean light, cirrus in the Earth's shadow stood paler than the glow
-behind it and lavender overhead (the glow's red with the sky's blue),
-where photographs show it darker than the glow and blue-grey overhead.
+edgewise, through tens of km of its ice, and is mostly spent on the way:
+the cirrus takes of it only what finds its way between the strands
+(`ciGlow`, see [Cirrus](#cirrus)). Lit by the mean light, cirrus in the
+Earth's shadow stood paler than the glow behind it and lavender overhead
+(the glow's red with the sky's blue), where photographs show it darker
+than the glow. At 12.5 km with the sun 9 degrees down, the mean light is
+4.2e-6, the light from above 7.8e-7 and from below 6.2e-7 (the table's
+units): five times as much comes level as from either face.
 
 One value per wavelength. The texture is `NMU` by `15 * NH`: the three
 groups of four wavelengths of the air stacked in y, then those of the
@@ -2703,27 +2707,54 @@ on the map.
   the thin ice round it.) At dusk it goes evenly (below). And the sheet
   sends skylight, from its own table (`ciSky`, less the share `CI_FWD`,
   below: by day the mean light, in the Earth's shadow the light through
-  its faces; see [The air](#the-air)), and light from the low clouds
-  below, at the mean distance of the decks seen. Measured with the sun 6
-  and 9 degrees down from 0.3 km, against the same views without cirrus
-  at the same exposure: looking towards the glow, 21 to 84 % of the
-  pixels were lighter than the sky behind them with the mean light (up to
-  1.6 times it), 1 % at most with the light through the faces; with no
-  light of its own at all, 78 to 99 % were darker. Looking up, the
-  streaks went from lavender, up to 2.3 times the sky, to blue-grey, up to
-  1.2 times it.
+  its faces; see [The air](#the-air)), plus the share `ciGlow` of the
+  rest of the mean light, the glow on its own horizon: that light comes in
+  level from the sun's side, as a low sun's does, and reaches the ice
+  between the strands as the low sun's light scattered once does,
+  `exp(-0.6 tauP / 0.15)` (`tauP`, the depth over the way towards the sun,
+  `ciLowSun`, read whenever the sun is under the sheet's horizon); and
+  light from the low clouds below, at the mean distance of the decks
+  seen. Measured with the sun 6 and 9 degrees down from 0.3 km (a debug
+  build that wrote the light of each part, in the densest fifth of the
+  cirrus):
+  - Looking up at -9 degrees, the air below the sheet gives twice the
+    light of the air behind it (behind / in front 0.46; at -6, 1.14). So
+    the sheet hides little, and what it shows is its own light: 3.0 times
+    the clear sky with the mean light (lavender), 1.2 times with the
+    light through the faces alone (faint, `texture` 0.011 where the
+    owner's report asks 0.025), 0.038 with the glow between the strands
+    (blue-grey streaks).
+  - Towards the glow most of the light comes from behind the sheet (2 to
+    4 times that in front), so the sheet hides much: 10 to 20 degrees
+    over the glow at -7, the median of the cirrus is 1.09 times the clear
+    sky with the mean light, 0.99 now; within 10 degrees of the horizon
+    0.83 to 0.85.
+  - Within some 10 degrees of the horizon much cirrus (`cirrus` 0.9, the
+    weather Cirrus) covers 93 to 95 % of the view, seen edgewise: a band
+    darker than the glow but even, with no glow between its streaks. At
+    `cirrus` 0.35 the streaks there stand dark grey with the glow between
+    them, as in photographs of a few streaks of cirrus uncinus.
 - **Two lights** (`uCiLights`): the sheet is lit by the sun
   and by the moon at once, each with its own single and multiple
   scattering, its own march sums near the eye (the vectors `onceN`,
   `onceDN`, `tsS`) and its own two numbers in the pass (`lkL`): the sun
   wherever its rays reach the sheet past the planet (`raySphere`, and
   reddened through `depthToTop`), the moon with its ring and aureole as
-  by night (`nightK`). As the sun sets, the Earth's shadow sweeps across
-  the sheet: cirrus overhead goes grey from some 3 to 3.5 degrees down,
-  while cirrus far towards the sun stays lit, dimmer and redder on its
-  long way past the planet, low over the glow from 0.3 km and 11 km, and
-  as a red band towards the horizon seen from 40 km with the sun some 4
-  degrees down. (Up to this change the cirrus shared the low clouds' one
+  by night (`nightK`). The sun's rays that pass low over the planet are
+  bent round it (`CI_REFR` = 0.02 rad where they graze the ground, twice
+  the 34' of the horizon seen from the ground, less as the air they graze
+  thins), which lifts the sun seen from the sheet by up to a degree: the
+  bend is found in three steps from the lowest point of the bent ray
+  (`cirrusLight`; 0.5 degrees with the sun 3 degrees under the sheet's
+  horizon, 1.0 at 4.5). As the sun sets, the Earth's shadow sweeps across
+  the sheet: from 0.3 km, looking towards the sun, the cirrus is red over
+  the whole view until some 4.25 degrees down, its edge crosses the view
+  from 4.5 to 5, and a red band stays low over the glow to some 6.5
+  degrees; seen from 40 km with the sun some 4 degrees down, the far deck
+  towards the sun is a red band. (Without refraction the edge passed
+  overhead a degree earlier, at 3.25 to 3.5 degrees down, where
+  photographs some 3.5 degrees down still show cirrus lit pink overhead.
+  Up to this change the cirrus shared the low clouds' one
   light, `uLight`, which hands over from the sun to the moon between 3
   and 4.5 degrees down: the pink cirrus faded over the whole sky at once.)
   The pass keeps each light's two numbers as floats, or as halves when
@@ -2765,8 +2796,9 @@ on the map.
   cirrus is lit by the twilight's sky, the cirrus was one flat veil with
   no streaks (the texture of the luma, `texture` in `look`, 0.003 looking
   up at the sun's -9 degrees, against 0.047 after PR #136: lavender
-  streaks lit by the mean light; 0.011 since the cirrus in the Earth's
-  shadow takes the light through its faces: faint blue-grey streaks).
+  streaks lit by the mean light; 0.038 since the cirrus in the Earth's
+  shadow takes the light through its faces and the glow between its
+  strands: blue-grey streaks).
 - **What lies behind shows through.** Some `CI_FWD` = 0.4 of the ice's
   extinction is diffraction by its crystals: light turned by less than a
   degree, which goes on as if not scattered. The march through the air
