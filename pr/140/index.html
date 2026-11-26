@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="d44f2a0 PR #140">
+<meta name="build" content="bc6a1cc PR #140">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -5847,12 +5847,24 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H
     // by CI_REFR where it grazes the ground (twice the 34' of the horizon
     // seen from the ground) and less as the air it grazes thins (HR), so
     // that seen from the sheet in the twilight the light stands higher and
-    // its rays reach the sheet past the planet for a degree longer. From
-    // 1.5 degrees under the sheet's horizon (as ciSky), by degrees.
+    // its rays reach the sheet past the planet for up to a degree longer.
+    // The bend hangs on how low the bent ray grazes: three steps, each
+    // halfway to the bend at the lowest point of the last (taken from the
+    // straight ray alone, it lifted the light by a degree everywhere, and
+    // the cirrus overhead stood bright red with the sun 4.5 degrees down,
+    // where its shadow's edge is). From 1.5 degrees under the sheet's
+    // horizon (as ciSky), by degrees.
     float mus = dot(up, L);
-    float graze = rc * sqrt(max(1.0 - mus * mus, 0.0)) - RG;
-    L = normalize(L + CI_REFR * exp(-max(graze, 0.0) / HR) * smoothstep(-0.026, -0.05, mus) * up);
-    mus = dot(up, L);
+    if (mus < -0.026) {
+      float lift = 0.5 * CI_REFR;
+      for (int i = 0; i < 3; i++) {
+        float s = -mus * cos(lift) - sqrt(1.0 - mus * mus) * sin(lift);   // the sine of the bent ray's depression
+        float graze = s > 0.0 ? rc * sqrt(1.0 - s * s) - RG : rc - RG;
+        lift = 0.5 * (lift + CI_REFR * exp(-max(graze, 0.0) / HR));
+      }
+      L = normalize(L + tan(lift * smoothstep(-0.026, -0.05, mus)) * normalize(up - mus * L));
+      mus = dot(up, L);
+    }
     float mu = dot(d, L), th = acos(clamp(mu, -1.0, 1.0));
     if (raySphere(pc, L, RG).y >= 0.0) continue;
     vec3 ol = depthToTop(pc, L);
