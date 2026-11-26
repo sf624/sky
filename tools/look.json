@@ -1439,6 +1439,72 @@
    ],
    "bad": "6a93479",
    "note": "0.011 on main 6a93479 and a7fbb75 (the moon's aureole and faint streaks), 0.084 once the sheet's own light keeps the depth at the pixel by night."
+  },
+  {
+   "name": "base-grain-0.3km-civil-flown",
+   "q": "weather=overcast&date=80&alt=0.3&pitch=50&time=18.3257&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "the grey bases of a deck seen from below, in flight at civil twilight: a pepper of dark dots over them",
+   "measures": [
+    {
+     "measure": "grain",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.6
+     ],
+     "max": 1.0
+    }
+   ],
+   "bad": "ca77500",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h. main ca77500: grain 2.59 (the light's point, drawn some tens of metres into the deck in one frame in twenty-five, took the light of the cloud's inside there, far darker: those frames stayed as dark dots in the mean over about ten); the fix (the lower part goes by the field at the entry too, fbIn): 0.54. At rest: 1.15 and 0.49."
+  },
+  {
+   "name": "base-grain-0.3km-noon-flown",
+   "q": "weather=overcast&date=80&alt=0.3&pitch=50&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "the grey bases of a deck seen from below, in flight at noon: a pepper of dark dots over them",
+   "measures": [
+    {
+     "measure": "grain",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.6
+     ],
+     "max": 0.6
+    }
+   ],
+   "bad": "ca77500",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h. main ca77500: grain 1.34; the fix: 0.32."
+  },
+  {
+   "name": "stripes-low-clouds-altostratus-0.3km",
+   "q": "weather=altostratus&date=80&alt=0.3&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "the low clouds under an altostratus, seen from below: fine diagonal stripes 4 pixels apart",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "label": "spectrumPeak 2-5 px",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.6
+     ],
+     "pmin": 2,
+     "pmax": 5,
+     "max": 100
+    }
+   ],
+   "bad": "ca77500",
+   "fixed": null,
+   "note": "At rest. main ca77500: 188 (the sky's direction drawn as ign of the pixel and of its swapped coordinates, whose phases differ by a quarter of a turn a pixel along x - y); the fix (ign2, a phase of its own): 14.0. With the first stage's light map left out (it hides most of it): 553 and 20."
   }
  ]
 }

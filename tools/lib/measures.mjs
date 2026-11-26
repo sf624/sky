@@ -348,6 +348,17 @@ export function speckDensity(img, opt = {}) {
   return areas.length / n * 1e4;
 }
 
+// grain: the root mean square of the luma's local contrast over a box of opt.k px (default 1: 3 x 3), as a
+// percentage of the region's median luma: the finest detail, pixel to pixel. The noise that the mean over
+// frames leaves (a pepper of single dark pixels in flight) gives most of it on a smooth cloud base; the base's
+// own texture gives some 0.3 to 0.5 %.
+export function grain(img, { region: box, k = 1 } = {}) {
+  const hp = highPass(region(img, box), k);
+  let s = 0;
+  for (let i = 0; i < hp.length; i++) s += hp[i] * hp[i];
+  return 100 * Math.sqrt(s / (hp.length || 1));
+}
+
 // verticalWalls: the share of the strong edges of the region (gradient of the luma over the opt.p-th
 // percentile, default 90, and at least 8 levels) that are near-vertical (within about 15 degrees) and lie in
 // a vertical run of at least opt.run px (default 4 % of the picture's height). Walls and needles, which
@@ -558,4 +569,4 @@ export function texture(img, { region: box, k1 = 2, k2 = 24, m = 2 } = {}) {
   return n ? Math.sqrt(s / n) / Math.max(sb / n, 1) : 0;
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape, texture };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape, texture };
