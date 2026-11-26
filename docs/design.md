@@ -1794,7 +1794,11 @@ middle. From that depth: what is left of the sky behind, and the base's
 light as their pass lights a base from below (two streams), seen through
 the air under the layer (half the molecules, all the haze; what the air
 takes, its own light gives back, lit through the layer). They stand
-behind the low clouds in the mirror and dim the low bases. So the sea
+behind the low clouds in the mirror, dim the low bases and light them as
+a sky, with half of what they scatter down, as the scene does (`midDown`;
+before, the low bases in the mirror had only the clear sky's blue light,
+and stood as dark blue streaks on a pale grey sea; they stay darker than
+the layer's base there, as the low bases are). So the sea
 under an altostratus is grey, not the blue of a clear sky. Their shadow
 (`midShadow`) joins `tau`.
 
@@ -1853,7 +1857,13 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     of small elements (two crossing waves of 300 and 420 m);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
-    with fine noise on its thin places;
+    with fine noise on its thin places, and thick and thin places in it: its
+    density times patches of some 3 to 6 km and a mottle of some 200 to 400
+    m (`midMottle`, which also stands for the cells' lumps where the pass
+    reads the column). From below it is a grey sheet, darker where it is
+    thicker and finely mottled, as in photographs (the luma varies by some
+    2 % over a few degrees and 3 to 5 % over tens of them); before, it was
+    an even white veil (0.3 and 0.8 % from 4 km under it);
   - *between them* both are there, each with its share of its own
     extinction (`MID_SIGMA`: 8 per km for a sheet, 45 for cells): a sheet
     that thins as cells grow in it, with no step at any form. A depth not
@@ -1869,11 +1879,18 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   to 10.
 - **The light**, from optical depths alone: three steps towards the light
   (each 3 to 5 times the one before, by the form), then the rest of the
-  column aslant; scattered once, an aureole and two wider octaves through
+  column aslant, on the side the light comes from (over the place or under
+  it, mixed over 3 degrees each way of the light's level: switched there, a
+  straight seam crossed the layer while the sun stood at 0 degrees, and
+  the cirrus's side, lit from above or through, had the same); scattered once, an aureole and two wider octaves through
   thin cloud; and two streams through the layer as a slab that keeps all
   it scatters (`midThrough`): what goes on to the far side (a base by day:
   white where thin, grey where deep) and what comes back (the tops). The
-  sky's light likewise, from above and from what lies below. In the scene
+  sky's light likewise, from above and from what lies below, in the unit
+  that the low clouds' sky light was set in against photographs (`SKYV.x`:
+  with the slab's alone, a fifth to a half of theirs, middle clouds at
+  dusk, lit by the sky alone, were darker than the low cumulus under them
+  and the sea between them). In the scene
   the layer takes the colours of the light at its place as the low clouds
   do (`uLight`, the sun or the moon, through the air above; the sky's
   light of the sun and of the moon, and the night sky's), so it goes
@@ -1889,7 +1906,14 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   sky's as a slab lets it through, and a share of what the layer scatters
   downwards. The air under it: its shade on the light scattered once
   (`midLight`), and the sky's light there by its amount (`midUnder`, as
-  `UNDER` for the low clouds; in the air's table too). The sea: its shadow
+  `UNDER` for the low clouds; in the air's table too), and what it
+  scatters down from the light, less the share that `midLight` counts as
+  the light's own, as an even radiance from above and the sea's and low
+  clouds' from below (`midDeck`, `airDeck` in `addLight`; by the amount, in
+  the air's table too). Without it, the air far off under the layer gave
+  back less than it took of what lay behind it: the horizon under an
+  altostratus was a dark blue band, and the layer over it, reddened by the
+  long way, brown-pink. The sea: its shadow
   (`midShadow`), and its base in the mirror (`midMirror`, see
   [The sea](#the-sea)). The glare of the sun is dimmed by it.
 - **In the scene** the layers are sorted by distance (`tOrd`, `iOrd`) and
