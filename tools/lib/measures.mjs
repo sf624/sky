@@ -526,4 +526,36 @@ export function starShape(img, { region: box, k = 4, t = 30, n = 12, r = 6 } = {
   return median(ratios);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape };
+// texture: the contrast of detail some 5 to 50 px across, against the light round about: the luma, cleared of
+// single bright points (a median of 3 x 3, so that stars do not count), is averaged over boxes of 2 k1 + 1 and
+// 2 k2 + 1 px (opt.k1 default 2, opt.k2 default 24); the measure is the RMS of their difference over the mean of the
+// larger, away from the region's edge (k2). Streaks of cirrus against the sky: some 0.02 to 0.1; an even veil or a
+// clear sky: under 0.01.
+function boxMean(L, w, h, r) {
+  const t = new Float32Array(w * h), o = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let i = Math.max(0, x - r); i <= Math.min(w - 1, x + r); i++) { s += L[y * w + i]; n++; }
+    t[y * w + x] = s / n;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let j = Math.max(0, y - r); j <= Math.min(h - 1, y + r); j++) { s += t[j * w + x]; n++; }
+    o[y * w + x] = s / n;
+  }
+  return o;
+}
+export function texture(img, { region: box, k1 = 2, k2 = 24, m = 2 } = {}) {
+  const R = region(img, box), { w, h } = R, M = new Float32Array(w * h), v = new Float32Array((2 * m + 1) ** 2);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let n = 0;
+    for (let j = -m; j <= m; j++) for (let i = -m; i <= m; i++) v[n++] = R.l[Math.min(h - 1, Math.max(0, y + j)) * w + Math.min(w - 1, Math.max(0, x + i))];
+    M[y * w + x] = v.sort()[n >> 1];
+  }
+  const a = boxMean(M, w, h, k1), b = boxMean(M, w, h, k2);
+  let s = 0, sb = 0, n = 0;
+  for (let y = k2; y < h - k2; y++) for (let x = k2; x < w - k2; x++) { const i = y * w + x, d = a[i] - b[i]; s += d * d; sb += b[i]; n++; }
+  return n ? Math.sqrt(s / n) / Math.max(sb / n, 1) : 0;
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, stars, starShape, texture };

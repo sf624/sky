@@ -1399,6 +1399,46 @@
    ],
    "bad": "03b0a75",
    "note": "The exposure lifted by the sunlit tops limit (SUNLIT_TOPS) is for cloud seen from above; from below it lifts TOPS_BELOW of the way. Guarded the other way by deck-white-11km and deck-white-down-11km."
+  },
+  {
+   "name": "cirrus-streaks-twilight-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.734&yaw=186.4&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "cirrus looking up with the sun 9 degrees under the horizon a flat purple veil, without streaks or texture: from some 4 degrees down, where the light goes over to the moon, the sheet's own light followed its depth over 10 km",
+   "measures": [
+    {
+     "measure": "texture",
+     "region": [
+      0,
+      0,
+      1,
+      0.8
+     ],
+     "min": 0.025
+    }
+   ],
+   "bad": "6a93479",
+   "note": "0.003 on main 6a93479 and a7fbb75 (one smooth veil), 0.047 once the sheet's own light keeps the depth at the pixel by night."
+  },
+  {
+   "name": "cirrus-streaks-moon-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=20.5&moon=14.75&yaw=23.8&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "moonlit cirrus looking up (a full moon 30 degrees high) a smooth grey glow with only faint streaks: the sheet's own light followed its depth over 10 km at night",
+   "measures": [
+    {
+     "measure": "texture",
+     "region": [
+      0.3,
+      0,
+      0.7,
+      0.8
+     ],
+     "min": 0.04
+    }
+   ],
+   "bad": "6a93479",
+   "note": "0.011 on main 6a93479 and a7fbb75 (the moon's aureole and faint streaks), 0.084 once the sheet's own light keeps the depth at the pixel by night."
   }
  ]
 }
