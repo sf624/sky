@@ -1709,6 +1709,75 @@
    "bad": null,
    "fixed": null,
    "note": "The sheet under the horizon: patchStops less the best plane 0.130 on main 517494b, 0.447 with thick and thin places about twice main's depth (0.6 to 1.0, and the 5th percentile of the luma under 150, about main's own depth, where the thin places let the sea through); p5 of the luma 207 on main, 184 now."
+  },
+  {
+   "name": "tower-stripes-ac-sun0-4km",
+   "q": "weather=ac-cumulus&date=80&alt=4&time=18&yaw=270&pitch=-4",
+   "reported": "2026-11-26",
+   "wrong": "a tall cumulus under altocumulus with the sun on the horizon, seen from 4 km with the sun behind: its lit side in evenly spaced hard horizontal bands, the cells' shadows read where the line of light crosses the layer's middle, 11 to 34 times smaller in height",
+   "measures": [
+    {
+     "measure": "regularity",
+     "region": [
+      0.16,
+      0.38,
+      0.2,
+      0.3
+     ],
+     "max": 0.35
+    }
+   ],
+   "bad": "c3c0298",
+   "note": "0.64 on main c3c0298, 0.14 once the shadow is the mean of the columns along the light's slanting way through the layer (midSlant)."
+  },
+  {
+   "name": "tower-line-ac-sun5-4km",
+   "q": "weather=ac-cumulus&date=80&alt=4&time=17.5928&yaw=266.5&pitch=-4",
+   "reported": "2026-11-26",
+   "wrong": "the same tower with the sun 5 degrees up: a thin dark line with hard edges straight across its lit side",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "region": [
+      0.16,
+      0.38,
+      0.2,
+      0.3
+     ],
+     "max": 15
+    }
+   ],
+   "bad": "c3c0298",
+   "note": "24.5 on main c3c0298, 9.1 with the mean along the slanting way. A soft grey band stays there: something dense and straight in the altocumulus field towards the sun (the field at this place shows a straight edge seen straight down from 11 km; not followed further)."
+  },
+  {
+   "name": "fragment-cut-sun0-0.3km",
+   "q": "weather=fair&date=80&alt=0.3&time=18&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "looking up from 0.3 km with the sun on the horizon: a small heap lit red over a straight edge and grey under it, the edge a height of the map of the clouds' shadow",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "region": [
+      0.281,
+      0.56,
+      0.055,
+      0.035
+     ],
+     "p": 0,
+     "of": "rg",
+     "against": "fragment-cut-sun0-0.3km",
+     "againstRegion": [
+      0.281,
+      0.515,
+      0.055,
+      0.035
+     ],
+     "min": 0.97
+    }
+   ],
+   "bad": "c3c0298",
+   "note": "The heap's red under the edge over that above it: 0.92 on main c3c0298, 1.02 once the depth towards the light is taken between the map's next two heights by where the place lies between them."
   }
  ]
 }
