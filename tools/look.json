@@ -1377,6 +1377,28 @@
    "bad": "5aa9d12",
    "fixed": null,
    "note": "Flown: 46 frames of 50 ms at 900 km/h; the region holds the heaps. Spectrum peak over periods of 2 to 5 px. main 5aa9d12: 263; the fix: 18.3."
+  },
+  {
+   "name": "sheet-grey-from-below-4km",
+   "q": "weather=altostratus&alt=4&date=172&time=12&yaw=180&pitch=50",
+   "reported": "2026-11-26",
+   "wrong": "a frame full of altostratus overhead at noon near white (luma p50 212 to 215, p5 195 to 199), where photographs of such skies looking up show grey (p50 150 to 192)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "p": 50,
+     "min": 150,
+     "max": 200
+    }
+   ],
+   "bad": "03b0a75",
+   "note": "The exposure lifted by the sunlit tops limit (SUNLIT_TOPS) is for cloud seen from above; from below it lifts TOPS_BELOW of the way. Guarded the other way by deck-white-11km and deck-white-down-11km."
   }
  ]
 }
