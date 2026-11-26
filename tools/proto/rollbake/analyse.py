@@ -195,11 +195,11 @@ def sheets(outdir, files):
         made.append(p)
     # 3. Variants against the fingerprint.
     vs = [('n1024', 'baseline T=150'), ('v_epsnoise', '(a) eps 0.25 +- 0.1 smooth noise'), ('v_turn', '(b) wind turning faster (turn2 0.4)'),
-          ('v_T50', '(c) stopped at T=50'), ('v_T80', '(c) stopped at T=80'), ('v_kick05', '(d) noise kick 0.05 per super-step'),
-          ('v_kick15', '(d) noise kick 0.15 per super-step'), ('v_kick40', '(d) noise kick 0.4 per super-step'),
-          ('v_kick80', '(d) noise kick 0.8 per super-step'), ('v_combo', '(a)+(b)+T=80'),
-          ('v_q10', '(e) wavenumber q 1 +- 0.1 smooth noise'), ('v_q20', '(e) wavenumber q 1 +- 0.2 smooth noise'),
-          ('v_mix', '(a)+(b)+(e) q +- 0.15, T=150')]
+          ('v_T50', '(c) stopped at T=50'), ('v_T80', '(c) stopped at T=80'), ('v_kick15', '(d) noise kick 0.15 per super-step'),
+          ('v_kick40b', '(d) kick 0.4, none in the last super-step'), ('v_kick80b', '(d) kick 0.8, none in the last super-step'),
+          ('v_kick80s20', '(d) kick 0.8, s=20 (23 kicks)'), ('v_q10', '(e) wavenumber q 1 +- 0.1 smooth noise'),
+          ('v_q20', '(e) wavenumber q 1 +- 0.2 smooth noise'), ('v_mix2', '(a)+(e): eps +- 0.1, q +- 0.2'),
+          ('v_mix', '(a)+(b)+(e): q +- 0.15'), ('v_combo', '(a)+(b), stopped at T=80')]
     vs = [(k, v) for k, v in vs if ('gl', k) in fields]
     if vs:
         for part, sel in zip('abcd', [vs[i:i + 4] for i in range(0, len(vs), 4)]):
