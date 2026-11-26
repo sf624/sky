@@ -3631,10 +3631,34 @@ diagonal hatch covered the clouds in flight.
 
 What is left between a flight and a still at the place reached is noise:
 the march's jitter (interleaved gradient noise, shifted each frame) gives
-each frame a fine diagonal hatch, which the mean over many frames at rest
+each frame a fine grain, which the mean over many frames at rest
 removes, and the mean over about ten in flight only partly. A sharper read
 shows more of it; a longer mean in flight (`IN_MOTION`) blurs the detail
 more (Catmull-Rom with 25 frames: 0.38 for 3.5 to 5 pixels).
+
+**The draws of a pixel over the frames.** The scene's draws for the mean
+(the march's start, the depth of the low clouds' light, the light's and
+the sky's directions, the middle clouds' start) are interleaved gradient
+noise (`ign`), shifted along the diagonal by 5.588238 pixels a frame
+(`uPass`), with an offset of their own for each draw. IGN is a function
+of one linear phase across the picture (`dot(p, k)`), and so were all the
+draws of a pixel over the frames, and what their mean missed: the mean
+kept a regular lattice of dots 2 to 3 pixels apart (spectral peaks at
+IGN's harmonics). It showed on the grey bases of low clouds seen from
+below, where the depth of the light's point changes the light most: faint
+at rest, plain in flight. So `ign` adds a phase of its own to each pixel
+(a hash of the pixel): a pixel steps through the same values over the
+frames as before, and its draws stay tied to each other, but what the mean
+misses is a different number in each pixel, an irregular grain. Measured
+on the overcast deck at 0.3 km looking up 50 degrees at civil twilight
+(1280 x 720, 46 frames of 50 ms; the sharpest peak of the luma's spectrum
+over periods of 2 to 5 pixels, the `base-lattice-*` entries of
+`tools/look.json`): at rest 1092 before, 16 after; flown at 900 km/h 6013
+and 21; natural cloud about 15 to 40. The error against the mean of 16
+settled stills with independent draws stayed the same (1.41 % of the
+luma). Draws that are not tied (a hash for each, or the golden ratio's
+and the plastic number's steps for the start and the light's depth, from
+a hash of the pixel) left an irregular grain twice as strong (3 %).
 
 **The neighbourhood check.** If the past was nearer or further by enough to
 slip a fraction of a pixel (`doubt`, from the parallax), it counts only as
