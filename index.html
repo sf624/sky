@@ -6226,7 +6226,10 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       float above = col * (1.0 - tf), under = col * tf, thru = 1.0 / (1.0 + K * col);
       float down = (1.0 + K * under) * thru, upG = (1.0 + K * above) * thru;
       float wd = smoothstep(-0.25, 0.25, cv), ground = 0.12 + 0.3 * uCloud;
-      float amb = mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd);
+      // (In the unit the low clouds' sky light was set in against photographs, SKYV.x: with the slab's alone, a fifth
+      // to a half of theirs, the middle clouds at dusk, lit by the sky alone, were darker than the low cumulus under
+      // them and than the sea between them, though higher up and nearer the light.)
+      float amb = SKYV.x * (mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd));
       sSun += w * sun;
       sAmb += w * amb;
       sunPrev = sun;
