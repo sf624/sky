@@ -8431,6 +8431,10 @@ const SkySound = (() => {
   const DAY_OPEN = [3.5, 2.8], DAY_KM = [12, 20];   // in sunlight the eye opens up at most DAY_OPEN[0] stops past the exposure
                                        // that shows a white surface facing the sun, in the sun's light at the eye, at
                                        // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
+  const WORLD = 9.25;            // ...and, looking at the world below, to no more light than it gets: a white surface in
+                                       // it stands WORLD stops above the air's mean light at the ground (worldLevel)...
+  const WORLD_SHARE = [0.1, 0.35];   // ...none of it where the view looks down by less than the first share (the mean
+                                       // of below), all of it from the second (a smoothstep)
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
   const MONO_DEEP = [-3, -6];                 // the first in civil twilight, the second from the sun MONO_DEEP[1] down
@@ -9097,13 +9101,18 @@ const SkySound = (() => {
   //   than the sun's light lets it: the exposure (after all the above) is
   //   at most DAY_OPEN[0] stops past the one that shows a white surface
   //   facing the sun, in the sun's light at the eye (sunlitLevel), at
-  //   WHITE (dayEye). It hangs on the light where the eye is, not on the
-  //   view, so turning the view does not move it; and on the sun as the
+  //   WHITE (dayEye). It hangs on the light where the eye is, not on what
+  //   the view shows, so a turn from the Earth to the sky has no step in
+  //   it (only how far the view looks down counts, below); and on the sun as the
   //   eye sees it, not on its height over the ground's horizon: from 40 km
   //   the sun sets some 6 degrees below it, and until then its light
   //   barely dims (to a fifth at 4 degrees down, in the model's air). So
   //   the limit lifts by itself as the sun's light at the eye fades into
-  //   the limb, and twilight's exposure then comes in as before. Up to the
+  //   the limb, and twilight's exposure then comes in as before. And
+  //   looking at the world below, the eye is adapted to no more light than
+  //   that world gets (WORLD, worldLevel): for a view with the Earth in it
+  //   from above the cruise heights, the limit lifts as the Earth goes
+  //   into twilight, not as the sun sets at the eye. Up to the
   //   cruise heights no view comes near it: the darkest, the deep blue
   //   zenith from 11 km, stays 0.26 stops below or more. From DAY_KM[0] km
   //   up it closes to DAY_OPEN[1] at DAY_KM[1] km, a little above where a
@@ -9162,10 +9171,39 @@ const SkySound = (() => {
   // sun's light the eye is adapted to (adaptedLevel; none some time after
   // the sun has set where the eye is). It matters only where it is below
   // the exposure E that the view asks for.
-  function dayEye(E) {
+  // But where the view holds the world below, the eye is adapted to no more
+  // light than that world gets (worldLevel): from the stratosphere the sun
+  // shines on the eye long after it has set on the ground (from 40 km until
+  // it is 6.4 degrees down), and the Earth below is in twilight by then.
+  // Held to the sun's light at the eye alone, a view of that Earth went near
+  // black (from 40 km down and away from the sun, luma 12 to 16 of 255 with
+  // the sun 5 degrees down, where the view asked for 2.3 to 3 stops more),
+  // and grew brighter again as the sun set at the eye (45 at 7 down).
+  // down: how far the view looks down (the mean of the meter's below, 0 to
+  // 1). The world's light comes in as that goes from WORLD_SHARE[0] to
+  // WORLD_SHARE[1]: from 40 km, with the view raised from 25 degrees (the
+  // Earth just out of the frame) to 10. A view of the sky alone keeps the
+  // limit of the sun's light at the eye, and the sky above the cruise
+  // heights stays near black while the sun shines there.
+  function dayEye(E, down) {
     const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
-    return WHITE + open - adaptedLevel(state.alt, state.elev, WHITE + open - E);
+    const sun = adaptedLevel(state.alt, state.elev, WHITE + open - E);
+    if (!Number.isFinite(sun)) return Infinity;
+    return WHITE + open - sun + smooth01((down - WORLD_SHARE[0]) / (WORLD_SHARE[1] - WORLD_SHARE[0])) * Math.max(0, sun - worldLevel(state.elev));
   }
+  // The light of the world below the eye, as the level of a white surface
+  // in it, with the sun at elevation e (degrees) over the ground: WORLD
+  // stops above the air's mean light at the ground (airLevel, which the
+  // envelope of the sun higher takes for the sky's darkening too). By day
+  // that lies above the sun's own light at the eye (by 1.1 stops with the
+  // sun 60 degrees up, 0.1 at 10) and does nothing; from the sun some 9
+  // degrees up it lies below it at 20 km and above, and falls with the
+  // twilight on the ground: 2.5 stops below the bare sun's at 0 degrees, 9
+  // at 6 down, 17 at 12 down. WORLD is set so that the limit stays a little
+  // over where a view with the Earth in it stands, as DAY_OPEN[1] is by
+  // day: from 40 km down and away from the sun, 0 to 0.4 stops over with
+  // the sun from 8 to 3 degrees up, 0.9 at 0, 1.6 to 2.6 from 3 to 6 down.
+  const worldLevel = e => airLevel(0, e) + WORLD;
   // The night's eye (see MOON_OPEN): the most the exposure may be, from the
   // moon's light the eye is adapted to: the eye under a moon is adapted to
   // the moonlit world round it, wherever it looks, as the day's eye is to
@@ -9318,7 +9356,9 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return Math.min(E, dayEye(E), moonEye(E));
+    // How far the view looks down, block by block alike (for dayEye).
+    const down = below.reduce((a, b) => a + b, 0) / below.length;
+    return Math.min(E, dayEye(E, down), moonEye(E));
   }
 
   // ---------- Drawing ----------

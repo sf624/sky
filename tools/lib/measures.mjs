@@ -75,6 +75,19 @@ export function exposureStep(imgs) {
   return Math.max(0, ...x.slice(1).map((v, i) => Math.abs(v - x[i])));
 }
 
+// lumaRise, of a sweep: the largest rise of the mean luma of the region (levels of 255) from any picture to a
+// later one. A sweep of the sun's height, going down: the picture never grows brighter, so about 0. Over the whole
+// sweep, not between neighbours: a slow rise over many stills counts in full.
+export function lumaRise(imgs, opt = {}) {
+  let low = Infinity, rise = 0;
+  for (const img of imgs) {
+    const m = mean(region(img, opt.region).l);
+    rise = Math.max(rise, m - low);
+    low = Math.min(low, m);
+  }
+  return rise;
+}
+
 // flatPlate: the largest connected part (4 neighbours) of the bright pixels (luma at least opt.luma, 150) whose
 // local relief is very low (the mean of |dx| + |dy| of the luma over a box of opt.k px, 7, under opt.grad, 3
 // levels), as a share of the region. Cloud tops are knobbly; a flat pale plate (a closed floor without the relief
@@ -606,4 +619,4 @@ export function patchStops(img, { region: box, nx = 24, ny = 14, top = 250, flat
   return at(s, 95) - at(s, 5);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture };
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture };

@@ -156,6 +156,13 @@ test('exposureStep: the largest change of the exposure between neighbouring pict
   assert.throws(() => M.exposureStep([at(1), pic(4, 4, () => 0)]), /without its exposure/);
 });
 
+test('lumaRise: the largest rise of the mean luma from a picture to a later one', () => {
+  const grey = (v) => pic(8, 8, () => v);
+  assert.equal(M.lumaRise([60, 40, 20, 10].map(grey)), 0);
+  assert.ok(Math.abs(M.lumaRise([60, 15, 20, 18, 45, 30].map(grey)) - 30) < 1e-9);
+  assert.ok(Math.abs(M.lumaRise([grey(10), pic(8, 8, (x) => (x < 4 ? 10 : 50))], { region: [0.5, 0, 0.5, 1] }) - 40) < 1e-9);
+});
+
 test('flatPlate: a large smooth bright part, not knobbly cloud', () => {
   // (Grain at every pixel: knobs, as cloud tops are at this scale.)
   const grain = (x, y) => { let n = (x * 374761393 + y * 668265263) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
