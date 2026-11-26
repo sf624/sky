@@ -1846,10 +1846,29 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     noise are read aslant through their tiles likewise. On a level slice
     the same 6.4 by 8 km of cells stood at every tile (the map only slid
     it), and the lumps repeated every 1.27 km: from 20 to 40 km up the
-    field was a lattice, and ranks ran to the horizon from any height. A threshold of the field (the amount, the map over 4 km
-    and more, the noise's swell) says where cells stand, run together or
+    field was a lattice, and ranks ran to the horizon from any height. A threshold of the field (the amount, the map,
+    the noise's swell) says where cells stand, run together or
     shrink apart; the map's other channels move the place in the noise and
-    say which size leads. The cells fill 0.65 of the layer's depth, at a
+    say which size leads.
+    - *Fields.* The layer is fields of cells with ragged edges, clear
+      lanes and gaps between them, tens of km across (`MID_EDGE`): the
+      map's systems (read over some 20 km) and four times its detail
+      under that (clusters, lanes, its streets) are set against the
+      amount, and the cells shrink apart over a narrow margin. Half the
+      map is field at an amount of 0.6. (Until #NNN the threshold fell
+      off over three times as wide a range of the map read over 4 km:
+      most of the map was margin, an even sprinkle of shrunken cells
+      from the nadir to the horizon, with no field in it.)
+    - *Regions of a field*, from the map read elsewhere or over more km,
+      so that they do not follow the fields' edges: how closely the cells
+      stand (`MID_PACK`: open cells with wide gaps, or cells packed with
+      seams between them; `MID_SEAM` keeps the seams, and the domes'
+      unlike heights, where they are packed), which size leads (400 or
+      800 m), and whether they stand in streets (`MID_STREET`): there
+      the map is read over 1.1 km, so its streets of 5 km and their
+      finer ones show, and its detail widens and narrows the cells
+      inside a field too: bands, ranks and lanes.
+    The cells fill 0.65 of the layer's depth, at a
     level that varies over some 4 km. Over its widest level a cell is a
     crisp heap of lumps (the heaps' heads, in upright columns); under it a
     soft slab whose density falls off outwards, in fibres where it is thin,
@@ -1870,9 +1889,14 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     given goes with the form too (1.2 - 0.8 `midform` km).
 - **The pass** (`MID_PASS`, `midClouds`): up to 128 steps along the ray
   through the shell, 20 m at the shortest (40 m from within), growing with
-  the distance; strides of 2.5 steps through clear air only where the
+  the distance, but ten at least through the layer where the ray crosses
+  it; strides of 2.5 steps through clear air only where the
   column has no cloud near (`midGap`), and back a stride when one lands in
-  cloud. It writes the third layer of `uPasses`: the mean distance
+  cloud. (Without the ten, a step from 20 km over the layer and more was
+  longer than the ray's whole way through it: a ray met a cell in some
+  frames and none in others, and from 40 km the cells were a dim
+  grey-blue grain with a checker of pixels in it, where from 11 km they
+  were white and solid.) It writes the third layer of `uPasses`: the mean distance
   (`tMid`), the light per unit of the light's (`sSun`) and of the sky's
   (`sAmb`), how far about the mean the light comes from, and what gets
   through (`Tm`) as the depth. The sun's disc shows through a depth of up

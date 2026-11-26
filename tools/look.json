@@ -1260,6 +1260,51 @@
    ],
    "bad": "8446078",
    "note": "The sun from 4.5 to 7.5 degrees down in steps of 0.25 (date 80, latitude 35: the times). The limit of the day's eye now rises at most EYE_FADE = 3 stops per degree of the sun: 0.75 a step."
+  },
+  {
+   "name": "mid-cells-white-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&yaw=200&pitch=-45&heading=49&cloud=0.02&mid=0.55&midform=1&cirrus=0.1&haze=0.9&wind=5",
+   "reported": "2026-11-26",
+   "wrong": "the middle clouds' cells from 40 km a dim grey-blue grain (white and solid from 11 km), with a checker of single pixels in them: the march's steps were longer than the ray's way through the layer, and a ray met a cell in some frames only",
+   "measures": [
+    {
+     "measure": "cover",
+     "region": [
+      0,
+      0.1,
+      1,
+      0.9
+     ],
+     "min": 0.15
+    }
+   ],
+   "bad": "8446078",
+   "note": "The cloud mask (white, bright) over the view: 0.000 on main 8446078 (no pixel of the grey-blue grain is in it), 0.309 with ten steps through the layer and the fields.",
+   "reference": {
+    "8446078": {
+     "cover": 0.0
+    }
+   }
+  },
+  {
+   "name": "mid-fields-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&yaw=200&pitch=-45&heading=49&cloud=0.02&mid=0.55&midform=1&cirrus=0.1&haze=0.9&wind=5",
+   "reported": "2026-11-26",
+   "wrong": "the middle clouds from 40 km an even sprinkle of cells over the whole sea, the same everywhere: no fields, lanes or gaps over tens of km",
+   "measures": [
+    {
+     "measure": "clumping",
+     "region": [
+      0,
+      0.1,
+      1,
+      0.9
+     ],
+     "min": 0.52
+    }
+   ],
+   "bad": "8446078",
+   "note": "0.625 with the fields (MID_EDGE and the others); 0.428 with main's field and the march's fix alone (the even sprinkle, drawn white). On main 8446078 itself the mask is empty, and the measure says nothing (2.9)."
   }
  ]
 }
