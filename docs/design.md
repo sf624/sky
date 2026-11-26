@@ -1583,6 +1583,15 @@ each cloud, not on its surface; no normal of the field enters it.
   aslant they made streaks); they are read in one level layer of the
   noise (where a read crossed from one layer to the next, the bends of
   the GPU's filter drew long straight lines).
+  Whether the point is in the lower part goes by the field at the point
+  or where the ray came into the cloud, whichever is more (`fbIn`): the
+  point lies at a depth drawn anew each frame, and some tens of metres
+  into a deck the base's field no longer bounds the cloud. There the point
+  took the light of the cloud's inside, far darker under a deck (at civil
+  twilight, overcast at 0.3 km looking up: 20 levels as shown with the
+  point at a depth of 3.5, against 97 at 1). Drawn that deep in one frame
+  in twenty-five, those frames left the mean over about ten frames in
+  flight a grain of dark dots on the bases (2.7 % of the luma).
 - *Inside a cloud* (the eye in it), the light is that of two streams in a
   slab, one down and one back up: the stream down goes from about all of
   it near the top to `tDown` at the base, as the depth under the place
@@ -3699,6 +3708,17 @@ settled stills with independent draws stayed the same (1.41 % of the
 luma). Draws that are not tied (a hash for each, or the golden ratio's
 and the plastic number's steps for the start and the light's depth, from
 a hash of the pixel) left an irregular grain twice as strong (3 %).
+The two numbers of a direction (the sky's direction over the hemisphere,
+`u1` and `u2`, and the turn of the light's later steps against the
+others) must not be tied: the second is drawn by `ign2`, the same noise
+from a phase of its own. They were drawn as `ign` of the pixel's
+coordinates and of the same swapped (`gl_FragCoord.yx`), whose phases
+differ by 0.0613 (x - y): IGN's factor 52.98 turns that into a quarter
+of a turn a pixel, and the mean kept diagonal stripes 4 pixels apart on
+the low clouds where the scene works their light out itself (strongest
+under a middle layer: `weather=altostratus` at 0.3 km looking up, the
+sharpest peak over periods of 2 to 5 pixels 188 before, 14 after; 553
+and 20 with the first stage's light map left out).
 
 **The neighbourhood check.** If the past was nearer or further by enough to
 slip a fraction of a pixel (`doubt`, from the parallax), it counts only as

@@ -154,6 +154,15 @@ test('sheet: rows of scaled pictures with labels', () => {
   assert.equal(s.h, 2 + 18 + 16 + 2);
 });
 
+test('grain: a pepper of dark pixels on a smooth base scores high, the smooth base and value noise low', () => {
+  const smooth = pic(W, H, (x, y) => 100 + 20 * Math.sin(x / 60) * Math.sin(y / 50));
+  const pepper = pic(W, H, (x, y) => 100 + 20 * Math.sin(x / 60) * Math.sin(y / 50) - ((x * 7 + y * 13) % 29 === 0 ? 30 : 0));
+  const s = M.grain(smooth), p = M.grain(pepper), n = M.grain(natural);
+  assert.ok(s < 0.4, `smooth ${s}`);             // the rounding to 8 bits alone
+  assert.ok(p > 2, `pepper ${p}`);
+  assert.ok(n < 1, `noise ${n}`);
+});
+
 test('stars: points 12 levels or more over their surroundings, per 10 000 px', () => {
   const pts = [[10, 10, 60], [40, 20, 30], [70, 30, 8], [100, 40, 40]];   // x, y, levels over a sky of 5
   const img = pic(200, 50, (x, y) => 5 + (pts.find((p) => p[0] === x && p[1] === y) || [0, 0, 0])[2]);
