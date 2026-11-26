@@ -3106,12 +3106,37 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   about 220, a stop brighter (11 to 40 km looking down by day, +0.9 to
   1.2 stops; towards the sun, with the sky in view, +0.2 to 0.3; inside
   a sunlit cloud +0.3 to 0.9). Views whose highlights are dimmer than
-  that keep their key: the clear sky, haze, the deck from below, the
+  that keep their key: the clear sky, haze, the dim deck from below, the
   sea, the night (where the sun is hidden, `sunlitLevel` is -Infinity
   and the limit does nothing). It fades out with the day's exposure in
   twilight (`DUSK`): from 11 km over a deck the exposure rises smoothly
   as the sun goes down, the change +0.4 stops at 9 degrees and none from
-  1.3 degrees down;
+  1.3 degrees down.
+  The limit is for cloud seen from above, in the sun's light. Cloud seen
+  from below is lit through, and photographs show it grey: it lifts the
+  key in full only for the share of the picture's light that comes from
+  below the horizontal (`below`: each block from none at `TOPS_SPAN` = 5
+  degrees above the horizontal to all of it at 5 below, a smoothstep,
+  weighed by its light as `lit` counts it), and `TOPS_BELOW` = 0.2 of the
+  way for the rest. Under altostratus at noon the sheet overhead is only
+  0.4 to 0.6 stops below a white surface facing the sun, as bright as
+  sunlit tops from above, and so flat that `white`, with its brightest
+  3 % at `WHITE`, set the whole frame near white: luma p50 212 (p5 199)
+  looking up from 4 km, where photographs of altostratus and overcast
+  looking up, sky alone, show p50 150 to 192 (median about 175). Now
+  184; with the sun 19 degrees up 156 (194 before), from 0.3 km 158
+  (164); level under the sheet at 4 km, the sun 19 degrees up, 186 (197)
+  towards it and 156 (166) away; the overcast deck from 0.3 km at noon
+  167 (173). From 0.3 km at noon the sheet has more contrast, `white`
+  decides, and it stays at 193. Photographs are exposed by their
+  cameras, so their levels say what a photograph of such a sky looks
+  like, not how bright the sky is; the share 0.2 puts these views among
+  them (with none, before the sheet of #128, they came out 143 to 169,
+  at the darker end). Views whose light comes
+  mostly from below the horizontal (the deck from above, cumulus seen
+  from 3 to 11 km), level views whose dark sea or sky lets `white`
+  decide, and views up at a clear or fair sky are as before (within 0.01
+  stops in 53 views at 0.3 to 11 km);
 - `white` brings `lit` to `WHITE` (2^0.3 before the tone curve: at the
   start of its shoulder, about 218 of 255) in daylight (`lit` at
   `DAY_HIGH` = 0.5 or more), and `DIM` = 0.6 stops lower for each stop
