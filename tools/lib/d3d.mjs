@@ -20,15 +20,25 @@ const winTemp = () => {
 // frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`,
 // then goes on to the next view of a chain, if any.
 // With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
+// With d3dSwitch=W, it chooses the weather W in the panel d3dAt s (default 5) after the first picture, and posts
+// instead the wait until the console line "middle clouds built" (none within 60 s: null; a weather without middle
+// clouds waits 8 s) and the gaps between animation frames from the choice to 1 s after.
 const INJECT = `<script>(() => {
   const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
+  const SWITCH = q.get('d3dSwitch'), AT = +(q.get('d3dAt') || 5);
+  let built = 0;
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(Object.assign({ at: performance.now() / 1000 }, o)) }).catch(() => {});
   for (const k of ['info', 'log', 'warn', 'error']) {
     const f = console[k];
-    console[k] = (...a) => { post({ ev: 'console', msg: a.map(String).join(' ').slice(0, 500) }); f.apply(console, a); };
+    console[k] = (...a) => {
+      const msg = a.map(String).join(' ').slice(0, 500);
+      if (!built && /middle clouds built/.test(msg)) built = performance.now();
+      post({ ev: 'console', msg });
+      f.apply(console, a);
+    };
   }
   let gl = null, ext = null, started = false, done = false;
-  const times = [], pending = [];
+  const times = [], pending = [], frames = [];
   const get = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (t, o) {
     const c = get.call(this, t, o);
@@ -50,6 +60,7 @@ const INJECT = `<script>(() => {
   };
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = cb => raf(ts => {
+    frames.push(performance.now());
     let query = null;
     if (ext && started && !done && !gl.isContextLost()) { query = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, query); }
     try { cb(ts); } finally {
@@ -59,7 +70,7 @@ const INJECT = `<script>(() => {
         if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) times.push(gl.getQueryParameter(p, gl.QUERY_RESULT) / 1e6);
         gl.deleteQuery(p);
       }
-      if (!done && !SHOT && times.length >= FRAMES + 10) {
+      if (!done && !SHOT && !SWITCH && times.length >= FRAMES + 10) {
         const t = times.slice(10, FRAMES + 10), s = [...t].sort((a, b) => a - b);
         finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], mean: t.reduce((a, b) => a + b, 0) / t.length,
           times: t.map(x => +x.toFixed(3)), w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
@@ -74,6 +85,21 @@ const INJECT = `<script>(() => {
       clearInterval(watch);
       post({ ev: 'shown', failed: hero.classList.contains('failed') });
       if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
+      else if (SWITCH && !hero.classList.contains('failed')) setTimeout(async () => {
+        const list = document.getElementById('weather'), at = performance.now();
+        list.value = SWITCH;
+        built = 0;
+        list.dispatchEvent(new Event('change', { bubbles: true }));
+        // (A weather without middle clouds, its slider at 0: 8 s.)
+        const limit = +document.getElementById('mid').value > 0 ? 60000 : 8000;
+        while (!built && performance.now() - at < limit) await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 1000));
+        const end = (built || performance.now() - 1000) + 1000, gaps = [];
+        for (let i = 1; i < frames.length; i++) if (frames[i] > at && frames[i - 1] < end) gaps.push([frames[i - 1] - at, frames[i] - frames[i - 1]]);
+        const top = gaps.reduce((m, g) => (g[1] > m[1] ? g : m), [0, 0]);
+        finish({ ev: 'switch', weather: SWITCH, after: AT, wait: built ? (built - at) / 1000 : null, gap: top[1], gapAt: top[0] / 1000,
+          gaps: gaps.filter(g => g[1] > 100).map(([t, d]) => [+(t / 1000).toFixed(2), Math.round(d)]) });
+      }, AT * 1000);
       else if (!ext || hero.classList.contains('failed')) finish({ ev: 'frames' });
     }
   }, 20);
@@ -263,7 +289,7 @@ export const pageUrl = (srv, key, id, q, frames) =>
   `http://localhost:${srv.port}/d3d/page/${key}/index.html?timing&res=1&${withQuality(q)}&d3d=${id}&d3dFrames=${frames}`;
 
 // `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
-export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null }) {
+export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null, weather = 'altocumulus', at = 5 }) {
   if (!windowsChrome()) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
   const srv = await d3dServer(), { reports, files, port } = srv;
   const results = [];
@@ -280,7 +306,7 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
           servePage(srv, id, html);
           // (A picture is taken at the page's own drawing size: no res=1.)
           url = shot ? `http://localhost:${port}/d3d/page/${id}/index.html?timing&${withQuality(q)}&d3d=${id}&d3dShot=${shot}`
-            : pageUrl(srv, id, id, q, frames);
+            : pageUrl(srv, id, id, q, frames) + (mode === 'switch' ? `&d3dSwitch=${encodeURIComponent(weather)}&d3dAt=${at}` : '');
         }
         reports.set(id, []);
         const timedOut = await runChrome(url, () => reports.get(id).some((g) => g.ev === 'done'), id, { limit, size });
@@ -298,7 +324,22 @@ export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300,
   } finally {
     srv.close();
   }
+  if (mode === 'switch' && runs > 1) summary(results);
   return results;
+}
+
+// The median and range of each page's switch runs.
+function summary(results) {
+  const span = (list, digits) => {
+    const v = list.filter((x) => x !== null && x !== undefined).sort((a, b) => a - b);
+    return v.length ? `${v[v.length >> 1].toFixed(digits)} (${v[0].toFixed(digits)}-${v[v.length - 1].toFixed(digits)})` : '-';
+  };
+  console.log('median (range):');
+  for (const name of [...new Set(results.map((r) => r.page))]) {
+    const rs = results.filter((r) => r.page === name), sw = rs.map((r) => r.got.find((g) => g.ev === 'switch') || {});
+    console.log(`  ${name}: first picture ${span(rs.map((r) => r.got.find((g) => g.ev === 'shown')?.at), 1)} s, ` +
+      `built after ${span(sw.map((g) => g.wait), 2)} s, longest gap ${span(sw.map((g) => g.gap), 0)} ms`);
+  }
 }
 
 function print(name, run, mode, got, timedOut, limit) {
@@ -314,6 +355,11 @@ function print(name, run, mode, got, timedOut, limit) {
   for (const g of got.filter((g) => g.ev === 'console')) console.log(`  ${g.msg}`);
   const shown = got.find((g) => g.ev === 'shown');
   if (shown) console.log(`  ${shown.failed ? 'failed' : 'first picture'} at ${shown.at.toFixed(2)} s (since the navigation)`);
+  const sw = got.find((g) => g.ev === 'switch');
+  if (sw) {
+    console.log(`  ${sw.weather} chosen ${sw.after} s after the first picture: ` + (sw.wait === null ? 'no "middle clouds built"' : `middle clouds built after ${sw.wait.toFixed(2)} s`) +
+      `; longest frame gap ${Math.round(sw.gap)} ms, ${sw.gapAt.toFixed(2)} s after the choice; gaps over 100 ms (s after the choice, ms): ${sw.gaps.map(([t, d]) => `${t} ${d}`).join(', ') || 'none'}`);
+  }
   const f = got.find((g) => g.ev === 'frames');
   if (f?.median) console.log(`  GPU time per frame at ${f.w} x ${f.h}: mean ${f.mean.toFixed(2)} ms, median ${f.median.toFixed(2)} ms, p90 ${f.p90.toFixed(2)} ms`);
 }

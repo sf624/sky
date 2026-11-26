@@ -261,6 +261,11 @@ these rules, and new work at start should too:
   says the program is done: asking earlier waits for the compiler, which
   can take seconds for `fs` (ANGLE on Direct3D 11, the usual stack on
   Windows).
+- A program compiled after the start (the middle clouds') waits while
+  the user looks on: compile it ahead where it takes seconds, without
+  adding to the start's own compiling (see `ahead` in
+  [design.md](design.md#middle-clouds)), and measure the wait with
+  `node tools/sky.mjs d3d switch`.
 - CPU work over a few ms is a job (a generator that yields every little
   while), run by `slices` at start and by `finish` later.
 - GPU work at start goes in `batches`, with a fence after each.
