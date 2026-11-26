@@ -1305,6 +1305,78 @@
    ],
    "bad": "8446078",
    "note": "0.625 with the fields (MID_EDGE and the others); 0.428 with main's field and the march's fix alone (the even sprinkle, drawn white). On main 8446078 itself the mask is empty, and the measure says nothing (2.9)."
+  },
+  {
+   "name": "base-lattice-0.3km-civil",
+   "q": "weather=overcast&date=80&alt=0.3&pitch=50&time=18.3257",
+   "reported": "2026-11-26",
+   "wrong": "the grey bases of a deck seen from below, at rest: a fine regular lattice of dots 2 to 3 pixels apart",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "label": "spectrumPeak 2-5 px",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.6
+     ],
+     "pmin": 2,
+     "pmax": 5,
+     "max": 100
+    }
+   ],
+   "bad": "5aa9d12",
+   "fixed": null,
+   "note": "At rest. The sharpest peak of the luma's spectrum over periods of 2 to 5 px (IGN's harmonics). main 5aa9d12: 1092 (every draw of a pixel over the frames was a function of IGN's one linear phase across the picture, and so was what the mean missed); the fix (a phase of its own for each pixel in ign): 16.8. Natural cloud 15 to 40."
+  },
+  {
+   "name": "base-lattice-0.3km-civil-flown",
+   "q": "weather=overcast&date=80&alt=0.3&pitch=50&time=18.3257&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "the grey bases of a deck seen from below, in flight: rows of dark dots 2 to 3 pixels apart",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "label": "spectrumPeak 2-5 px",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.6
+     ],
+     "pmin": 2,
+     "pmax": 5,
+     "max": 100
+    }
+   ],
+   "bad": "5aa9d12",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h. Spectrum peak over periods of 2 to 5 px. main 5aa9d12: 6013; the fix: 21.3."
+  },
+  {
+   "name": "base-lattice-cumulus-0.3km-flown",
+   "q": "weather=fair&date=80&alt=0.3&pitch=50&speed=900",
+   "reported": "2026-11-26",
+   "wrong": "cumulus seen from below in flight: a fine regular lattice of dots over the clouds",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "label": "spectrumPeak 2-5 px",
+     "region": [
+      0.25,
+      0.6,
+      0.7,
+      0.4
+     ],
+     "pmin": 2,
+     "pmax": 5,
+     "max": 100
+    }
+   ],
+   "bad": "5aa9d12",
+   "fixed": null,
+   "note": "Flown: 46 frames of 50 ms at 900 km/h; the region holds the heaps. Spectrum peak over periods of 2 to 5 px. main 5aa9d12: 263; the fix: 18.3."
   }
  ]
 }
