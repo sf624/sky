@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="507de8b PR #130">
+<meta name="build" content="bdadf16 PR #130">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2055,6 +2055,12 @@ vec3 phases(float mu) { return phases(mu, false); }
 vec4 lightOnce[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
 bool onceOn = false;
 #endif
+//[ middle clouds
+// The light that the middle clouds scatter down on the air under them, from
+// all sides, per unit of the light on them, times the phase (see midDeck;
+// the caller sets it for each light).
+float airDeck = 0.0;
+//]
 // Light from one source (sun or moon) scattered towards the eye at p:
 // scattered once (times `direct`: less in the shadow of a cloud), plus what
 // was already scattered (the table).
@@ -2077,8 +2083,14 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
     vec4 sc = uBR[k] * dens.x, sm = scM * uMA[k];
     vec4 a = Tv[k] * ((sc + sm) * ms[k] + sm * MIE_LEAN * max(ch * lh[k] + cv * lv[k], 0.0)) * sky;
     if (lit) {
+//[ middle clouds
+      vec4 tl = exp(-(uBR[k] * odl.x + extM * uMA[k] * odl.y + uBO[k] * odl.z));
+      vec4 once = direct * tl * (sc * phase.x + sm * mix(phase.z, phase.y, dens.w));
+      a += once + airDeck * tl * (sc + sm);
+//| without
       vec4 once = direct * exp(-(uBR[k] * odl.x + extM * uMA[k] * odl.y + uBO[k] * odl.z)) * (sc * phase.x + sm * mix(phase.z, phase.y, dens.w));
       a += once;
+//]
 #ifdef AIR_LUT
       if (onceOn) lightOnce[k] += gain * once;
 #endif
@@ -3064,6 +3076,9 @@ const vec3 MID_CUT_X = vec3(8.0, -26.0, 29.0) / 256.0, MID_CUT_Z = vec3(28.0, -7
 // (midGap, of the last call: how far the place is, in km straight up or down, from where the column at the place has
 // cloud; 1 where the column has none at all. Nought within it. The march strides only where this allows.)
 float midLump, midGap;
+// (midMottle: the sheet's mottle at the place of the last call of midSheet, 0 to 1, 0.5 on the mean: it takes the
+// place of midLump for a sheet, see midDensity.)
+float midMottle = 0.5;
 // The field's order over tens of km, from the weather map (see midCells):
 //  - MID_EDGE: where cells stand. x, y: the amount at which half the map is field, and how fast the field grows with
 //    the amount; z: how much the map's detail (under some 20 km: clusters, lanes, its streets) counts beside its systems
@@ -3228,6 +3243,17 @@ float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fin
   // Where: the weather map's amount, elsewhere on it, over 4 km and more
   // (patches and sheets, with clear lanes), and over some 20 km (wr).
   float am = clamp(uMid.x + 0.7 * (1.0 - 0.8 * smoothstep(0.75, 1.0, uMid.x)) * (wa - 0.5), 0.0, 1.0);
+  // Thick and thin places in it, as the amount there: patches of some 3 to
+  // 6 km drawn out along the wind, and a mottle of some 200 to 400 m (read
+  // at a depth in the noise that wanders with the patches, so that its tile
+  // of 1.6 km does not show). From below an altostratus is a grey sheet,
+  // darker where it is thicker and finely mottled: in photographs the luma
+  // varies by some 2 % over a few degrees and 3 to 5 % over tens of them.
+  // With the slow swells alone it was an even white veil, 0.3 and 0.8 %.
+  vec4 m = textureLod(uNoise, vec3(0.5 * x.x, 0.0, x.y) / (2.0 * MID_KM) + vec3(0.37, 0.19 + 0.25 * t * uMid.w / MID_KM + wr, 0.71), max(lod - 1.0, 0.0));
+  vec4 mn = textureLod(uNoise, vec3(0.6 * x.x, 0.5 * h, x.y) * (2.0 / MID_KM) + vec3(0.53, 1.7 * m.b + 0.9 * m.a, 0.29), max(lod, 0.0));
+  midMottle = 0.5 * mn.b + 0.5 * mn.a;
+  float th = clamp(1.0 + 1.4 * (m.r - 0.5) + 2.5 * (midMottle - 0.5), 0.3, 1.8);
   float d;
   // A sheet: slow swells, drawn out along the wind.
   vec3 q = vec3(0.125 * x.x, 0.0, 0.5 * x.y) / MID_KM + vec3(0.0, 0.61 + 0.5 * t * uMid.w / MID_KM + wr, 0.0);
@@ -3249,7 +3275,7 @@ float midSheet(float h, float t, vec2 x, float wa, float wr, float lod, bool fin
     }
   }
   er = clamp(0.5 + 2.0 * (er - 0.5), 0.0, 1.0);
-  return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0);
+  return clamp(d - 0.25 * (1.0 - er) * (1.0 - d), 0.0, 1.0) * 0.8 * th;
 }
 // The density at p (from the eye), 0 to 1. lod as cloudShape's; fine: the
 // cells with their fine noise (else its mean); eye: the eye's own samples,
@@ -3269,7 +3295,7 @@ float midDensity(vec3 p, float lod, bool fine, bool eye) {
   float wr = wf.r, form = uMid.y, cells = 0.0, sheet = 0.0;
   if (form > UNSEEN(0.0)) cells = min(midCells(p, h, t, x, xw, wm, wf, textureLod(uWeather, xw + vec2(0.43, 0.29), 5.5), lod, fine, eye), MID_FULL);
   if (form < UNSEEN(1.0)) sheet = min(midSheet(h, t, x, wm.r, wr, lod, eye), MID_FULL);
-  midLump = mix(0.5, midLump, form);
+  midLump = mix(midMottle, midLump, form);
   return (MID_SIGMA.x * (1.0 - form) * sheet + MID_SIGMA.y * form * cells) / mix(MID_SIGMA.x, MID_SIGMA.y, form);
 }
 float midExtinction(float den) {
@@ -3327,6 +3353,25 @@ float midLight(vec3 p, float share) {
 float midUnder(float h) {
   float through = 1.0 / (1.0 + COLUMN * 0.5 * midExtinction(MID_FULL) * uMid.w);
   return mix(1.0, through, smoothstep(0.4, 1.0, uMid.x) * (1.0 - smoothstep(uMid.z - 1.0, uMid.z, h)));
+}
+// The share of what the layer scatters on downwards that still lights the
+// air under it from the light's side (midLight's share for the air).
+const float MID_AIR = 0.3;
+// The rest lights it from all sides (airDeck in addLight), by the layer's
+// amount, as midUnder: of the light on the layer (m: its cosine to the
+// vertical), what that slab lets through less what comes straight through,
+// all but MID_AIR of it, from the sky above as an even radiance (the flux
+// over pi; the air scatters a hemisphere of it towards the eye at 1 / 4 pi
+// per steradian), and what the sea and the low clouds send back up. Without
+// it the air under the layer was lit by little but the sky's light through
+// it: far off, under the layer, the air gave back less than it took of what
+// lay behind it, and the horizon under an altostratus was a dark blue band,
+// over it the layer's own light, reddened by the long way, brown-pink.
+float midDeck(float h, float m) {
+  if (uMid.x <= 0.0 || m <= 0.0) return 0.0;
+  float col = 0.5 * midExtinction(MID_FULL) * uMid.w, ground = 0.12 + 0.3 * uCloud;
+  float down = (1.0 - MID_AIR) * m * max(midThrough(col, m) - exp(-col / m), 0.0);
+  return uLightShare * down * (1.0 + ground) / (2.0 * PI) * smoothstep(0.4, 1.0, uMid.x) * (1.0 - smoothstep(uMid.z - 1.0, uMid.z, h));
 }
 // The layer in the sea's mirror (see addSea), along uk from ps on the sea
 // (ck: uk's cosine to the vertical; c: the light's): what it leaves of the
@@ -4583,14 +4628,17 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
       vec2 deck = throughDeck(max(c, 0.0), 1.0 / (1.0 + COLUMN * tv), ck, 0.0);
       float sk = exp(-tv / ck);
 //[ middle clouds
-      // (Behind the low clouds, the middle clouds: their base over what is left of the sky; and they dim the low bases.)
+      // (Behind the low clouds, the middle clouds: their base over what is left of the sky; and they dim the low bases,
+      // which they light as a sky, with half of what they scatter on downwards, as the scene does (midDown). Without it,
+      // the low bases in the mirror were lit by the clear sky's blue light alone: dark blue streaks on a pale grey sea.
+      // They stay darker than the layer's base there, as the low bases are.)
       // (Their base through the air under them, aslant: what the air takes of it, the air's own light gives back, lit
       // through the layer. Half the air's molecules lie under the layer, and nearly all its haze.)
       vec3 mb, ola = depthToTop(ps, up) * (dot(up, n) / ck);
       float sm = midMirror(ps, uk, ck, c, mb);
       for (int k = 0; k < 3; k++) {
         vec4 sky2 = 2.0 * (uSunI * msS[k] + uMoonI * msM[k]), ta = exp(-(0.5 * uBR[k] * ola.x + extM * uMA[k] * ola.y));
-        vec4 base = mb.z * (deck.x * lit[k] + deck.y * sky2);
+        vec4 base = mb.z * (deck.x * lit[k] + deck.y * sky2) + deck.y * 0.5 * mb.x * lit[k];
         mir[k] += wk * mix(base, mix(mix(mb.z * S[k], mb.x * lit[k] + mb.y * sky2, ta), S[k], sm), sk);
       }
 //| without
@@ -5285,9 +5333,10 @@ float cirrusDepth(vec2 x, float foot) {
 // Light scattered once by a sheet of depth te along the view, lit through a
 // depth ts: the sheet sends te times the mean of exp(-t - ts(t)) along the
 // view, lit on the side the eye is on (sameSide), or through it.
-float ciOnce(float te, float ts, bool sameSide) {
-  return sameSide ? te * (1.0 - exp(-te - ts)) / max(te + ts, 1e-6)
-       : abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
+// (sameSide: 0 to 1, a mix of the two: see highCloud.)
+float ciOnce(float te, float ts, float sameSide) {
+  float same = te * (1.0 - exp(-te - ts)) / max(te + ts, 1e-6), through = abs(te - ts) < 1e-3 ? te * exp(-te) : te * (exp(-ts) - exp(-te)) / (te - ts);
+  return sameSide >= 1.0 ? same : sameSide <= 0.0 ? through : mix(through, same, sameSide);
 }
 
 // The phase of ice crystals without their diffraction peak: rough compact
@@ -5582,7 +5631,9 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out ve
   // A fibre in a thick body of ice is lit through the body. A low sun
   // does not cross the whole sheet edgewise: it finds its way in between
   // the clouds within some seven times the sheet's thickness.
-  bool sameSide = (dot(d, up) < 0.0) == (mus > 0.0);
+  // (By degrees, over 3 degrees each way of the light's level: switched there, the sheet lit from above met the sheet
+  // lit from below in a straight seam, fixed in the world, while the sun stood at 0 degrees.)
+  float sameSide = smoothstep(-0.05, 0.05, dot(d, up) < 0.0 ? mus : -mus);
   // Near the eye, the march's own sum, and the flat reads behind it.
   float li = 1.0 / max(abs(mus), 0.15);
   // A low sun (from some 30 degrees down) runs along the decks: its light
@@ -5926,13 +5977,21 @@ void main() {
       for (int k = 0; k < 3; k++) Tv[k] = exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
 //[ middle clouds
       float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low) * midUnder(h);
+      // (What the layer scatters down, from the light its shadows are of: see midDeck.)
+      airDeck = sunLight ? midDeck(h, dot(p, sunD) / r) : 0.0;
 //| without
       float low = 1.0 - smoothstep(0.6, 2.0, h), sky = mix(1.0, under, low);
 //]
       onceOn = sunLight;
       if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, sunD, uSunI * gain, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
       onceOn = !sunLight;
+//[ middle clouds
+      airDeck = sunLight ? 0.0 : midDeck(h, dot(p, moonD) / r);
+//]
       if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, moonD, uMoonI * gain, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
+//[ middle clouds
+      airDeck = 0.0;
+//]
     }
     od += 0.5 * dens.xyz;
   }
@@ -6139,10 +6198,15 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
     if (Tm > 0.03) {
       vec3 P = o + p, upv = normalize(P);
       float sunUp = dot(upv, uLight);
+      // (fromUp: how far the light comes from above the level here, 0 to 1, over 3 degrees each way. The column the light
+      // goes through is the share over the place (from above) or under it (from below): switched at the level, the side
+      // of the layer that the light had set just over the horizon met the side that it had just under it in a straight
+      // seam across the layer, pink against lavender, fixed in the world, while the sun stood at 0 degrees.)
+      float fromUp = smoothstep(-0.05, 0.05, sunUp);
       float tf = clamp((heightAt(p) - uMid.z) / uMid.w, 0.0, 1.0);
       // (The steps end where the light's line leaves the layer, at the latest: grown with the distance alone, the last and
       // longest stood outside it from some 10 km on, and the layer was lit there as if thin, from an arc across the sky on.)
-      float reach = (sunUp > 0.0 ? 1.0 - tf : tf) * uMid.w / max(abs(sunUp), 0.1);
+      float reach = mix(tf, 1.0 - tf, fromUp) * uMid.w / max(abs(sunUp), 0.1);
       // (Each step `longer` times the one before, 5 in a sheet, which is smooth, and 3 among cells, by the form; the
       // first so long that three of them reach as far.)
       float longer = mix(5.0, 3.0, uMid.y);
@@ -6158,7 +6222,7 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       vec3 pe = p + uLight * acc;
       float te = clamp((heightAt(pe) - uMid.z) / uMid.w, 0.0, 1.0), slant = max(abs(sunUp), 0.1);
       // (Less among cells: light comes in through the gaps between them.)
-      tauS += mix(1.0, 0.4, uMid.y) * midColumn(o + pe) * (sunUp > 0.0 ? 1.0 - te : te) / slant;
+      tauS += mix(1.0, 0.4, uMid.y) * midColumn(o + pe) * mix(te, 1.0 - te, fromUp) / slant;
       float cv = dot(d, upv);
       // (The column by the lumps: the map of the columns is of the field without them. Only seen from under or over the
       // layer and from some way off: from within and aslant, a lump's column showed as a grey disc.)
@@ -6178,11 +6242,11 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // in its thick middle.
       // (The depth behind a place is the less of its own share of the column and the depth along the light, upright: the
       // lumps shade one another, and along a low sun's line the depth is many cells', not the layer's.)
-      float over = min(tauS * m, col * (sunUp > 0.0 ? 1.0 - tf : tf)), e0 = midThrough(col, m);
+      float over = min(tauS * m, col * mix(tf, 1.0 - tf, fromUp)), e0 = midThrough(col, m);
       // (What lies towards the light beyond the place's own column, a neighbour or a lump, shades both, softly.)
       float shade = 1.0 / (1.0 + 3.0 * K * max(tauS * m - over, 0.0));
       float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = shade * e0 * K * (col - over);
-      float c = clamp(0.5 + 0.9 * dot(d, normalize(sign(sunUp) * upv + uLight)), 0.0, 1.0);
+      float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
       // Scattered once; the aureole (the droplets send half of what they
       // scatter on within a degree: that light fades half as fast, and is
       // the small glow round a sun seen through a veil); then the next
@@ -6196,7 +6260,10 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       float above = col * (1.0 - tf), under = col * tf, thru = 1.0 / (1.0 + K * col);
       float down = (1.0 + K * under) * thru, upG = (1.0 + K * above) * thru;
       float wd = smoothstep(-0.25, 0.25, cv), ground = 0.12 + 0.3 * uCloud;
-      float amb = mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd);
+      // (In the unit the low clouds' sky light was set in against photographs, SKYV.x: with the slab's alone, a fifth
+      // to a half of theirs, the middle clouds at dusk, lit by the sky alone, were darker than the low cumulus under
+      // them and than the sea between them, though higher up and nearer the light.)
+      float amb = SKYV.x * (mix(down - thru, down, wd) + ground * mix(upG, upG - thru, wd));
       sSun += w * sun;
       sAmb += w * amb;
       sunPrev = sun;
@@ -6622,7 +6689,7 @@ void main() {
           float h = length(o + d * ts) - RG;
           // (The thin cloud's shade on the low air too, as the march takes it.)
 //[ middle clouds
-          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - midLight(o + d * ts, 0.3)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
+          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - midLight(o + d * ts, MID_AIR)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
 //| without
           float lit = mix(1.0, exp(-cloudShadow(o + d * ts)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
 //]
@@ -6714,14 +6781,14 @@ void main() {
         vec3 w = density(length(ps) - RG);
         float wt = uBR[1].z * w.x + betaM * w.y;
 //[ middle clouds
-        lit += wt * exp(-cloudShadow(ps) - midLight(ps, 0.3));
+        lit += wt * exp(-cloudShadow(ps) - midLight(ps, MID_AIR));
 //| without
         lit += wt * exp(-cloudShadow(ps));
 //]
         sum += wt;
       }
 //[ middle clouds
-      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - midLight(p, 0.3));
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - midLight(p, MID_AIR));
 //| without
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
 //]
@@ -6736,8 +6803,17 @@ void main() {
 //]
     direct *= mix(1.0, ciShade, low);
     direct = mix(1.0, direct, uLightShare);          // the clouds' shadows come and go with their light
+//[ middle clouds
+    airDeck = sunLight ? midDeck(h, dot(p, uSun) / r) : 0.0;
+//]
     if (uSunI > 0.0) addLight(p, r, h, od, dens, scM, extM, uSun, uSunI * visX, sunLight ? direct : 1.0, sky, phaseSun, d, Tv, L);
+//[ middle clouds
+    airDeck = sunLight ? 0.0 : midDeck(h, dot(p, uMoon) / r);
+//]
     if (uMoonI > 0.0) addLight(p, r, h, od, dens, scM, extM, uMoon, uMoonI * visX, sunLight ? 1.0 : direct, sky, phaseMoon, d, Tv, L);
+//[ middle clouds
+    airDeck = 0.0;
+//]
     od += 0.5 * dens.xyz;
     if (atLayer) {
 //[ middle clouds
@@ -6769,6 +6845,7 @@ void main() {
   }
 #endif
 
+  float starL = 0.0;                                 // the stars' light in L[1] (below)
   if (vis <= 0.0) {
     // Behind a thick cloud.
   } else if (ground) {
@@ -6893,6 +6970,7 @@ void main() {
       G[k] += tk[k] * sun;
       L[k] += tk[k] * (sun + moon * moonMask + stars * st[k]) + tg[k] * vg * (glow * pow(uWL[k], vec4(-3.0)) + zodi);
     }
+    starL = stars * dot(tk[1] * st[1], vec4(1.0));
   }
   // Glare: light of the sun strayed inside the eye or the lens. Its shape is
   // the eye's, the CIE general disability glare function (CIE 146:2002;
@@ -7102,6 +7180,14 @@ void main() {
 //[ middle clouds
   astray = max(astray, midAstray);
 //]
+  // A star stays put, and a pixel that its light fills stays with it, by
+  // its share of the light from 0.05 to 0.25: the cloud in front, which
+  // gives the rest, is soft. Moved with a sheet by what the sheet hides,
+  // a star behind thin moonlit cloud lost half its light in flight, read
+  // each frame from where the sheet had been, and was drawn out along the
+  // sheet's way.
+  float stay = smoothstep(0.05, 0.25, starL / max(dot(L[1], vec4(1.0)), 1e-30));
+  if (tSeen > 0.0 && stay > 0.0) tSeen = stay < 1.0 ? tSeen / (1.0 - stay) : -1.0;
   gl_FragDepth = distanceCode(tSeen) + 0.75 / 65536.0 * astray;
   // The frame is kept in steps (of half floats, or of 8 bits). Rounded to
   // the nearest, a smooth sky would come out in bands; rounded down, it
@@ -7231,10 +7317,19 @@ void main() {
   // If something nearer was there, this pixel may show its ragged edge,
   // where one frame hits the cloud and the next misses it. Then look where
   // that nearer thing was: for a miss, it leads to the same edge; for sea
-  // that the cloud has just uncovered, to the sea next to the cloud.
+  // that the cloud has just uncovered, to the sea next to the cloud; for
+  // sky, to the sky next to it. Where the nearer thing is not found there,
+  // that is a stand-in, not this pixel's past: it is in doubt as far as a
+  // thing at the nearer distance (`invLed`) would be (below). Taken whole,
+  // in flight a star beside a cloud was copied a cloud's step further each
+  // frame, into a dotted streak.
+  float invLed = 0.0;
   if (uTrust > 0.0 && parallax > 0.0 && st == clamp(st, 0.0, 1.0)) {
     float invWas = nearness(decode(textureLod(uPastAux, st, 0.0).rg));
-    if (parallax * (0.8 * invWas - inv) > 0.1) st = whence(invWas);
+    if (parallax * (0.8 * invWas - inv) > 0.1) {
+      st = whence(invWas);
+      invLed = invWas;
+    }
   }
 
   // The mean of n frames takes this one as the next. Without a past (the
@@ -7316,9 +7411,15 @@ void main() {
     // that moves: that light slips by the pixel's own way. Next to the sun,
     // under a thin sheet near the eye, the glare and the sun's disc slipped
     // so by pixels a frame, and in flight the disc drew a streak and the
-    // glow banded copies of its edge.
-    float invWas = nearness(codeWas);
-    float doubt = smoothstep(0.1, 0.3, parallax * max(max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0), astray * inv));
+    // glow banded copies of its edge. The mean in flight holds some ten
+    // frames, so light that slips 0.1 pixels a frame is smeared over a
+    // pixel: that light is in doubt from a slip of 0.02 pixels a frame
+    // (fully from 0.06). From 0.1, a star behind a moonlit sheet, which
+    // gives most of the light round the star, was drawn out along the
+    // sheet's way.
+    float invWas = max(nearness(codeWas), invLed);
+    float doubt = max(smoothstep(0.1, 0.3, parallax * max(abs(inv - invWas) - 0.2 * max(inv, invWas), 0.0)),
+                      smoothstep(0.02, 0.06, parallax * astray * inv));
     if (doubt > 0.0) {
 #ifdef UPSCALE
       ivec2 edge = ivec2(uFrameRes) - 1;
@@ -8923,24 +9024,59 @@ const SkySound = (() => {
     sunThrough(alt, Math.sin(e * RAD), sunlit);
     return Math.log2(ISUN / Math.PI * WY.reduce((a, y, w) => a + y * sunlit[w], 0));
   }
+  // The light the eye is adapted to, from a light at elevation e (degrees)
+  // seen from height alt: the level of a white surface facing it, in its
+  // light at the eye (sunlitLevel), or what that was with the light higher,
+  // less EYE_FADE stops for each degree it has gone down since, whichever is
+  // more. The eye adapts to the dark slowly, so its adaptation falls behind
+  // a light that sets: from 40 km the sun's light at the eye falls by some
+  // 11 stops between 5 and 6 degrees down, as it sets there (6.4 degrees
+  // down), and the limit it sets (dayEye) rose with it by 2.4 stops between
+  // stills a quarter of a degree apart (the view down from 3.9 to 8.8
+  // between 5 and 6 degrees down). Now it rises at most EYE_FADE stops for
+  // each degree. Where the light at the eye falls slower than that (by day,
+  // and through sunset but its last degree or so before the eye's
+  // horizon), it is that light.
+  // The sun higher at every EYE_STEP degrees from the eye's horizon (below
+  // which the planet hides it) or from e up, on a grid that does not move
+  // with e: each term comes in equal to the light now, so the level is
+  // continuous in e. Terms that cannot pass both the level found and floor
+  // (below which the caller's limit does nothing) are not worked out.
+  const EYE_FADE = 3, EYE_STEP = 0.05;
+  const BARE = Math.log2(ISUN / Math.PI);   // sunlitLevel with no air in the way, its most
+  function adaptedLevel(alt, e, floor) {
+    let level = sunlitLevel(alt, e);
+    const set = -Math.acos(RG / (RG + alt)) / RAD;
+    for (let k = Math.ceil(Math.max(e, set) / EYE_STEP); k * EYE_STEP <= 90; k++) {
+      const up = k * EYE_STEP, fade = EYE_FADE * (up - e);
+      if (BARE - fade <= Math.max(level, floor)) break;
+      level = Math.max(level, sunlitLevel(alt, up) - fade);
+    }
+    return level;
+  }
   // The day's eye (see DAY_OPEN): the most the exposure may be, from the
-  // sun's light where the eye is now (none once the sun has set there).
-  function dayEye() {
+  // sun's light the eye is adapted to (adaptedLevel; none some time after
+  // the sun has set where the eye is). It matters only where it is below
+  // the exposure E that the view asks for.
+  function dayEye(E) {
     const open = DAY_OPEN[0] + (DAY_OPEN[1] - DAY_OPEN[0]) * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]));
-    return WHITE + open - sunlitLevel(state.alt, state.elev);
+    return WHITE + open - adaptedLevel(state.alt, state.elev, WHITE + open - E);
   }
   // The night's eye (see MOON_OPEN): the most the exposure may be, from the
-  // moon's light where the eye is now: the eye under a moon is adapted to
+  // moon's light the eye is adapted to: the eye under a moon is adapted to
   // the moonlit world round it, wherever it looks, as the day's eye is to
   // the sun's (dayEye). Without it a view turned up to a black sky with
   // stars opened up some 2.5 stops (from 40 km, a full moon high), and
   // the moonlit Earth along the foot of the frame came out bright. The
   // moon's light at the eye (moonI, its phase and the air, sunThrough along
   // it) falls through moonrise and moonset to nothing, and the limit rises
-  // with it out of the way: no step. Under a crescent or no moon it lies
-  // far above the exposure, which opens for the stars.
-  function moonEye() {
-    const lit = moonlitLevel();
+  // out of the way, no faster than the eye adapts (adaptedLevel). Under a
+  // crescent or no moon it lies far above the exposure, which opens for the
+  // stars.
+  function moonEye(E) {
+    if (state.moonI <= 0) return Infinity;
+    const phase = Math.log2(state.moonI);
+    const lit = phase + adaptedLevel(state.alt, Math.asin(state.moon[1]) / RAD, MOON_LIT - phase + (MOON_OPEN - E) / NIGHT_RATE);
     return Number.isFinite(lit) ? MOON_OPEN - NIGHT_RATE * (lit - MOON_LIT) : Infinity;
   }
   // The level of a white surface facing the moon, in its light at the eye
@@ -9067,7 +9203,7 @@ const SkySound = (() => {
         E = Math.min(E, d + exposureAt(st, e, d));
       }
     }
-    return Math.min(E, dayEye(), moonEye());
+    return Math.min(E, dayEye(E), moonEye(E));
   }
 
   // ---------- Drawing ----------
