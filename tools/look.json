@@ -1259,7 +1259,7 @@
     }
    ],
    "bad": "8446078",
-   "note": "The sun from 4.5 to 7.5 degrees down in steps of 0.25 (date 80, latitude 35: the times). The limit of the day's eye now rises at most EYE_FADE = 3 stops per degree of the sun: 0.75 a step."
+   "note": "The sun from 4.5 to 7.5 degrees down in steps of 0.25 (date 80, latitude 35: the times). The limit of the day's eye now rises at most EYE_FADE = 3 stops per degree of the sun: 0.75 a step. Since the world's light (WORLD) took this view out of the limit's reach: 0.49 a step, the meter's own."
   },
   {
    "name": "mid-cells-white-40km",
@@ -1778,6 +1778,114 @@
    ],
    "bad": "c3c0298",
    "note": "The heap's red under the edge over that above it: 0.92 on main c3c0298, 1.02 once the depth towards the light is taken between the map's next two heights by where the place lies between them."
+  },
+  {
+   "name": "sunset-never-brighter-down-40km",
+   "q": "weather=altocumulus&date=80&clock=solar&lat=35&alt=40&yaw=-177.9&pitch=-50",
+   "sweep": {
+    "param": "time",
+    "values": [
+     17.1841,
+     17.3479,
+     17.5112,
+     17.6743,
+     17.8372,
+     18.0,
+     18.0814,
+     18.1628,
+     18.2442,
+     18.3257,
+     18.4072,
+     18.448,
+     18.4888,
+     18.5704,
+     18.6521,
+     18.8159,
+     18.9802
+    ]
+   },
+   "reported": "2026-11-26",
+   "wrong": "from 40 km looking down, the Earth went near black while the sun still shone on the eye (luma 12 with the sun 5 degrees down), then grew brighter as the sun set there (45 at 7 down): the picture brightened while the sun went down",
+   "measures": [
+    {
+     "measure": "lumaRise",
+     "max": 6
+    }
+   ],
+   "bad": "718df06",
+   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 31.0 (the day's eye held the Earth near black while the sun shone on the eye, luma 14 at 5 degrees down, and let go as it set there, 45 at 8 down). With the world's light (WORLD): 2.3, in deep twilight (42.6 at 7 degrees down, 44.9 at 8): the meter's own."
+  },
+  {
+   "name": "sunset-never-brighter-away-40km",
+   "q": "weather=altocumulus&date=80&clock=solar&lat=35&alt=40&yaw=-87.9&pitch=-8",
+   "sweep": {
+    "param": "time",
+    "values": [
+     17.1841,
+     17.3479,
+     17.5112,
+     17.6743,
+     17.8372,
+     18.0,
+     18.0814,
+     18.1628,
+     18.2442,
+     18.3257,
+     18.4072,
+     18.448,
+     18.4888,
+     18.5704,
+     18.6521,
+     18.8159,
+     18.9802
+    ]
+   },
+   "reported": "2026-11-26",
+   "wrong": "from 40 km looking away from the sun, the same: luma 16 with the sun 5 degrees down, 35 at 8 down",
+   "measures": [
+    {
+     "measure": "lumaRise",
+     "max": 8
+    }
+   ],
+   "bad": "718df06",
+   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 17.9. With the world's light: 3.0, between 5 and 5.5 degrees down (46.0, 49.0): the meter's own, as the Earth in the view darkens sooner than the sky over it (the exposure follows the darker quarter)."
+  },
+  {
+   "name": "sunset-never-brighter-down-11km",
+   "q": "weather=altocumulus&date=80&clock=solar&lat=35&alt=11&yaw=-177.9&pitch=-50",
+   "sweep": {
+    "param": "time",
+    "values": [
+     17.1841,
+     17.3479,
+     17.5112,
+     17.6743,
+     17.8372,
+     18.0,
+     18.0814,
+     18.1628,
+     18.2442,
+     18.3257,
+     18.4072,
+     18.448,
+     18.4888,
+     18.5704,
+     18.6521,
+     18.8159,
+     18.9802
+    ]
+   },
+   "reported": "2026-11-26",
+   "wrong": "(a guard: from 11 km looking down the picture did not brighten as the sun went down, and must not)",
+   "measures": [
+    {
+     "measure": "lumaRise",
+     "max": 3
+    }
+   ],
+   "bad": null,
+   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. A guard: 0.0 on main 718df06 and with the world's light."
   }
  ]
 }
