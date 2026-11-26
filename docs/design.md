@@ -53,7 +53,7 @@ today: there is no stratus (`low.smooth`) in it, and no `low.*` field.
   compiled ahead, from the first picture on).
   A weather with another haze also rebuilds `msData` (see the frame loop
   in [From the address bar to the first frame](#from-the-address-bar-to-the-first-frame)):
-  one frame after the choice takes some 0.3 s longer.
+  in slices between the frames, while the frames draw the old table.
 - The die draws a weather from a seed: one of the table by weight, then
   each value between its low and its high, and any whole-km place on the
   map. The seed's numbers are xorshift32 started from the seed through
@@ -147,8 +147,7 @@ The JS then runs once, at load, and does little:
      it, asking waits, so the page asks for one program a frame. A failed
      program throws the compiler's or the linker's message.
    - Meanwhile the tables of the CPU, in slices of about 8 ms, one a task
-     (`slices`). Each is a generator (a job) that yields every little while;
-     `finish(job)` runs one at once.
+     (`slices`). Each is a generator (a job) that yields every little while.
      - `odTable` (`buildDepths`): optical depth to the top of the air
        towards the sun, over altitude (48 rows, squared spacing) and the
        cosine of the sun's zenith angle (96 columns from -0.2), 64 steps
@@ -243,10 +242,20 @@ which asks for one `requestAnimationFrame(frame)`.
 `frame(now)` then:
 
 - does nothing in a hidden tab;
-- if something changed: rebuilds `msData` when the haze has changed (at
-  once, with `finish`; it takes about a quarter of a second: while the haze
-  slider moves, it is built `HAZE_WAIT` = 250 ms after the last move), runs
-  `celestial()` and sets the panel's labels;
+- if something changed: starts to rebuild `msData` and `upData` when the
+  haze has changed (`buildHaze`). While the haze slider moves it waits,
+  and starts `HAZE_WAIT` = 250 ms after the last move (on the first frame
+  at once). The job takes 0.1 to 0.4 s of script (0.26 s for its first
+  gathering and 0.10 s for its second on Direct3D 11): `slices` runs it in
+  slices of about 8 ms, one a task, between the frames, which draw the old
+  table meanwhile. Built in one go, in one frame, it held the picture for
+  0.32 to 0.47 s on Direct3D 11. Its last slice writes both tables; then
+  `builtHaze` takes the new haze and `update()` asks for a frame: the
+  table is uploaded, and the picture, the air's table and the sky's light
+  on the clouds are drawn again, as at a change of the light (`builtHaze`
+  is in their keys). A change of the haze while the job runs ends it, and
+  the wait begins again. Then `frame` runs `celestial()` and sets the
+  panel's labels;
 - flies the aircraft (`fly`, see [Steering](#steering)): the controls,
   the turn, the climb, and `state.drift` grows by `speed / 3600 * dt`
   along `state.heading` (`dt` capped at 0.1 s, and 0 after a pause, so the

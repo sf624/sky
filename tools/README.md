@@ -246,7 +246,7 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   line per page gives the median and range of the first picture, the wait
   and the longest gap. The control is a weather without middle clouds
   (`--weather fair`, whose haze is the page's own: another haze rebuilds
-  a table, some 0.3 s).
+  a table, some 0.4 s of script in slices between the frames).
 - `d3d programs`: each program `makeSky` links (its `link(...)` calls,
   with their defines), alone: the time to compile and link it, and of its
   first draw into one target and into all its outputs (ANGLE compiles a
