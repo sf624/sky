@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roll bake prototype</title>
+<style>
+  body { margin: 0; background: #111; color: #ddd; font: 13px/1.4 system-ui, sans-serif; }
+  #log { white-space: pre-wrap; padding: 8px 12px; }
+  canvas { display: block; max-width: 100%; }
+</style>
+</head>
+<body>
+<canvas id="view" width="512" height="512"></canvas>
+<div id="log"></div>
+<script>
+// A standalone prototype (not part of the site): bakes a Swift-Hohenberg roll field on the GPU (WebGL2) and measures
+// how long it takes. See README.md next to this file.
+//
+// Units where q0 = 1 and a texel is h = 2 pi / 8 (8 texels per wavelength); the map is periodic.
+//   du/dt = eps u - (1 + lap)^2 u + a div(w w^T grad u) + g u^2 - u^3
+// Real space, the 9-point Laplacian, RKL1 Legendre super-time-stepping (Meyer, Balsara and Aslam 2012), s stages per
+// super-step. Each stage is two passes: the Laplacian of the last stage, then the right-hand side (the Laplacian of
+// that Laplacian, the anisotropic term, the nonlinear terms) and the RKL combination.
+//
+// The jobs come from `JOBS` (set by run.mjs when it serves the page) or from the URL (one job). Results are posted to
+// /d3d/report/<id> when the URL has ?d3d=<id>.
+const JOBS = null;
+
+const H = 2 * Math.PI / 8;
+const params = new URLSearchParams(location.search);
+const reportId = params.get('d3d');
+const logEl = document.getElementById('log');
+const say = (s) => { logEl.textContent += s + '\n'; console.log(s); };
+let chain = Promise.resolve();
+const post = (o) => {
+  if (!reportId) return Promise.resolve();
+  chain = chain.then(() => fetch('/d3d/report/' + reportId, { method: 'POST', body: JSON.stringify(o) })).catch(() => {});
+  return chain;
+};
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+const canvas = document.getElementById('view');
+const gl = canvas.getContext('webgl2', { antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
+const extFloat = gl && gl.getExtension('EXT_color_buffer_float');
+const extHalf = gl && gl.getExtension('EXT_color_buffer_half_float');
+const timer = gl && gl.getExtension('EXT_disjoint_timer_query_webgl2');
+const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+const rendererName = !gl ? '(no WebGL2)' : dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+
+const VS = `#version 300 es
+in vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+// Shared by every fragment shader: periodic reads at whole texels (the map's size is a power of two), the integer
+// hash lowbias32 and a normal deviate from it.
+const COMMON = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+uniform int uMask;
+uniform float uN;
+out vec4 o;
+float at(sampler2D t, ivec2 p) { return texelFetch(t, p & ivec2(uMask), 0).r; }
+uint ihash(uint x) {
+  x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+  return x;
+}
+float unit(uint h) { return (float(h >> 8) + 0.5) / 16777216.0; }
+float gauss(ivec2 p, uint salt) {
+  uint i = uint(p.x) + uint(p.y) * uint(uMask + 1);
+  float u1 = unit(ihash(i * 2u + salt * 0x9e3779b9u)), u2 = unit(ihash(i * 2u + 1u + salt * 0x9e3779b9u));
+  return sqrt(-2.0 * log(u1)) * cos(6.28318530718 * u2);
+}
+`;
+
+// The fields that steer the pattern, per texel: eps, the wind's direction (wx, wy), and q^2, the square of the
+// local wavenumber (1 unless uQNoise). The wind's angle is the CPU prototype's (sh.py, wind_angle), plus an optional
+// faster turning (uTurn2); eps is 0.25 plus optional smooth periodic noise (uEpsNoise), q is 1 plus another
+// (uQNoise), both in cycles per map scaled with the map so that they have the same size in wavelengths.
+const FS_PARAMS = COMMON + `
+uniform float uEps, uEpsNoise, uQNoise, uTurn2;
+const float TAU = 6.28318530718;
+void main() {
+  vec2 x = floor(gl_FragCoord.xy) / uN;
+  float th = 0.3 + 0.6 * sin(TAU * x.x) + 0.3 * sin(TAU * x.y + 1.0);
+  th += uTurn2 * (sin(TAU * (3.0 * x.x - 2.0 * x.y) + 2.0) + 0.7 * sin(TAU * (2.0 * x.x + 5.0 * x.y) + 0.5));
+  float m = uN / 512.0, n = 0.0;
+  n += cos(TAU * m * (3.0 * x.x + 1.0 * x.y) + 0.3);
+  n += cos(TAU * m * (-2.0 * x.x + 3.0 * x.y) + 1.7);
+  n += cos(TAU * m * (1.0 * x.x - 4.0 * x.y) + 4.1);
+  n += cos(TAU * m * (4.0 * x.x + 2.0 * x.y) + 2.9);
+  n += cos(TAU * m * (-3.0 * x.x - 3.0 * x.y) + 5.3);
+  n += cos(TAU * m * (5.0 * x.x - 1.0 * x.y) + 0.9);
+  n = clamp(n / 2.2, -1.0, 1.0);
+  float r = 0.0;
+  r += cos(TAU * m * (2.0 * x.x + 3.0 * x.y) + 1.1);
+  r += cos(TAU * m * (-4.0 * x.x + 1.0 * x.y) + 2.3);
+  r += cos(TAU * m * (3.0 * x.x - 3.0 * x.y) + 3.7);
+  r += cos(TAU * m * (1.0 * x.x + 5.0 * x.y) + 0.2);
+  r += cos(TAU * m * (-5.0 * x.x - 2.0 * x.y) + 4.4);
+  r += cos(TAU * m * (4.0 * x.x + 4.0 * x.y) + 5.9);
+  r = clamp(r / 2.2, -1.0, 1.0);
+  float q = 1.0 + uQNoise * r;
+  o = vec4(uEps + uEpsNoise * n, cos(th), sin(th), q * q);
+}`;
+
+// White noise of amplitude uAmp.
+const FS_SEED = COMMON + `
+uniform float uAmp;
+uniform int uSalt;
+void main() { o = vec4(uAmp * gauss(ivec2(gl_FragCoord.xy), uint(uSalt)), 0.0, 0.0, 1.0); }`;
+
+// Pass 1 of a stage: the 9-point Laplacian of the last stage.
+const LAP9 = `
+float lap9(sampler2D t, ivec2 p, float c) {
+  float e = at(t, p + ivec2(1, 0)) + at(t, p + ivec2(-1, 0)) + at(t, p + ivec2(0, 1)) + at(t, p + ivec2(0, -1));
+  float d = at(t, p + ivec2(1, 1)) + at(t, p + ivec2(-1, 1)) + at(t, p + ivec2(1, -1)) + at(t, p + ivec2(-1, -1));
+  return (4.0 * e + d - 20.0 * c) * ${(1 / (6 * H * H)).toFixed(9)};
+}`;
+const FS_LAP = COMMON + LAP9 + `
+uniform sampler2D uY;
+void main() { ivec2 p = ivec2(gl_FragCoord.xy); o = vec4(lap9(uY, p, at(uY, p)), 0.0, 0.0, 1.0); }`;
+
+// Pass 2 of a stage: y_j = mu y_{j-1} + nu y_{j-2} + mu w1 dt f(y_{j-1}) (+ a kick of noise at the first stage of a
+// super-step, when asked, but the last: one super-step smooths the kick's grain away).
+const FS_STAGE = COMMON + LAP9 + `
+uniform sampler2D uY, uY2, uL, uP;
+uniform float uMu, uNu, uMuW, uG, uKick, uA;
+uniform int uSalt;
+const float IH2 = ${(1 / (H * H)).toFixed(9)};
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float y = at(uY, p);
+  float yE = at(uY, p + ivec2(1, 0)), yW = at(uY, p + ivec2(-1, 0)), yN = at(uY, p + ivec2(0, 1)), yS = at(uY, p + ivec2(0, -1));
+  float uxx = (yE + yW - 2.0 * y) * IH2, uyy = (yN + yS - 2.0 * y) * IH2;
+  float uxy = (at(uY, p + ivec2(1, 1)) - at(uY, p + ivec2(-1, 1)) - at(uY, p + ivec2(1, -1)) + at(uY, p + ivec2(-1, -1))) * (0.25 * IH2);
+  float l1 = at(uL, p), l2 = lap9(uL, p, l1);
+  vec4 q = texelFetch(uP, p, 0);
+  float f = q.x * y - (q.w * q.w * y + 2.0 * q.w * l1 + l2) + uG * y * y - y * y * y + uA * (q.y * q.y * uxx + q.z * q.z * uyy + 2.0 * q.y * q.z * uxy);
+  float v = uMu * y + uNu * at(uY2, p) + uMuW * f;
+  if (uKick > 0.0) v += uKick * gauss(p, uint(uSalt));
+  o = vec4(v, 0.0, 0.0, 1.0);
+}`;
+
+// The view: the height profile pow(0.5 + 0.5 clamp(u / A, -1, 1), 0.35), A = 2 sqrt(eps / 3).
+const FS_VIEW = COMMON + `
+uniform sampler2D uY;
+uniform float uA, uScale;
+void main() {
+  ivec2 p = ivec2(floor(gl_FragCoord.xy * uScale));
+  float h = pow(0.5 + 0.5 * clamp(at(uY, p) / uA, -1.0, 1.0), 0.35);
+  o = vec4(vec3(h), 1.0);
+}`;
+
+function compile(fs) {
+  const prog = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, fs]]) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('compile: ' + gl.getShaderInfoLog(sh));
+    gl.attachShader(prog, sh);
+  }
+  gl.bindAttribLocation(prog, 0, 'aPos');
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(prog));
+  const loc = {};
+  const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(prog, i); loc[u.name] = gl.getUniformLocation(prog, u.name); }
+  return { prog, loc };
+}
+
+const FORMATS = {
+  r32f: { internal: () => gl.R32F, format: () => gl.RED, type: () => gl.FLOAT, params: () => gl.RGBA32F },
+  rg32f: { internal: () => gl.RG32F, format: () => gl.RG, type: () => gl.FLOAT, params: () => gl.RGBA32F },
+  rgba32f: { internal: () => gl.RGBA32F, format: () => gl.RGBA, type: () => gl.FLOAT, params: () => gl.RGBA32F },
+  r16f: { internal: () => gl.R16F, format: () => gl.RED, type: () => gl.HALF_FLOAT, params: () => gl.RGBA16F },
+  rgba16f: { internal: () => gl.RGBA16F, format: () => gl.RGBA, type: () => gl.HALF_FLOAT, params: () => gl.RGBA16F },
+};
+
+function target(internal, n) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, internal, n, n);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.REPEAT], [gl.TEXTURE_WRAP_T, gl.REPEAT]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb, ok, free() { gl.deleteFramebuffer(fb); gl.deleteTexture(tex); } };
+}
+
+// Which float formats can be rendered to here.
+function formatsSupported() {
+  const out = {};
+  for (const [name, f] of Object.entries(FORMATS)) {
+    try {
+      const t = target(f.internal(), 64);
+      out[name] = t.ok && gl.getError() === gl.NO_ERROR;
+      t.free();
+    } catch (e) { out[name] = false; }
+  }
+  return out;
+}
+
+// The largest magnitude of the linear operator's symbol on the grid, over every wavevector and wind direction: the
+// explicit (Euler) step is 2 / that. The CPU prototype took the 9-point part alone (58.2 at eps 0.25); the
+// anisotropic term adds up to some 4 / h^2 times a.
+function lambdaMax(eps, a, q2) {
+  let max = 0;
+  const K = 96, A = 24;
+  for (let i = 0; i <= K; i++) {
+    for (let j = 0; j <= K; j++) {
+      const kx = -Math.PI + 2 * Math.PI * i / K, ky = -Math.PI + 2 * Math.PI * j / K;
+      const cx = Math.cos(kx), cy = Math.cos(ky);
+      const lam = (4 * (2 * cx + 2 * cy) + 4 * cx * cy - 20) / (6 * H * H);
+      const base = (q2 + lam) ** 2 - eps;
+      for (let t = 0; t < A; t++) {
+        const th = Math.PI * t / A, wx = Math.cos(th), wy = Math.sin(th);
+        const sym = (wx * wx * (2 - 2 * cx) + wy * wy * (2 - 2 * cy) + 2 * wx * wy * Math.sin(kx) * Math.sin(ky)) / (H * H);
+        max = Math.max(max, base + a * sym);
+      }
+    }
+  }
+  return max;
+}
+
+async function blobBase64(view) {
+  const url = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(new Blob([view])); });
+  return url.slice(url.indexOf(',') + 1);
+}
+
+// The red channel of a float target, as a Float32Array of n * n (row 0 at the bottom: texel y = 0).
+function readField(t, n, fmt) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+  const one = FORMATS[fmt].format() === gl.RED && gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT) === gl.RED &&
+    gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) === gl.FLOAT;
+  const out = new Float32Array(n * n);
+  if (one) gl.readPixels(0, 0, n, n, gl.RED, gl.FLOAT, out);
+  else {
+    // Row by row bands, to keep the RGBA buffer small at 2048^2.
+    const band = 256, buf = new Float32Array(n * band * 4);
+    for (let y = 0; y < n; y += band) {
+      gl.readPixels(0, y, n, band, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < n * band; i++) out[y * n + i] = buf[i * 4];
+    }
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { data: out, path: one ? 'RED/FLOAT' : 'RGBA/FLOAT' };
+}
+
+let progs = null;
+function programs() {
+  if (progs) return progs;
+  const t0 = performance.now();
+  progs = { params: compile(FS_PARAMS), seed: compile(FS_SEED), lap: compile(FS_LAP), stage: compile(FS_STAGE), view: compile(FS_VIEW) };
+  progs.ms = performance.now() - t0;
+  const vb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  return progs;
+}
+
+function bindTex(unit, tex, loc) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(loc, unit); }
+
+// One job: a bake from noise to model time T. Yields to the browser after every `perFrame` passes (0: no yield).
+async function bake(job) {
+  const j = Object.assign({ n: 1024, s: 40, T: 150, a: 0.5, eps: 0.25, epsNoise: 0, qNoise: 0, turn2: 0, g: 0, kick: 0, fmt: 'r32f',
+    perFrame: 40, seed: 1, amp: 0.01, dump: false, dumpSeed: false, view: false }, job);
+  const P = programs(), n = j.n, f = FORMATS[j.fmt];
+  const fields = [0, 1, 2].map(() => target(f.internal(), n));
+  const lap = target(f.internal(), n), par = target(f.params(), n);
+  const all = [...fields, lap, par];
+  if (!all.every((t) => t.ok)) { all.forEach((t) => t.free()); return { name: j.name, error: `${j.fmt} not renderable` }; }
+  const lm = lambdaMax(j.eps - j.epsNoise, j.a, (1 - j.qNoise) ** 2), dtE = 2 / lm;
+  const dts = 0.9 * dtE * (j.s * j.s + j.s) / 2, nsup = Math.max(1, Math.round(j.T / dts)), w1 = 2 / (j.s * j.s + j.s);
+  gl.viewport(0, 0, n, n);
+  gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
+  const common = (p) => { gl.useProgram(p.prog); gl.uniform1i(p.loc.uMask, n - 1); gl.uniform1f(p.loc.uN, n); };
+  const t0 = performance.now();
+  // Fields of the steering, then the seed.
+  common(P.params);
+  gl.uniform1f(P.params.loc.uEps, j.eps); gl.uniform1f(P.params.loc.uEpsNoise, j.epsNoise);
+  gl.uniform1f(P.params.loc.uQNoise, j.qNoise); gl.uniform1f(P.params.loc.uTurn2, j.turn2);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, par.fb); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  common(P.seed);
+  gl.uniform1f(P.seed.loc.uAmp, j.amp); gl.uniform1i(P.seed.loc.uSalt, j.seed);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fields[0].fb); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  let seedB64 = null;
+  if (j.dumpSeed) seedB64 = await blobBase64(readField(fields[0], n, j.fmt).data);
+  // GPU time per frame's batch of passes.
+  const queries = [], gpu = [];
+  let disjoint = false;
+  // (WebGL makes a query's result available only between frames.)
+  const poll = () => {
+    while (queries.length) {
+      const q = queries[0];
+      if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
+      gpu.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
+      gl.deleteQuery(q);
+      queries.shift();
+    }
+    if (timer && gl.getParameter(timer.GPU_DISJOINT_EXT)) disjoint = true;
+  };
+  let cur = 0, prev = 0, passes = 2, inFrame = 0, frames = 0, query = null;
+  const begin = () => { if (timer && !query) { query = gl.createQuery(); gl.beginQuery(timer.TIME_ELAPSED_EXT, query); } };
+  const end = () => { if (query) { gl.endQuery(timer.TIME_ELAPSED_EXT); queries.push(query); query = null; } };
+  const tick = async () => {
+    passes++;
+    if (j.perFrame && ++inFrame >= j.perFrame) { end(); inFrame = 0; frames++; await frame(); poll(); begin(); }
+  };
+  begin();
+  for (let k = 0; k < nsup; k++) {
+    // Stage 1 reads y0 twice (nu = 0); later stages read the last two.
+    for (let st = 1; st <= j.s; st++) {
+      const ym1 = cur, ym2 = st === 1 ? cur : prev, out = [0, 1, 2].find((i) => i !== ym1 && i !== ym2);
+      const mu = st === 1 ? 1 : (2 * st - 1) / st, nu = st === 1 ? 0 : -(st - 1) / st;
+      common(P.lap);
+      bindTex(0, fields[ym1].tex, P.lap.loc.uY);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, lap.fb); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      await tick();
+      common(P.stage);
+      bindTex(0, fields[ym1].tex, P.stage.loc.uY); bindTex(1, fields[ym2].tex, P.stage.loc.uY2);
+      bindTex(2, lap.tex, P.stage.loc.uL); bindTex(3, par.tex, P.stage.loc.uP);
+      gl.uniform1f(P.stage.loc.uMu, mu); gl.uniform1f(P.stage.loc.uNu, nu); gl.uniform1f(P.stage.loc.uMuW, mu * w1 * dts);
+      gl.uniform1f(P.stage.loc.uG, j.g); gl.uniform1f(P.stage.loc.uA, j.a);
+      gl.uniform1f(P.stage.loc.uKick, st === 1 && k < nsup - 1 ? j.kick : 0); gl.uniform1i(P.stage.loc.uSalt, 1000 + k);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fields[out].fb); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      for (let u = 0; u < 4; u++) { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, null); }
+      prev = ym1; cur = out;
+      await tick();
+    }
+  }
+  end();
+  // The bake is done when one texel of its result can be read.
+  const px = new Float32Array(4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fields[cur].fb);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const wall = performance.now() - t0;
+  for (let i = 0; i < 120 && queries.length; i++) { await frame(); poll(); }
+  const res = { ev: 'job', name: j.name, job: j, n, fmt: j.fmt, s: j.s, nsup, dts, dtE, T: nsup * dts, evals: nsup * j.s, passes,
+    perFrame: j.perFrame, frames, wallMs: wall, gpuMs: gpu.reduce((x, y) => x + y, 0), gpuFrames: gpu.length,
+    gpuFrameMax: gpu.length ? Math.max(...gpu) : null, gpuFrameMedian: gpu.length ? gpu.slice().sort((x, y) => x - y)[gpu.length >> 1] : null,
+    disjoint, timer: !!timer };
+  if (j.dump || j.view) {
+    const r = readField(fields[cur], n, j.fmt);
+    let mx = 0, bad = 0;
+    for (const v of r.data) { if (!Number.isFinite(v)) bad++; else mx = Math.max(mx, Math.abs(v)); }
+    res.maxAbs = mx; res.nonFinite = bad; res.readPath = r.path;
+    if (j.dump) res.field = await blobBase64(r.data);
+  }
+  if (seedB64) res.seed = seedB64;
+  if (j.view) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    common(P.view);
+    bindTex(0, fields[cur].tex, P.view.loc.uY);
+    gl.uniform1f(P.view.loc.uA, 2 * Math.sqrt(j.eps / 3)); gl.uniform1f(P.view.loc.uScale, n / canvas.width);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  all.forEach((t) => t.free());
+  return res;
+}
+
+(async () => {
+  if (!gl) { await post({ ev: 'renderer', renderer: rendererName }); await post({ ev: 'done', error: 'no WebGL2' }); return; }
+  const fmts = formatsSupported();
+  const info = { ev: 'renderer', renderer: rendererName, extColorBufferFloat: !!extFloat, extColorBufferHalfFloat: !!extHalf,
+    timer: !!timer, floatLinear: !!gl.getExtension('OES_texture_float_linear'), formats: fmts, maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE) };
+  say(JSON.stringify(info));
+  await post(info);
+  const jobs = JOBS || [Object.fromEntries([...params].filter(([k]) => k !== 'd3d').map(([k, v]) => [k, isNaN(+v) ? v : +v]))];
+  for (const job of jobs) {
+    if (!job.view && !JOBS) job.view = true;
+    try {
+      const r = await bake(job);
+      const { field, seed, ...short } = r;
+      say(JSON.stringify(short));
+      await post(r);
+    } catch (e) {
+      say(`${job.name}: ${e}`);
+      await post({ ev: 'job', name: job.name, error: String(e) });
+    }
+    await frame();
+  }
+  await post({ ev: 'done' });
+})().catch((e) => { say(String(e)); post({ ev: 'done', error: String(e) }); });
+</script>
+</body>
+</html>
