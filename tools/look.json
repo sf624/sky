@@ -1813,7 +1813,7 @@
     }
    ],
    "bad": "718df06",
-   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 31.0 (the day's eye held the Earth near black while the sun shone on the eye, luma 14 at 5 degrees down, and let go as it set there, 45 at 8 down). With the world's light (WORLD): 2.3, in deep twilight (42.6 at 7 degrees down, 44.9 at 8): the meter's own."
+   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 31.0 (the day's eye held the Earth near black while the sun shone on the eye, luma 14 at 5 degrees down, and let go as it set there, 45 at 8 down). With the world's light (WORLD) and the twilight's key above the cruise heights (HIGH_DIM): 1.6, in deep twilight (30.8 at 7 degrees down, 32.4 at 8): the meter's own."
   },
   {
    "name": "sunset-never-brighter-away-40km",
@@ -1849,7 +1849,7 @@
     }
    ],
    "bad": "718df06",
-   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 17.9. With the world's light: 3.0, between 5 and 5.5 degrees down (46.0, 49.0): the meter's own, as the Earth in the view darkens sooner than the sky over it (the exposure follows the darker quarter)."
+   "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. main 718df06: 17.9. With the world's light and the twilight's key: 2.1, between 5 and 5.5 degrees down (the meter's own, as the Earth in the view darkens sooner than the sky over it)."
   },
   {
    "name": "sunset-never-brighter-down-11km",
@@ -1886,6 +1886,39 @@
    ],
    "bad": null,
    "note": "The sun from 10 degrees up to 12 down (date 80, latitude 35: 10, 8, 6, 4, 2, 0, -1, -2, -3, -4, -5, -5.5, -6, -7, -8, -10, -12 degrees; the times). The largest rise of the mean luma from a still to a later one. A guard: 0.0 on main 718df06 and with the world's light."
+  },
+  {
+   "name": "turn-up-gradual-40km-dusk",
+   "q": "weather=altocumulus&date=80&clock=solar&lat=35&alt=40&yaw=-87.19&time=18.3257",
+   "sweep": {
+    "param": "pitch",
+    "values": [
+     -40,
+     -30,
+     -20,
+     -15,
+     -10,
+     -5,
+     0,
+     5,
+     10,
+     15,
+     20,
+     25,
+     30,
+     40
+    ]
+   },
+   "reported": "2026-11-26",
+   "wrong": "from 40 km with the sun 4 degrees down, raising the view from the Earth to the sky closed the exposure by 2.8 stops between a view raised 15 degrees and one raised 25: it read as a switch",
+   "measures": [
+    {
+     "measure": "exposureStep",
+     "max": 0.75
+    }
+   ],
+   "bad": "7fade82",
+   "note": "Looking away from the sun, the view from 40 degrees down to 40 up in steps of 5 and 10 degrees. The exposure is window.__exposure (the adaptation, before the keys). 7fade82 (the world's light coming in between WORLD_SHARE 0.1 and 0.35): 1.6 between 20 and 25 degrees. With WORLD_SHARE[1] = 1: 0.58, between the level view and one lowered 5 degrees (5.10, 4.52; then 3.96, 3.44, 3.00, 2.67, 2.52 at 5 to 25 degrees up)."
   }
  ]
 }

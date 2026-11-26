@@ -8433,7 +8433,7 @@ const SkySound = (() => {
                                        // WHITE; DAY_OPEN[1] from DAY_KM[1] km up (a smoothstep from DAY_KM[0])
   const WORLD = 9.25;            // ...and, looking at the world below, to no more light than it gets: a white surface in
                                        // it stands WORLD stops above the air's mean light at the ground (worldLevel)...
-  const WORLD_SHARE = [0.1, 0.35];   // ...none of it where the view looks down by less than the first share (the mean
+  const WORLD_SHARE = [0.1, 1];      // ...none of it where the view looks down by less than the first share (the mean
                                        // of below), all of it from the second (a smoothstep)
   const MONO_RATE = [1, 0.8], MONO_STEP = 0.25;  // as the sun goes down, the exposure opens up at most MONO_RATE
                                               // stops for each stop the sky darkens (in steps of MONO_STEP degrees):
@@ -9017,7 +9017,23 @@ const SkySound = (() => {
   const NIGHT_KEY = [12, 14.5, 17.5], NIGHT_DIM = 1.0;
   const nightDimFor = e => NIGHT_DIM * (e < NIGHT_KEY[1] ? smooth01((e - NIGHT_KEY[0]) / (NIGHT_KEY[1] - NIGHT_KEY[0]))
                                                        : 1 - smooth01((e - NIGHT_KEY[1]) / (NIGHT_KEY[2] - NIGHT_KEY[1])));
-  const shownFor = e => e - nightDimFor(e);
+  // The twilight's key above the cruise heights: there too the screen shows
+  // the picture darker than the eye's adaptation holds it. From the
+  // stratosphere the twilit Earth is seen by an eye that still has the sun
+  // on it, or beside the sunlit limb: dim, where the meter alone shows it
+  // as from the cruise heights (looking away from the sun from 40 km, a
+  // mean luma of 90 of 255 with the sun 2 degrees down, where a photograph
+  // of the terminator from orbit has its dark side at about 40). The shown
+  // exposure is the adaptation less HIGH_DIM stops from DAY_KM[1] km up (none
+  // up to DAY_KM[0], as the day's eye closes), coming in as the adaptation
+  // goes from HIGH_KEY[0] (the day's, there) to HIGH_KEY[1] (about the sun 2
+  // degrees down), and going again as the night's key comes in (NIGHT_KEY[0]
+  // to NIGHT_KEY[1]). It follows the light, not the hour, and changes by at
+  // most 0.4 stops for each stop of the adaptation.
+  const HIGH_DIM = 0.75, HIGH_KEY = [0.5, 3.5];
+  const highDimFor = e => HIGH_DIM * smooth01((state.alt - DAY_KM[0]) / (DAY_KM[1] - DAY_KM[0]))
+                        * smooth01((e - HIGH_KEY[0]) / (HIGH_KEY[1] - HIGH_KEY[0])) * (1 - smooth01((e - NIGHT_KEY[0]) / (NIGHT_KEY[1] - NIGHT_KEY[0])));
+  const shownFor = e => e - nightDimFor(e) - highDimFor(e);
 
   // The exposure (log2) that a picture asks for, from the levels v of its
   // blocks. As the eye's:
@@ -9181,8 +9197,10 @@ const SkySound = (() => {
   // and grew brighter again as the sun set at the eye (45 at 7 down).
   // down: how far the view looks down (the mean of the meter's below, 0 to
   // 1). The world's light comes in as that goes from WORLD_SHARE[0] to
-  // WORLD_SHARE[1]: from 40 km, with the view raised from 25 degrees (the
-  // Earth just out of the frame) to 10. A view of the sky alone keeps the
+  // WORLD_SHARE[1]: from 40 km, from a view raised 25 degrees (the Earth
+  // just out of the frame) down to one lowered 30 (the Earth all but
+  // filling it), so that the exposure moves by at most some 0.13 stops for
+  // each degree the view turns. A view of the sky alone keeps the
   // limit of the sun's light at the eye, and the sky above the cruise
   // heights stays near black while the sun shines there.
   function dayEye(E, down) {
