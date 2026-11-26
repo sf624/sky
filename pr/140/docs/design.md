@@ -2746,7 +2746,19 @@ on the map.
   thins), which lifts the sun seen from the sheet by up to a degree: the
   bend is found in three steps from the lowest point of the bent ray
   (`cirrusLight`; 0.5 degrees with the sun 3 degrees under the sheet's
-  horizon, 1.0 at 4.5). As the sun sets, the Earth's shadow sweeps across
+  horizon, 1.0 at 4.5). The bent rays also spread and stay low for
+  longer: the light is less by the flattening of the sun's disc seen past
+  the planet (`dim`, 1 over 1 plus the change of the bend with the height:
+  0.6 where the ray grazes 2.6 km, 0.5 at 0.6 km, as the setting sun is
+  flattened), and the depth along the ray grows by `1 / sqrt(1 - kappa)`,
+  `kappa` the ray's bend over the planet's (`air`, 1.09 and 1.12 there).
+  Without them, with the sun 4.5 degrees down, the whole deck below an eye
+  at 40 km stood lit brick red by rays that had grazed the planet within a
+  few km; now the light there is a fifth as much, deep red and dim, and
+  fades into the sheet's own grey towards the eye (from 40 km at the
+  sun's -4.4 degrees, the sun's light on the sheet is 18 times its sky's
+  light some 280 km towards the sun, 1.6 times at 120 km, 0.1 to 0.5
+  times from 80 km in). As the sun sets, the Earth's shadow sweeps across
   the sheet: from 0.3 km, looking towards the sun, the cirrus is red over
   the whole view until some 4.25 degrees down, its edge crosses the view
   from 4.5 to 5, and a red band stays low over the glow to some 6.5
@@ -2758,7 +2770,11 @@ on the map.
   light, `uLight`, which hands over from the sun to the moon between 3
   and 4.5 degrees down: the pink cirrus faded over the whole sky at once.)
   The pass keeps each light's two numbers as floats, or as halves when
-  both lights are on.
+  both lights are on. The two lights' numbers are found in one body of
+  vectors (`hg2`, `ciGeo2`, `ciOnce2`): two copies, or a loop over them,
+  took Microsoft's compiler as long; the moon's light costs the start on
+  Direct3D 11 some 1 to 1.5 s (the cirrus's pass with the sun's light
+  alone was within the noise of the page without this change).
 - **A low sun** (`duskK`, a `smoothstep` of `li`, 1 over the sine of the
   sun's height where it is capped at 0.15, from 2 to 6: the sun from some
   30 degrees down; while the sun lights the cirrus) runs along the decks: its light
