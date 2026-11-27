@@ -9271,7 +9271,7 @@ const SkySound = (() => {
   const msData = new Float32Array(NMU * NH * MS_GROUPS * 4);  // RGBA texels, NMU x (MS_GROUPS * NH): the air, the clouds, the lean, the cirrus, the shape
   // The light of the sky from above on a level surface (all orders, over 4
   // pi, as the table's), by height, sun angle and wavelength: for the white
-  // balance in twilight (balanceFor).
+  // balance (addLevel, litBy).
   const upData = new Float64Array(NMU * NH * NW);
   const msIndex = (j, i, w) => (((w >> 2) * NH + j) * NMU + i) * 4 + (w & 3);
   const cloudIndex = (j, i, w) => msIndex(j, i, w) + 3 * NH * NMU * 4;
@@ -9786,13 +9786,16 @@ const SkySound = (() => {
   const SUN_DISC = 0.0093;   // radians
   const litSpec = new Float64Array(NW), litDepth = [0, 0, 0];
   const upAt = (j, i, w) => (j * NMU + i) * NW + w;
-  // Adds scale times a table over height and the light's cosine (upData, or
-  // msData's mean light) at alt and mu into out.
-  const addTable = (data, at, alt, mu, scale, out) => {
-    const x = Math.min(1, Math.max(0, (mu - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+  // Adds scale times a table over height and the light's cosine at alt and
+  // mu into out, read between its columns over msFall (as the shader reads
+  // msData): upData, which holds the light itself, or msData's mean light
+  // (over: held over msFall already).
+  const addTable = (data, at, alt, mu, scale, out, over = false) => {
+    const x = msColumn(mu);
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
     const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
-    const w00 = scale * (1 - fx) * (1 - fy), w01 = scale * fx * (1 - fy), w10 = scale * (1 - fx) * fy, w11 = scale * fx * fy;
+    const fall = scale * msFall(msMu(x)), f0 = (1 - fx) * fall / (over ? 1 : msFallAt[i0]), f1 = fx * fall / (over ? 1 : msFallAt[i0 + 1]);
+    const w00 = f0 * (1 - fy), w01 = f1 * (1 - fy), w10 = f0 * fy, w11 = f1 * fy;
     for (let w = 0; w < NW; w++) {
       out[w] += data[at(j0, i0, w)] * w00 + data[at(j0, i0 + 1, w)] * w01 + data[at(j0 + 1, i0, w)] * w10 + data[at(j0 + 1, i0 + 1, w)] * w11;
     }
@@ -9869,12 +9872,12 @@ const SkySound = (() => {
       if (sun > 0) {
         const mu = (px * s[0] + py * s[1] + pz * s[2]) / r;
         addBeam(h, mu, 4 * Math.PI * (ray * pS[0] + low * pS[1] + up * pS[2]) * g * sun, litSpec);
-        addTable(msData, msIndex, h, mu, all * sun, litSpec);
+        addTable(msData, msIndex, h, mu, all * sun, litSpec, true);
       }
       if (moon > 0) {
         const mu = (px * m[0] + py * m[1] + pz * m[2]) / r;
         addBeam(h, mu, 4 * Math.PI * (ray * pM[0] + low * pM[1] + up * pM[2]) * g * moon, litSpec);
-        addTable(msData, msIndex, h, mu, all * moon, litSpec);
+        addTable(msData, msIndex, h, mu, all * moon, litSpec, true);
       }
     }
     toRgb(litSpec, out);
