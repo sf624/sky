@@ -2332,6 +2332,99 @@
    ],
    "bad": "a2ba547",
    "note": "The outline's length over that of the smoothed picture's: 1.20 on main a2ba547 (a clean envelope), 1.79 with the fibres, which shape thin ice most."
+  },
+  {
+   "name": "sheet-sunset-up-0.3km",
+   "q": "weather=altostratus&cloud=0&date=80&time=17.9&alt=0.3&yaw=90&pitch=60",
+   "reported": "2026-11-27",
+   "wrong": "an altostratus overhead with the sun 1.5 degrees up an even salmon wall, where photographs show the sheet slate grey to blue-grey, warm only low towards the sun",
+   "measures": [
+    {
+     "measure": "meanColour",
+     "label": "r/g",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "of": "rg",
+     "max": 1.1
+    },
+    {
+     "measure": "meanColour",
+     "label": "b/g",
+     "region": [
+      0.1,
+      0.1,
+      0.8,
+      0.8
+     ],
+     "of": "bg",
+     "min": 1.0
+    }
+   ],
+   "bad": "3678899",
+   "fixed": null,
+   "note": "Linear light over the frame: r/g 1.473, b/g 0.814 on main 3678899 (the sun's light on the sheet by a cosine of no less than 0.2, 7 times what a sun 1.5 degrees up brings a level plane); 0.848 and 1.304 with the sun's height alone and the camera's balance under the sheet. Photographs of altostratus overhead near sunset (Wikimedia Commons, Famartin, CC BY-SA 4.0): blue over green 1.28 to 1.32 as shown where the sun is at or under the horizon, 1.01 where it is grey."
+  },
+  {
+   "name": "sheet-sunset-away-4km",
+   "q": "weather=altostratus&date=80&time=18&alt=4&yaw=-90&pitch=25",
+   "reported": "2026-11-27",
+   "wrong": "the same from 4 km away from the sun at 0 degrees: the sheet salmon from the base to the horizon, lit from below where the sun stood under the level at its place, through no cloud",
+   "measures": [
+    {
+     "measure": "meanColour",
+     "label": "r/g",
+     "region": [
+      0.1,
+      0.05,
+      0.8,
+      0.5
+     ],
+     "of": "rg",
+     "max": 1.0
+    }
+   ],
+   "bad": "3678899",
+   "fixed": null,
+   "note": "Linear light over the upper half: r/g 1.738 on main 3678899 (the base lit from below wherever the sun stood under the level at its place, and by the cosine's floor from above); 0.741 with the light from below through the layer where it went down through it (midSlant) and the sun's height alone."
+  },
+  {
+   "name": "sheet-horizon-noon-0.3km",
+   "q": "weather=altostratus&cloud=0&date=172&time=12&alt=0.3&yaw=180&pitch=4",
+   "reported": "2026-11-27",
+   "wrong": "under an altostratus at noon from 0.3 km the sheet turned cream towards the horizon, where photographs go grey to blue-grey and darker",
+   "measures": [
+    {
+     "measure": "meanColour",
+     "label": "b/g near the horizon",
+     "region": [
+      0.1,
+      0.3,
+      0.8,
+      0.18
+     ],
+     "of": "bg",
+     "min": 0.96
+    },
+    {
+     "measure": "meanColour",
+     "label": "r/g near the horizon",
+     "region": [
+      0.1,
+      0.3,
+      0.8,
+      0.18
+     ],
+     "of": "rg",
+     "max": 1.08
+    }
+   ],
+   "bad": "3678899",
+   "fixed": null,
+   "note": "Linear light over the band above the horizon: b/g 0.918, r/g 1.096 on main 3678899 (the far base as bright aslant as overhead, the haze before it taking away the blue of its light and giving back less); 0.995 and 1.056 with the light through the slab darker aslant (limb, Eddington's 0.5 + 0.75 cos). Photographs of altostratus towards the horizon by day: 1.2 to 1.28 and 0.90 to 0.93, constant or bluer and darker towards the horizon."
   }
  ]
 }
