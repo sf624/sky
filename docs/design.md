@@ -4261,12 +4261,36 @@ At the end of `main`:
      mean of the picture. It is made from the model's lights, not from the
      picture's colours: a mean of the picture ("grey world") takes the
      blue of a clear sky for the colour of its light, and greyed the day's
-     sky from cruise. The clouds above the eye are not known to the JS:
-     each counts as the air about it. The light is followed for one block
+     sky from cruise. The clouds are known to it by their mean only. The
+     air under the low clouds' tops (from `CB` to `CT`) has what their
+     deck leaves it of the beam and of the sky's light, as the table of
+     the air's light takes it in `fs` (0.15 and `UNDER` = 0.3 under a whole
+     deck, by `smoothstep(0.4, 1, cloud)`). What is seen from under a layer,
+     the middle sheet or the low deck, is lit through it (below). Else a
+     cloud counts as the air about it. Before, the rays from under a low
+     deck were followed into the air above it, lit by the reddened beam
+     the deck hides: the deck with the sun 5 to 0 degrees up came out steel
+     blue (blue over green 1.7 to 2.1 as shown, linear), where a photograph
+     of a stratocumulus deck at sunset gives 1.3 and of altostratus 1.0 to
+     1.1, while the middle sheet beside it stayed grey. The light is followed for one block
      of each two by two (and for each block where the horizon runs between
      them), and not again while the view, the lights and the eye's height
      stay as they were (at rest, in straight flight): some 4 ms of script
      a reading on the test machine when they change, 8 for every block.
+   - **Under a layer.** What the camera sees from under a cloud layer is
+     lit by the light through it: the sun's beam by 0.5 + 0.75 times its
+     cosine and the sky's light whole, as a slab lets them through
+     (`addLevel`'s `slab`, on the level sea). The estimate goes that far
+     towards it (in log) as the layers cover the eye: the middle sheet by
+     its form, its amount (whole from 0.7) and from its top down to its
+     base; the low deck by its mean cover (`lowCover`,
+     `smoothstep(0.4, 1, cloud)`) and from its tops down to its base
+     (`lowOver`: the base `LOW_LAYER[0]` = 0.75 km over the level and
+     `low.base`, the deck `LOW_LAYER[1]` = 1.2 km deep at `low.depth` 1).
+     It goes over smoothly with the amount (the balance's blue over red,
+     in log, under a sun 2 degrees up: +0.34 clear, +0.33 at 0.4, +0.19 at
+     0.6, -0.15 overcast) and with the eye's height (-0.15 at 0.3 km under
+     the overcast, -0.02 at 1.2, +0.15 from 1.8 km over it).
    - **Daylight's light** (`dayLights`, made again with the table of
      multiple scattering): the clear sky's air seen all round from sea
      level with the sun at `DAY_SUN` = 40 degrees, and the level sea's
