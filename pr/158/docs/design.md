@@ -1174,7 +1174,7 @@ seen from far above.)
   the dome's surface out by `CF_HEAD` km per unit of its height over
   `CF_HEAD0` = 0.36 (about the mean): 0.15, 0.4, 0.24 and 0.12 km for the
   heads of 2 km to 250 m, so that a head of 1 km, 500 m or 250 m stands
-  about as high as it is wide. (Until #PRNUM the heads of 500 m and 250 m
+  about as high as it is wide. (Until #158 the heads of 500 m and 250 m
   moved it by 0.3 and 0.2 km, higher than wide: they cut the heads of
   1 km into knobs of one size and left crumbs beside them, and from 11 km
   every heap was a tight cluster of such knobs, "popcorn". A shorter
@@ -1197,7 +1197,7 @@ seen from far above.)
   heaps merge into one mass a few km wide with one flat base, and their
   domes and heads are its bulges, small against it; between the bodies
   the heaps are as elsewhere. So one frame holds masses of several km,
-  heaps of 1 to 3 km and small ones. (Until #PRNUM every heap in a
+  heaps of 1 to 3 km and small ones. (Until #158 every heap in a
   cluster stood alone.)
   - *Where*: 1 less the gusts over `CF_BODY`.x = 0.6, whole 0.07 over it,
     eased in from the rim (`inB`: a step in it or in its slope was a step
