@@ -619,4 +619,30 @@ export function patchStops(img, { region: box, nx = 24, ny = 14, top = 250, flat
   return at(s, 95) - at(s, 5);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture };
+// fringe: foam beside the white of the whitecaps, not white itself: the pixels within k px (default 10) of a
+// white one (luma at least `white`, default 235) that are brighter than their surroundings (their luma over its
+// mean over 33 x 33 px by more than t, default 25) without being white, per white pixel. Whitecaps drawn as flat
+// white blobs on dark water have few (0.45 at 15 m/s from 0.3 km on main at e18ddb1); with trails of foam
+// torn into streaks behind them, more (0.65).
+export function fringe(img, { region: box, k = 10, t = 25, white = 235 } = {}) {
+  const R = region(img, box), { w, h, l } = R, m = boxMean(l, w, h, 16);
+  const W = new Uint8Array(w * h), row = new Uint8Array(w * h);
+  let nw = 0;
+  for (let i = 0; i < W.length; i++) { W[i] = l[i] >= white ? 1 : 0; nw += W[i]; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let any = 0;
+    for (let i = Math.max(0, x - k); i <= Math.min(w - 1, x + k) && !any; i++) any = W[y * w + i];
+    row[y * w + x] = any;
+  }
+  let part = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    if (W[i] || l[i] - m[i] <= t) continue;
+    let near = 0;
+    for (let j = Math.max(0, y - k); j <= Math.min(h - 1, y + k) && !near; j++) near = row[j * w + x];
+    part += near;
+  }
+  return part / Math.max(nw, 1);
+}
+
+export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe };
