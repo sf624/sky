@@ -249,3 +249,17 @@ test('fringe: white blobs alone score low, blobs with streaks of foam beside the
   assert.ok(M.fringe(plain) < 0.05, `plain ${M.fringe(plain)}`);
   assert.ok(M.fringe(trails) > 0.15, `trails ${M.fringe(trails)}`);
 });
+
+test('fray: a patch with a smooth outline scores about 1, one frayed into filaments 2 and more', () => {
+  // A bright disc on a darker sky, its edge soft over 8 px; and the same with its rim cut into filaments 5 px apart.
+  const disc = (frayed) => pic(W, H, (x, y) => {
+    const r = Math.hypot(x - W / 2, y - H / 2), a = Math.atan2(y - H / 2, x - W / 2);
+    const edge = 80 + (frayed ? 22 * Math.sign(Math.sin(a * 80)) : 0);
+    return 90 + 130 / (1 + Math.exp((r - edge) / 3));
+  });
+  const smooth = M.fray(disc(false)), frayed = M.fray(disc(true));
+  assert.ok(smooth > 0.9 && smooth < 1.2, `smooth ${smooth}`);
+  assert.ok(frayed > 2, `frayed ${frayed}`);
+  // No bright form at all: no outline, 0.
+  assert.equal(M.fray(pic(W, H, () => 100)), 0);
+});

@@ -2270,6 +2270,68 @@
    ],
    "bad": "7b0a747",
    "note": "The limit of mid-lattice-40km. #135 at 7b0a747 with ?midrolls=1: 35.0; the map of rolls: 29.4 (27.7 in mid-lattice-40km's own view, rolls in half the regions; 26.7 there at 7b0a747). Far off, where the map no longer tells the rolls apart, the cells take over: with rolls to the horizon the groups were bands 32 px apart there, a peak of 39 to 55."
+  },
+  {
+   "name": "cirrus-fibres-under-deck-11.5km",
+   "q": "alt=11.5&pitch=40&cirrus=0.7&yaw=270",
+   "reported": "2026-11-16",
+   "wrong": "cirrus seen from just under its sheet a smooth gradient, a grey blurred fan with no fibres: the ice has nothing finer than some 100 m, and every fine term faded over the step's length along the ray (issue #9)",
+   "measures": [
+    {
+     "measure": "texture",
+     "label": "texture 3-17 px",
+     "region": [
+      0,
+      0,
+      1,
+      0.85
+     ],
+     "k1": 1,
+     "k2": 8,
+     "m": 1,
+     "min": 0.015
+    }
+   ],
+   "bad": "a2ba547",
+   "note": "The detail of 3 to 17 px over the sky: 0.003 on main a2ba547 (satin), 0.041 with the fibres (ciFibre), read with the pixel's footprint at the sheets of the march."
+  },
+  {
+   "name": "cirrus-fibres-ground-0.3km",
+   "q": "date=172&time=11&cloud=0&alt=0.3&cirrus=0.6&yaw=127.5&pitch=65",
+   "reported": "2026-11-16",
+   "wrong": "cirrus from the ground at a high sun airbrushed strokes with a satin inside: no fibres within the forms (issue #9)",
+   "measures": [
+    {
+     "measure": "texture",
+     "label": "texture 3-17 px",
+     "k1": 1,
+     "k2": 8,
+     "m": 1,
+     "min": 0.017
+    }
+   ],
+   "bad": "a2ba547",
+   "note": "0.011 on main a2ba547, 0.024 with the fibres."
+  },
+  {
+   "name": "cirrus-edge-frays-11km",
+   "q": "cirrus=0.4",
+   "reported": "2026-11-16",
+   "wrong": "the dense patch of cirrus at the top left of the default view ended on one smooth rounded curve, like a cumulus top (issue #9: 'its boundary shows clearly')",
+   "measures": [
+    {
+     "measure": "fray",
+     "region": [
+      0,
+      0,
+      0.4,
+      0.3
+     ],
+     "min": 1.4
+    }
+   ],
+   "bad": "a2ba547",
+   "note": "The outline's length over that of the smoothed picture's: 1.20 on main a2ba547 (a clean envelope), 1.59 with the fibres, which shape thin ice most."
   }
  ]
 }

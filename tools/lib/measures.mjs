@@ -704,4 +704,26 @@ export function fringe(img, { region: box, k = 10, t = 25, white = 235 } = {}) {
   return part / Math.max(nw, 1);
 }
 
-export const MEASURES = { lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe, rollEven, rollLong };
+// fray: how ragged the outline of the bright forms is. The mask of the pixels at least opt.t over the region's
+// median luma (default: a third of the way from the median to the 98th percentile) has an outline; so has the mask
+// of the luma averaged over boxes of 2 opt.k + 1 px (k default 6) at the same level. The measure is the length of
+// the first outline (the steps between a pixel in the mask and a neighbour out of it) over the second's, away from
+// the region's edge (k). A patch that ends on one smooth curve: about 1; an edge frayed into filaments with gaps
+// between them: 2 and more.
+export function fray(img, { region: box, k = 6, t } = {}) {
+  const R = region(img, box), { w, h } = R, s = sorted(R.l), med = at(s, 50);
+  const level = med + (t ?? (at(s, 98) - med) / 3), B = boxMean(R.l, w, h, k);
+  const outline = (L) => {
+    let n = 0;
+    for (let y = k; y < h - k - 1; y++) for (let x = k; x < w - k - 1; x++) {
+      const i = y * w + x, v = L[i] >= level;
+      if (v !== (L[i + 1] >= level)) n++;
+      if (v !== (L[i + w] >= level)) n++;
+    }
+    return n;
+  };
+  const smooth = outline(B);
+  return smooth ? outline(R.l) / smooth : 0;
+}
+
+export const MEASURES = { fray, lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe, rollEven, rollLong };
