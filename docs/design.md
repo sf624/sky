@@ -4262,7 +4262,11 @@ At the end of `main`:
      picture's colours: a mean of the picture ("grey world") takes the
      blue of a clear sky for the colour of its light, and greyed the day's
      sky from cruise. The clouds above the eye are not known to the JS:
-     each counts as the air about it.
+     each counts as the air about it. The light is followed for one block
+     of each two by two (and for each block where the horizon runs between
+     them), and not again while the view, the lights and the eye's height
+     stay as they were (at rest, in straight flight): some 4 ms of script
+     a reading on the test machine when they change, 8 for every block.
    - **Daylight's light** (`dayLights`, made again with the table of
      multiple scattering): the clear sky's air seen all round from sea
      level with the sun at `DAY_SUN` = 40 degrees, and the level sea's
@@ -4307,7 +4311,27 @@ At the end of `main`:
      it at once; then the balance follows it exponentially in log, with
      `BALANCE_TIME` = 0.5 s, and the frames go on while it is more than
      `BALANCE_STILL` = 0.002 from it. `window.__balance` reads it.
-   - **What it does.** BALANCE_RESULTS
+   - **What it does** (against the balance before, over 42 views from
+     0.3, 3, 11 and 30 km in five weathers, the whole frame as shown,
+     linear). By day (the sun at 55 degrees) red over green within 1.4 %
+     and blue over green within 4 % (most -1 %). With the sun from 5 to 0
+     degrees up the frame is cooled as the low sun reddens (red over green
+     down by a median of 4 % at 5 degrees, 22 % at 0): the clear sky
+     beside the sun 15 to 25 degrees up from 0.3 km is red over green 0.63
+     at 0 degrees (0.89 before; photographs of a low sun's sky 0.34 to
+     0.46). In twilight the ground's sky is blue-grey to blue (towards the
+     sun at -2 degrees 0.74 and 1.47, before 1.10 and 1.05). From 30 km
+     looking down, blue over green 1.5 to 2.7 from 2 to 9 degrees down and
+     red over green 1.1 to 1.2 at 2 to 4 down (before 1.2 to 3.5, and 1.6 to
+     1.7: mauve-brown, then navy); photographs from orbit 1.2 to 1.5 and 0.86 to
+     1.02. Deeper in twilight it is greyer than before (blue over green of
+     the frame down by a third at 9 degrees down, where the old balance had
+     let go), and under an altostratus at 9 down blue-grey (0.91, 1.33)
+     where it was blue. At night under a full moon, within 0.3 %. As the
+     sun steps by half degrees from 10 up to 9 down, the balance moves by
+     at most 0.12 in log a step (looking down from 30 km as the sunlit
+     cirrus go into the shadow), most by 0.01 to 0.02; in a flight of 20 s
+     at 11 km at dusk it moves by 0.4 % in all.
    - Before (until #<this>), the balance went half way to the light on the
      level sea, blended in as the sun went from 2.5 to -0.5 degrees
      (`BALANCE_IN`), out again from 4 to 9 degrees down (`BALANCE_OUT`),
@@ -4317,8 +4341,8 @@ At the end of `main`:
      over green 1.05 at 2 degrees down, towards the sun, 15 to 25 degrees
      up), the clear sky with the sun from 5 to 0 degrees up lost its blue
      at the side (red over green 0.50 to 0.89), and from 30 km the twilit
-     Earth went from mauve-brown (red over green 1.56 at 2 to 4 degrees
-     down) to navy (blue over green 3.1 at 6 down, 3.9 at 9) as
+     Earth went from mauve-brown (red over green 1.6 to 1.7 at 2 to 4
+     degrees down) to navy (blue over green 2.9 at 6 down, 3.5 at 9) as
      `BALANCE_OUT` let go. Before that, without any balance in twilight,
      the sky away from the sun was lavender and the Belt of Venus magenta.
 3. A camera's saturation by day, `uSaturation` (`saturationFor`):
