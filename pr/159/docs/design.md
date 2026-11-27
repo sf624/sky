@@ -4243,8 +4243,8 @@ At the end of `main`:
        twilight the light through it (the twilight sky's) asked for 0.86
        at 9 degrees down; followed, the sheet came out brown (red over
        green 1.5, blue over green 0.77), and with the range ending at 0.55
-       grey (1.02, 1.11), where main kept it blue (0.75, 2.13); now 0.91
-       and 1.33.
+       grey (1.02, 1.11), where main kept it blue (0.79, 1.91); now 0.96
+       and 1.25.
      - Across the line: twilight's light from high up is purple (the
        sun's light through the ozone). Followed only along the line, the
        twilit Earth from 40 km stayed navy (2.8 against the photographs'
@@ -4270,14 +4270,14 @@ At the end of `main`:
      red over green 1.1 to 1.2 at 2 to 4 down (before 1.2 to 3.5, and 1.6 to
      1.7: mauve-brown, then navy); photographs from orbit 1.2 to 1.5 and 0.86 to
      1.02. Deeper in twilight it is greyer than before (blue over green of
-     the frame down by a third at 9 degrees down, where the old balance had
-     let go), and under an altostratus at 9 down blue-grey (0.91, 1.33)
-     where it was blue. At night under a full moon, within 0.3 %. As the
+     the frame down by about 30 % at 9 degrees down, where the old balance had
+     let go), and under an altostratus at 9 down grey-blue (0.96, 1.25)
+     where it was blue (0.79, 1.91). At night under a full moon, within 0.3 %. As the
      sun steps by half degrees from 10 up to 9 down, the balance moves by
      at most 0.12 in log a step (looking down from 30 km as the sunlit
      cirrus go into the shadow), most by 0.01 to 0.02; in a flight of 20 s
      at 11 km at dusk it moves by 0.4 % in all.
-   - Before (until #<this>), the balance went half way to the light on the
+   - Before (until #159), the balance went half way to the light on the
      level sea, blended in as the sun went from 2.5 to -0.5 degrees
      (`BALANCE_IN`), out again from 4 to 9 degrees down (`BALANCE_OUT`),
      and out with height from 2 to 11 km (`BALANCE_HIGH`) but for the share
