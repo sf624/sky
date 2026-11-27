@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="026f53f PR #139">
+<meta name="build" content="45dd99e PR #139">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3361,14 +3361,25 @@ vec3 midColumns(vec3 p) {
 float midColumn(vec3 p) {
   return midColumns(p).x;
 }
-// And from p towards the light, for what lies under the layer: the column
-// where the line of light crosses the layer's middle, aslant.
-float midShadow(vec3 p) {
-  if (uMid.x <= 0.0) return 0.0;
-  float hm = uMid.z + 0.5 * uMid.w;
-  if (length(p) - RG > hm) return 0.0;
-  vec3 pc = p + uLight * raySphere(p, uLight, RG + hm).y;
-  return midColumns(pc).y / max(dot(normalize(pc), uLight), 0.06);
+// And from p towards the light, for what lies under the layer: the line of
+// light crosses the layer aslant, over its depth over the tangent of the
+// light's height (4.6 km of an altocumulus 0.4 km deep at 5 degrees: some
+// cells), so its depth is the mean of the columns along that way over the
+// light's cosine there (m): the mean of n places, at (j + f) / n of the way
+// from the base to the top. (Read where the line crosses the layer's middle
+// alone, a tower under the cells with the sun low wore their shadows 11 to
+// 34 times smaller in height, over a cosine of some 0.06: hard bands across
+// its lit side, one for each cell that the line slid across.)
+float midSlant(vec3 p, int n, float f, out float m) {
+  float t0 = max(raySphere(p, uLight, RG + uMid.z).y, 0.0), t1 = raySphere(p, uLight, RG + uMid.z + uMid.w).y, col = 0.0;
+  for (int j = 0; j < n; j++) col += midColumns(p + uLight * mix(t0, t1, (float(j) + f) / float(n))).y;
+  m = max(dot(normalize(p + uLight * mix(t0, t1, 0.5)), uLight), 0.06);
+  return col / float(n);
+}
+float midShadow(vec3 p, int n, float f) {
+  if (uMid.x <= 0.0 || length(p) - RG > uMid.z + 0.5 * uMid.w) return 0.0;
+  float m, col = midSlant(p, n, f, m);
+  return col / m;
 }
 
 // (The scene adds both where it reads the low clouds' shadow, once each:
@@ -3379,12 +3390,12 @@ float midShadow(vec3 p) {
 // much as the layer does, counting `share` of what it scatters on downwards
 // as light that still comes from the sun's side (through a veil most of it
 // does: the low clouds under an altostratus keep a light and a dark side).
-float midLight(vec3 p, float share) {
-  if (uMid.x <= 0.0) return 0.0;
-  float hm = uMid.z + 0.5 * uMid.w;
-  if (length(p) - RG > hm) return 0.0;
-  vec3 pc = p + uLight * raySphere(p, uLight, RG + hm).y;
-  float col = midColumns(pc).y, m = max(dot(normalize(pc), uLight), 0.06), dir = exp(-col / m);
+// (n and f as midSlant's. The air reads the middle of the way alone, n 1
+// and f 0.5, at each of its many samples: its light is a mean along the
+// view, which blurs the cells' shafts as it is.)
+float midLight(vec3 p, float share, int n, float f) {
+  if (uMid.x <= 0.0 || length(p) - RG > uMid.z + 0.5 * uMid.w) return 0.0;
+  float m, col = midSlant(p, n, f, m), dir = exp(-col / m);
   return -log(dir + share * max(midThrough(col, m) - dir, 0.0));
 }
 // What the layer leaves of the sky's light in the air under it (h: the
@@ -3436,14 +3447,6 @@ float midMirror(vec3 ps, vec3 uk, float ck, float c, out vec3 base) {
 // The optical depth of the clouds from p towards the light.
 float cloudShadow(vec3 p) {
   return mapDepth(uShadow, shX, shY, uShadowShift, p, 0.0);
-}
-// The same, for a cloud's own light: with the light low, from the height
-// above p alone. (Read between two heights, which lie kilometres apart
-// along a low light, the depth from the one below took in the cloud
-// itself behind p, and drew bands across the lit walls of towers, one for
-// each height of the map.)
-float cloudShadowOwn(vec3 p) {
-  return mapDepth(uShadow, shX, shY, uShadowShift, p, 1.0 - smoothstep(0.25, 0.45, uLight.y));
 }
 
 // The optical depth of the clouds straight up from p, times the sheet's
@@ -4099,22 +4102,35 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
           // tens of km, so that with the sun low they shade one another.
           // It holds the depth along the line of light through this place
           // from a height upwards, so read where the steps ended. With the
-          // light low it is read at the map's next height above that place
-          // (cloudShadowOwn), which lies up to 5 km farther along the light
-          // (275 m of height at 3 degrees): that way to it is marched here,
-          // in 8 steps at about the map's own level. (Without it, the cloud
-          // on that way was left out, more the lower in each height of the
-          // map: lit slabs with flat tops across the shaded sides of heaps,
-          // one for each height of the map.)
-          vec3 xe = ps + uLight * reach;
+          // light low it is read one step of the map's heights (275 m)
+          // farther up the line of light, up to 14 km on with the sun on the
+          // horizon: there it lies between the map's next two heights above
+          // the place, both of which cross the line ahead of the place, so
+          // neither takes in the cloud itself behind it. The way to there is
+          // marched here, in 8 steps at about the map's own level. (Read at
+          // the place between its two heights, the one below took in the
+          // cloud behind the place, and drew a band across the lit walls of
+          // towers for each height of the map. Read at the next height above
+          // the place alone, with the way to it marched, the way went from a
+          // few metres to 14 km as the place rose through a height of the
+          // map: a heap lit by a light on the horizon was cut at that height,
+          // lit red over it and grey under it along a straight edge.)
+          vec3 xe = ps + uLight * reach, xr = xe;
           float tauGap = 0.0;
           if (overMap < 1.0) {
-            float hx = heightAt(xe), zk = min(floor(clamp((hx - CB) / (CT - CB), 0.0, 1.0) * float(SHADOW_N)) + 1.0, float(SHADOW_N));
-            float g = max(CB + (CT - CB) * zk / float(SHADOW_N) - hx, 0.0) / max(dot(uLight, normalize(xe + eye())), 0.02);
-            float lg = max(log2(0.04 * g / TEXEL_KM), lod);
-            for (int n = 0; n < LONG_N(8); n++) tauGap += cloudDensity(xe + uLight * (g * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * g;
+            // (Between 15 and 27 degrees, by degrees towards the map read at
+            // the place, as by day.)
+            // (The level of the field from the whole step: from the way
+            // shortened by degrees, near 27 degrees the field was read at its
+            // finest, and the frame of the overcast view with the sun at 49
+            // degrees took 13 % more on Direct3D 11, whose compiler seems to
+            // run this branch for every place.)
+            float step = (CT - CB) / float(SHADOW_N) / max(dot(uLight, normalize(xe + eye())), 0.02), L = (1.0 - overMap) * step;
+            float lg = max(log2(0.04 * step / TEXEL_KM), lod);
+            for (int n = 0; n < LONG_N(8); n++) tauGap += cloudDensity(xe + uLight * (L * (float(n) + 0.5) / 8.0), lg, false) * 0.125 * L;
+            xr = xe + uLight * L;
           }
-          tauCM = tauL + (1.0 - overMap) * tauGap + cloudShadowOwn(xe + eye());
+          tauCM = tauL + tauGap + cloudShadow(xr + eye());
           tauCM = mix(tauCM, above / max(sunUp, 0.05), slabbed);
         }
       }
@@ -6639,12 +6655,14 @@ void main() {
     // towards it, the sky's as a slab lets it through.
     vec3 pc = o + d * tBar;
     // (The sun's light through places scattered within 150 m round it, anew each frame, as the sea's shadow is read:
-    // the low cloud itself spreads the light as far. The sky's and the layer's own come from all of it overhead:
+    // the low cloud itself spreads the light as far; each the mean along the light's slanting way through the layer,
+    // at four places drawn anew each frame by the golden ratio, which covers the way evenly within a few frames (midSlant;
+    // the step of 4.71 pixels a frame repeats every five frames: the way's four places drew four thin bands). The sky's and the layer's own come from all of it overhead:
     // through the column smoothed over a kilometre. Read at the place alone, a heap wore the cells' outlines as a map.)
-    float jit = ign(gl_FragCoord.xy + 4.71 * uPass + 23.0), midLitS = 0.0;
+    float jit = ign(gl_FragCoord.xy + 4.71 * uPass + 23.0), along = fract(ign2(gl_FragCoord.xy) + 0.618034 * mod(uPass, 4096.0)), midLitS = 0.0;
     for (int i = 0; i < 2 + int(min(uRes.x, 0.0)); i++) {
       float a = 6.2832 * jit + 2.39996 * float(i), ri = 0.15 * sqrt((float(i) + jit) / 2.0);
-      midLitS += exp(-midLight(pc + ri * vec3(cos(a), 0.0, sin(a)), 0.5));
+      midLitS += exp(-midLight(pc + ri * vec3(cos(a), 0.0, sin(a)), 0.5, 4, fract(along + 0.5 * float(i))));
     }
     float col = midColumns(pc).z, sky = 1.0 / (1.0 + COLUMN * col), slant = max(dot(normalize(pc), uLight), 0.06);
     for (int k = 0; k < 3; k++) C[k] *= sky;
@@ -6767,7 +6785,7 @@ void main() {
           float h = length(o + d * ts) - RG;
           // (The thin cloud's shade on the low air too, as the march takes it.)
 //[ middle clouds
-          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - midLight(o + d * ts, MID_AIR)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
+          float lit = mix(1.0, exp(-cloudShadow(o + d * ts) - midLight(o + d * ts, MID_AIR, 1, 0.5)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
 //| without
           float lit = mix(1.0, exp(-cloudShadow(o + d * ts)) * mix(1.0, ciShade, 1.0 - smoothstep(0.6, 2.0, h)), uLightShare);
 //]
@@ -6859,14 +6877,14 @@ void main() {
         vec3 w = density(length(ps) - RG);
         float wt = uBR[1].z * w.x + betaM * w.y;
 //[ middle clouds
-        lit += wt * exp(-cloudShadow(ps) - midLight(ps, MID_AIR));
+        lit += wt * exp(-cloudShadow(ps) - midLight(ps, MID_AIR, 1, 0.5));
 //| without
         lit += wt * exp(-cloudShadow(ps));
 //]
         sum += wt;
       }
 //[ middle clouds
-      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - midLight(p, MID_AIR));
+      direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p) - midLight(p, MID_AIR, 1, 0.5));
 //| without
       direct = sum > 0.0 ? lit / sum : exp(-cloudShadow(p));
 //]
@@ -6930,7 +6948,7 @@ void main() {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
 //[ middle clouds
-    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + midShadow(pg) + ciSea) : 0.0;
+    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + midShadow(pg, 4, fract(ign2(gl_FragCoord.xy + 41.0) + 0.618034 * mod(uPass, 4096.0))) + ciSea) : 0.0;
 //| without
     float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea) : 0.0;
 //]
@@ -7071,7 +7089,7 @@ void main() {
     float glare = GLARE * min(1.0, exp2(GLARE_EXPO) / uExposure)
                 * SUN_L * PI * SUN_R * SUN_R * glareShape(t2);
 //[ middle clouds
-    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o) - midShadow(o));   // the map is the sun's
+    if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o) - midShadow(o, 4, 0.5));   // the map is the sun's
 //| without
     if (dot(uLight, uSun) > 0.999) glare *= exp(-cloudShadow(o));   // the map is the sun's
 //]
