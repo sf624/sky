@@ -599,11 +599,13 @@ covers the deck. The hairs they replace cost 1.55 ms in the first view
 left: the same noise drawn by `ciNoise` in the shader, seven sizes in
 four patches (the first view took 10.5 ms more: some 0.04 ms for each
 call a pixel at this size); the three patches in a loop kept as a loop
-(`CI_N`: 0.45 ms more). In Microsoft's compiler (`d3d fxc`, three runs)
-the cirrus's pass takes 7.3 s where it took 8.3 s with the hairs (4607
-instructions for 5247), and the sum of all programs is the same (26.3 s
-for 26.4 s): the ice's program no longer draws the strands' phase into a
-third target.
+(`CI_N`: 0.45 ms more). In Microsoft's compiler (`d3d fxc`, three sets
+of three runs in turns with main) the cirrus's pass takes no longer than
+it did with the hairs: 6.9, 7.3 and 7.4 s where main took 8.2, 8.3 and
+7.5 s (4607 instructions for 5247), and the sum of all programs 0.92,
+1.00 and 0.99 times main's. On Direct3D 11 the first picture came 0.7 s
+sooner (`d3dperf`: 14.5 s for 15.2 s): the ice's program no longer draws
+the strands' phase into a third target.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
