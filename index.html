@@ -3219,6 +3219,11 @@ const float MID_DETAIL = 5.0;        // its fine noise: tiles per tile
 // the thin places) the sheet from above was torn, dark grey where the sea showed through.
 const vec4 MID_THICK = vec4(1.6, 1.4, 1.2, 0.25);
 const float MID_THICK_GAIN = 1.5, MID_THICK_MEAN = 2.0, MID_THICK_MIN = 0.7, MID_THICK_MAX = 4.0;
+// The least cosine of the sun's light to a sheet's top, for the light that comes back out of it (see midClouds): what
+// comes back leaves near where it went in, the swells' faces towards the sun, which take it more steeply than the
+// level does. (Cells stand up, and a low sun lights their sides: 0.35.) What goes through to the base has spread
+// over many swells, and takes the sun's light by its height alone.
+const float MID_SHEET_SUN = 0.2;
 // The cells' map: a cut through the noise, the same at every height. Not a
 // level slice of its tile but an oblique one (two vectors at right angles, of
 // 256 / 58.8 and 256 / 60.2 km to the tile: its Worley cells are of 1.1 km,
@@ -6849,11 +6854,16 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       float own = uMid.y * max(smoothstep(0.05, 0.25, abs(cv)), smoothstep(3.0, 8.0, t)), greyer = mix(1.0, MID_SHADE.x, own);
       float col = mix(own < UNSEEN(1.0) ? midColumn(P) : 0.0, MID_SHADE.x * colCells, own) * mix(1.0, max(2.0 * lump, 0.1), 0.4 * smoothstep(0.15, 0.5, abs(cv)) * smoothstep(0.3, 1.5, t));
       // (The light's cosine to the layer, for the light that falls on it: no less than 0.35 for cells, whose sides a low
-      // light falls on. A sheet takes the light by its height alone: a level sheet, however it swells, takes no more
-      // of a beam than the beam brings to a level plane over it. With no less than 0.2, as until #146, a sun 0 to 3
-      // degrees up brought it 4 to 8 times that, of its red light, and the sheet from below was an even salmon wall
-      // where photographs show it slate grey, warm only towards the sun.)
-      float m = max(abs(sunUp), 0.35 * uMid.y);
+      // light falls on. For a sheet, m, for what goes through to its base, by the light's height alone: a level
+      // sheet, however it swells, takes no more of a beam than the beam brings to a level plane over it. With no less
+      // than MID_SHEET_SUN, as until #146, a sun 0 to 3 degrees up brought the base 4 to 8 times that, of its red
+      // light, and the sheet from below was an even salmon wall where photographs show it slate grey, warm only
+      // towards the sun. mTop, for what comes back out of its top, keeps MID_SHEET_SUN: the top from above at sunset
+      // stays as it was, lit pink.)
+      // (slab: a sheet seen from below, by the form and the view (wd: how far the view looks up), and wherever the eye
+      // is under the layer: a far base seen a few degrees up is a base too.)
+      float wd = smoothstep(-0.25, 0.25, cv), slab = max(wd, smoothstep(0.0, 0.15, uMid.z - uAlt)) * (1.0 - uMid.y);
+      float mTop = max(abs(sunUp), mix(MID_SHEET_SUN, 0.35, uMid.y)), m = mix(mTop, abs(sunUp), slab);
       // Two streams through the layer as a slab that keeps all it scatters
       // (Eddington's): of the light on its sun side, e0 / (1 + K col) comes
       // out of the far side; at a place with `over` of the column behind it
@@ -6883,20 +6893,17 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       float shade = 1.0 / (1.0 + mix(1.0, MID_RELIEF.z, uMid.y) * K * max(upright - over, 0.0));
       shade += MID_SHADOW * uMid.y * (1.0 - shade);
       float low = 1.0 - (1.0 - MID_RELIEF.x) * own * (1.0 - smoothstep(0.0, MID_RELIEF.y, sides.x));
-      float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = low * shade * e0 * K * (col - over);
+      float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = low * shade * midThrough(col, mTop) * K * (col - over);
       float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
       // (A sheet seen from the side away from the light shows what came through it whichever way the eye looks: its
       // base, looking up and away from a low sun, took a share of the stream that goes back, nothing there, and was
-      // darker and bluer than towards the sun. wd: how far the view looks up.)
-      float wd = smoothstep(-0.25, 0.25, cv);
+      // darker and bluer than towards the sun.)
       c = mix(c, 1.0, mix(1.0 - wd, wd, fromUp) * (1.0 - uMid.y));
-      // (slab: a sheet seen from below, by the form and the view, and wherever the eye is under the layer: a far base
-      // seen a few degrees up is a base too. limb: what comes through a thick slab leaves it brighter straight down
-      // than aslant, by 1 + 1.5 times the view's cosine to the vertical over 2 (Eddington's, as the two streams; a
-      // flux the same as an even radiance's). Even, as until #146, the far base near the horizon was as bright as the
+      // (limb: what comes through a thick slab leaves it brighter straight down than aslant, by 1 + 1.5 times the
+      // view's cosine to the vertical over 2 (Eddington's, as the two streams; a flux the same as an even radiance's,
+      // for a base seen from below, slab). Even, as until #146, the far base near the horizon was as bright as the
       // base overhead, the haze before it took the blue of its light away and gave back less than it took, and the
       // sheet from 0.3 km at noon turned cream towards the horizon where photographs go grey to blue-grey and darker.)
-      float slab = max(wd, smoothstep(0.0, 0.15, uMid.z - uAlt)) * (1.0 - uMid.y);
       float limb = mix(1.0, 0.5 + 0.75 * max(cv, 0.0), slab);
       // Scattered once; the aureole (the droplets send half of what they
       // scatter on within a degree: that light fades half as fast, and is
@@ -6905,7 +6912,7 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // light, through 0.4 of the depth, with half the forward lean): the
       // glow of thin cloud about the sun and the light in a cell's rim;
       // then the two streams.
-      float sun = ph * exp(-tauS) + 0.2 * hg(mu, 0.98) * (exp(-0.5 * tauS) - exp(-tauS)) + mix(1.0, shade, MID_RELIEF.w * uMid.y) * (0.5 * phWide * exp(-0.4 * tauS) + 0.25 * hg(mu, 0.2) * exp(-0.16 * tauS)) + limb * m / PI * mix(up, onD, c);
+      float sun = ph * exp(-tauS) + 0.2 * hg(mu, 0.98) * (exp(-0.5 * tauS) - exp(-tauS)) + mix(1.0, shade, MID_RELIEF.w * uMid.y) * (0.5 * phWide * exp(-0.4 * tauS) + 0.25 * hg(mu, 0.2) * exp(-0.16 * tauS)) + limb / PI * mix(mTop * up, m * onD, c);
       // The sky's light, as two streams too: from above, and what the sea,
       // the low clouds and the air below send up.
       float above = col * (1.0 - tf), under = col * tf, thru = 1.0 / (1.0 + K * col);
@@ -6930,9 +6937,10 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // at the far edge of a sheet or through a gap: midSlant reads the column along that way. Without it, the base
       // was lit from below wherever the sun stood under the level at its place, through no cloud at all: half the
       // sheet in view was salmon with the sun 0 degrees up.)
-      if (fromUp < 1.0 && uMid.y < 1.0) {
+      // (For a base seen from below, slab: from above, the top keeps its light as it was.)
+      if (fromUp < 1.0 && slab > 0.0) {
         float mf, cf = midSlant(P, 1, 0.5, mf);
-        sun *= mix(exp(-cf / mf), 1.0, max(fromUp, uMid.y));
+        sun *= mix(1.0, mix(exp(-cf / mf), 1.0, fromUp), slab);
       }
       sSun += w * sun;
       sAmb += w * amb;
