@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="818e62b PR #158">
+<meta name="build" content="3532b15 PR #158">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2889,12 +2889,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // drifts from place to place (far) keeps two tiles from showing the same
   // clouds; and it leans with the wind's shear.
   vec4 far = a.far;
-#ifdef TOPS_MAP
-  // (The map of the tops reads the heaps upright, and widens them by their lean: see below.)
-  vec2 xs = x;
-#else
   vec2 xs = x - CF_LEAN * overBase;
-#endif
   vec3 off = vec3(far.b, 2.5 * far.r, far.g);
   q.xyz = vec3(xs.x, h, xs.y) / BASE_KM + off;
   // (Near the eye, where a pixel is finer than 1 m, the read moves by up to
@@ -3029,11 +3024,10 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // through it.)
     vec3 top = swell + hm * sqrt(max(1.0 - U * U, 0.0));
 #ifdef TOPS_MAP
-    // (The map of the tops: as high as the domes within reach of the place, by their heads, the swell of a body and
-    // their lean, and the heads on them. Read upright and widened by the lean: read leaning, as the field is, the bound
-    // was not one that falls with the height, which the search for the top takes for granted, and a body's taller
-    // heaps lean farther than the heads reach.)
-    vec3 Uo = max(U - (CF_OUT + swell + length(CF_LEAN) * (hm + swell)) / rmax, 0.0), to = hm * sqrt(max(1.0 - Uo * Uo, 0.0));
+    // (The map of the tops: as high as the domes within the heads' reach of the place, and a body's swell, and the
+    // heads on them. Read upright and widened by the domes' lean as well, the map stood higher round every heap: the
+    // frame among heaps at 3 km took 13 % longer on Direct3D 11, bodies or none.)
+    vec3 Uo = max(U - (CF_OUT + swell) / rmax, 0.0), to = hm * sqrt(max(1.0 - Uo * Uo, 0.0));
     float tall = max(to.x, max(to.y, to.z));
     tall = tall > 0.0 ? tall + swell : 0.0;
     return max(topsOld, tall > 0.0 ? a.level + tall + CF_OUT - sinkB + 0.03 + 0.06 * a.depth - h : -9.0);

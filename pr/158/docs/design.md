@@ -1378,11 +1378,11 @@ seen from far above.)
   the towers' carving read their own field (`co`): read from the union, a
   heap kept a smooth dome 90 m under its surface, which showed wherever a
   seam between heads went deeper.
-- **The map of the tops** takes the heaps' own domes within reach of each
-  place (the heads', a body's swell, and how far the dome leans), not the
-  layer's bound. It reads the domes upright and widens them by their
-  lean: read leaning, as the field is, the bound did not fall steadily
-  with the height, which the search for the top takes for granted.
+- **The map of the tops** takes the heaps' own domes within the heads'
+  reach of each place, and a body's swell, not the layer's bound. (Read
+  upright and widened by the domes' lean as well, it stood higher round
+  every heap, and the frame among heaps at 3 km took 13 % longer on
+  Direct3D 11, bodies or none.)
 - **Towers** (towering cumulus) are models, not noise: noise gives lumps,
   and a taller dome is a bullet, where a tower is a broad foot, shoulders
   and stacked turrets (after the modelled clouds of Guerrilla's Nubis
