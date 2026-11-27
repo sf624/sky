@@ -1444,21 +1444,27 @@ each cloud, not on its surface; no normal of the field enters it.
   cost did not change measurably. With the fine noise in the later steps
   too the depth came out at 7, but the shaded sides of towers turned
   mottled), and beyond that the
-  map of the clouds' shadow (`cloudShadowOwn`, read where the steps ended:
+  map of the clouds' shadow (`cloudShadow`, read where the steps ended:
   it holds the depth along the line of light from that height up), so that
   heaps shade one another out to tens of km, as with the sun low. With the
-  light under 15 degrees it reads the map's height above the place alone,
-  and between the two by degrees up to 27 degrees. That height lies up to
-  5 km farther along a low light (275 m of height at 3 degrees): the way
-  to it is marched in 8 more steps, at about the map's own level, by the
-  same degrees. (Without them, the cloud on that way was left out, the
-  more the lower in each height of the map: lit slabs with flat tops
-  across the shaded sides of heaps at dusk.) Read between two
-  heights, which lie kilometres apart along a low light, the depth from
+  light under 15 degrees it is read one step of the map's heights (275 m)
+  farther up the line of light, and that step by degrees less up to 27
+  degrees. That lies up to 14 km farther along a light on the horizon
+  (5 km at 3 degrees): the way to it is marched in 8 more steps, at about
+  the map's own level. (Without them, the cloud on that way was left out,
+  the more the lower in each height of the map: lit slabs with flat tops
+  across the shaded sides of heaps at dusk.) There the place's line of
+  light lies between the map's next two heights above the place, which
+  both cross it ahead of the place. Read at the place itself between its
+  two heights, which lie kilometres apart along a low light, the depth from
   the one below took in the cloud itself behind the place and drew a band
-  across the lit walls of towers for each height of the map (#63; a few
-  short dashes remain where the place lies just under a height of the
-  map, whose line of light still starts inside the same heap); `tauB`,
+  across the lit walls of towers for each height of the map (#63). Read
+  at the next height above the place alone, the way to it went from a few
+  metres to 14 km as the place rose through a height of the map: a small
+  heap lit by a light on the horizon was cut at that height, red over a
+  straight edge and grey under it. (A few short dashes on towers were
+  seen where the place lies just under a height of the map, whose line of
+  light still starts inside the same heap; not looked at since); `tauB`,
   away from the light, out to 1.58 km (three steps of 25 m growing by 2,
   out to 175 m, with the fine noise and a sideways stray that grows; the
   rest, with the light more than 27 degrees high, from the map of the
@@ -2018,8 +2024,16 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
 - **What lies under it.** The low clouds: the sun's light by the layer's
   depth towards it (read at two places within 150 m, anew each frame), the
   sky's as a slab lets it through, and a share of what the layer scatters
-  downwards. The air under it: its shade on the light scattered once
-  (`midLight`), and the sky's light there by its amount (`midUnder`, as
+  downwards. The depth towards the light is that along its slanting way
+  through the layer (`midSlant`): the mean of the columns at four places
+  along the way, drawn anew each frame by the golden ratio, over the
+  light's cosine. The way is 4.6 km long through an altocumulus 0.4 km deep
+  with the sun 5 degrees up. (Read where the line crosses the layer's middle
+  alone, a tower under the cells with the sun low wore their shadows as
+  hard horizontal bands, 11 to 34 times smaller in height.) The sea reads
+  it the same way; the air under the layer reads the middle of the way
+  alone, at each of its samples. The air under it: its shade on the light
+  scattered once (`midLight`), and the sky's light there by its amount (`midUnder`, as
   `UNDER` for the low clouds; in the air's table too), and what it
   scatters down from the light, less the share that `midLight` counts as
   the light's own, as an even radiance from above and the sea's and low
