@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="393b81c main">
+<meta name="build" content="5d3f581 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -1831,11 +1831,12 @@ uniform vec4 uWS[3];    // spectrum -> what the rods see (WS in the JS)
 // The air's tables, one texture of AIR_TABLES texels (Direct3D 11 gives a
 // program 16 textures, and the scene's reads 16 with the air's table at
 // high and max). From y = 0, multiple scattering per unit of scattering
-// coefficient: NMU x (15 * NH) texels, the three wavelength groups stacked
-// in y; then the same for the light of the sky on the low clouds
+// coefficient: NMU x (MS_GROUPS * NH) texels, the three wavelength groups
+// stacked in y; then the same for the light of the sky on the low clouds
 // (cloudSky); then the light's mean direction, towards the sun's side and
-// up (msLean); then the sky's light on the cirrus (ciSky). From y = 15 *
-// NH, the depths of depthToTop.
+// up (msLean); then the sky's light on the cirrus (ciSky), all over msFall;
+// then the mean light's shape (msShape). From y = MS_GROUPS * NH, the
+// depths of depthToTop.
 uniform sampler2D uMS;
 uniform vec4 uWL[3];    // wavelength / 550 nm
 uniform vec4 uMA[3];    // the aerosol by wavelength, relative to 550 nm (ANGSTROM in the JS)
@@ -1981,8 +1982,10 @@ const float MIE_G_UP = 0.6;
 // The aerosol sends the light scattered many times on forwards (msLean):
 // MIE_LEAN times the light's mean direction, towards a view that looks where
 // it comes from. Its first moment would give 3 times the asymmetry, 2.1;
-// 4 matches the reference (see design.md), as the forward peak is sharper.
-const float MIE_LEAN = 4.0;
+// 6 matches the reference (see design.md), as the forward peak is sharper
+// (4 until the table was read over msFall: between its columns it held up
+// to 1.4 times too much light, and the lean with it).
+const float MIE_LEAN = 6.0;
 // Aerosol above the haze of the lowest kilometres (mieDensity in the JS):
 // a thin layer in the free troposphere and one in the stratosphere.
 const vec3 AERO_FREE = vec3(0.048, 6.0, 5.0);    // density (as at sea level), height, half-width in km
@@ -1993,6 +1996,7 @@ const int NSHADE = Q_NSHADE;        // more samples in twilight: in the planet's
 const int NFAR = Q_NFAR;          // ...and in the lit air beyond it (see shadowSpan)
 const int NMU = 40;             // multiple-scattering table: sun angle
 const int NH = 12;              // multiple-scattering table: altitude
+const int MS_GROUPS = 18;       // ...and its groups of NH rows (MS_GROUPS in the JS)
 const float MS_MU_MIN = -0.35;
 const float STAR_GAIN = 20.0;   // the core of a star of magnitude 6.5, of the airglow's radiance (see main)
 const float STAR_LN_MAG = 0.6447;   // a star's brightness as drawn, ln per magnitude (0.7 of the real 0.921: a "look")
@@ -2055,7 +2059,7 @@ vec3 density(float h) { return densities(h).xyz; }
 // most at that height, and the distance to the horizon. They keep the
 // table smooth near the horizon.
 const int DEPTH_MU = 512, DEPTH_R = 128;
-const vec2 AIR_TABLES = vec2(DEPTH_MU, 15 * NH + DEPTH_R);
+const vec2 AIR_TABLES = vec2(DEPTH_MU, MS_GROUPS * NH + DEPTH_R);
 const float H_TOP = 1132.2544;  // distance from the ground to the top, along the horizon: sqrt(RT^2 - RG^2)
 
 // Optical depth (per species) from p to the top of the atmosphere.
@@ -2065,18 +2069,34 @@ vec3 depthToTop(vec3 p, vec3 d) {
   float lo = RT - r, hi = rho + H_TOP;
   vec2 x = vec2(clamp((raySphere(p, d, RT).y - lo) / (hi - lo), 0.0, 1.0), clamp(rho / H_TOP, 0.0, 1.0));
   const vec2 N = vec2(DEPTH_MU, DEPTH_R);
-  return textureLod(uMS, (x * (N - 1.0) + vec2(0.5, 0.5 + float(15 * NH))) / AIR_TABLES, 0.0).rgb;
+  return textureLod(uMS, (x * (N - 1.0) + vec2(0.5, 0.5 + float(MS_GROUPS * NH))) / AIR_TABLES, 0.0).rgb;
 }
 
+// The table's light falls e-fold with each degree of the sun's below the
+// horizon, and its columns stand 2 degrees apart: so it holds its light over
+// msFall, a curve that falls as twilight does (MS_FALL.x per unit of the
+// sun's cosine, 1 per degree, going over into level from MS_FALL.y under the
+// horizon to as much above it), and what is read between two columns is
+// times the curve at the sun's own height (msFall in the JS; see design.md).
+const vec2 MS_FALL = vec2(57.0, 0.04);
+float msFall(float mus) { return pow(1.0 + exp(-mus / MS_FALL.y), -MS_FALL.x * MS_FALL.y); }
+
+// Where the multiple-scattering table holds height h and the sun's cosine
+// mus: its column and its row within a group (not whole).
+vec2 msPlace(float h, float mus) {
+  return vec2(clamp((mus - MS_MU_MIN) / (1.0 - MS_MU_MIN), 0.0, 1.0) * float(NMU - 1),
+              sqrt(clamp(h / (RT - RG), 0.0, 1.0)) * float(NH - 1));
+}
 // Bilinear lookup of the multiple-scattering table: the groups from `first`.
 void msTable(float h, float mus, int first, out vec4 ms[3]) {
-  float x = clamp((mus - MS_MU_MIN) / (1.0 - MS_MU_MIN), 0.0, 1.0) * float(NMU - 1);
-  float y = sqrt(clamp(h / (RT - RG), 0.0, 1.0)) * float(NH - 1);
+  vec2 xy = msPlace(h, mus);
+  float x = xy.x, y = xy.y;
+  float fall = msFall(MS_MU_MIN + x / float(NMU - 1) * (1.0 - MS_MU_MIN));
   // It is read through the GPU's filter (see the table of depths). The
   // groups lie one above the other: a read within one never reaches the
   // next.
   for (int k = 0; k < 3; k++) {
-    ms[k] = textureLod(uMS, (vec2(x, y + float((first + k) * NH)) + 0.5) / AIR_TABLES, 0.0);
+    ms[k] = fall * textureLod(uMS, (vec2(x, y + float((first + k) * NH)) + 0.5) / AIR_TABLES, 0.0);
   }
 }
 // The light scattered many times that reaches a point of the air.
@@ -2086,6 +2106,18 @@ void cloudSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 3, ms); }
 // Where that light comes from: its mean over the sphere times the
 // direction it comes from, towards the sun's side (lh) and up (lv).
 void msLean(float h, float mus, out vec4 lh[3], out vec4 lv[3]) { msTable(h, mus, 6, lh); msTable(h, mus, 9, lv); }
+// How that light is spread over the sphere, for the air's own phase
+// function (see buildMultiScatter): the part of its second moments that an
+// even light would not have, over the mean light, along the sun's side (hh),
+// up (vv) and between the two (hv), at four wavelengths (405, 505, 580 and
+// 680 nm: it changes little from one of the twelve to the next). A ratio,
+// so it is read as it is (no msFall).
+void msShape(float h, float mus, out vec4 hh, out vec4 vv, out vec4 hv) {
+  vec2 xy = msPlace(h, mus) + 0.5;
+  hh = textureLod(uMS, (xy + vec2(0.0, float(15 * NH))) / AIR_TABLES, 0.0);
+  vv = textureLod(uMS, (xy + vec2(0.0, float(16 * NH))) / AIR_TABLES, 0.0);
+  hv = textureLod(uMS, (xy + vec2(0.0, float(17 * NH))) / AIR_TABLES, 0.0);
+}
 // The sky's light on the cirrus: what enters the sheet through its faces
 // once the sun is under its horizon (see buildMultiScatter).
 void ciSky(float h, float mus, out vec4 ms[3]) { msTable(h, mus, 12, ms); }
@@ -2200,11 +2232,26 @@ void addLight(vec3 p, float r, float h, vec3 od, vec4 dens, float scM, float ext
   vec3 up = p / r, side = dir - mus * up;
   float sl = length(side);
   float cv = dot(view, up), ch = sl > 1e-5 ? dot(view, side) / sl : 0.0;
+  // The air scatters that light by its own phase function, 3 / 4 (1 + the
+  // cosine squared): as much again along the line the light comes along as
+  // across it. So it takes the mean light plus 3 / 4 of the light's second
+  // moment along the view, less an even light's (msShape): in twilight,
+  // when most of the light comes level from the glow, more towards a view
+  // along that line (towards the glow, and away from it: the sky opposite
+  // the sun), less across it and looking down. The table's light taken as
+  // even, the sky opposite a sun 4 to 5 degrees down was 0.73 to 0.88 of the
+  // reference's, and the air seen from above 1.2 to 1.4 times too red.
+  vec4 qh, qv, qc;
+  msShape(h, mus, qh, qv, qc);
+  float cz = max(1.0 - ch * ch - cv * cv, 0.0);
+  vec4 q = 0.75 * (qh * (ch * ch - cz) + qv * (cv * cv - cz) + 2.0 * qc * ch * cv);
+  vec4 shape[3] = vec4[3](mix(q.xxxx, q.yyyy, vec4(0.0, 0.25, 0.5, 0.75)), mix(q.yyyy, q.zzzz, vec4(0.0, 1.0, 2.0, 3.0) / 3.0),
+                          mix(q.zzzz, q.wwww, vec4(0.25, 0.5, 0.75, 1.0)));
   bool lit = raySphere(p, dir, RG).y < 0.0;          // not behind the planet
   vec3 odl = lit ? od + depthToTop(p, dir) : vec3(0.0);
   for (int k = 0; k < 3; k++) {
     vec4 sc = uBR[k] * dens.x, sm = scM * uMA[k];
-    vec4 a = Tv[k] * ((sc + sm) * ms[k] + sm * MIE_LEAN * max(ch * lh[k] + cv * lv[k], 0.0)) * sky;
+    vec4 a = Tv[k] * ((sc * (1.0 + shape[k]) + sm) * ms[k] + sm * MIE_LEAN * max(ch * lh[k] + cv * lv[k], 0.0)) * sky;
     if (lit) {
 //[ middle clouds
       vec4 tl = exp(-(uBR[k] * odl.x + extM * uMA[k] * odl.y + uBO[k] * odl.z));
@@ -9157,11 +9204,29 @@ const SkySound = (() => {
   // clouds came out mauve and brown under a blue sky. By day, where the two
   // colours stand in a fixed ratio, it is the mean light itself.
   const NMU = 40, NH = 12, MS_MU_MIN = -0.35;
+  // The sun's cosine of the table's column i, and the column (not whole) of a cosine.
+  const msMu = i => MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1);
+  const msColumn = mus => Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+  // In twilight the table's light falls e-fold with each degree of the sun's
+  // (57 per unit of its cosine), and the columns stand 2 degrees apart. Read
+  // straight between two of them, it came out 1.1 to 1.4 times too bright
+  // with the sun 1 to 5 degrees down and up to 1.8 times further down,
+  // most half way between columns: the light of the air in twilight rose
+  // and fell by that much with every 2 degrees of the sun's. So the table
+  // holds its light over msFall, a curve that falls as twilight does (MS_FALL[0]
+  // per unit of the cosine well under the horizon, level well above it,
+  // going over within MS_FALL[1] on either side), and every reader takes
+  // what it reads between columns times the curve at the sun's own height
+  // (msFall in the shader).
+  const MS_FALL = [57, 0.04];
+  const msFall = mus => (1 + Math.exp(-mus / MS_FALL[1])) ** (-MS_FALL[0] * MS_FALL[1]);
+  const msFallAt = Float64Array.from({ length: NMU }, (_, i) => msFall(msMu(i)));
   // The sun's cosine at the cirrus where its sky's light starts to go over
   // from the mean light to the light through its faces, and where it has
   // (1.5 and 4.5 degrees under its horizon; see ciSky).
   const CI_SKY = [-0.026, -0.078];
-  const msData = new Float32Array(NMU * NH * 15 * 4);  // RGBA texels, NMU x (15 * NH): the air, the clouds, the lean, the cirrus
+  const MS_GROUPS = 18;   // groups of NH rows (MS_GROUPS in the shader)
+  const msData = new Float32Array(NMU * NH * MS_GROUPS * 4);  // RGBA texels, NMU x (MS_GROUPS * NH): the air, the clouds, the lean, the cirrus, the shape
   // The light of the sky from above on a level surface (all orders, over 4
   // pi, as the table's), by height, sun angle and wavelength: for the white
   // balance in twilight (balanceFor).
@@ -9173,6 +9238,12 @@ const SkySound = (() => {
   const leanIndex = (side, j, i, w) => msIndex(j, i, w) + (6 + 3 * side) * NH * NMU * 4;
   // The sky's light on the cirrus (ciSky in the shader).
   const ciSkyIndex = (j, i, w) => msIndex(j, i, w) + 12 * NH * NMU * 4;
+  // The mean light's shape (msShape in the shader): how its second moments
+  // differ from an even light's, over the mean light; along the sun's side
+  // (part 0), up (1) and between the two (2). One texel each: the four
+  // wavelengths SHAPE_W of the twelve (405, 505, 580, 680 nm).
+  const SHAPE_W = [0, 4, 7, 11];
+  const shapeIndex = (part, j, i, c) => (((15 + part) * NH + j) * NMU + i) * 4 + c;
   function* buildMultiScatter(haze) {
     const bMw = MA.map(m => BETA_M * haze * m), bMew = bMw.map(b => b * MIE_EXT);
     // NT bands of the sphere's height, narrower near the horizon (x |x|):
@@ -9186,6 +9257,10 @@ const SkySound = (() => {
     const U = new Float64Array(NW);                // the same, from above only, times the cosine
     const XH = new Float64Array(NW), XV = new Float64Array(NW);   // the same, times the direction (the lean)
     const leanH = new Float64Array(NMU * NH * NW), leanV = new Float64Array(NMU * NH * NW);
+    // The same, times the direction twice (the second moments: the sun's side, up, and the two together), and
+    // what they have over an even light's (a third of the light along each axis): the shape.
+    const QH = new Float64Array(NW), QV = new Float64Array(NW), QC = new Float64Array(NW);
+    const shapeH = new Float64Array(NMU * NH * NW), shapeV = new Float64Array(NMU * NH * NW), shapeC = new Float64Array(NMU * NH * NW);
     const once = new Float64Array(NMU * NH * NW), prev = new Float64Array(NMU * NH * NW);
     const upOnce = new Float64Array(NMU * NH * NW), series = new Float64Array(NMU * NH * NW);
     const all = new Float64Array(NMU * NH * NW), upAll = new Float64Array(NMU * NH * NW);
@@ -9193,24 +9268,26 @@ const SkySound = (() => {
     // shader reads it (multiScatter): bilinear, clamped. Into here, by wavelength.
     const here = new Float64Array(NW);
     const readPrev = (h, mus) => {
-      const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+      const x = msColumn(mus);
       const y = Math.sqrt(Math.min(1, Math.max(0, h / (RT - RG)))) * (NH - 1);
       const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
       const k00 = (j0 * NMU + i0) * NW, k01 = k00 + NW, k10 = k00 + NMU * NW, k11 = k10 + NW;
-      const w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy;
+      // Between two columns, over msFall (as the shader reads the table).
+      const fall = msFall(msMu(x)), f0 = (1 - fx) * fall / msFallAt[i0], f1 = fx * fall / msFallAt[i0 + 1];
+      const w00 = f0 * (1 - fy), w01 = f1 * (1 - fy), w10 = f0 * fy, w11 = f1 * fy;
       for (let w = 0; w < NW; w++) here[w] = prev[k00 + w] * w00 + prev[k01 + w] * w01 + prev[k10 + w] * w10 + prev[k11 + w] * w11;
     };
     for (let pass = 0; pass < 2; pass++) {
       for (let j = 0; j < NH; j++) {
         const r = RG + Math.min(Math.max((RT - RG) * (j / (NH - 1)) ** 2, 0.01), RT - RG - 0.01);
         for (let i = 0; i < NMU; i++) {
-          const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), sx = Math.sqrt(1 - mus * mus);
+          const mus = msMu(i), sx = Math.sqrt(1 - mus * mus);
           // The series is right within 2 % while the sun stands higher than
           // 17 degrees: there the second gathering is left out, and it is
           // blended in down to 9 degrees.
           const order = Math.min(1, Math.max(0, (0.3 - mus) / 0.15));
           if (pass === 1 && order === 0) continue;
-          L2.fill(0); F.fill(0); G.fill(0); U.fill(0); XH.fill(0); XV.fill(0);
+          L2.fill(0); F.fill(0); G.fill(0); U.fill(0); XH.fill(0); XV.fill(0); QH.fill(0); QV.fill(0); QC.fill(0);
           for (let a = 0; a < NT; a++) {
             const dy = band(a + 0.5), st = Math.sqrt(1 - dy * dy), wa = (band(a + 1) - band(a)) * NT / 2;
             const up = Math.max(dy, 0);
@@ -9247,12 +9324,19 @@ const SkySound = (() => {
                       U[w] += v * up;
                       XH[w] += v * dx;
                       XV[w] += v * dy;
+                      QH[w] += v * dx * dx;
+                      QV[w] += v * dy * dy;
+                      QC[w] += v * dx * dy;
                     }
                   } else {
-                    G[w] += tr * here[w];
-                    U[w] += tr * here[w] * up;
-                    XH[w] += tr * here[w] * dx;
-                    XV[w] += tr * here[w] * dy;
+                    const v = tr * here[w];
+                    G[w] += v;
+                    U[w] += v * up;
+                    XH[w] += v * dx;
+                    XV[w] += v * dy;
+                    QH[w] += v * dx * dx;
+                    QV[w] += v * dy * dy;
+                    QC[w] += v * dx * dy;
                   }
                 }
                 o0 += 0.5 * dR; o1 += 0.5 * dM; o2 += 0.5 * dO;
@@ -9266,6 +9350,9 @@ const SkySound = (() => {
                     L2[w] += v;
                     XH[w] += v * dx;
                     XV[w] += v * dy;
+                    QH[w] += v * dx * dx;
+                    QV[w] += v * dy * dy;
+                    QC[w] += v * dx * dy;
                   }
                 }
               }
@@ -9280,11 +9367,17 @@ const SkySound = (() => {
               prev[k] = once[k] * series[k];
               leanH[k] = XH[w] / n;
               leanV[k] = XV[w] / n;
+              shapeH[k] = (QH[w] - L2[w] / 3) / n;
+              shapeV[k] = (QV[w] - L2[w] / 3) / n;
+              shapeC[k] = QC[w] / n;
             } else {
               all[k] = prev[k] + order * (once[k] + G[w] / n - prev[k]);
               upAll[k] = upOnce[k] * series[k] + order * (upOnce[k] + U[w] / n - upOnce[k] * series[k]);
               leanH[k] += order * XH[w] / n;
               leanV[k] += order * XV[w] / n;
+              shapeH[k] += order * (QH[w] - G[w] / 3) / n;
+              shapeV[k] += order * (QV[w] - G[w] / 3) / n;
+              shapeC[k] += order * QC[w] / n;
             }
           }
           yield;
@@ -9319,18 +9412,24 @@ const SkySound = (() => {
     const c = new Float64Array(NW);
     for (let j = 0; j < NH; j++) {
       for (let i = 0; i < NMU; i++) {
-        const mus = MS_MU_MIN + (1 - MS_MU_MIN) * i / (NMU - 1), k = (j * NMU + i) * NW;
+        const mus = msMu(i), k = (j * NMU + i) * NW, fall = msFallAt[i];
         const cw = Math.min(1, Math.max(0, (0.1 - mus) / 0.15));
         const ci = Math.min(1, Math.max(0, (CI_SKY[0] - mus) / (CI_SKY[0] - CI_SKY[1])));
         for (let w = 0; w < NW; w++) c[w] = upAll[k + w];
         const y = lum(c, 0), scale = y > 0 ? lum(all, k) / y : 0;
         for (let w = 0; w < NW; w++) {
-          msData[msIndex(j, i, w)] = all[k + w];
-          msData[cloudIndex(j, i, w)] = all[k + w] + cw * (c[w] * scale - all[k + w]);
-          msData[leanIndex(0, j, i, w)] = leanH[k + w];
-          msData[leanIndex(1, j, i, w)] = leanV[k + w];
-          msData[ciSkyIndex(j, i, w)] = all[k + w] + ci * (4 * upAll[k + w] - 2 * leanV[k + w] - all[k + w]);
+          msData[msIndex(j, i, w)] = all[k + w] / fall;
+          msData[cloudIndex(j, i, w)] = (all[k + w] + cw * (c[w] * scale - all[k + w])) / fall;
+          msData[leanIndex(0, j, i, w)] = leanH[k + w] / fall;
+          msData[leanIndex(1, j, i, w)] = leanV[k + w] / fall;
+          msData[ciSkyIndex(j, i, w)] = (all[k + w] + ci * (4 * upAll[k + w] - 2 * leanV[k + w] - all[k + w])) / fall;
         }
+        SHAPE_W.forEach((w, c) => {
+          const a = all[k + w];
+          msData[shapeIndex(0, j, i, c)] = a > 0 ? shapeH[k + w] / a : 0;
+          msData[shapeIndex(1, j, i, c)] = a > 0 ? shapeV[k + w] / a : 0;
+          msData[shapeIndex(2, j, i, c)] = a > 0 ? shapeC[k + w] / a : 0;
+        });
       }
     }
   }
@@ -9966,8 +10065,7 @@ const SkySound = (() => {
   // log2 of the luminance of the air's mean light (msData) at height alt
   // with the sun at elevation e (degrees): how much darker the sky is.
   function airLevel(alt, e) {
-    const mus = Math.sin(e * RAD);
-    const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+    const x = msColumn(Math.sin(e * RAD));
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
     const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
     let lum = 0;
@@ -9975,7 +10073,7 @@ const SkySound = (() => {
       lum += WY[w] * ((msData[msIndex(j0, i0, w)] * (1 - fx) + msData[msIndex(j0, i0 + 1, w)] * fx) * (1 - fy)
                     + (msData[msIndex(j0 + 1, i0, w)] * (1 - fx) + msData[msIndex(j0 + 1, i0 + 1, w)] * fx) * fy);
     }
-    return Math.log2(Math.max(lum, 1e-30));
+    return Math.log2(Math.max(lum * msFall(msMu(x)), 1e-30));
   }
   // How much of the moon's light in the air (uMoonI) is drawn. By day the
   // air the moon lights is some 2e-6 of what the sun lights, far below one
@@ -11011,8 +11109,8 @@ const SkySound = (() => {
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
       gl.texParameteri(gl.TEXTURE_2D, k, v);
     }
-    gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, 15 * NH + NR, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 15 * NH, NM, NR, gl.RGBA, gl.FLOAT, depths);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fullFloat ? gl.RGBA32F : gl.RGBA16F, NM, MS_GROUPS * NH + NR, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, MS_GROUPS * NH, NM, NR, gl.RGBA, gl.FLOAT, depths);
     C('uniform1i', 'uMS', 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
@@ -11057,7 +11155,7 @@ const SkySound = (() => {
     // passTarget), then the frame into shot (see render).
     const draw = (v, cam, w, h, each, stage, vw = w, vh = h) => {
       if (tableHaze !== builtHaze) {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NMU, 15 * NH, gl.RGBA, gl.FLOAT, msData);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NMU, MS_GROUPS * NH, gl.RGBA, gl.FLOAT, msData);
         tableHaze = builtHaze;
       }
       gl.viewport(0, 0, vw, vh);
