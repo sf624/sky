@@ -1906,43 +1906,92 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     them again; the passes' third layer and the map's fifth stay.
 - **The density** (`midDensity`), from the noise of the low clouds
   (`uNoise`, `uHeads`) and the weather map read elsewhere on it:
-  - *cells* (`midCells`, `midform` = 1): the noise's Worley cells in a tile
-    of `MID_KM` = 6.4 km (1.6 km, 800 m and 400 m), each a dome over a
-    shallower bowl. They are read on an oblique cut through the noise's
-    tile (`MID_CUT_X`, `MID_CUT_Z`: whole numbers of tiles in the weather
-    map's 256 km, so it repeats with the map and no sooner), at a depth in
-    the noise that wanders with the weather map; the lumps and the fine
-    noise are read aslant through their tiles likewise. On a level slice
-    the same 6.4 by 8 km of cells stood at every tile (the map only slid
-    it), and the lumps repeated every 1.27 km: from 20 to 40 km up the
-    field was a lattice, and ranks ran to the horizon from any height. A threshold of the field (the amount, the map,
-    the noise's swell) says where cells stand, run together or
-    shrink apart; the map's other channels move the place in the noise and
-    say which size leads.
+  - *cells* (`midCells`, `midform` = 1): a map of cells in the layer's
+    plane, the same at every height, and a profile over it. The map is the
+    noise's Worley cells (1.1 km, 540 and 270 m) read on an oblique cut
+    through the noise's tile (`MID_CUT_X`, `MID_CUT_Z`: whole numbers of
+    tiles in the weather map's 256 km, so it repeats with the map and no
+    sooner), at a depth in the noise that wanders with the weather map;
+    the lumps and the fine noise are read aslant through their tiles
+    likewise. On a level slice the same tile of cells stood everywhere
+    (the map only slid it), and the lumps repeated every 1.27 km: from 20
+    to 40 km up the field was a lattice, and ranks ran to the horizon from
+    any height. (Until #135 the cut was read at the sample's height too:
+    cells cut from noise in three dimensions, torn every way, an even
+    popcorn of crumbs from above and white lumps from below.)
+    - *A cell* (`MID_CELL`) is the part of a Worley cell over the field's
+      threshold: an upright dome, as high as the noise stands over the
+      threshold (less for the tallest, so that they do not all end at the
+      layer's top), over a shallower bowl whose depth differs from cell to
+      cell (all down to one floor, a packed field seen on edge had a ruled
+      line for a base). The noise is taken so steeply that its lowest
+      sixth stays under the threshold of the closest field: packed cells
+      keep a net of seams between them, as a perlucidus has. The
+      threshold is the field's (the amount, the map, the noise's cells of
+      1.1 km and its swell): it says where cells stand, run together or
+      shrink apart; the map's other channels move the place in the noise.
     - *Fields.* The layer is fields of cells with ragged edges, clear
       lanes and gaps between them, tens of km across (`MID_EDGE`): the
       map's systems (read over some 20 km) and four times its detail
       under that (clusters, lanes, its streets) are set against the
-      amount, and the cells shrink apart over a narrow margin. Half the
-      map is field at an amount of 0.6. (Until #130 the threshold fell
-      off over three times as wide a range of the map read over 4 km:
-      most of the map was margin, an even sprinkle of shrunken cells
-      from the nadir to the horizon, with no field in it.)
+      amount. Half the map is field at an amount of 0.6. (Until #130 the
+      threshold fell off over three times as wide a range of the map read
+      over 4 km: most of the map was margin, an even sprinkle of shrunken
+      cells from the nadir to the horizon, with no field in it.)
+    - *A field's fringe* (`MID_FRINGE`): beyond the edge the threshold
+      falls a third as fast, so the cells get smaller, lower, thinner and
+      further apart over some kilometres; and over regions of the map a
+      veil in fibres lies between them, up to 0.35 as dense as a cell:
+      there a field fades out through it. (With the one steep edge, full
+      cells stood up to a coastline.)
+    - *The top of the slider* (`MID_SHUT`): over an amount of 0.7 the map
+      counts less (a quarter at 1) and the cells stand closer: at 1 the
+      layer is nearly closed, cells with seams. (With the map whole, clear
+      lakes stayed at 1: 0.54 of the sky covered.)
     - *Regions of a field*, from the map read elsewhere or over more km,
       so that they do not follow the fields' edges: how closely the cells
       stand (`MID_PACK`: open cells with wide gaps, or cells packed with
-      seams between them; `MID_SEAM` keeps the seams, and the domes'
-      unlike heights, where they are packed), which size leads (400 or
-      800 m), and whether they stand in streets (`MID_STREET`): there
+      seams between them; `MID_SEAM` keeps the domes' unlike heights where
+      they are packed), which size leads (270 or 540 m, changing over by
+      degrees), and whether they stand in streets (`MID_STREET`): there
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
-      inside a field too: bands, ranks and lanes.
+      inside a field too: bands and lanes.
+    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`), by `midrolls` alone (0 at
+      first): the height is read from the noise on a second cut, 5.8
+      times as long one way as the other: its Worley cells are 0.5 and
+      1.1 km wide and 3 to 6 km long, long lumps side by side that begin,
+      end, fork and join. They are not in the page's own picture: they
+      read as smears, not as rolls at an even distance (regions of them
+      stood in the fields in a state of #135; a wave across them made
+      them as even as ripples in sand where it counted much, and changed
+      nothing where it counted little). At 0 the branch costs nothing on
+      Direct3D 11.
+    - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
+      (not in its fringe), no place is lower than a floor a little over
+      the threshold, higher where the cells stand closest, lower among
+      rolls, higher at the top of the slider. With it a field's body is
+      whole, so the fields' edge takes the amount as 0.18 less up to 0.6,
+      and the whole of it from 0.9 (`MID_LESS`): the same amount covers
+      about what it did (0.37 of the view straight down from 40 km at
+      the altocumulus weather's 0.55; 0.34 before the floor, 0.53 with it
+      and without this). The seams between the cells
+      and the troughs between the rolls are thin low cloud there, not
+      clear air, and the lumps and the fine noise count a third on it. So
+      a field's body is a deck with relief: from above, tops with shaded
+      seams; from below, grey cells in a pale
+      sheet that lets the blue through in places; cells apart, with clear
+      air between them, stand in the fringes only. (Without it, and with
+      half the regions open, a field from 11 km was equal white dots side
+      by side on the sea, and from 40 km at the top of the slider an even
+      grain.)
     The cells fill 0.65 of the layer's depth, at a
     level that varies over some 4 km. Over its widest level a cell is a
     crisp heap of lumps (the heaps' heads, in upright columns); under it a
-    soft slab whose density falls off outwards, in fibres where it is thin,
-    and a thin veil lies at the margins of a patch. `midrolls` adds ranks
-    of small elements (two crossing waves of 300 and 420 m);
+    soft slab whose density falls off outwards, in fibres where it is
+    thin. The slab is 0.6 as dense between the lumps (at a quarter, the
+    lumps were what showed from below, not the cells), and its outline
+    goes in and out with the lumps and the fine noise (`MID_RAG`);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
     with fine noise on its thin places, and thick and thin places in it:
@@ -1980,14 +2029,43 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   through (`Tm`) as the depth. The sun's disc shows through a depth of up
   to 10.
 - **The light**, from optical depths alone: three steps towards the light
-  (each 3 to 5 times the one before, by the form), then the rest of the
+  in a sheet and two among cells (each 3 to 5 times the one before, by
+  the form), then the rest of the
   column aslant, on the side the light comes from (over the place or under
   it, mixed over 3 degrees each way of the light's level: switched there, a
   straight seam crossed the layer while the sun stood at 0 degrees, and
   the cirrus's side, lit from above or through, had the same); scattered once, an aureole and two wider octaves through
   thin cloud; and two streams through the layer as a slab that keeps all
   it scatters (`midThrough`): what goes on to the far side (a base by day:
-  white where thin, grey where deep) and what comes back (the tops). The
+  white where thin, grey where deep) and what comes back (the tops). A
+  cell's column for this is its own, from its map at the very place
+  (`midCol`), not the light's map's, which is too coarse for cells some
+  kilometres off (with it, a field from below was white lumps with grey
+  blots that kept to no cell), and counted `MID_SHADE` = 6 times: a
+  cell's sides let light out, and its middle is the greyer for it. It is
+  deeper in a field's body than at its margins (by the map's detail), and
+  the steps towards the light span the cell the place is in (planned to
+  the layer's top, the last step stood over a cell of 150 m, the depth
+  towards the light came out a third too small, and a cell from below was
+  white to its middle). So a
+  cell from below is grey in its thick middle and white at its thin rim,
+  and from above its thin parts are dimmer than its thick ones.
+  Only where the view is not level, or from some kilometres on: seen
+  level from within the layer, a cell near the eye wore its thick middle
+  as a grey disc on its side, a barrel; there the layer's column from the
+  light's map stands in, as in a sheet.
+  *Relief* (`MID_RELIEF`, `MID_SHADOW`, `MID_SHADE.z`): among cells the
+  steps towards the light reach 80 m up at the least and read the noise
+  half a level and more finer than in a sheet, so a cell shades its far
+  side and its neighbour (a place on a cell's top has its column's top
+  just over it: ending there, and read over three cells and more, the
+  depth towards the light was the same everywhere, and the field from
+  above at a low sun was white all over). What lies towards the light
+  beyond the place's own column shades more than in a sheet, with 0.4 of
+  the light left in the deepest shade (the deck's own, scattered many
+  times: with the sky's light alone the shade was blue); and the sky's
+  light and the light that comes back are a quarter in the seams and
+  troughs, whole from 120 m over a cell's floor. The
   sky's light likewise, from above and from what lies below, in the unit
   that the low clouds' sky light was set in against photographs (`SKYV.x`:
   with the slab's alone, a fifth to a half of theirs, middle clouds at
@@ -3431,8 +3509,10 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   surface facing the sun, in the sun's light at the eye, at `WHITE`
   (`dayEye`; `sunlitLevel`: the bare sun's light through the air to the
   eye, `sunThrough`, with the ozone, times `ISUN` / pi). It hangs on the
-  light where the eye is, not on the view: turning the view does not
-  move it, so a turn from the Earth to the sky has no step in it. And it
+  light where the eye is, not on what the view shows: by day turning the
+  view does not move it, so a turn from the Earth to the sky has no step
+  in it (in twilight from above the cruise heights it moves with how far
+  the view looks down, smoothly: the world's light, below). And it
   hangs on the sun as the eye sees it, not on the sun's height over the
   ground's horizon, which sets the twilight's exposure (`DUSK`): from 40
   km the sun sets some 6.4 degrees below the horizontal, from 20 km 4.5,
@@ -3455,22 +3535,90 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   sun, the exposure jumped by 2.4 stops between stills a quarter of a
   degree of the sun apart (3.9, 4.7, 5.5, 7.9, 8.8 from 5 to 6 degrees
   down), and the Earth from near black (luma 16) to a bright blue (38,
-  then 47). Now it rises 0.75 stops a quarter of a degree (3.9, 4.6, 5.4,
-  6.1, 6.9 over the same steps), and meets the view's own exposure at
-  about 7 degrees down (9.9; luma 16, 18, 20, 23, 29, 36, 45 from 5.5
-  to 7 down). The largest step over the sun from 3 to 8 degrees down is
-  now 0.75 stops at 40 km, in every view, at dusk and at dawn (2.4
-  before); from 20 and 11 km, where the limit no longer holds the views
-  once the sun is 3 degrees down, nothing changes (0.65 and 0.52 at
-  most, as before), nor through sunset from 0.3, 11 and 20 km (the sun
-  from 3 degrees up to 3 down, looking up, down and towards it: the
-  same exposures). The same holds the moon's limit (`moonEye`), which
+  then 47). With the lag it rose 0.75 stops a quarter of a degree (3.9,
+  4.6, 5.4, 6.1, 6.9 over the same steps), and met the view's own
+  exposure at about 7 degrees down (9.9; luma 16, 18, 20, 23, 29, 36, 45
+  from 5.5 to 7 down): no step, but still a picture that brightened while
+  the sun went down. The world's light (below) has since taken those
+  views out of this limit's reach, and from 20 km up the lag has little
+  left to hold; it holds the light at the eye where that is the lesser
+  (up to the cruise heights, and the moon's). The same holds the moon's limit (`moonEye`), which
   rises half a stop for each stop of the moon's light, as the moon sets
   at the eye: from 40 km under a moon of 10 days, looking down, it rose
   2.9 stops between stills 1.1 degrees of the moon apart (17.5 to 20.4),
   now 1.6 (17.5, 19.1, 20.4). Where the light at the eye falls slower than
   that, by day and through most of a sunset, the level is that light
   itself.
+  And where the view holds the world below, the eye is adapted to no more
+  light than that world gets (`worldLevel`): the limit is then taken from
+  the lesser of the sun's light at the eye and the light of the world
+  below, a white surface in which stands `WORLD` = 9.25 stops above the
+  air's mean light at the ground (`airLevel` at 0 km, with the sun's height
+  over the ground; the envelope of the sun higher, above, takes the same
+  light for the sky's darkening). From the stratosphere the two part: the
+  sun shines on the eye long after it has set on the ground below, until
+  6.4 degrees down from 40 km, and the Earth is in twilight by then. The
+  limit from the sun's light at the eye alone held a view of that Earth
+  far below what it asked for: from 40 km looking down or away from the
+  sun, 1.7 stops below with the sun at 0 degrees and 3 at 3 and at 5
+  down. The Earth went near black while the ground under it was in civil
+  twilight (looking down, a mean luma of 54 of 255 at 0 degrees, 21 at 3
+  down, 14 at 5 down), and then grew brighter as the sun set at the eye
+  (43 at 7 down): the picture brightened while the sun went down, by 31
+  levels looking down and 18 looking away, and from 20 km by up to 17 and
+  11 (the sun 2.5 to 3.75 degrees down). Now a view with the Earth in it
+  is not held: looking down from 40 km it darkens steadily, 123 with the
+  sun 6 degrees up, 104 at 0, 74 at 3 down, 44 at 5 down, and then as
+  from the cruise heights (43 to 45 down to 8 degrees, 25 at 12), where
+  the view down from 11 km gives 92, 70 and 53 at 0, 3 and 5 down (these
+  at the adaptation; the twilight's key above the cruise heights, below,
+  shows them dimmer). By day the
+  world's light lies above the sun's at the eye (by 1.1 stops with the sun
+  60 degrees up, 0.1 at 10) and nothing changes; from the sun about 9
+  degrees up it lies below at 20 km and above: 2.5 stops below the bare
+  sun's at 0 degrees, 9 at 6 down, 17 at 12 down. `WORLD` keeps the limit
+  a little over where a view with the Earth in it stands, as `DAY_OPEN[1]`
+  does by day (from 40 km: 0 to 0.4 stops over with the sun 8 to 3 degrees
+  up, 0.9 at 0, 1.6 to 2.6 from 3 to 6 down). Up to 11 km the sun sets at
+  the eye soon after it sets on the ground, its light at the eye stays the
+  lesser, and nothing changes (the sun from 5 degrees up to 14 down at
+  0.3, 4 and 11 km, four views, three weathers: the same exposures).
+  The world's light counts by how far the view looks down: the mean over
+  the meter's blocks of `below` (0 for a block that looks `TOPS_SPAN`
+  degrees above the horizontal or more, 1 from as far below; the sunlit
+  tops' share, above, weighs the same by the light). None of it where that
+  mean is under `WORLD_SHARE[0]` = 0.1, all of it at `WORLD_SHARE[1]` = 1,
+  along a smoothstep: from 40 km that is from a view raised 25 degrees or
+  more, where the Earth is out of the frame and the limit is the sun's
+  light at the eye as before, down to one lowered 30 degrees, where the
+  Earth all but fills it. So this limit now hangs on where the view
+  points, though still not on what it shows: a view of the sky alone from
+  above the cruise heights stays near black while the sun shines on the
+  eye (from 40 km with the sun 4 degrees down, a median luma under 15, as
+  by day), and a turn from the Earth up to that sky closes the exposure
+  over the whole of the turn in which the Earth leaves the frame. The
+  exposure shown moves by at most 0.12 stops for each degree the view
+  turns: from 40 km, 0.03 with the sun 2 degrees up, 0.05 at 0, 0.09 at 2
+  down, 0.12 at 4 down (4.6 with the view lowered 10 degrees, 3.8 level,
+  2.7 raised 10, 2.1 raised 20, 2.0 from 25), 0.08 at 6 down; from 20 km
+  0.04 or less. With the world's light coming in over 15 degrees only
+  (`WORLD_SHARE[1]` = 0.35, the first form), the exposure fell by 2.8
+  stops between a view raised 15 degrees and one raised 25 with the sun 4
+  degrees down, 0.31 stops a degree, and read as a switch. A view level or
+  a little raised is now held between the two: looking level from 40 km
+  with the sun 4 degrees down, 0.8 stops under a view lowered 10 degrees.
+  A limit that does not hang on the view cannot keep both that sky black
+  and that Earth seen: the high air is still in sunlight while the Earth
+  is in twilight, and with the world's light for every view the sky alone
+  opened up as the Earth darkened (from 40 km looking up, a mean luma of
+  10 by day, 34 with the sun at 0 degrees, 57 from 2 down). Nor does an
+  envelope that lifts the limit no faster than the air at the eye
+  darkens: under it the sky stayed black and the Earth with it, to the
+  night (luma 3 to 5 from 6 degrees down, the night 4 stops under its
+  exposure). The sky alone still opens up as the sun sets at the eye
+  (from 40 km looking up: 12 at 3 down, 30 at 6.5 down, 14 at 8 down;
+  the twilight's key above the cruise heights, below, took a quarter off
+  that rise).
   Up to the cruise heights no view comes near it, by day or at dusk: the
   darkest, the deep blue zenith from 11 km, stays 0.26 to 0.74 stops
   below by day (least with the sun 15 to 28 degrees up) and 0.3 at
@@ -3492,11 +3640,10 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   to 1.6 stops (26, 50, 103, now 14, 27, 57), from 15 km 0.7, from 13 km
   0.4. Through sunset from 40 km the sky alone stays near black (median
   luma 5 from 8 degrees up to 2 down, 8 at 4 down) and turns the dark
-  blue of before only as the sun sets at the eye (40 at 6 down); the
-  Earth below goes dark first (luma 51 at 0 degrees, 19 at 4 down, where
-  it was 109 and 64). From 20 km the sky alone stays dark navy down to 2
-  degrees below (luma 26 to 35) and takes twilight's exposure from 4
-  down, as before. Every view up to 11 km, by day, at dusk and at night,
+  blue of before only as the sun sets at the eye (40 at 6 down); a view
+  with the Earth in it follows the world's light (above). From 20 km the
+  sky alone stays dark navy down to 2 degrees below (luma 26 to 35) and
+  takes twilight's exposure from 4 down, as before. Every view up to 11 km, by day, at dusk and at night,
   is as before (216 views at 0.3, 3 and 11 km, the sun from 78 degrees up
   to the night), and so is the night at every height.
   The limit bounds the exposure of the sun as it is, not the envelope of
@@ -3544,7 +3691,8 @@ adaptation less `nightDimFor`, up to `NIGHT_DIM` = 1 stop at
 `NIGHT_KEY[1]` = 14.5 (a full moon's clouds from cruise), along a
 smoothstep in from 12 (the end of nautical twilight) and out again by 17.5
 (a moonless night from cruise). By day and through most of twilight it is
-0. It changes by at most 0.6 stops for each stop of the adaptation, which
+0. (Above the cruise heights the twilight has a key of its own,
+`highDimFor`: below.) It changes by at most 0.6 stops for each stop of the adaptation, which
 itself opens half a stop for each stop the night darkens (`NIGHT_RATE`):
 a darker night is still shown darker, and nothing switches.
 
@@ -3570,6 +3718,72 @@ night's 17.6), the Milky Way in a view up from cruise went from 15 to 12
 of luma at its median. For the eye the dimming would grow on into the
 dark; the stars are why it does not. Under a full moon the stars are
 thinned by the moon's limit above, not by the key.
+
+**The twilight's key above the cruise heights.** From 20 km up the screen
+also shows the twilight darker than the adaptation holds it: the exposure
+drawn is the adaptation less `highDimFor`, `HIGH_DIM` = 0.75 stops from
+`DAY_KM[1]` = 20 km up and none up to `DAY_KM[0]` = 12 km (the smoothstep
+of the day's eye), coming in as the adaptation goes from `HIGH_KEY[0]` =
+0.5 (where the day's views stand there) to `HIGH_KEY[1]` = 3.5 (a view
+of the Earth with the sun about 2 degrees down), and going again as the
+night's key comes in (`NIGHT_KEY[0]` to `NIGHT_KEY[1]`, 12 to 14.5). It
+follows the light, not the hour, changes by at most 0.4 stops for each
+stop of the adaptation, and by day, at night and up to the cruise heights
+it is 0.
+
+At the adaptation alone the meter shows the twilit Earth from the
+stratosphere as it shows it from the cruise heights, nearly as light as
+by day until the sun is 3 degrees down: from 40 km looking away from the
+sun, a mean luma of 94 of 255 at 0 degrees, 90 at 2 down, 83 at 3 down;
+looking down 103, 85, 74. But that Earth is seen by an eye that still has
+the sun on it (until 6.4 degrees down from 40 km), or by a camera beside
+the sunlit limb: a photograph of the terminator from orbit (NASA,
+ISS027-E-012224) has its twilit side at about 40, grey-brown and plainly
+seen, beside lit ground at 80 and more. The owner found the render too
+bright against it. Now, from 40 km looking away from the sun: 77 at 0
+degrees, 61 at 2 down, 56 at 3 down, 50 at 4 down, 33 at 5 down, 25 at 8
+down; looking down 88, 62, 53, 40, 31, and 31 to 32 down to 8 degrees
+(43 to 45 before), 25 at 12 down as before. From 20 km looking down: 88
+at 0 degrees, 56 at 3 down, 37 at 5 down, 32 at 8 down.
+
+Why a key, and not a lower limit of the day's eye: that limit, however it
+is taken (the world's light set lower, or a mean of the world's light and
+the sun's at the eye), has to let go before the night, and the meter
+holds a view of the Earth at the same level from the sun 5 degrees down
+to 9 (the darker quarter's key), so letting go there brightens the
+picture. With the limit a mean of the two, a view down from 40 km dipped
+to 31 at 5 degrees down and came back to 44 at 6.5; with the world's
+light a stop lower for all the twilight, the view away from the sun
+brightened again by 7 to 18 levels on the way (both worked out from the
+stills' exposures, not drawn). The key leaves the adaptation where the
+meter puts it and lowers the whole of the twilight, so the picture still
+never brightens as the sun goes down: the largest rise of the mean luma
+from 9 degrees up to 14 down is 1.4 levels looking down from 40 km and
+2.2 looking away (the meter's own, at 5 to 5.5 down), 0 and 0.5 from 20
+km, and the same at dawn (0.8 and 2.1) and in the weathers `clear` and
+`fair` (2 or less). It lowers every view there: towards the sun from 40
+km the band of glow is drawn 0.5 to 0.75 stops lower from 4 degrees down
+(its brighter twentieth 161 at 4 down, 148 at 5, 119 at 8, where it was
+186, 184, 156), and a view of the sky alone, which opens up as the sun
+sets at the eye, rises to 30 instead of 40 from 40 km, and to 60 instead
+of 80 from 20 km.
+
+What stays unlike the photograph: the twilit Earth is a saturated blue
+(the blue over the green of its light, linear, 2.7 to 2.9 from 40 km with
+the sun 2 to 4 degrees down, 1.85 by day; the photograph's twilit ground
+1.2 to 1.3, grey-brown). The blue is the scene's, not the exposure's: at
+the limit of the sun's light at the eye, three stops lower, the same view
+measured 2.2 to 2.5, and the rods' grey has not come in yet (the
+adaptation there is 3.5 to 5.3, under `NIGHT_EYE[0]`). It is the light of
+the twilight sky on the ground and the lit air in the line of sight
+(looking down, 2.4 to 2.65; along the slant of the view away from the
+sun, more), and the white balance of twilight goes out with height
+(`BALANCE_HIGH`, none from 11 km). The band of light over the limb in the
+view away from the sun is the scene's too: the air above the planet's
+shadow is in sunlight while the Earth under it is in twilight, and with
+the sun 3 degrees down the sky two bands of 3.4 degrees over the limb is
+as light as the Earth below it (0.8 to 1 of its luma, at the day's eye's
+limit as at the meter's exposure), where by day it is a seventh.
 
 The dimming follows the adaptation, not the moon: late twilight with the
 same light is dimmed the same. From 11 km away from the sun on a moonless
