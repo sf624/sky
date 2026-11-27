@@ -1760,9 +1760,28 @@ their shade from it (see [Middle clouds](#middle-clouds)).
 - **Wind.** `uWind`, varied by gusts (B of the weather map) and streaks (A of
   the wave map). The slopes have the variance of Cox and Munk (1954):
   `s2 = 0.003 + 0.00512 * wind`.
-- **Waves the picture shows.** Three bands of wind waves read from the wave
-  map `uWaves` (R, G: slopes) at sizes a factor 6 apart, the longest set by
-  the wind; and eight swells (`SWELL`), each smoothed over the footprint.
+- **Rougher and smoother water.** The wave map `uWaves` has two layers;
+  layer 1 holds four noises (mean 0.5, rms 0.125), each a sum of plane
+  waves drawn at start. Patches (R, read at two sizes: some 50 m to 3 km)
+  vary the wind by a factor of about e^±0.45 in light airs, e^±0.2 from
+  9 m/s: cat's paws and gusts. Slicks: where a smooth noise (G, waves of
+  1 to 5 km) crosses its mean, a meandering line some 300 m wide has the
+  slopes of Cox and Munk's slick sea (`0.008 + 0.00156 U`); waves of over
+  7 m/s break them up, and seen from far a line is spread over the
+  footprint with its share kept. Windrows (B, 25 to 100 m apart, along
+  the wind) make the water some 7 % smoother or rougher. They change
+  the glitter (brighter where smoother in its middle, darker at its edges)
+  and what the water mirrors at a slant, so that from high up the glitter
+  is mottled, as in photographs; before, it was an even blur, and the sea
+  outside it was smooth.
+- **Waves the picture shows.** Three bands of wind waves read from layer 0
+  of the wave map (R, G: slopes) at sizes a factor 6 apart, the longest set
+  by the wind; and 28 swells (`SWELL`), each smoothed over the footprint:
+  two trains, twenty waves of about 260 m spread over some 20 degrees and
+  eight of about 150 m from elsewhere (rms slopes 0.010 and 0.004), each
+  of an amplitude drawn at random, so that the crests break into groups a
+  few crests long. Before, eight waves of two trains crossed as a
+  regular lattice in the glitter from 1 to 11 km.
   Reads use `textureGrad` with the pixel's footprint on the sea (long when
   seen aslant). What the footprint averages away stays in the variance
   (`hidden`, from B of the wave map), so the glitter has the same light
@@ -1830,7 +1849,13 @@ their shade from it (see [Middle clouds](#middle-clouds)).
 - **Light from below.** `SEA`: blue light scattered back out of clear water.
 - **Foam.** Whitecaps cover `2.95e-6 U^3.52` of the sea (Monahan and
   O'Muircheartaigh, 1980), as separate breakers in a grid of cells: counted
-  sharp from near, averaged from far.
+  sharp from near, averaged from far. Behind each breaker, up the wind,
+  lies a trail of older foam: 3 to 9 crests long (longer in a strong
+  wind), widening, at 0.45 of the crest's light and fading along it, torn
+  into streaks along the wind (A of layer 1, broken into patches by R
+  read three times as fine) that thin out as it ages.
+  From far, the mean counts the trails too. Before, a breaker was a white
+  blob on dark water.
 
 The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
 depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus

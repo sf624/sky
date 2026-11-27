@@ -2022,6 +2022,79 @@
    ],
    "bad": "e18ddb1",
    "note": "r/g of the brightest tenth: 1.00 on e18ddb1; 1.60 once the cirrus is lit by the sun wherever its refracted rays reach it, dimmed by their spread."
+  },
+  {
+   "name": "sea-swell-lattice-4km",
+   "q": "date=172&lat=35&lon=135&time=12&weather=clear&wind=6&alt=4&yaw=0&pitch=-35",
+   "reported": "2026-11-15, 2026-11-16 (#11)",
+   "wrong": "the swell in the glitter a regular lattice: two trains of parallel crests crossing, from 1 to 11 km",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "region": [
+      0.2,
+      0.55,
+      0.6,
+      0.45
+     ],
+     "max": 350
+    },
+    {
+     "measure": "regularity",
+     "region": [
+      0.2,
+      0.55,
+      0.6,
+      0.45
+     ],
+     "max": 1.1
+    }
+   ],
+   "bad": "e18ddb1",
+   "fixed": "99c815d",
+   "note": "The glitter's lower half at 4 km, the sun high: spectrumPeak 1182 and regularity 1.22 with eight swells of two trains; 89 and 0.95 with 28 spread over their directions and lengths, in groups, and the patches of rougher and smoother water."
+  },
+  {
+   "name": "sea-glitter-even-11km",
+   "q": "date=172&lat=35&lon=135&time=17.85&weather=clear&wind=6&alt=11&yaw=108&pitch=-18",
+   "reported": "2026-11-15 (#11)",
+   "wrong": "from 11 km the sea smooth below 10 m/s of wind, and the sun's glitter an even blur; photographs from cruise show it mottled by patches of rougher and smoother water",
+   "measures": [
+    {
+     "measure": "texture",
+     "region": [
+      0.3,
+      0.65,
+      0.4,
+      0.35
+     ],
+     "min": 0.028
+    }
+   ],
+   "bad": "e18ddb1",
+   "fixed": "99c815d",
+   "note": "The glitter's lower part with the sun 15 degrees up: texture 0.022 even, 0.036 mottled."
+  },
+  {
+   "name": "sea-whitecap-blobs-0.3km",
+   "q": "date=172&lat=35&lon=135&time=14&weather=clear&wind=12&alt=0.3&yaw=150&pitch=-30",
+   "reported": "2026-11-15 (#11)",
+   "wrong": "whitecaps flat white blobs on dark water, without foam trailing behind them",
+   "measures": [
+    {
+     "measure": "fringe",
+     "region": [
+      0,
+      0.4,
+      1,
+      0.6
+     ],
+     "min": 1.4
+    }
+   ],
+   "bad": "e18ddb1",
+   "fixed": "99c815d",
+   "note": "Foam beside the white per white pixel: 1.13 with blobs alone, 1.70 with trails torn into streaks behind them."
   }
  ]
 }

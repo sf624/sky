@@ -1525,11 +1525,18 @@ precision highp sampler2D;
 
 // Draws the map of the waves on the sea once, at start: many plane waves,
 // each a whole number of times across the map, so that it repeats.
-// R, G: the slope along x and z, in units of its rms (0.125 per unit, flat
-// at 0.5). B: the slope squared, over 8: averaged over a footprint, it
-// tells how much slope the averaged R and G have lost. A: streaks along
-// the wind.
+// Layer 0: R, G: the slope along x and z, in units of its rms (0.125 per
+// unit, flat at 0.5). B: the slope squared, over 8: averaged over a
+// footprint, it tells how much slope the averaged R and G have lost.
+// A: streaks along the wind.
+// Layer 1 (uLayer 1): fields that make the sea rougher or smoother here
+// and there, each a noise of mean 0.5 and rms 0.125 (see addSea). R:
+// patches (gusts, cat's paws), 3 to 24 across the map. G: a smoother noise
+// whose lines of 0.5 are the slicks, 2 to 10 across. B: rows along the
+// wind (windrows), 20 to 80 across it. A: the fine streaks of foam, 16 to
+// 96 across the wind, four to eight times as long along it.
 uniform float uSize;
+uniform int uLayer;
 out vec4 outColor;
 
 const float TAU = 6.28318530718;
@@ -1552,8 +1559,33 @@ vec3 rnd(int i) {
   return vec3(h, h << 11u, h << 22u) * (1.0 / 4294967296.0);
 }
 
+// A noise of M plane waves, each a whole number of times across the map:
+// wavenumbers from k0 to k0 * kr (spread evenly in log), directions about
+// a (spread sd: uniform within a +- sd; a full turn at sd = PI),
+// amplitudes k^-p; scaled to mean 0.5 and rms 0.125.
+float field(vec2 uv, int seed, int M, float k0, float kr, float a, float sd, float p) {
+  float s = 0.0, v = 0.0;
+  for (int i = 0; i < M; i++) {
+    vec3 r = rnd(seed + i);
+    float k = k0 * pow(kr, (float(i) + r.x) / float(M));
+    float t = a + sd * (2.0 * r.y - 1.0);
+    vec2 m = round(k * vec2(cos(t), sin(t)));
+    float amp = pow(max(length(m), 1.0), -p);
+    s += amp * cos(TAU * (dot(m, uv) + r.z));
+    v += 0.5 * amp * amp;
+  }
+  return 0.5 + 0.125 * s / sqrt(v);
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
+  if (uLayer == 1) {
+    outColor = vec4(field(uv, 20000, 48, 3.0, 8.0, 0.0, 3.14159, 0.5),
+                    field(uv, 21000, 40, 2.0, 5.0, WIND + 0.25 * TAU, 1.2, 0.7),
+                    field(uv, 22000, 40, 20.0, 4.0, WIND + 0.25 * TAU, 0.35, 0.3),
+                    field(uv, 23000, 48, 16.0, 6.0, WIND + 0.25 * TAU, 0.3, 0.5));
+    return;
+  }
   // Wind waves: 10 to 64 crests across the map, with the same slope in
   // every octave (a sea in equilibrium). They run within some 70 degrees
   // of the wind, short-crested; the long ones keep closer to it.
@@ -4476,19 +4508,34 @@ float waveShade(float c, float s2) {
   return a < 1.6 ? (1.0 - 1.259 * a + 0.396 * a * a) / (3.535 * a + 2.181 * a * a) : 0.0;
 }
 
-// Map of the waves, repeating (drawn at start). R, G: the slope of a wind
-// sea along x and z, in units of its rms; B: the slope squared; A: streaks.
-uniform sampler2D uWaves;
+// Maps of the waves, repeating (drawn at start). Layer 0: R, G: the slope
+// of a wind sea along x and z, in units of its rms; B: the slope squared;
+// A: streaks. Layer 1: fields of roughness and foam (see the waves shader).
+uniform sampler2DArray uWaves;
 const vec2 WIND = vec2(0.8944, 0.4472);              // the wind blows this way (x, z)
 // Swell from far storms: plane waves with a whole number of crests (x, z)
 // in WEATHER_KM, and the amplitude of their slope along x and z. Two
-// trains: six waves of 200 to 340 m, and two of 120 to 170 m from elsewhere.
-const int SWELLS = 8;
+// trains, each spread over its wavelengths and directions, so that the
+// crests break into groups (a few crests long and wide) instead of
+// running on as parallel lines: twenty waves of about 260 m within some
+// 20 degrees, and eight of about 150 m from elsewhere, weaker (rms slopes
+// 0.010 and 0.004), each of an amplitude drawn at random.
+const int SWELLS = 28;
 const vec4 SWELL[SWELLS] = vec4[SWELLS](
-  vec4(-1246.0, 182.0, -0.0109, 0.0016), vec4(-1043.0, 324.0, -0.0114, 0.0035),
-  vec4(-1061.0, 74.0, -0.0152, 0.0011), vec4(-978.0, -23.0, -0.0111, -0.0003),
-  vec4(-827.0, 187.0, -0.0112, 0.0025), vec4(-794.0, 212.0, -0.0118, 0.0031),
-  vec4(-775.0, -1975.0, -0.0036, -0.0091), vec4(-468.0, -1475.0, -0.0031, -0.0098));
+  vec4(-747.0, 418.0, -0.0038, 0.0021), vec4(-678.0, 631.0, -0.0025, 0.0023),
+  vec4(-721.0, 75.0, -0.0050, 0.0005), vec4(-1023.0, 330.0, -0.0011, 0.0004),
+  vec4(-744.0, -228.0, -0.0038, -0.0012), vec4(-729.0, 206.0, -0.0026, 0.0007),
+  vec4(-1067.0, 218.0, -0.0015, 0.0003), vec4(-1018.0, 43.0, -0.0023, 0.0001),
+  vec4(-834.0, -221.0, -0.0030, -0.0008), vec4(-1094.0, 173.0, -0.0035, 0.0006),
+  vec4(-891.0, -145.0, -0.0038, -0.0006), vec4(-727.0, 665.0, -0.0007, 0.0007),
+  vec4(-932.0, 88.0, -0.0027, 0.0003), vec4(-918.0, 414.0, -0.0026, 0.0012),
+  vec4(-893.0, 137.0, -0.0010, 0.0001), vec4(-1080.0, 294.0, -0.0021, 0.0006),
+  vec4(-984.0, -5.0, -0.0014, -0.0000), vec4(-770.0, 187.0, -0.0034, 0.0008),
+  vec4(-962.0, 158.0, -0.0037, 0.0006), vec4(-961.0, -160.0, -0.0048, -0.0008),
+  vec4(-660.0, -1989.0, -0.0006, -0.0018), vec4(484.0, -1363.0, 0.0010, -0.0029),
+  vec4(441.0, -1614.0, 0.0006, -0.0021), vec4(-1472.0, -642.0, -0.0026, -0.0012),
+  vec4(-1224.0, -1456.0, -0.0007, -0.0009), vec4(-1106.0, -1134.0, -0.0004, -0.0004),
+  vec4(-1616.0, -429.0, -0.0017, -0.0004), vec4(-706.0, -1636.0, -0.0005, -0.0012));
 
 // The glitter at night as the eye sees it: separate sparkles, not their
 // mean. The sea is cut into facets of FACET km, each with its own slope
@@ -4615,11 +4662,33 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   vec2 fa = along * ua, fc = across * vec2(-ua.y, ua.x);
 
   // The wind varies: gusts and calms over kilometres (the weather map),
-  // more so in light airs, and streaks within them.
+  // more so in light airs, and streaks within them. Within those, patches
+  // of rougher and smoother water from some 50 m to 3 km (cat's paws,
+  // gusts), stronger in light airs: from high up they mottle the glitter,
+  // as in photographs, where before it was an even blur (layer 1, R, read
+  // at two sizes). Rows along the wind (B: windrows, some 25 to 100 m
+  // apart) where the water is a little smoother.
   float gust = textureLod(uWeather, x / WEATHER_KM, log2(max(along / (WEATHER_KM / 1024.0), 1.0))).b;
-  float streak = textureGrad(uWaves, x * (40.0 / WEATHER_KM), fa * (40.0 / WEATHER_KM), fc * (40.0 / WEATHER_KM)).a;
-  float wind = uWind * exp(mix(1.2, 0.4, smoothstep(2.0, 9.0, uWind)) * (2.0 * gust - 1.0) + 0.3 * (streak - 0.5));
+  float streak = textureGrad(uWaves, vec3(x * (40.0 / WEATHER_KM), 0.0), fa * (40.0 / WEATHER_KM), fc * (40.0 / WEATHER_KM)).a;
+  const float RP1 = 32.0 / WEATHER_KM, RP2 = 192.0 / WEATHER_KM, RS = 24.0 / WEATHER_KM, RW = 128.0 / WEATHER_KM;
+  float p1 = textureGrad(uWaves, vec3(x * RP1 + 0.21, 1.0), fa * RP1, fc * RP1).r;
+  float p2 = textureGrad(uWaves, vec3(x * RP2 + 0.63, 1.0), fa * RP2, fc * RP2).r;
+  vec2 sl = textureGrad(uWaves, vec3(x * RS + 0.47, 1.0), fa * RS, fc * RS).gb;
+  float rows = textureGrad(uWaves, vec3(x * RW + 0.11, 1.0), fa * RW, fc * RW).b;
+  float patches = 7.2 * (p1 - 0.5) + 3.6 * (p2 - 0.5);  // rms 1, mostly the larger
+  float wind = uWind * exp(mix(1.2, 0.4, smoothstep(2.0, 9.0, uWind)) * (2.0 * gust - 1.0) + 0.3 * (streak - 0.5)
+                         + mix(0.3, 0.12, smoothstep(2.0, 9.0, uWind)) * patches);
   float s2 = 0.003 + 0.00512 * wind;
+  // Slicks: films on the water damp the short waves, to the slopes of
+  // Cox and Munk's slick sea (0.008 + 0.00156 U), in meandering lines some
+  // 200 m wide where a smooth noise (G) crosses its mean; waves of over
+  // 7 m/s break them up. Seen from far, a line is spread over the
+  // footprint, with its share kept.
+  float ns = 8.0 * (sl.x - 0.5);
+  float gs = 3.0 * 2.0 * PI * RS;                      // the noise's slope per km, about
+  float ws = 0.35, wf = sqrt(ws * ws + gs * gs * (0.25 * along * along + 0.25 * across * across));
+  float slick = 0.6 * smoothstep(0.45, 0.65, p1) * ws / wf * (1.0 - smoothstep(0.0, wf, abs(ns))) * (1.0 - smoothstep(4.0, 8.0, wind));
+  s2 = mix(s2, min(0.008 + 0.00156 * wind, s2), slick) * exp(0.07 * 8.0 * (rows - 0.5));
 
   // Wind waves. The longest are as long as a grown sea has them
   // (0.9 U^2 metres), ten to a tile of the map; each band reaches down to a
@@ -4638,7 +4707,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   for (int i = 0; i < 3; i++) {
     float far = smoothstep(-1.585, 0.0, log2(along * rep / 0.12));
     vec4 w = vec4(0.5, 0.5, 0.125, 0.0);
-    if (far < 1.0) w = mix(textureGrad(uWaves, x * rep + 0.37 * float(i), fa * rep, fc * rep), w, far);
+    if (far < 1.0) w = mix(textureGrad(uWaves, vec3(x * rep + 0.37 * float(i), 0.0), fa * rep, fc * rep), w, far);
     vec2 s = 8.0 * w.rg - 4.0;
     float h = max(8.0 * w.b - dot(s, s), 0.0);
     slope += s;
@@ -4651,7 +4720,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   float micro = s2 - 3.0 * share;
   // Swell, smoothed over the footprint. Currents bend its crests: the map
   // of the streaks, read wide, shifts it by up to some 200 m.
-  vec2 xs = (x + (textureLod(uWaves, x * (5.0 / WEATHER_KM), 2.0).a - 0.5) * vec2(0.24, 0.32)) / WEATHER_KM;
+  vec2 xs = (x + (textureLod(uWaves, vec3(x * (5.0 / WEATHER_KM), 0.0), 2.0).a - 0.5) * vec2(0.24, 0.32)) / WEATHER_KM;
   for (int i = 0; i < SWELLS; i++) {
     vec2 k = SWELL[i].xy * (2.0 * PI / WEATHER_KM);
     float keep = exp(-0.125 * (dot(k, fa) * dot(k, fa) + dot(k, fc) * dot(k, fc)));
@@ -4671,10 +4740,20 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   // what the footprint covers of the breakers around (seen sharp, a
   // breaker has an edge, ragged with the short waves); from far, take the
   // mean.
+  // Behind each breaker (up the wind: the crest runs on and leaves it)
+  // lies a trail of older foam: thinner (TRAIL of the thick foam's light),
+  // torn into lace along the wind that thins out as it ages (A and R of
+  // layer 1, a cell to the map, read in the breaker's own place). It is
+  // some 3 to 9 crests long, longer in a strong wind, and widens as it
+  // goes; fresher foam, nearer the crest, is the brighter. Before, a
+  // breaker was a white blob on dark water. From far, its mean: 0.055 of
+  // the crest's per crest of length.
   float white = 0.4 * 2.95e-6 * pow(wind, 3.52);
   float cells = max(round(WEATHER_KM / (2.7e-4 * uWind * uWind)), 1.0);
   float cell = WEATHER_KM / cells;
-  float foam = white;
+  const float TRAIL = 0.45;
+  float trailLen = mix(3.0, 9.0, smoothstep(5.0, 14.0, wind));
+  float foam = white * (1.0 + 0.055 * trailLen);
   if (white > 1e-5 && along < 1.5 * cell) {
     const float SB = 0.07;                           // size of a breaker, in cells
     float chance = white / (2.0 * PI * SB * SB * 1.2) * exp(3.5 * (streak - 0.5) - 0.245);
@@ -4685,6 +4764,12 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     // A breaker of unit size: 1.5 SB along the crest, SB / 1.5 down the wind.
     vec3 one = SB * SB * (2.25 * vec3(WIND.y * WIND.y, -WIND.x * WIND.y, WIND.x * WIND.x)
                         + 0.444 * vec3(WIND.x * WIND.x, WIND.x * WIND.y, WIND.y * WIND.y));
+    // The footprint's spread down the wind and across it (variances, in cells).
+    vec2 wx = vec2(-WIND.y, WIND.x);
+    float fu2 = dot(WIND, vec2(cov.x * WIND.x + cov.y * WIND.y, cov.y * WIND.x + cov.z * WIND.y));
+    float fw2 = dot(wx, vec2(cov.x * wx.x + cov.y * wx.y, cov.y * wx.x + cov.z * wx.y));
+    // How much of the streaks the footprint keeps (finest some 0.02 cell apart).
+    float torn = 1.0 - smoothstep(0.006, 0.03, sqrt(fw2));
     float sum = 0.0;
     for (int j = -1; j <= 1; j++) {
       for (int i = -1; i <= 1; i++) {
@@ -4699,11 +4784,41 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
           float sharp = size * size * SB * SB / sqrt(det);
           float b = sharp * exp(-0.5 * (v.z * e.x * e.x - 2.0 * v.y * e.x * e.y + v.x * e.y * e.y) / det);
           float edge = mix(0.3, 0.06, smoothstep(0.3, 0.9, sharp));
-          sum += mix(b, smoothstep(0.37 - edge, 0.37 + edge, b * exp(0.7 * crest)), smoothstep(0.3, 0.7, sharp));
+          // The trail: tt 0 at the crest's middle, 1 at its length, up the wind.
+          // Its foam is lace: where the marbled noise is over a threshold
+          // that rises as the trail fades (cover), so that it thins out into
+          // separate streaks, at one light (TRAIL) with the water between.
+          // Seen wider than the streaks, their share over the footprint.
+          float lt = min(trailLen * SB * size, 0.9);
+          float tt = dot(e, WIND) / lt, w = dot(e, wx);
+          float wc = 1.5 * SB * size * (1.0 + 0.5 * max(tt, 0.0));
+          float sw2 = wc * wc + fw2, su = sqrt(fu2) / lt;
+          float along0 = exp(-2.0 * max(tt, 0.0)) * smoothstep(-0.05 - su, 0.1 + su, tt);
+          float cover = along0 * exp(-0.5 * w * w / (wc * wc));
+          float wide = along0 * wc / sqrt(sw2) * exp(-0.5 * w * w / sw2);
+          // Streaks along the wind (A) broken by patches (R) drawn out along
+          // it too: marbled, not combed. They also tear the crest's edge and
+          // shade its foam (some 0.75 to 1 of its light where seen sharp).
+          float a = 0.5;
+          if (max(cover, wide) > 0.02 || b > 0.02) {
+            vec2 q = fract(vec2(31.7, 57.3) * r) - e;
+            vec2 q2 = 2.0 * (q - 0.5 * dot(q, WIND) * WIND), fa2 = 2.0 * (fa - 0.5 * dot(fa, WIND) * WIND) / cell, fc2 = 2.0 * (fc - 0.5 * dot(fc, WIND) * WIND) / cell;
+            a = 0.5 + (0.6 * textureGrad(uWaves, vec3(q, 1.0), fa / cell, fc / cell).a
+                     + 0.6 * textureGrad(uWaves, vec3(q2, 1.0), fa2, fc2).r - 0.6) / 0.849;
+          }
+          float tex = mix(0.5, a, torn);
+          sum += mix(b, smoothstep(0.37 - edge, 0.37 + edge, b * exp(0.7 * crest + 1.6 * (tex - 0.5))) * (1.0 + 0.6 * (tex - 0.5)),
+                     smoothstep(0.3, 0.7, sharp));
+          if (max(cover, wide) > 0.02) {
+            // Fresher foam, nearer the crest, is the brighter.
+            float lace = smoothstep(0.72 - 0.35 * cover - 0.03, 0.72 - 0.35 * cover + 0.03, a) * smoothstep(0.02, 0.2, cover);
+            float share = smoothstep(-2.0, 2.0, (0.35 * wide - 0.22) / 0.125) * smoothstep(0.02, 0.2, wide);
+            sum += TRAIL * mix(share * (0.35 + 0.65 * wide), lace * (0.35 + 0.65 * cover), torn);
+          }
         }
       }
     }
-    foam = mix(min(max(chance, 1.0) * sum, 1.0), white, smoothstep(0.6, 1.5, along / cell));
+    foam = mix(min(max(chance, 1.0) * sum, 1.0), foam, smoothstep(0.6, 1.5, along / cell));
   }
   foam *= 0.5;                                       // the albedo of thick foam
 
@@ -10393,27 +10508,31 @@ const SkySound = (() => {
       mark('cirrus built');
     }
 
-    // The map of the waves on the sea, on unit 4, drawn by its own program.
+    // The maps of the waves on the sea, on unit 4, drawn by their own
+    // program: layer 0 the waves, layer 1 the fields of roughness and foam.
     {
-      const n = 512;
+      const n = 512, T = gl.TEXTURE_2D_ARRAY;
       gl.activeTexture(gl.TEXTURE4);
       const waves = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, waves);
-      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(n) + 1, gl.RGBA8, n, n);
+      gl.bindTexture(T, waves);
+      gl.texStorage3D(T, Math.log2(n) + 1, gl.RGBA8, n, n, 2);
       const draw = wavesProgram;
       gl.useProgram(draw);
       gl.uniform1f(gl.getUniformLocation(draw, 'uSize'), n);
       const target = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, target);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, waves, 0);
       gl.viewport(0, 0, n, n);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      for (let layer = 0; layer < 2; layer++) {
+        gl.uniform1i(gl.getUniformLocation(draw, 'uLayer'), layer);
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, waves, 0, layer);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(target);
       gl.deleteProgram(draw);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+      gl.generateMipmap(T);
+      gl.texParameteri(T, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      if (aniso) gl.texParameterf(T, aniso.TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
       gl.activeTexture(gl.TEXTURE0);
     }
     await settle();

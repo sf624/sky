@@ -213,3 +213,14 @@ test('judge: a measure against another entry\'s still is their ratio', () => {
   const reg = { entries: [e, { name: 'level', measures: [] }, { name: 'other', measures: [] }] };
   assert.deepEqual(pick(reg, { only: 'up' }).map((x) => x.name), ['up', 'level']);
 });
+
+test('fringe: white blobs alone score low, blobs with streaks of foam beside them high', () => {
+  // White ellipses on dark water; then the same with thin, dimmer streaks trailing to the right of each.
+  const blobsAt = [[40, 40], [120, 70], [200, 40], [280, 80]];
+  const blob = (x, y) => blobsAt.some(([bx, by]) => ((x - bx) / 6) ** 2 + ((y - by) / 10) ** 2 < 1);
+  const streak = (x, y) => blobsAt.some(([bx, by]) => x > bx + 4 && x < bx + 40 && (y - by + 9) % 4 === 0 && Math.abs(y - by) < 9);
+  const plain = pic(320, 120, (x, y) => (blob(x, y) ? 250 : 40));
+  const trails = pic(320, 120, (x, y) => (blob(x, y) ? 250 : streak(x, y) ? 160 : 40));
+  assert.ok(M.fringe(plain) < 0.05, `plain ${M.fringe(plain)}`);
+  assert.ok(M.fringe(trails) > 0.15, `trails ${M.fringe(trails)}`);
+});
