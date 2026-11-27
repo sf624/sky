@@ -298,18 +298,20 @@ and GL shows nothing (see the GLSL rules). `d3dperf` watches for it, on
 the owner's machine; GitHub's runners have no such GPU.
 
 ```sh
-node tools/sky.mjs d3dperf                  # this tree against origin/main, some 7 minutes
+node tools/sky.mjs d3dperf                  # this tree against origin/main, some 10 minutes
 node tools/sky.mjs d3dperf --views tower --rounds 7
 ```
 
-It times six views, flying at 50 km/h (the page draws nothing at rest;
+It times eight views, flying at 50 km/h (the page draws nothing at rest;
 at that speed a view moves some 20 m while it is timed), with `res=1`, at
 `quality=max`, in a window of `--size` (default 1920x1080, drawn at
 1898 x 982): `default` (11 km), `overcast` (11 km over a deck),
 `heaps-3km`, `tower` (a tower close ahead at 3 km), `cirrus` (12.5 km,
-level inside the cirrus) and `night` (a full moon over clouds). Each round
+level inside the cirrus), `night` (a full moon over clouds), `altocumulus`
+(the middle clouds' cells from 11 km) and `altocumulus-0.3km` (the same
+from below, looking up 30 degrees). Each round
 runs the base, then the page: one Windows Chrome each (as `d3d`), which
-goes through the six views in its tab, so the later views' programs may
+goes through the views in its tab, so the later views' programs may
 come from the GPU process's cache. A view times `--frames` frames (default
 120) after the first picture and 10 more; its frame time is their mean.
 The verdict of a view takes the median of the `--rounds` rounds (default
@@ -326,7 +328,7 @@ each round only, whose programs are compiled cold), page against base.
 The last line is for the pull request's description:
 
 ```
-d3dperf: 6 views, worst 1.00x (cirrus), 0 FAIL, 0 undecided, spread up to 3.2 % at 9de3e45 vs origin/main (9de3e45)
+d3dperf: 8 views, worst 1.00x (cirrus), 0 FAIL, 0 undecided, spread up to 3.2 % at 9de3e45 vs origin/main (9de3e45)
 ```
 
 Exit status 0 when every view passes, 1 when one fails, 3 when none fails

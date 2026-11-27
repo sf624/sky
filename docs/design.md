@@ -1883,43 +1883,92 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     them again; the passes' third layer and the map's fifth stay.
 - **The density** (`midDensity`), from the noise of the low clouds
   (`uNoise`, `uHeads`) and the weather map read elsewhere on it:
-  - *cells* (`midCells`, `midform` = 1): the noise's Worley cells in a tile
-    of `MID_KM` = 6.4 km (1.6 km, 800 m and 400 m), each a dome over a
-    shallower bowl. They are read on an oblique cut through the noise's
-    tile (`MID_CUT_X`, `MID_CUT_Z`: whole numbers of tiles in the weather
-    map's 256 km, so it repeats with the map and no sooner), at a depth in
-    the noise that wanders with the weather map; the lumps and the fine
-    noise are read aslant through their tiles likewise. On a level slice
-    the same 6.4 by 8 km of cells stood at every tile (the map only slid
-    it), and the lumps repeated every 1.27 km: from 20 to 40 km up the
-    field was a lattice, and ranks ran to the horizon from any height. A threshold of the field (the amount, the map,
-    the noise's swell) says where cells stand, run together or
-    shrink apart; the map's other channels move the place in the noise and
-    say which size leads.
+  - *cells* (`midCells`, `midform` = 1): a map of cells in the layer's
+    plane, the same at every height, and a profile over it. The map is the
+    noise's Worley cells (1.1 km, 540 and 270 m) read on an oblique cut
+    through the noise's tile (`MID_CUT_X`, `MID_CUT_Z`: whole numbers of
+    tiles in the weather map's 256 km, so it repeats with the map and no
+    sooner), at a depth in the noise that wanders with the weather map;
+    the lumps and the fine noise are read aslant through their tiles
+    likewise. On a level slice the same tile of cells stood everywhere
+    (the map only slid it), and the lumps repeated every 1.27 km: from 20
+    to 40 km up the field was a lattice, and ranks ran to the horizon from
+    any height. (Until #135 the cut was read at the sample's height too:
+    cells cut from noise in three dimensions, torn every way, an even
+    popcorn of crumbs from above and white lumps from below.)
+    - *A cell* (`MID_CELL`) is the part of a Worley cell over the field's
+      threshold: an upright dome, as high as the noise stands over the
+      threshold (less for the tallest, so that they do not all end at the
+      layer's top), over a shallower bowl whose depth differs from cell to
+      cell (all down to one floor, a packed field seen on edge had a ruled
+      line for a base). The noise is taken so steeply that its lowest
+      sixth stays under the threshold of the closest field: packed cells
+      keep a net of seams between them, as a perlucidus has. The
+      threshold is the field's (the amount, the map, the noise's cells of
+      1.1 km and its swell): it says where cells stand, run together or
+      shrink apart; the map's other channels move the place in the noise.
     - *Fields.* The layer is fields of cells with ragged edges, clear
       lanes and gaps between them, tens of km across (`MID_EDGE`): the
       map's systems (read over some 20 km) and four times its detail
       under that (clusters, lanes, its streets) are set against the
-      amount, and the cells shrink apart over a narrow margin. Half the
-      map is field at an amount of 0.6. (Until #130 the threshold fell
-      off over three times as wide a range of the map read over 4 km:
-      most of the map was margin, an even sprinkle of shrunken cells
-      from the nadir to the horizon, with no field in it.)
+      amount. Half the map is field at an amount of 0.6. (Until #130 the
+      threshold fell off over three times as wide a range of the map read
+      over 4 km: most of the map was margin, an even sprinkle of shrunken
+      cells from the nadir to the horizon, with no field in it.)
+    - *A field's fringe* (`MID_FRINGE`): beyond the edge the threshold
+      falls a third as fast, so the cells get smaller, lower, thinner and
+      further apart over some kilometres; and over regions of the map a
+      veil in fibres lies between them, up to 0.35 as dense as a cell:
+      there a field fades out through it. (With the one steep edge, full
+      cells stood up to a coastline.)
+    - *The top of the slider* (`MID_SHUT`): over an amount of 0.7 the map
+      counts less (a quarter at 1) and the cells stand closer: at 1 the
+      layer is nearly closed, cells with seams. (With the map whole, clear
+      lakes stayed at 1: 0.54 of the sky covered.)
     - *Regions of a field*, from the map read elsewhere or over more km,
       so that they do not follow the fields' edges: how closely the cells
       stand (`MID_PACK`: open cells with wide gaps, or cells packed with
-      seams between them; `MID_SEAM` keeps the seams, and the domes'
-      unlike heights, where they are packed), which size leads (400 or
-      800 m), and whether they stand in streets (`MID_STREET`): there
+      seams between them; `MID_SEAM` keeps the domes' unlike heights where
+      they are packed), which size leads (270 or 540 m, changing over by
+      degrees), and whether they stand in streets (`MID_STREET`): there
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
-      inside a field too: bands, ranks and lanes.
+      inside a field too: bands and lanes.
+    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`), by `midrolls` alone (0 at
+      first): the height is read from the noise on a second cut, 5.8
+      times as long one way as the other: its Worley cells are 0.5 and
+      1.1 km wide and 3 to 6 km long, long lumps side by side that begin,
+      end, fork and join. They are not in the page's own picture: they
+      read as smears, not as rolls at an even distance (regions of them
+      stood in the fields in a state of #135; a wave across them made
+      them as even as ripples in sand where it counted much, and changed
+      nothing where it counted little). At 0 the branch costs nothing on
+      Direct3D 11.
+    - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
+      (not in its fringe), no place is lower than a floor a little over
+      the threshold, higher where the cells stand closest, lower among
+      rolls, higher at the top of the slider. With it a field's body is
+      whole, so the fields' edge takes the amount as 0.18 less up to 0.6,
+      and the whole of it from 0.9 (`MID_LESS`): the same amount covers
+      about what it did (0.37 of the view straight down from 40 km at
+      the altocumulus weather's 0.55; 0.34 before the floor, 0.53 with it
+      and without this). The seams between the cells
+      and the troughs between the rolls are thin low cloud there, not
+      clear air, and the lumps and the fine noise count a third on it. So
+      a field's body is a deck with relief: from above, tops with shaded
+      seams; from below, grey cells in a pale
+      sheet that lets the blue through in places; cells apart, with clear
+      air between them, stand in the fringes only. (Without it, and with
+      half the regions open, a field from 11 km was equal white dots side
+      by side on the sea, and from 40 km at the top of the slider an even
+      grain.)
     The cells fill 0.65 of the layer's depth, at a
     level that varies over some 4 km. Over its widest level a cell is a
     crisp heap of lumps (the heaps' heads, in upright columns); under it a
-    soft slab whose density falls off outwards, in fibres where it is thin,
-    and a thin veil lies at the margins of a patch. `midrolls` adds ranks
-    of small elements (two crossing waves of 300 and 420 m);
+    soft slab whose density falls off outwards, in fibres where it is
+    thin. The slab is 0.6 as dense between the lumps (at a quarter, the
+    lumps were what showed from below, not the cells), and its outline
+    goes in and out with the lumps and the fine noise (`MID_RAG`);
   - *a sheet* (`midSheet`, `midform` = 0): slow swells drawn out along the
     wind, a parabola over the layer's depth less what the amount takes,
     with fine noise on its thin places, and thick and thin places in it:
@@ -1957,14 +2006,43 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   through (`Tm`) as the depth. The sun's disc shows through a depth of up
   to 10.
 - **The light**, from optical depths alone: three steps towards the light
-  (each 3 to 5 times the one before, by the form), then the rest of the
+  in a sheet and two among cells (each 3 to 5 times the one before, by
+  the form), then the rest of the
   column aslant, on the side the light comes from (over the place or under
   it, mixed over 3 degrees each way of the light's level: switched there, a
   straight seam crossed the layer while the sun stood at 0 degrees, and
   the cirrus's side, lit from above or through, had the same); scattered once, an aureole and two wider octaves through
   thin cloud; and two streams through the layer as a slab that keeps all
   it scatters (`midThrough`): what goes on to the far side (a base by day:
-  white where thin, grey where deep) and what comes back (the tops). The
+  white where thin, grey where deep) and what comes back (the tops). A
+  cell's column for this is its own, from its map at the very place
+  (`midCol`), not the light's map's, which is too coarse for cells some
+  kilometres off (with it, a field from below was white lumps with grey
+  blots that kept to no cell), and counted `MID_SHADE` = 6 times: a
+  cell's sides let light out, and its middle is the greyer for it. It is
+  deeper in a field's body than at its margins (by the map's detail), and
+  the steps towards the light span the cell the place is in (planned to
+  the layer's top, the last step stood over a cell of 150 m, the depth
+  towards the light came out a third too small, and a cell from below was
+  white to its middle). So a
+  cell from below is grey in its thick middle and white at its thin rim,
+  and from above its thin parts are dimmer than its thick ones.
+  Only where the view is not level, or from some kilometres on: seen
+  level from within the layer, a cell near the eye wore its thick middle
+  as a grey disc on its side, a barrel; there the layer's column from the
+  light's map stands in, as in a sheet.
+  *Relief* (`MID_RELIEF`, `MID_SHADOW`, `MID_SHADE.z`): among cells the
+  steps towards the light reach 80 m up at the least and read the noise
+  half a level and more finer than in a sheet, so a cell shades its far
+  side and its neighbour (a place on a cell's top has its column's top
+  just over it: ending there, and read over three cells and more, the
+  depth towards the light was the same everywhere, and the field from
+  above at a low sun was white all over). What lies towards the light
+  beyond the place's own column shades more than in a sheet, with 0.4 of
+  the light left in the deepest shade (the deck's own, scattered many
+  times: with the sky's light alone the shade was blue); and the sky's
+  light and the light that comes back are a quarter in the seams and
+  troughs, whole from 120 m over a cell's floor. The
   sky's light likewise, from above and from what lies below, in the unit
   that the low clouds' sky light was set in against photographs (`SKYV.x`:
   with the slab's alone, a fifth to a half of theirs, middle clouds at

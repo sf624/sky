@@ -1919,6 +1919,46 @@
    ],
    "bad": "7fade82",
    "note": "Looking away from the sun, the view from 40 degrees down to 40 up in steps of 5 and 10 degrees. The exposure is window.__exposure (the adaptation, before the keys). 7fade82 (the world's light coming in between WORLD_SHARE 0.1 and 0.35): 1.6 between 20 and 25 degrees. With WORLD_SHARE[1] = 1: 0.58, between the level view and one lowered 5 degrees (5.10, 4.52; then 3.96, 3.44, 3.00, 2.67, 2.52 at 5 to 25 degrees up)."
+  },
+  {
+   "name": "mid-top-of-slider-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&yaw=140&pitch=-80&heading=49&cloud=0.02&mid=1&cirrus=0&at=100,60",
+   "reported": "2026-11-26",
+   "wrong": "at the top of the slider (mid=1) the middle clouds' cells left clear lakes kilometres wide: a little over half the view from 40 km was cloud, where the layer is to be nearly closed, cells with seams between them",
+   "measures": [
+    {
+     "measure": "cover",
+     "region": [
+      0,
+      0.1,
+      1,
+      0.9
+     ],
+     "min": 0.6
+    }
+   ],
+   "bad": "03b0a75",
+   "note": "The white mask straight down from 40 km: 0.539 on main 03b0a75, 0.644 with MID_SHUT (the map counts a quarter at 1, the cells stand closer and higher). The seams between the cells are not in the mask."
+  },
+  {
+   "name": "mid-packed-deck-11km",
+   "q": "date=172&lat=35&cirrus=0&cloud=0.02&mid=0.8&midform=1&alt=11&time=15.5&yaw=0&pitch=-35",
+   "reported": "2026-11-26",
+   "wrong": "altocumulus from 11 km looking down was equal round white puffs side by side with clear gaps between them, like polka dots on the sea, where aircraft photographs of such decks show packed cells and rolls with narrow shaded seams",
+   "measures": [
+    {
+     "measure": "cover",
+     "region": [
+      0,
+      0.2,
+      1,
+      0.8
+     ],
+     "min": 0.93
+    }
+   ],
+   "bad": "ca77500",
+   "note": "The white mask of the field's body at mid=0.8: 0.870 on main ca77500, 0.810 in the first state of #135 (the sea between the puffs), 0.985 with MID_FLOOR (the seams are thin low cloud, shaded). The measure does not see the rolls or the shade itself."
   }
  ]
 }
