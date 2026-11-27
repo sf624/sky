@@ -52,6 +52,17 @@ export function brightColour(img, { region: box, p = 95, of = 'sat' } = {}) {
   return mean(v);
 }
 
+// The colour of the whole region in the page's linear light: each level undone with the power 2.2 that the page
+// encodes with (not the sRGB curve, whose straight foot near black makes a dim colour far less saturated), the
+// mean of each channel over the region, then their ratio by opt.of: b/g (bg, default) or r/g (rg). The twilit
+// Earth seen from 40 km: 2.97 on main at cda9faa (navy), where photographs from orbit give 1.2 to 2.
+export function meanColour(img, { region: box, of = 'bg' } = {}) {
+  const R = region(img, box), lin = (v) => (v / 255) ** 2.2;
+  let r = 0, g = 0, b = 0;
+  for (let i = 0; i < R.l.length; i++) { r += lin(R.r[i]); g += lin(R.g[i]); b += lin(R.b[i]); }
+  return g > 0 ? (of === 'rg' ? r : b) / g : 0;
+}
+
 // cover: the share of the region in the cloud mask (opt.cloudLuma, opt.cloudSat as in cloudMask).
 export function cover(img, opt = {}) {
   const m = cloudMask(region(img, opt.region), opt);
@@ -645,4 +656,4 @@ export function fringe(img, { region: box, k = 10, t = 25, white = 235 } = {}) {
   return part / Math.max(nw, 1);
 }
 
-export const MEASURES = { lumaPct, brightColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe };
+export const MEASURES = { lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe };
