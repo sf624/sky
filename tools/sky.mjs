@@ -33,7 +33,9 @@ common:       --page DIR (the page to test; default: this repository)
 environment:  SKY_GPU=1 (the GPU; default SwiftShader), SKY_CHROME, SKY_CHROME_LIBS, SKY_WRAP, SKY_TIMEOUT, SKY_WIN_CHROME`;
 
 // Commands that start Chrome, and their time limits (s).
-const LIMITS = { trace: 900, stills: 2400, look: 1200, check: 5400, drive: 900, perf: 300 };
+// look: 64 entries took 519 s alone at 1280x720 on the GPU (e18ddb1); 83 entries, some of them sweeps of a dozen
+// views, ran past 1200 s beside another GPU run. The list grows with every flaw fixed.
+const LIMITS = { trace: 900, stills: 2400, look: 3600, check: 5400, drive: 900, perf: 300 };
 
 // The options that take no value: `--mobile --dpr 2.6` took '--dpr' as the value of --mobile, and the DPR stayed 1.
 const FLAGS = new Set(['mobile', 'no-gpu', 'sheet']);

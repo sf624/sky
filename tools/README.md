@@ -204,7 +204,7 @@ A file may also hold a list of such scripts: they run one after another in the s
 | `SKY_CHROME_LIBS` | Directories put before `LD_LIBRARY_PATH` for Chrome, where it lacks system libraries. |
 | `SKY_WRAP` | The queue for heavy runs: a path to a program that runs its arguments (like `heavy`). Default: `~/.claude/bin/heavy` if it exists. `none`: no queue. |
 | `SKY_MEMORY_MAX` | The memory cap under the queue (default `3G`). |
-| `SKY_TIMEOUT` | The time limit in seconds (defaults: trace 900, stills 2400, check 5400, drive 900, perf 300). |
+| `SKY_TIMEOUT` | The time limit in seconds (defaults: trace 900, stills 2400, look 3600, check 5400, drive 900, perf 300). |
 | `SKY_READY_MS` | How long to wait for the page to be ready (default 180000). |
 
 With a queue, the command runs again inside it: `heavy timeout --foreground -k 10 T systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p TasksMax=500 -p RuntimeMaxSec=… node tools/sky.mjs …` (without `systemd-run` where there is none). It prints one line when it queues. The queue and everything under it run in a process group of their own, and the command passes `SIGINT`, `SIGTERM` and `SIGHUP` on to that group: Ctrl-C stops the run and frees the queue's slot. Without a queue, the command runs directly, with its own time limit.
