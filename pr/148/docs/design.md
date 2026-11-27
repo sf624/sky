@@ -2889,9 +2889,14 @@ on the map.
   The pass keeps each light's two numbers as floats, or as halves when
   both lights are on. The two lights' numbers are found in one body of
   vectors (`hg2`, `ciGeo2`, `ciOnce2`): two copies, or a loop over them,
-  took Microsoft's compiler as long; the moon's light costs the start on
-  Direct3D 11 some 1 to 1.5 s (the cirrus's pass with the sun's light
-  alone was within the noise of the page without this change).
+  took Microsoft's compiler as long. The two lights cost the start on
+  Direct3D 11 in the scene's program more than in the pass: timed alone
+  with Microsoft's compiler (CPU time, 2026-11-27), the pass took 7.4 to
+  7.9 s before the two lights and 7.5 to 8.5 s after, the scene 6.0 to
+  6.2 s before and 7.3 to 7.6 s after (`cirrusLight`: its loop over the
+  two lights, the refraction, the reads of `ciSky`). Of that, the moon's
+  light was some 0.3 to 0.5 s (the scene with the sun's light alone),
+  which the halo's angle found once, before that loop, wins back.
 - **A low sun** (`duskK`, a `smoothstep` of `li`, 1 over the sine of the
   sun's height where it is capped at 0.15, from 2 to 6: the sun from some
   30 degrees down; while the sun lights the cirrus) runs along the decks: its light
