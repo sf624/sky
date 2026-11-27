@@ -393,6 +393,29 @@ values (16.0 or 16.5 ms in `tower`, 15.1 or 16.1 ms in `night`). Their
 spread is the largest; the median of five rounds is seldom moved by it.
 
 
+## The reference
+
+`tools/ref` holds a Monte Carlo solver of the page's atmosphere, to check the air's light against (see "Against a reference, again" in [docs/design.md](../docs/design.md#the-air)). It runs in Node alone, without Chrome, and is not one of the checks. It reads the page's model out of `index.html` itself (the block from "The atmosphere" to "Axes" in the script: the constants, the three density profiles, the phase functions, and the page's own tables to compare), and uses none of the page's approximations: a sphere, the planet's shadow, every order of scattering, ozone, the aerosol with its phase functions by height, and a ground (Lambert, or `--ground sea`: a flat mirror by Fresnel over water with a Lambert albedo). Backward paths from the eye, free paths by delta tracking against a majorant per shell, the sun's light taken at every collision, absorption as a weight, one wavelength at a time (the page's twelve). The light scattered once is a quadrature; the paths give the rest, by order. Radiance is per unit of the sun's irradiance, and as the page's linear sRGB before exposure (`col` in `fs`).
+
+```sh
+node tools/ref/validate.mjs                        # the checks of the solver itself, some 5 minutes on one core
+node tools/ref/run.mjs --sun -2 --out sun-2.json   # rays from 11 km: 4 azimuths from the sun, 20 elevations
+node tools/ref/table.mjs 100000                    # the page's table of multiple scattering against the mean light
+node tools/ref/shape.mjs 200000                    # the table's shape (second moments) against the reference's
+```
+
+| File | What it does |
+|---|---|
+| `air.mjs` | The page's model read from `index.html` (`loadPage`; `PAGE` is this repository's), the reference's own air from its constants (`makeAir`: the haze, ozone and the aerosol's absorption can be set), the optical depth to the top (`makeDepth`: a table for rays that go up, the rest by symmetry about the ray's lowest point), spectrum to the page's linear sRGB (`toRGB`). |
+| `mc.mjs` | The solver: `path` (one path, its light by order; the surface's light apart from the air's), `once` (the light scattered once along a ray, by quadrature: air, aerosol, ground, and the ray's transmittance), `sunT`. `screen` takes the sun's beam in a layer of clouds far off (an experiment of issue #40). |
+| `validate.mjs` | `depth`: the depth table against a direct sum. `closure`: in air that absorbs nothing over a white ground, under a sky equally bright from all sides, every ray sees that brightness: the sun's light summed over all its directions plus the unscattered way out is 1 (it tests the tracking, the phase functions and their sampling, the ground and the sun's depths at every order). `once`: the first order by paths against the quadrature. `twice`: the second order against a direct triple sum, without aerosol. `zenith`: the zenith from sea level in cd/m2 beside measurements. |
+| `run.mjs` | Rays from an eye (`--alt`, `--sun`, `--az`, `--el`, `--n` paths a wavelength, `--haze`, `--albedo`, `--ground`): a JSON file with each ray's spectrum by order and its linear sRGB (`rgb`, and `rgbR`, `rgbM`, `rgbMore`, `rgbSurf`: scattered once by the air and by the aerosol, the higher orders, the surface's light). `--index` takes another build's `index.html`. |
+| `table.mjs`, `shape.mjs` | The page's table of multiple scattering against the reference's mean radiance at a point (every order), its lean, and its shape. |
+
+The sun's elevation is at the eye's place, in parallel light without refraction, as the page's. To set the page beside it, show the page's linear light: in a copy of `index.html`, replace the lines of `fs` from `col *= uExposure;` to the display encoding by `col = min(col * uExposure, 1.0);`, set `uExposure` to a fixed power of two, switch the glare off (`GLARE`) and the sea where the air alone is wanted (`addSea`), and undo the power 2.2 of the stills (`drive`, `cloud=0&cirrus=0&speed=0`). Two stills four stops apart hold a ray's light within 3 %. A pixel's ray: the camera's field is 62 degrees high.
+
+100 000 paths a wavelength take some 3 s a ray by day and in civil twilight. In twilight the noise grows: with the sun 8 to 10 degrees down the red channel of a ray is good to 20 % or worse at that count.
+
 ## Timings and limits
 
 Measured on the owner's machine (WSL2, RTX 3090, 16 CPU threads) on 2026-11-16, with `main` at fa1fa6c against itself. Other runs shared the machine, so take the times as rough.
@@ -442,3 +465,5 @@ Other copies broken on purpose, each caught: the loop stopping one frame early (
 | `lib/d3d.mjs` | The command `d3d`: Windows Chrome on Direct3D 11, its harness pages, its cleanup. |
 | `lib/d3dperf.mjs` | The command `d3dperf`: its views, the rounds in turns, the verdict. |
 | `test/d3dperf.test.mjs` | Unit tests of `d3dperf`'s arithmetic (the medians, the spread, the verdict, the summary line). |
+| `ref/` | The Monte Carlo reference of the page's atmosphere (see [The reference](#the-reference)). |
+| `test/air.test.mjs` | Unit tests of the page's table of multiple scattering (read between its columns against a finer table) and of the reference's closure. |
