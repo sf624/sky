@@ -2027,6 +2027,10 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   white to its middle). So a
   cell from below is grey in its thick middle and white at its thin rim,
   and from above its thin parts are dimmer than its thick ones.
+  Only where the view is not level, or from some kilometres on: seen
+  level from within the layer, a cell near the eye wore its thick middle
+  as a grey disc on its side, a barrel; there the layer's column from the
+  light's map stands in, as in a sheet.
   *Relief* (`MID_RELIEF`, `MID_SHADOW`, `MID_SHADE.z`): among cells the
   steps towards the light reach 80 m up at the least and read the noise
   half a level and more finer than in a sheet, so a cell shades its far

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="483ce45 PR #135">
+<meta name="build" content="480296f PR #135">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -6428,8 +6428,12 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // cells some kilometres off, and with its columns a field from below was white lumps with grey blots that kept to
       // no cell. So the pass shades each cell by itself: grey in its thick middle, white where it is thin, at its rim.
       // More than its depth alone says: a cell's sides let light out, and its middle is the greyer for it.)
-      float greyer = mix(1.0, MID_SHADE.x, uMid.y);
-      float col = mix(uMid.y < UNSEEN(1.0) ? midColumn(P) : 0.0, MID_SHADE.x * colCells, uMid.y) * mix(1.0, max(2.0 * lump, 0.1), 0.4 * smoothstep(0.15, 0.5, abs(cv)) * smoothstep(0.3, 1.5, t));
+      // (own: only where the view is not level, or from some kilometres on. The column straight up says how deep a cell
+      // is for an eye under it or over it; seen level from within the layer, a cell near the eye wore its thick middle as
+      // a grey disc with a hard rim on its side, a barrel. There the layer's column from the light's map stands in, as
+      // in a sheet, and the cell is a soft white puff.)
+      float own = uMid.y * max(smoothstep(0.05, 0.25, abs(cv)), smoothstep(3.0, 8.0, t)), greyer = mix(1.0, MID_SHADE.x, own);
+      float col = mix(own < UNSEEN(1.0) ? midColumn(P) : 0.0, MID_SHADE.x * colCells, own) * mix(1.0, max(2.0 * lump, 0.1), 0.4 * smoothstep(0.15, 0.5, abs(cv)) * smoothstep(0.3, 1.5, t));
       // (The light's cosine to the layer, for the light that falls on it: no less than 0.35 for cells, whose sides a low
       // light falls on; for a sheet no less than MID_SHEET_SUN.)
       float m = max(abs(sunUp), mix(MID_SHEET_SUN, 0.35, uMid.y));
@@ -6461,7 +6465,7 @@ void midClouds(vec3 o, vec3 d, float ta, float tb, float plan, float jitter, out
       // comes back in the seams and troughs, which the cells about them hide from the sky. MID_RELIEF.)
       float shade = 1.0 / (1.0 + mix(1.0, MID_RELIEF.z, uMid.y) * K * max(upright - over, 0.0));
       shade += MID_SHADOW * uMid.y * (1.0 - shade);
-      float low = 1.0 - (1.0 - MID_RELIEF.x) * uMid.y * (1.0 - smoothstep(0.0, MID_RELIEF.y, sides.x));
+      float low = 1.0 - (1.0 - MID_RELIEF.x) * own * (1.0 - smoothstep(0.0, MID_RELIEF.y, sides.x));
       float on = shade * min(e0 * (1.0 + K * (col - over)), 1.0), onD = max(on - exp(-tauS), 0.0), up = low * shade * e0 * K * (col - over);
       float c = clamp(0.5 + 0.9 * dot(d, normalize((2.0 * fromUp - 1.0) * upv + uLight)), 0.0, 1.0);
       // (A sheet seen from the side away from the light shows what came through it whichever way the eye looks: its
