@@ -6420,6 +6420,9 @@ void main() {
 // One texel of uSkyLight: the sky's light (the sun's part) on a white
 // matt surface facing up (its irradiance over pi), from 64 directions over
 // the sky by the cosine, against 2 cloudSky.
+// (The directions' loop has a bound the compiler cannot know: with 64,
+// Microsoft's compiler tried to unroll it and kept it as a loop anyway,
+// after 2.2 s; now 0.2 s.)
 vec4 skyLightTexel(ivec2 ij) {
   float h = CB + (CT - CB) * float(ij.x) / 15.0;
   vec3 pc = vec3(0.0, RG + h, 0.0);
@@ -6427,7 +6430,7 @@ vec4 skyLightTexel(ivec2 ij) {
   cloudSky(h, uSun.y, ms);
   vec4 E = vec4(0.0);
   skyMoon = false;
-  for (int j = 0; j < 64; j++) {
+  for (int j = 0; j < LONG_N(64); j++) {
     float u1 = (float(j / 8) + 0.5) / 8.0, a = 2.0 * PI * (float(j % 8) + 0.5 * float(j / 8 % 2)) / 8.0;
     skyAt(pc, vec3(sqrt(u1) * vec2(cos(a), sin(a)), sqrt(1.0 - u1)).xzy, BETA_M * uHaze, BETA_M * uHaze * MIE_EXT, S);
     E += (ij.y == 0 ? S[0] : ij.y == 1 ? S[1] : S[2]) / 64.0;
