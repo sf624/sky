@@ -420,7 +420,8 @@ const span = (v) => v.length ? `${median(v).toFixed(2)} (${Math.min(...v).toFixe
 // One line a program: each page's CPU time (median and range of the runs), and the page's against the first.
 function printFxc(pages, names, files, got) {
   console.log(`fxc: CPU time of Microsoft's compiler, s, median (range) of ${got.size ? got.values().next().value.cpu.length : 0} runs; instructions`);
-  console.log('  ' + 'program'.padEnd(28) + pages.map((p) => p.name.padEnd(30)).join('') + (pages.length > 1 ? 'ratio' : ''));
+  // (A long name, such as a folder's path, is cut to its end.)
+  console.log('  ' + 'program'.padEnd(28) + pages.map((p) => (p.name.length > 29 ? '…' + p.name.slice(-28) : p.name).padEnd(30)).join('') + (pages.length > 1 ? 'ratio' : ''));
   const sums = pages.map(() => []);
   for (const n of names) {
     const cells = pages.map((p) => { const f = files.find((f) => f.page === p.name && f.name === n); return f && got.get(f.file); });
