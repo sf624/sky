@@ -2179,6 +2179,97 @@
     }
    ],
    "note": "The sky's upper 30 %: 2.70 on main b6f2dea; 2.34 with the fix, where the Earth gives about a third of the metered light. Round 10 found this sky grey with the twilight balance in full at this height."
+  },
+  {
+   "name": "mid-rolls-even-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&yaw=140&pitch=-80&heading=49&cloud=0.02&mid=0.8&cirrus=0&at=100,60&midrolls=1",
+   "reported": "2026-11-27",
+   "wrong": "the middle clouds' rolls (?midrolls) from 40 km were smears: long lumps that began and ended anywhere, with no distance of their own from one to the next, where photographs show rolls packed side by side at an even distance, with narrow seams, that bend, fork and end",
+   "measures": [
+    {
+     "measure": "rollEven",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 0.3
+    },
+    {
+     "measure": "rollEven",
+     "label": "rollEven (no grating)",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "max": 0.75
+    },
+    {
+     "measure": "rollLong",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 3.0
+    }
+   ],
+   "bad": "7b0a747",
+   "note": "Straight down over a region of rolls. The mean of the upper quarter of the windows. #135 at 7b0a747 (the noise drawn out one way): rollEven 0.18, rollLong 2.35; the map of rolls grown by the Swift-Hohenberg equation: 0.41 and 3.57. Photographs of rolls from orbit, scaled to rolls as many pixels apart: 0.44 and 3.4 (ISS023-E-10682), 0.21 and 2.7 (ISS-36, whose rolls differ more in width). The upper limit: a wave as even as a grating is near 1."
+  },
+  {
+   "name": "mid-rolls-streets-40km",
+   "q": "weather=altocumulus&date=330&time=15&clock=solar&lat=35&lon=135&alt=40&yaw=140&pitch=-80&heading=49&at=100,60",
+   "reported": "2026-11-27",
+   "wrong": "the altocumulus weather from 40 km was fields of round cells alone: no field of it stood in rolls or streets, as fields of altocumulus do in photographs from aircraft and from orbit",
+   "measures": [
+    {
+     "measure": "rollEven",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 0.2
+    },
+    {
+     "measure": "rollLong",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "min": 2.8
+    }
+   ],
+   "bad": "7b0a747",
+   "note": "The weather as the page draws it (rolls in about half the map's regions, in groups among the cells; streets with clear air between them where the cells stand wide apart). #135 at 7b0a747 (cells alone): rollEven 0.10, rollLong 1.91; with the rolls: 0.29 and 3.34."
+  },
+  {
+   "name": "mid-rolls-lattice-40km",
+   "q": "date=330&time=15&clock=solar&lat=35&lon=135&alt=40&at=19.184,16.539&yaw=49.04&pitch=-31.49&heading=49.23&bank=0&climb=0&cloud=0.02&mid=1&cirrus=0.1&haze=0.9&wind=5&moon=16&quality=high&pixels=wqhd&midrolls=1",
+   "reported": "2026-11-27",
+   "wrong": "the view of mid-lattice-40km with every region in rolls: rolls must not make the layer a lattice or ruled lines to the horizon (waves did: a peak of 49; the noise drawn out one way 35)",
+   "measures": [
+    {
+     "measure": "spectrumPeak",
+     "region": [
+      0.3,
+      0.15,
+      0.35,
+      0.6
+     ],
+     "max": 32
+    }
+   ],
+   "bad": "7b0a747",
+   "note": "The limit of mid-lattice-40km. #135 at 7b0a747 with ?midrolls=1: 35.0; the map of rolls: 29.4 (27.7 in mid-lattice-40km's own view, rolls in half the regions; 26.7 there at 7b0a747). Far off, where the map no longer tells the rolls apart, the cells take over: with rolls to the horizon the groups were bands 32 px apart there, a peak of 39 to 55."
   }
  ]
 }
