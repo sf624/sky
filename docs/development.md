@@ -105,7 +105,7 @@ weather of the list sets it, and these win over the weather):
 | `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
 | `midbase` | 5 to 9 | 5.2 | The layer's base, km |
 | `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
-| `midrolls` | 0 to 1 | 0 | How far the cells stand in ranks of small elements |
+| `midrolls` | 0 to 1 | 0 | How far the cells of the middle clouds are long lumps, not round ones (1: everywhere). A trial: they read as smears, not as rolls |
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
@@ -319,9 +319,9 @@ shows nothing: Microsoft's compiler may fold or flatten a branch after a
 harmless-looking edit, and the frame gets a fifth slower with the same
 picture (see the GLSL rules). Before a pull request that changes what is
 drawn is shown, run `node tools/sky.mjs d3dperf` on the owner's machine
-(WSL with Windows Chrome; it skips elsewhere): six views, the branch
-against `origin/main` in turns, some 7 minutes. Put its last line
-(`d3dperf: 6 views, worst …`) in the pull request's description. A view
+(WSL with Windows Chrome; it skips elsewhere): eight views, the branch
+against `origin/main` in turns, some 10 minutes. Put its last line
+(`d3dperf: 8 views, worst …`) in the pull request's description. A view
 fails above 1.10 times main's frame time, the working limit for one pull
 request; an `undecided` view is not a pass: run it again (`--views`,
 `--rounds`). See

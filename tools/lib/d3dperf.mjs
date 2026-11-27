@@ -16,6 +16,9 @@ export const VIEWS = [
   { name: 'tower', q: 'date=172&time=15&alt=3&at=36.3,58.9&yaw=90&pitch=4&cloud=0.5' },
   { name: 'cirrus', q: 'date=172&time=15&alt=12.5&pitch=0&cirrus=0.8' },
   { name: 'night', q: 'date=180&time=23&moon=14&yaw=-5&pitch=8&cloud=0.3' },
+  // (The middle clouds, whose programs no other view has: from above, and from below, where they fill the picture.)
+  { name: 'altocumulus', q: 'date=172&time=15&cloud=0.1&mid=0.7&midform=1' },
+  { name: 'altocumulus-0.3km', q: 'date=172&time=15&alt=0.3&pitch=30&cloud=0&mid=0.7&midform=1' },
 ];
 export const SPEED = 50;
 // Frames timed in each view, after 10 left out.
