@@ -2208,8 +2208,11 @@ half; 0 none; 1 all.
   and the sea between them).
   - *A sheet from below* is lit through itself alone, as a slab: the sun's
     light by the cosine of its height (0.35 at the least for cells, whose
-    sides a low sun lights; none for a sheet, which however it swells
-    takes no more of a beam than a level plane over it), the sky's light
+    sides a low sun lights; for what goes through a sheet to its base none,
+    since however it swells a sheet takes no more of a beam than a level
+    plane over it; what comes back out of its top, seen from above, keeps
+    `MID_SHEET_SUN` = 0.2: it leaves near where it went in, the swells'
+    faces towards the sun), the sky's light
     on its top once (not `SKYV.x` times), and of both what the sea and the
     low clouds send back up and the sheet down again, each in its own
     colour. What comes through leaves the base brighter straight down
@@ -2222,8 +2225,8 @@ half; 0 none; 1 all.
     degrees up; photographs 0.05 to 0.14), slate blue-grey at sunset with
     a warm glow low towards the sun only (the air under it, lit from the
     sun's side), and darker and grey to blue-grey towards the horizon.
-    - Until #146 the sun's cosine for a sheet was no less than 0.2: with
-      the sun 0 to 3 degrees up the sheet took 4 to 8 times the light the
+    - Until #146 the sun's cosine for a sheet's base was no less than 0.2:
+      with the sun 0 to 3 degrees up the base took 4 to 8 times the light the
       beam brings a level plane, of its red light, and from below was an
       even salmon wall. Light from under the level (a sun just under it at
       the place) lit the base through no cloud at all; it went down
@@ -2266,8 +2269,10 @@ half; 0 none; 1 all.
   hard horizontal bands, 11 to 34 times smaller in height.) Of what the
   layer scatters on, the share that still comes from the light's side
   (`midLight`) is what a slab lets through less what comes straight
-  through, times the light's cosine there: the flux a level plane over it
-  takes of the beam. (Without the cosine, as until #146, the low cumulus
+  through, of a sheet times the light's cosine there: the flux a level
+  plane over it takes of the beam (among cells the light comes forwards
+  through the gaps and thin rims, more than the mean column lets through,
+  and keeps the share whole). (Without the cosine, as until #146, the low cumulus
   under an altostratus with the sun 1.5 degrees up were lit pink, as if
   by the sun through a veil, where under a whole sheet at sunset they are
   dark grey.) The sea reads

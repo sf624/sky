@@ -3678,7 +3678,12 @@ float midShadow(vec3 p, int n, float f) {
 float midLight(vec3 p, float share, int n, float f) {
   if (uMid.x <= 0.0 || length(p) - RG > uMid.z + 0.5 * uMid.w) return 0.0;
   float m, col = midSlant(p, n, f, m), dir = exp(-col / m);
-  return -log(dir + share * m * max(midThrough(col, m) - dir, 0.0));
+  // (Of a sheet, times the light's cosine: what it scatters on is spread out over the sky under it, and a level
+  // plane under it takes no more of it than of the beam over it. Without, as until #146, the low cumulus under an
+  // altostratus with the sun 1.5 degrees up were lit pink, as by the sun through a veil, where under a whole sheet
+  // at sunset they are dark grey. Not among cells: their light comes through the gaps and thin rims forwards, more
+  // than the mean column along the way lets through, and a sun 5 degrees up behind them keeps its golden glow.)
+  return -log(dir + share * mix(1.0, m, 1.0 - uMid.y) * max(midThrough(col, m) - dir, 0.0));
 }
 // What the layer leaves of the sky's light in the air under it (h: the
 // height, km), by its amount, as UNDER does for the low clouds: under a
