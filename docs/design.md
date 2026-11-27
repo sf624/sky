@@ -2567,7 +2567,10 @@ of Nubis, Schneider 2023: it erodes the base shape, wispy at thin rims):
   the fibres: once with cells of 0.32, 0.16 and 0.08 km across (and their
   finer sizes), `CI_FIB_LONG.x` = 12 times as long as wide, and once more
   at an eighth of that, 32 times as long (cells of 40 m down to some 5 m,
-  at 0.35 of the weight). The three channels are weighed 1, 0.8 and 0.6,
+  at 0.3 of the weight). The three channels are weighed 1, 0.7 and 0.45
+  (most of the variance in the broad streaks, the fine strands a minor
+  share: weighed 1, 0.8 and 0.6 with the fine read at 0.35, the thin
+  strands led from just under a sheet),
   each less its mean and over its spread (measured from the texture, the
   constants `CI_FIB_MEAN` and `CI_FIB_STD`). A plane of the noise of its
   own for each deck and patch (below).
@@ -2602,30 +2605,40 @@ of Nubis, Schneider 2023: it erodes the base shape, wispy at thin rims):
   weighs little (`0.05 + max(cos, 0)` of twice the angle between them):
   blended evenly, two sets of fibres crossed as a weave where the flow
   turns sharply.
-- **Variety.** Each patch's fibres curve (by up to 0.03 per km), fan out
-  (by up to 0.1 per km) and wave (by 10 m over 0.9 to 2 km) their own
-  way, each patch is fibrous to its own degree (0.25 to 1.35 of the
-  strength: smooth regions and fibrous ones), and the place read wanders
-  by the noise (by some 30 m over cells of 1.3, 0.6 and 0.3 km, less than
-  would fold the fibres). Straight and alike everywhere, the fibres stood
-  as combed hair; moved by cells of 0.4 km, as marbling seen from just
-  under a deck.
-- **Strength** (in `ciDensity`). The fibres' noise `n` (variance 1 when
-  every size shows) shapes the depth after its floor is taken off, as a
-  factor `exp(b n - b^2 v / 2)`, `v` the variance that the footprint
-  leaves: the depth spreads as cloud depths do (log-normal: gaps and
-  thin places, a few dense filaments), and its mean is 1 at any
-  distance, so that the cirrus keeps its depth and its cover on average
-  as its fibres fade into their mean. `b` is `CI_FIB_B.x` = 1 in thin ice
-  (a rim frays into filaments with gaps between them, a few of which
-  reach past the outline the ice alone drew; thin ice is fibres all
-  through) and falls to `CI_FIB_B.y` = 0.35 in dense cores (from 0.015
-  to 0.23 of ice: soft and milky, with strands and thin places). The
-  veil, the bands' body and the thin veil take `CI_FIB_B.z` = 0.32 (0.21
-  at the top of the slider, where the veil evens out): a milky body with
-  fine streaks. (With 1.2 and 0.6, a deck seen from just under it was all
-  bright hair on dark blue, where a telephoto of cirrus fibratus shows
-  soft streaks.)
+- **Variety.** Each patch's fibres curve (by up to 0.03 per km) and fan
+  out (by up to 0.1 per km) their own way: bends over km, never at a
+  scale near a fibre's width. How fibrous the cirrus is changes from
+  place to place (`ciFibrous`: the noise's B over cells of 1.3 km, with
+  0.6 and 0.3 km on them, 0.45 to 1.4 of the strength), so that some
+  stretches are a nearly smooth veil and others stranded; it is read once
+  a deck and pixel and serves the deck's sheets. Straight and alike
+  everywhere, the fibres stood as combed hair. (Tried and left: a wave of
+  10 m over 1 to 2 km in each patch, and the place read moved by the
+  noise by some 30 m over cells of 0.3 to 1.3 km. The fibres then wiggled
+  in step with their neighbours, strand after strand, with one visible
+  wavelength: hair, kelp or smoke seen from just under a sheet. Moved by
+  cells of 0.4 km: marbling. A strength of each patch's own, 0.25 to
+  1.35, in place of the noise's.)
+- **Strength** (in `ciDensity`, `ciFibShape`). The fibres' noise `n`
+  (variance 1 when every size shows) shapes the depth after its floor is
+  taken off, as a factor of `x = b n`: `exp(x)` below the mean (gaps and
+  thin places, which never end at a hard rim) and `1 + x` above it (a
+  dense strand is only so much denser), over the mean of that for a
+  normal `x` of the spread that the pixel's footprint leaves (`1 + s^2
+  (0.2 - 0.04 s)`, fitted within 1 % up to `s` = 1.4). So the mean is 1
+  at any distance, and the cirrus keeps its depth and its cover on
+  average as its fibres fade into their mean. `b` is `CI_FIB_B.x` = 1 in
+  thin ice (a rim frays into filaments with gaps between them; thin ice
+  is fibres all through) and falls to `CI_FIB_B.y` = 0.35 in dense cores
+  (from 0.015 to 0.23 of ice: soft and milky, with strands and thin
+  places). The veil, the bands' body and the thin veil take `CI_FIB_B.z`
+  = 0.32 (0.21 at the top of the slider, where the veil evens out): a
+  milky body with fine streaks. (The exponent on both sides, a log-normal
+  depth, as at first: its long tail drew a few thin bright threads on a
+  dark sky from just under a thin sheet, where a telephoto of cirrus
+  fibratus shows broad soft streaks of low contrast with finer strands
+  in them. `1 + x` on both sides, cut at 0: dark pits in the forms seen
+  from the ground.)
 - **Where it is read.** Far off, once per deck at the place read, with a
   pixel's footprint; near the eye, at the sheets (above). The second read
   of a long crossing and the depth the light feels have none.
