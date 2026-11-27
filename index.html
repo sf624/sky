@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="e0fe364 main">
+<meta name="build" content="df28a24 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -10008,6 +10008,10 @@ const SkySound = (() => {
       programs.push([prog, shaders]);
       return prog;
     };
+    // For the tools: each program linked so far, by its name, with the
+    // text of its fragment shader as compiled (`node tools/sky.mjs d3d
+    // programs` compiles them alone).
+    window.__programs = () => programs.map(([prog, shaders]) => ({ name: names.get(prog), source: gl.getShaderSource(shaders[1]) }));
     // Throws the compiler's message, or the linker's, if a program failed.
     const check = ([prog, shaders]) => {
       alive();
