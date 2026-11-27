@@ -1415,6 +1415,18 @@
       0.8
      ],
      "min": 0.025
+    },
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0,
+      1,
+      0.8
+     ],
+     "p": 90,
+     "of": "rg",
+     "max": 0.95
     }
    ],
    "bad": "6a93479",
@@ -1959,6 +1971,57 @@
    ],
    "bad": "ca77500",
    "note": "The white mask of the field's body at mid=0.8: 0.870 on main ca77500, 0.810 in the first state of #135 (the sea between the puffs), 0.985 with MID_FLOOR (the seams are thin low cloud, shaded). The measure does not see the rolls or the shade itself."
+  },
+  {
+   "name": "cirrus-shadow-glow-clear-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.5704&yaw=94.9&pitch=12&expo=9.4&cirrus=0",
+   "reported": "2026-11-26",
+   "wrong": "the clear sky of cirrus-shadow-glow-0.3km at the same exposure: what its cirrus is measured against",
+   "measures": []
+  },
+  {
+   "name": "cirrus-shadow-glow-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.5704&yaw=94.9&pitch=12&expo=9.4",
+   "reported": "2026-11-26",
+   "wrong": "cirrus in the Earth's shadow, seen towards the twilight glow with the sun 7 degrees down, paler and lavender against the brighter sky behind it, where photographs show dark grey streaks: the cirrus was lit by the mean light at its height, most of which is the glow on its own horizon",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "region": [
+      0,
+      0.2,
+      1,
+      0.15
+     ],
+     "p": 50,
+     "against": "cirrus-shadow-glow-clear-0.3km",
+     "max": 1.03
+    }
+   ],
+   "bad": "ca77500",
+   "note": "The sky some 10 to 20 degrees over the glow, cirrus against the same view without it: 1.088 on e18ddb1 (85 % of the pixels lighter), 0.986 once the cirrus in the Earth's shadow takes the sky's light through its faces and the glow only through the gaps between its strands (ciSky, ciGlow)."
+  },
+  {
+   "name": "cirrus-lit-sun-4deg-0.3km",
+   "q": "weather=cirrus&date=80&alt=0.3&time=18.3257&yaw=92.8&pitch=40",
+   "reported": "2026-11-27",
+   "wrong": "cirrus towards the sun, 40 degrees up, with the sun 4 degrees down: grey, where photographs a few minutes after sunset show it lit pink and red: the cirrus shared the low clouds' light, which hands over from the sun to the moon between 3 and 4.5 degrees down, and had no refraction",
+   "measures": [
+    {
+     "measure": "brightColour",
+     "region": [
+      0,
+      0,
+      1,
+      0.6
+     ],
+     "p": 90,
+     "of": "rg",
+     "min": 1.4
+    }
+   ],
+   "bad": "e18ddb1",
+   "note": "r/g of the brightest tenth: 1.00 on e18ddb1; 1.60 once the cirrus is lit by the sun wherever its refracted rays reach it, dimmed by their spread."
   }
  ]
 }
