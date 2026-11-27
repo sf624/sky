@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="d2be720 PR #154">
+<meta name="build" content="7d4a62c PR #154">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -5364,18 +5364,18 @@ float ciVeilNoise(vec2 tc, float gl, uint seed) {
 //   place blend, their variance kept (after Heitz and Neyret, 2018), so
 //   that no patch's edge shows. A patch whose way is far from the place's
 //   weighs little: blended evenly, two sets of fibres crossed as a weave.
-// - Each patch's fibres curve, fan out and wave a little their own way,
-//   each patch is fibrous to its own degree (0.25 to 1.35), and the place
-//   read wanders by the noise: alike and straight everywhere, the fibres
-//   stood as combed hair.
+// - Each patch's fibres curve and fan out a little their own way (over
+//   km: never a wiggle at a scale near their width), and how fibrous the
+//   cirrus is changes over 1 to 3 km (0.45 to 1.4 of the strength): alike
+//   and straight everywhere, the fibres stood as combed hair.
 // It gives the noise (x, variance 1 when every size shows; its y is the
 // variance that the footprint leaves), which ciDensity turns into a factor
-// of the depth with the mean 1 whatever the footprint leaves.
+// of the depth with the mean 1 whatever the footprint leaves (ciFibShape).
 const float CI_FIB_P = 16.0;                   // patches to a side of the tile
 const float CI_FIB_KM = 1.28;                  // the noise's tile across the fibres, at the coarse read (km)
 const vec2 CI_FIB_LONG = vec2(12.0, 32.0);     // the cells' length over their width, at the coarse and at the fine read
-const float CI_FIB_FINE = 0.35;                // the fine read's weight
-const vec3 CI_FIB_W = vec3(1.0, 0.8, 0.6);     // the weights of the noise's G, B and A
+const float CI_FIB_FINE = 0.3;                 // the fine read's weight
+const vec3 CI_FIB_W = vec3(1.0, 0.7, 0.45);    // the weights of the noise's G, B and A
 const vec3 CI_FIB_B = vec3(1.0, 0.35, 0.32);   // how strongly the fibres shape thin ice, dense ice and the veil
 // The mean and the spread of the noise's G, B and A (measured: read back
 // from uNoise, each level of its mipmaps), and how much of the spread a
@@ -5389,17 +5389,34 @@ vec3 ciFibKeep(float l) {
 vec2 ciHalf(vec2 d) {
   return vec2(sqrt(max(0.5 + 0.5 * d.x, 0.0)), (d.y < 0.0 ? -1.0 : 1.0) * sqrt(max(0.5 - 0.5 * d.x, 0.0)));
 }
+// The factor the fibres' noise makes of a depth: x, the noise times its
+// strength there, and s, the spread of x that the pixel's footprint leaves.
+// Below the mean the exponent of x (gaps and thin places, never a hole
+// with a hard rim), above it 1 + x (the dense strands only so much
+// denser), over the mean of that for a normal x: 1 at s = 0, 1.16 at 1,
+// 1.27 at 1.4 (fitted within 1 %), so that the depth keeps its mean
+// whatever the footprint leaves. (The exponent on both sides, as at first:
+// its long tail drew a few thin bright threads on a dark sky from just
+// under a sheet. 1 + x on both sides, cut at 0: dark pits in the forms.)
+float ciFibShape(float x, float s) {
+  return (x > 0.0 ? 1.0 + x : exp(x)) / (1.0 + s * s * (0.2 - 0.04 * s));
+}
+// How fibrous the cirrus of deck k is at tc (its tile), seen over a
+// footprint of fp (tile units), 0.45 to 1.4 of the strength: the noise
+// again (its B: cells of 1.3 km, with 0.6 and 0.3 km on them), so that
+// some stretches are a nearly smooth veil and others stranded. (Alike
+// everywhere, the fibres stood as combed hair; by each patch's own number,
+// 0.25 to 1.35, the patches could show.)
+float ciFibrous(vec2 tc, int k, float fp) {
+  float n = textureLod(uNoise, vec3(tc * 4.0, k == 0 ? 0.21 : 0.67), log2(512.0 * max(fp, 1e-7))).b;
+  return mix(0.45, 1.4, smoothstep(-1.0, 0.4, (n - CI_FIB_MEAN.y) / CI_FIB_STD.y));
+}
 // The fibres of deck k at tc (its tile; J: tc over km on the map, see
-// ciPlace), seen over the pixel's footprint h1, h2 (km on the map).
-vec2 ciFibre(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2) {
+// ciPlace), seen over the pixel's footprint h1, h2 (km on the map); st: how
+// fibrous the cirrus is there (ciFibrous).
+vec2 ciFibre(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2, float st) {
 #if Q_FIBRES
   vec2 g1 = J * h1, g2 = J * h2;
-  // The fibres wander: the place is moved by the noise (by some 30 m, its
-  // standard deviation, over cells of 1.3, 0.6 and 0.3 km, less than would
-  // fold them). Straight along the flow, they stood as combed hair; moved
-  // by cells of 0.4 km, as marbling seen from just under a deck.
-  float lw = log2(1024.0 * max(max(length(g1), length(g2)), 1e-7));
-  tc += 0.0007 * (1.0 - smoothstep(3.0, 5.0, lw)) * (textureLod(uNoise, vec3(tc * 8.0, k == 0 ? 0.21 : 0.67), lw).rg - vec2(0.578, 0.4826)) / 0.1;
   vec2 pc = tc * CI_FIB_P, pi = floor(pc), pf = pc - pi;
   int lodA = int(log2(float(textureSize(uIceWay, 0).x) / CI_FIB_P) + 0.5);
   // The way the fibres run at the place, over some 0.45 km (at twice the
@@ -5420,7 +5437,7 @@ vec2 ciFibre(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2) {
   vec3 w2 = CI_FIB_W * CI_FIB_W, k1 = ciFibKeep(l1), k2 = ciFibKeep(l2), wn = CI_FIB_W / CI_FIB_STD;
   float full = (1.0 + CI_FIB_FINE * CI_FIB_FINE) * dot(w2, vec3(1.0));
   float var = dot(w2, k1 * k1) + CI_FIB_FINE * CI_FIB_FINE * dot(w2, k2 * k2);
-  float sum = 0.0, sw = 0.0, sw2 = 0.0, ss = 0.0;
+  float sum = 0.0, sw2 = 0.0;
   // The three patches round the place: the corners of its half of the
   // patch's square. (A loop the compiler unrolls: kept as a loop, CI_N, the
   // frame under a deck took 0.45 ms longer.)
@@ -5443,22 +5460,22 @@ vec2 ciFibre(vec2 tc, mat2 J, int k, vec2 h1, vec2 h2) {
     vec2 r = (pc - cell) / CI_FIB_P;
     float u = (nn.x * r.y - nn.y * r.x) * ICE_KM, v = dot(r, nn) * ICE_KM;
     uint h = ihash(uint(cw.x + 0.5) * 0x9e3779b9u + ihash(uint(cw.y + 0.5) + (k == 0 ? 5100u : 5200u))), h2 = ihash(h);
-    vec4 ra = vec4(float(h & 255u), float((h >> 8u) & 255u), float((h >> 16u) & 255u), float(h >> 24u)) / 255.0;
-    vec4 rb = vec4(float(h2 & 255u), float((h2 >> 8u) & 255u), float((h2 >> 16u) & 255u), float(h2 >> 24u)) / 255.0;
-    // The patch's fibres curve (by up to 0.03 per km), wave (by 10 m over
-    // 0.9 to 2 km) and fan out (by up to 0.1 per km) their own way.
-    v += 0.03 * (2.0 * rb.x - 1.0) * u * u + 0.01 * sin(u * (3.0 + 4.0 * rb.z) + 6.283 * rb.w);
+    vec3 ra = vec3(float(h & 255u), float((h >> 8u) & 255u), float((h >> 16u) & 255u)) / 255.0;
+    vec2 rb = vec2(float(h2 & 255u), float((h2 >> 8u) & 255u)) / 255.0;
+    // The patch's fibres curve (by up to 0.03 per km) and fan out (by up
+    // to 0.1 per km) their own way: bends over km, never at a scale near a
+    // fibre's width. (Waved by a sine of 1 to 2 km, and the place moved by
+    // the noise over cells of 0.3 to 1.3 km, the fibres wiggled in step
+    // with their neighbours, strand after strand: hair, or kelp.)
+    v += 0.03 * (2.0 * rb.x - 1.0) * u * u;
     v *= 1.0 + 0.1 * (2.0 * rb.y - 1.0) * u;
     // (A plane of the noise of its own for each patch and deck.)
     float z = ra.z + (k == 0 ? 0.0 : 0.43);
     vec3 n = (textureLod(uNoise, vec3(u / (CI_FIB_KM * CI_FIB_LONG.x) + ra.x, v / CI_FIB_KM + ra.y, z), l1).gba - CI_FIB_MEAN) * wn;
     if (l2 < 6.0) n += CI_FIB_FINE * (textureLod(uNoise, vec3(8.0 * u / (CI_FIB_KM * CI_FIB_LONG.y) + ra.y, 8.0 * v / CI_FIB_KM + ra.x, z + 0.37), l2).gba - CI_FIB_MEAN) * wn;
     sum += w * (n.x + n.y + n.z);
-    sw += w;
     sw2 += w * w;
-    ss += w * mix(0.25, 1.35, ra.w);
   }
-  float st = ss / sw;
   return vec2(st * sum / sqrt(sw2 * full), st * st * var / full);
 #else
   return vec2(0.0);
@@ -5640,15 +5657,14 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec4 fi
   // How dense the ice is, from 0 to 1, for the fibres' strength.
   float dense = 1.0 - exp(-7.0 * ice);
   // The fibres (ciFibre, read by the caller at the place it chose) shape
-  // the depth: times the exponent of their noise, so that the depth spreads
-  // as cloud depths do (log-normal: gaps and thin places, a few dense
-  // filaments), with the mean 1 for the variance the pixel's footprint
-  // leaves, so that the ice keeps its depth on average at any distance.
+  // the depth (ciFibShape: gaps and thin places below the mean, strands
+  // above it, the mean kept for the variance the pixel's footprint leaves,
+  // so that the ice keeps its depth on average at any distance).
   // Thin ice by CI_FIB_B.x (a rim frays into filaments with gaps between,
   // and thin ice is fibres all through), dense cores by CI_FIB_B.y (soft
   // and milky, with strands and thin places), from 0.015 to 0.23 of ice.
   float fb = mix(CI_FIB_B.x, CI_FIB_B.y, smoothstep(0.1, 0.8, dense));
-  F = exp(fb * fibIn.x - 0.5 * fb * fb * fibIn.y);
+  F = ciFibShape(fb * fibIn.x, fb * sqrt(fibIn.y));
   // The optical depth follows the ice: thin almost everywhere (some 0.05
   // to 0.5 seen straight up), the cores 1 to 2. Little cirrus is the same
   // ice less a floor: the weak tails and the thin edges go first, and
@@ -5709,8 +5725,8 @@ float ciDensity(vec2 x, int k, vec2 f1, vec2 f2, bool fibres, bool lite, vec4 fi
   // The veil, the bands' body and the thin veil take the fibres by
   // CI_FIB_B.z (less as the veil evens out): a milky body with fine
   // streaks. As strongly as the ice, a deck seen from just under it was all
-  // bright hair on dark blue, where photographs show soft streaks.
-  float fv = CI_FIB_B.z * (1.0 - 0.35 * even), Fv = exp(fv * fibIn.x - 0.5 * fv * fv * fibIn.y);
+  // hair, where photographs show soft streaks.
+  float fv = CI_FIB_B.z * (1.0 - 0.35 * even), Fv = ciFibShape(fv * fibIn.x, fv * sqrt(fibIn.y));
   // The veil is thicker and thinner over tens of km (0.55 to 1.45 of its
   // depth, by the noise of where the tails are: thicker round the
   // generating cells): even all over, a deck seen from just under it was a
@@ -5919,6 +5935,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
   // over the map there, for the sheets of the march.
   vec4 tcK0 = vec4(0.0), tcK1 = vec4(0.0);
   mat2 JK0 = mat2(0.0), JK1 = mat2(0.0);
+  vec2 stK = vec2(1.0);          // how fibrous each deck is there (ciFibrous)
   // (A loop the compiler cannot unroll: unrolled, its two copies took
   // Microsoft's compiler, ANGLE on Direct3D 11, half as long again over the
   // cirrus's pass.)
@@ -5957,11 +5974,13 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
     vec2 tcp = ciPlace(p.xz + uDrift, k, Jp);
     // (Where the march near the eye covers the whole deck, the sheets read
     // the fibres, and this read's are not seen.)
-    vec2 hr = wn >= 1.0 && s1 <= tE ? vec2(0.0) : ciFibre(tcp, Jp, k, dn * (pix * t / max(cv, 1e-3)), vec2(-dn.y, dn.x) * (pix * t));
+    // (How fibrous the deck is here is read once, and serves its sheets.)
+    float fst = ciFibrous(tcp, k, length(Jp[0]) * pix * t / max(cv, 1e-3));
+    vec2 hr = wn >= 1.0 && s1 <= tE ? vec2(0.0) : ciFibre(tcp, Jp, k, dn * (pix * t / max(cv, 1e-3)), vec2(-dn.y, dn.x) * (pix * t), fst);
     float rho = ciDensity(p.xz + uDrift, k, f1, f2, true, false, vec4(-1.0), hr), way = (s1 - s0) / th;
     float cBody = ciBody, cVeil = ciVeil, cWide = ciWide, plain = ciPlain / max(rho, 1e-6);
-    if (k == 0) { fieldsK0 = ciFieldsOut; tcK0 = vec4(tcp, p.xz); JK0 = Jp; }
-    else { fieldsK1 = ciFieldsOut; tcK1 = vec4(tcp, p.xz); JK1 = Jp; }
+    if (k == 0) { fieldsK0 = ciFieldsOut; tcK0 = vec4(tcp, p.xz); JK0 = Jp; stK.x = fst; }
+    else { fieldsK1 = ciFieldsOut; tcK1 = vec4(tcp, p.xz); JK1 = Jp; stK.y = fst; }
     // A ray that grazes the deck crosses it over km: one read stood for all
     // of that, while the march near the eye reads it all along, and where
     // the two met, a patch of ice near the eye stood apart from the same
@@ -6051,7 +6070,7 @@ void highCloud(vec3 o, vec3 d, float tmax, out float Th, out float tHigh, out fl
       vec4 tk = k == 0 ? tcK0 : tcK1;
       if (Js[0] == vec2(0.0)) continue;
       vec2 tcs = tk.xy + Js * (ps.xz - tk.zw);
-      vec2 hn = ciFibre(tcs, Js, k, dns * (pix * tsh / max(abs(cs), 1e-3)), vec2(-dns.y, dns.x) * (pix * tsh));
+      vec2 hn = ciFibre(tcs, Js, k, dns * (pix * tsh / max(abs(cs), 1e-3)), vec2(-dns.y, dns.x) * (pix * tsh), stK[k]);
       if (k == 0) { fibS0[n] = hn.x; varS0[n] = hn.y; }
       else { fibS1[n - CI_SHEETS] = hn.x; varS1[n - CI_SHEETS] = hn.y; }
     }
