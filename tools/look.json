@@ -2293,7 +2293,7 @@
     }
    ],
    "bad": "a2ba547",
-   "note": "The detail of 3 to 17 px over the sky: 0.003 on main a2ba547 (satin), 0.041 with the fibres (ciFibre), read with the pixel's footprint at the sheets of the march."
+   "note": "The detail of 3 to 17 px over the sky: 0.003 on main a2ba547 (satin), 0.026 with the fibres (ciFibre; 0.041 in their first round, as thin bright threads), read with the pixel's footprint at the sheets of the march."
   },
   {
    "name": "cirrus-fibres-ground-0.3km",
@@ -2311,7 +2311,7 @@
     }
    ],
    "bad": "a2ba547",
-   "note": "0.011 on main a2ba547, 0.024 with the fibres."
+   "note": "0.011 on main a2ba547, 0.030 with the fibres."
   },
   {
    "name": "cirrus-edge-frays-11km",
@@ -2331,7 +2331,7 @@
     }
    ],
    "bad": "a2ba547",
-   "note": "The outline's length over that of the smoothed picture's: 1.20 on main a2ba547 (a clean envelope), 1.59 with the fibres, which shape thin ice most."
+   "note": "The outline's length over that of the smoothed picture's: 1.20 on main a2ba547 (a clean envelope), 1.79 with the fibres, which shape thin ice most."
   }
  ]
 }

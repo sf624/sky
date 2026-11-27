@@ -583,18 +583,21 @@ runs each in turns with main a2ba547, 2026-11-27):
 
 | View | Pass before | Pass after |
 |---|---|---|
-| Just under the sheet (`alt=11.5&pitch=40&cirrus=0.7&yaw=270`) | 14.5 ms | 16.1 ms (+1.6) |
+| Just under the sheet (`alt=11.5&pitch=40&cirrus=0.7&yaw=270`) | 14.5 ms | 16.0 ms (+1.5) |
 | 11.2 km, up 25 degrees (`date=172&time=11&cloud=0&alt=11.2&cirrus=0.5&yaw=127.5&pitch=25`) | 10.2 ms | 11.4 ms (+1.2) |
 | Inside the shell (`alt=12.5&pitch=10`) | 12.4 ms | 13.6 ms (+1.2) |
 | From the ground (`date=172&time=11&cloud=0&alt=0.3&cirrus=0.6&yaw=127.5&pitch=65`) | 3.7 ms | 4.0 ms (+0.25) |
 | Cruise (the defaults) | 2.3 ms | 2.6 ms (+0.3) |
 
-A read of the fibres is eleven reads of textures: the wander, the way at
-the place, and for each of three patches its anchor's way and the noise
-twice. Far off there is one read a deck; near the eye, one at each of
+A read of the fibres is ten reads of textures: the way at the place, and
+for each of three patches its anchor's way and the noise twice; and once
+a deck, how fibrous the cirrus is there. Far off there is one read a
+deck; near the eye, one at each of
 three sheets a deck (with four sheets, as the hairs had, the first view
 took 0.5 ms more), and the read far off is left out where the march
-covers the deck. The hairs they replace cost 1.55 ms in the first view
+covers the deck. (The first view was measured again after the second
+round of issue #9's fibres, 14.4 and 16.0 ms; the other rows are the
+first round's, which read one texture more a read.) The hairs they replace cost 1.55 ms in the first view
 (mostly their loop over the sheets, which is still there). Tried and
 left: the same noise drawn by `ciNoise` in the shader, seven sizes in
 four patches (the first view took 10.5 ms more: some 0.04 ms for each
