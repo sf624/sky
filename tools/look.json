@@ -2453,7 +2453,7 @@
     }
    ],
    "bad": "393b81c",
-   "fixed": null,
+   "fixed": "269629c",
    "note": "The table of multiple scattering read straight between its columns (2 degrees of the sun apart) held 1.3 to 1.4 times too much light here, and its light was taken as even where it comes level from the glow. The reference (tools/ref): the air under the horizon 1.03 to 1.3 times too bright (green) and up to 1.8 times in the red on 393b81c, 0.9 to 1.16 with the fix. As shown: sky over ground 1.73 on 393b81c, 1.92 fixed. It holds a ratio within one still, so that the exposure and most of the balance cancel."
   },
   {
@@ -2483,7 +2483,7 @@
     }
    ],
    "bad": "393b81c",
-   "fixed": null,
+   "fixed": "269629c",
    "note": "Clear air, so that only the air and the sea are measured. Sky over ground 1.39 on 393b81c, 1.61 fixed; against the reference the air under the horizon 1.4 to 1.5 before, 0.97 to 1.08 now."
   },
   {
@@ -2516,7 +2516,7 @@
     }
    ],
    "bad": "393b81c",
-   "fixed": null,
+   "fixed": "269629c",
    "note": "The sun from 3.5 to 6.5 degrees down in steps of a quarter degree. The table of multiple scattering held up to 1.4 times too much light half way between its columns (2 degrees of the sun apart), so the air's light fell unevenly: the frame's mean rose by 1.3 levels at 4.25 degrees and 1.4 at 6.25 on 393b81c; it falls at every step with the fix."
   }
  ]
