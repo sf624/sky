@@ -9847,11 +9847,14 @@ const SkySound = (() => {
   // sea where it meets it (of any brightness).
   // (lights: the sun's and the moon's directions and strengths, on the air
   // and on the sea; the page's own by default.)
+  // Whether a ray from radius r0 that rises by dy (its unit vector's up)
+  // meets the planet.
+  const meets = (r0, dy) => dy < 0 && (r0 * dy) ** 2 - r0 * r0 + RG * RG >= 0;
   const lightsNow = () => ({ sun: state.sun, sunOn: state.sunOn, moon: state.moon, moonAir: state.moonI * moonAirFor(), moonI: state.moonI });
   function litBy(alt, dx, dy, dz, day, out, level, lights = lightsNow()) {
     const r0 = RG + alt, b = r0 * dy, s = lights.sun, m = lights.moon;
     const sun = lights.sunOn, moon = lights.moonAir;
-    const dg = b * b - r0 * r0 + RG * RG, hit = dy < 0 && dg >= 0;
+    const dg = b * b - r0 * r0 + RG * RG, hit = meets(r0, dy);
     const T = hit ? -b - Math.sqrt(dg) : -b + Math.sqrt(b * b - r0 * r0 + RT * RT);
     const nuS = dx * s[0] + dy * s[1] + dz * s[2], nuM = dx * m[0] + dy * m[1] + dz * m[2];
     const pS = [phaseR(nuS), phaseM(nuS), phaseUp(nuS)], pM = [phaseR(nuM), phaseM(nuM), phaseUp(nuM)];
@@ -11616,13 +11619,19 @@ const SkySound = (() => {
     const litAir = new Float64Array(METER[0] * METER[1] * 3), litOut = [0, 0, 0];
     const litLevel = new Float64Array(METER[0] * METER[1] * 3), levelOut = [0, 0, 0];
     const litHit = new Uint8Array(METER[0] * METER[1]);
-    let litDay = null, litDayHaze = null;
+    let litDay = null, litDayHaze = null, weighed = null;
     const weigh = p => {
       const v = view(), c = cameraOf(v), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
       if (litDayHaze !== builtHaze) {
         litDay = dayLights();
         litDayHaze = builtHaze;
       }
+      // All of it hangs on the view, the lights and the eye's height only:
+      // the same in straight flight and at rest, where it is not done again.
+      const key = [...c, t, a, ...s, state.sunOn, ...state.moon, state.moonI, state.alt, state.haze, builtHaze].join();
+      if (key === weighed) return;
+      weighed = key;
+      const r0 = RG + state.alt;
       for (let j = 0, i = 0; j < METER[1]; j++) {
         for (let k = 0; k < METER[0]; k++, i++) {
           const x = ((k + 0.5) / METER[0] * 2 - 1) * a * t, y = ((j + 0.5) / METER[1] * 2 - 1) * t;
@@ -11630,8 +11639,19 @@ const SkySound = (() => {
           const deg = Math.acos(Math.min(1, (dx * s[0] + dy * s[1] + dz * s[2]) / Math.hypot(dx, dy, dz))) / RAD;
           near[i] = Math.log2(SUN_SHARE + (1 - SUN_SHARE) * smooth01((deg - SUN_NEAR[0]) / (SUN_NEAR[1] - SUN_NEAR[0])));
           below[i] = smooth01((TOPS_SPAN - Math.asin(dy / Math.hypot(dx, dy, dz)) / RAD) / (2 * TOPS_SPAN));
-          const n = Math.hypot(dx, dy, dz);
-          litHit[i] = litBy(state.alt, dx / n, dy / n, dz / n, litDay, litOut, levelOut) ? 1 : 0;
+          // The light is followed for one block of each two by two, and
+          // taken for the other three from it, but where the horizon runs
+          // between them: some 4 ms a reading on the test machine, where
+          // every block took 8.
+          const n = Math.hypot(dx, dy, dz), up = dy / n, from = (j & ~1) * METER[0] + (k & ~1);
+          const hit = meets(r0, up) ? 1 : 0;
+          if (from !== i && litHit[from] === hit) {
+            litHit[i] = hit;
+            litAir.copyWithin(3 * i, 3 * from, 3 * from + 3);
+            litLevel.copyWithin(3 * i, 3 * from, 3 * from + 3);
+            continue;
+          }
+          litHit[i] = litBy(state.alt, dx / n, up, dz / n, litDay, litOut, levelOut) ? 1 : 0;
           litAir.set(litOut, 3 * i);
           if (litHit[i]) litLevel.set(levelOut, 3 * i);
         }
