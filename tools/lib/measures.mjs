@@ -290,6 +290,54 @@ export function spectrumPeak(img, { region: box, n, pmin = 6, pmax = 40, k = 4 }
   return best;
 }
 
+// Rolls in a window, from its autocorrelation along each of 36 directions:
+//  - even: the autocorrelation at its first peak after its first trough (the largest within three times the
+//    trough's lag; less the trough where that is over 0), along the direction where this is largest: across the
+//    rolls, how well a roll's neighbour, one distance on, repeats it. Rolls packed side by side at one distance
+//    near 1; with their distances spread by a share c about exp(-2 pi^2 c^2) of that (0.8 at 0.1, 0.45 at 0.2,
+//    0.17 at 0.3); long lumps that begin and end anywhere, with no distance of their own, near 0.
+//  - long: how far the autocorrelation stays over 0.3 at right angles to that direction (along the rolls), over
+//    how far along it. Without a peak, the direction is the one where the autocorrelation falls fastest. Round
+//    cells about 1; rolls, and noise drawn out one way, 3 and more.
+//  - period: the lag of the peak, px (0 if there is none).
+function rollsIn(acf, n) {
+  const reach = n / 2 - 1;
+  // (The autocorrelation between whole lags.)
+  const at2 = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+    return acf(xi, yi) * (1 - fx) * (1 - fy) + acf(xi + 1, yi) * fx * (1 - fy) + acf(xi, yi + 1) * (1 - fx) * fy + acf(xi + 1, yi + 1) * fx * fy;
+  };
+  const dirs = Array.from({ length: 36 }, (_, k) => {
+    const a = k * Math.PI / 36, g = (s) => at2(s * Math.cos(a), s * Math.sin(a));
+    let falls = reach;
+    for (let s = 0.5; s <= reach; s += 0.5) if (g(s) < 0.3) { falls = s; break; }
+    let s = Math.ceil(falls);
+    while (s < reach && g(s + 1) < g(s)) s++;
+    const trough = s;
+    let peak = s;
+    for (let t = s + 1; t <= Math.min(reach, 3 * trough); t++) if (g(t) > g(peak)) peak = t;
+    // (A peak at the end of the reach is the way up to one further on, not a peak.)
+    const even = peak > trough && peak < Math.min(reach, 3 * trough) ? Math.max(0, g(peak) - Math.max(g(trough), 0)) : 0;
+    return { falls, even, period: even > 0 ? peak : 0 };
+  });
+  let across = 0;
+  for (let k = 1; k < 36; k++) {
+    const d = dirs[k], b = dirs[across];
+    if (d.even > b.even || (d.even === b.even && d.falls < b.falls)) across = k;
+  }
+  return { long: dirs[(across + 18) % 36].falls / dirs[across].falls, even: dirs[across].even, period: dirs[across].period };
+}
+// rollEven, rollLong: over windows of the region (as regularity's), the mean of the upper quarter of the
+// windows' values: a field of rolls in a quarter of the view is enough, and one window's chance is not.
+function rolls(img, { region: box, n } = {}, of) {
+  const R = region(img, box);
+  n = n || Math.min(128, pow2(Math.min(R.w, R.h) / 1.5));
+  const v = windows(R, n).map(([x, y]) => rollsIn(autocorrelation(detrend(R, x, y, n), n), n)[of]).sort((a, b) => b - a);
+  return mean(v.slice(0, Math.max(1, Math.round(v.length / 4))));
+}
+export const rollEven = (img, opt = {}) => rolls(img, opt, 'even');
+export const rollLong = (img, opt = {}) => rolls(img, opt, 'long');
+
 // detailScale: the typical size of the detail, as a share of the picture's width: over windows of the region,
 // the median of the lag (px) at which the radial mean of the autocorrelation first falls below 0.5, divided by
 // the picture's width. Larger blobs, smoother clouds: larger.
@@ -656,4 +704,4 @@ export function fringe(img, { region: box, k = 10, t = 25, white = 235 } = {}) {
   return part / Math.max(nw, 1);
 }
 
-export const MEASURES = { lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe };
+export const MEASURES = { lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe, rollEven, rollLong };

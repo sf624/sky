@@ -44,6 +44,19 @@ test('spectrumPeak: a tile of noise shown again and again scores high, the noise
   assert.ok(f < 30, `noise ${f}`);
 });
 
+test('rollEven and rollLong: rolls side by side score high on both, noise drawn out one way on length alone, a lattice on evenness alone', () => {
+  // Rolls 12 px apart that bend, their distances spread a little; long lumps of noise, six times as long as wide;
+  // round dots on a lattice; and the noise itself.
+  const n = noise(9);
+  const bent = pic(W, H, (x, y) => 150 + 70 * Math.sin((y + 6 * Math.sin(x / 50) + 14 * (n(x / 3, y / 3) - 0.5)) * 2 * Math.PI / 12 + x / 60));
+  const smears = pic(W, H, (x, y) => 120 + 500 * (n(x * 2, y * 12) - 0.5));
+  const e = [bent, smears, lattice, natural].map((p) => M.rollEven(p)), l = [bent, smears, lattice, natural].map((p) => M.rollLong(p));
+  assert.ok(e[0] > 0.6 && l[0] > 5, `rolls ${e[0]} ${l[0]}`);
+  assert.ok(e[1] < 0.25 && l[1] > 2.8, `smears ${e[1]} ${l[1]}`);
+  assert.ok(e[2] > 0.6 && l[2] < 1.5, `lattice ${e[2]} ${l[2]}`);
+  assert.ok(e[3] < 0.3 && l[3] < 3, `noise ${e[3]} ${l[3]}`);
+});
+
 test('specksCv: equal dots give a small spread of sizes, dots of every size a large one', () => {
   const equal = pic(W, H, (x, y) => (Math.hypot((x % 16) - 8, (y % 16) - 8) < 3 ? 60 : 200));
   let s = 7;

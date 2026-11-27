@@ -105,7 +105,7 @@ weather of the list sets it, and these win over the weather):
 | `midform` | 0 to 1 | 1 | 0 a sheet (altostratus), 1 cells (altocumulus); between them both, each by its share |
 | `midbase` | 5 to 9 | 5.2 | The layer's base, km |
 | `middepth` | 0.1 to 2.5 | 1.2 - 0.8 `midform` | The layer's depth, km |
-| `midrolls` | 0 to 1 | 0 | How far the cells of the middle clouds are long lumps, not round ones (1: everywhere). A trial: they read as smears, not as rolls |
+| `midrolls` | 0 to 1 | 0.5 | How many of the map's regions stand in rolls (altocumulus undulatus, streets): 0 none (cells alone), 0.5 about half, 1 all |
 
 The page keeps seven choices in `localStorage`: `sky.pixels` (the drawing
 limit), `sky.quality` (the quality level chosen in the panel; none when
@@ -170,8 +170,8 @@ same commands to WebGL. For example
 **The look invariants.** `node tools/sky.mjs look` renders the views of
 the flaws the owner reported (`tools/look.json`), one still each, and
 measures each against absolute limits. No base is needed, so a flaw
-that was merged once is still flagged afterwards. It takes about a
-minute and a half on the GPU. Run it before pushing any change of
+that was merged once is still flagged afterwards. It takes some 20
+minutes on the GPU. Run it before pushing any change of
 `index.html`, and put its lines (`PASS`, `FAIL`, `KNOWN`) and its last
 line (`look: 9 PASS, 5 KNOWN, 0 FAIL at <commit>`) in the pull
 request's description. `check` runs it first. A pull request that
@@ -663,8 +663,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
     `MIE_EXT`, `MIE_PHASE`, `MIE_G_UP`, `NMU`, `NH`, `MS_MU_MIN`, `GRID`, `SLOTS`,
     `LN_FLUX_MAX`, `WEATHER_KM`, and `ISUN` (20, also in the JS's
     earthshine). `RG` is also in the `mean` shader.
-  - The integer hash `ihash` (lowbias32): in the `noise`, `ice`, `waves`
-    and `fs` shaders.
+  - The integer hash `ihash` (lowbias32): in the `noise`, `rolls`, `ice`,
+    `waves` and `fs` shaders.
+  - The map of the rolls: eight texels to a roll (`IH2`, `IH6` in the
+    `rolls` shader; `ROLL_TEXEL` in the JS, from which `fs` gets
+    `Q_ROLL_KM`, 128 at `max`); its channels (`ROLL_MAP` in the `rolls`
+    shader, `midCells` in `fs`). The pattern's numbers are the JS's alone
+    (`ROLL`, the shader's `uRoll`).
   - The layout of the cirrus's textures (the ice's four kinds in RGBA;
     the way as the gradient at twice its angle, and the ice's mean age
     with its weight; the map's channels):
