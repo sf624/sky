@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="a2ba547 main">
+<meta name="build" content="3678899 main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -828,6 +828,130 @@ void main() {
     outColor = vec4(amount, depth, gusts, rise);
   }
 }
+</script>
+
+<script id="rolls" type="x-shader/x-fragment">
+#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+// Bakes the map of the middle clouds' rolls (uRolls in fs, see midCells), once, when middle clouds are first shown:
+// a pattern of convection rolls, grown from noise by the Swift-Hohenberg equation, the standard model of them,
+//   du/dt = eps u - (q^2 + lap)^2 u + ROLL_WIND div(w w^T grad u) - u^3,
+// in units where the rolls' wavenumber is 1 on the mean and a texel is 2 pi / 8: eight texels to a roll. Its rolls
+// are packed side by side at an even distance, bend, fork and end, and are no lattice: there is no period in it but
+// the map's own. The term with w, a direction, lays them along it (without it: a labyrinth). eps says where rolls
+// grow (over 0) and how strong they are; q is the wavenumber there.
+// In real space on the map's texels, which wrap (reads at whole texels, wrapped by hand): the nine-point Laplacian,
+// and the steps of RKL1, Legendre super-time-stepping (Meyer, Balsara and Aslam 2012): ROLL_STAGES stages a step,
+// each the right-hand side once, reach as far as (s^2 + s) / 2 explicit steps. A stage is two draws: the Laplacian of
+// the last stage (ROLL_LAP), then the right-hand side, which takes the Laplacian of that again, and the stage's sum
+// (ROLL_STAGE). The page's rollParts makes the draws; the numbers that both need are named alike there.
+// One of the defines says which draw this is:
+//  - ROLL_FIELDS: eps, w and q^2 at each texel;
+//  - ROLL_SEED: the noise the pattern grows from (a stripe as a seed stays a perfect grating);
+//  - ROLL_LAP, ROLL_STAGE: a stage;
+//  - ROLL_MAP: the map that fs reads, from the last stage and the fields.
+uniform int uMask;            // the map's size less 1 (a power of two)
+uniform sampler2D uY, uY2;    // the last stage and the one before
+uniform sampler2D uL;         // the Laplacian of the last stage
+uniform sampler2D uP;         // the fields
+uniform vec3 uStage;          // the stage's weights: of the last stage, of the one before, of the right-hand side
+out vec4 outColor;
+
+const float TAU = 6.28318530718;
+// (A texel, 2 pi / 8: 1 / h^2 and 1 / (6 h^2).)
+const float IH2 = 1.62113894, IH6 = 0.27018982;
+// The pattern's numbers (ROLL in the page, which needs them for the steps' length): how much the direction counts,
+// eps on the mean, and how far it and the wavenumber swing about their means (as shares).
+uniform vec4 uRoll;
+#define ROLL_WIND uRoll.x
+// (The amplitude of the rolls of a field: 2 sqrt(eps / 3).)
+#define ROLL_AMP (2.0 * sqrt(uRoll.y / 3.0))
+
+float at(sampler2D t, ivec2 p) { return texelFetch(t, p & ivec2(uMask), 0).r; }
+
+#if defined(ROLL_FIELDS)
+// A smooth field that repeats with the map: six waves, each a whole number of times across it (k), -1 to 1.
+float waves(vec2 x, vec4 k0, vec4 k1, vec4 k2, vec3 ph0, vec3 ph1) {
+  float n = cos(TAU * dot(x, k0.xy) + ph0.x) + cos(TAU * dot(x, k0.zw) + ph0.y) + cos(TAU * dot(x, k1.xy) + ph0.z)
+          + cos(TAU * dot(x, k1.zw) + ph1.x) + cos(TAU * dot(x, k2.xy) + ph1.y) + cos(TAU * dot(x, k2.zw) + ph1.z);
+  return clamp(n / 2.2, -1.0, 1.0);
+}
+void main() {
+  vec2 x = floor(gl_FragCoord.xy) / float(uMask + 1);
+  // The rolls' direction: it swings by some 45 degrees each way across the map, by 20 more over some 30 km and by
+  // 11 over some 15 km: the rolls bend, and where they cannot follow, they fork and end. (With the slow swing
+  // alone: a fingerprint. With twice the faster ones: whorls.)
+  float th = 0.3 + 0.5 * sin(TAU * x.x) + 0.25 * sin(TAU * x.y + 1.0)
+           + 0.2 * (sin(TAU * (3.0 * x.x - 2.0 * x.y) + 2.0) + 0.7 * sin(TAU * (2.0 * x.x + 5.0 * x.y) + 0.5))
+           + 0.1 * (sin(TAU * (7.0 * x.x + 4.0 * x.y) + 4.0) + sin(TAU * (5.0 * x.x - 8.0 * x.y) + 1.3));
+  // Stronger and fainter rolls, over some 15 km, and rolls everywhere: where there are none in the layer, fs says
+  // (midCells). (Fields of rolls in the pattern itself, with eps under 0 between them, were ringed by their rolls:
+  // rolls lie along an edge of eps, and from 40 km each field was a whorl.)
+  float eps = uRoll.y * (1.0 + uRoll.z * waves(x, vec4(3.0, 1.0, -2.0, 3.0), vec4(1.0, -4.0, 4.0, 2.0), vec4(-3.0, -3.0, 5.0, -1.0), vec3(0.3, 1.7, 4.1), vec3(2.9, 5.3, 0.9)));
+  // The wavenumber, wider and narrower rolls over some 4 km. (All of one width, the map was as even as a
+  // fingerprint; a swing of 0.2 over some 10 km spreads the distances between them three times as far, and they
+  // stay packed.)
+  float q = 1.0 + uRoll.w * waves(x, vec4(8.0, 12.0, -16.0, 4.0), vec4(12.0, -12.0, 4.0, 20.0), vec4(-20.0, -8.0, 16.0, 16.0), vec3(1.1, 2.3, 3.7), vec3(0.2, 4.4, 5.9));
+  outColor = vec4(eps, cos(th), sin(th), q * q);
+}
+#elif defined(ROLL_SEED)
+// (lowbias32, as in the other shaders.)
+uint ihash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+float unit(uint h) { return (float(h >> 8u) + 0.5) / 16777216.0; }
+// White noise, a normal deviate of 0.01 a texel (Box and Muller's, from two words of the hash).
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  uint i = uint(p.x) + uint(p.y) * uint(uMask + 1);
+  float u1 = unit(ihash(i * 2u + 0x9e3779b9u)), u2 = unit(ihash(i * 2u + 1u + 0x9e3779b9u));
+  outColor = vec4(0.01 * sqrt(-2.0 * log(u1)) * cos(TAU * u2), 0.0, 0.0, 1.0);
+}
+#elif defined(ROLL_LAP) || defined(ROLL_STAGE)
+float lap9(sampler2D t, ivec2 p, float c) {
+  float e = at(t, p + ivec2(1, 0)) + at(t, p + ivec2(-1, 0)) + at(t, p + ivec2(0, 1)) + at(t, p + ivec2(0, -1));
+  float d = at(t, p + ivec2(1, 1)) + at(t, p + ivec2(-1, 1)) + at(t, p + ivec2(1, -1)) + at(t, p + ivec2(-1, -1));
+  return (4.0 * e + d - 20.0 * c) * IH6;
+}
+#if defined(ROLL_LAP)
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  outColor = vec4(lap9(uY, p, at(uY, p)), 0.0, 0.0, 1.0);
+}
+#else
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float y = at(uY, p);
+  float uxx = (at(uY, p + ivec2(1, 0)) + at(uY, p + ivec2(-1, 0)) - 2.0 * y) * IH2, uyy = (at(uY, p + ivec2(0, 1)) + at(uY, p + ivec2(0, -1)) - 2.0 * y) * IH2;
+  float uxy = (at(uY, p + ivec2(1, 1)) - at(uY, p + ivec2(-1, 1)) - at(uY, p + ivec2(1, -1)) + at(uY, p + ivec2(-1, -1))) * (0.25 * IH2);
+  float l1 = at(uL, p), l2 = lap9(uL, p, l1);
+  vec4 f = texelFetch(uP, p, 0);
+  float rhs = f.x * y - (f.w * f.w * y + 2.0 * f.w * l1 + l2) - y * y * y + ROLL_WIND * (f.y * f.y * uxx + f.z * f.z * uyy + 2.0 * f.y * f.z * uxy);
+  outColor = vec4(uStage.x * y + uStage.y * at(uY2, p) + uStage.z * rhs, 0.0, 0.0, 1.0);
+}
+#endif
+#elif defined(ROLL_MAP)
+// The map: r, the pattern over the amplitude of a full field, about -1 in a trough to 1 on a crest; g, how strong
+// the rolls are at the place, 0 to about 1: the pattern's envelope, sqrt(u^2 + (grad u / q)^2) over that amplitude
+// (a wave's own amplitude wherever on it the place lies; nought where rolls end, between two fields and at a fork's
+// middle). fs lays the height's profile over r, so that the map's own filter and its mipmaps smooth the pattern, not
+// the profile's narrow seams.
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float y = at(uY, p), q2 = texelFetch(uP, p, 0).w;
+  // (The central difference of a wave of eight texels is 0.9 of its slope.)
+  vec2 g = vec2(at(uY, p + ivec2(1, 0)) - at(uY, p + ivec2(-1, 0)), at(uY, p + ivec2(0, 1)) - at(uY, p + ivec2(0, -1))) * (0.5 * sqrt(IH2) / 0.9);
+  outColor = vec4(y / ROLL_AMP, sqrt(y * y + dot(g, g) / q2) / ROLL_AMP, 0.0, 1.0);
+}
+#endif
 </script>
 
 <script id="ice" type="x-shader/x-fragment">
@@ -3110,6 +3234,14 @@ float mapDepth(highp sampler2DArray map, vec3 ax, vec3 ay, vec2 shift[4], vec3 p
 // its share), its base and its depth (km).
 uniform vec4 uMid;
 uniform float uMidRolls;
+// The map of the rolls (the shader "rolls" draws it once, see rollParts in the JS): ROLL_KM wide, a whole share of
+// the weather map, 125 m a texel. r: the pattern of the rolls, about -1 in a trough to 1 on a crest, a roll every
+// kilometre (0.75 to 1.4 km); g: how strong the rolls are at the place, 0 (none) to about 1.
+uniform sampler2D uRolls;
+#ifndef Q_ROLL_KM
+#define Q_ROLL_KM 128.0
+#endif
+const float ROLL_KM = Q_ROLL_KM;
 // Its depth straight up over each place is layer 4 of uShadow (on a level
 // plane through the eye, warped as the others; see MID_MAP and midColumn),
 // read where things were when it was drawn.
@@ -3179,15 +3311,17 @@ const vec3 MID_PACK = vec3(4.0, 0.3, 1.0);
 //    between the cells and the troughs between the rolls are thin low cloud, not clear air, and the field is a deck with
 //    relief: from above, tops with shaded seams, where it was dots on the sea; from below, grey cells in a pale sheet
 //    that lets the blue through only in places. MID_FLOOR_MORE: x, how much of the lumps and the fine noise counts on
-//    a floor (whole, they cut it into crumbs); y, how much lower the floor is among rolls (dark troughs between
-//    them from above); z, how much higher at the top of the slider.
+//    a floor (whole, they cut it into crumbs; they count whole again on a roll's crest, well over the floor: a roll
+//    has no outline in the map's noise as a cell has, and without them it was a smooth bar); y, how much lower the
+//    floor is among rolls (dark troughs between them from above; none where the rolls are streets, MID_ROLL_OPEN);
+//    z, how much higher at the top of the slider.
 //    MID_LESS: with the floor a field's body is whole, where it was two thirds cells and a third gaps, so the same
 //    amount covered half as much again (0.53 of the view straight down from 40 km at the altocumulus weather's 0.55,
 //    main 0.34). The fields' edge takes the amount as that much less, up to 0.6, and the whole of it from 0.9: the
 //    weather keeps its sky between the fields, and the top of the slider its closed deck.
 const vec4 MID_FLOOR = vec4(0.6, 0.9, -0.2, 0.5);
 const float MID_LESS = 0.18;
-const vec3 MID_FLOOR_MORE = vec3(0.35, 0.25, 0.3);
+const vec3 MID_FLOOR_MORE = vec3(0.35, 0.4, 0.3);
 const vec2 MID_SEAM = vec2(0.35, 0.3);
 //  - MID_FRINGE: a field's fringe. Further than x under the field's threshold the cells shrink y times as slowly with
 //    the map: a margin some kilometres wide of cells ever smaller, lower, thinner and further apart, not a coastline
@@ -3205,25 +3339,48 @@ const vec4 MID_SHUT = vec4(0.7, 0.25, 1.0, 0.5);
 // (In a field's body the seams are not clear air but thin low cloud: MID_FLOOR.)
 const vec4 MID_CELL = vec4(0.39, 0.2, 0.8, 0.6);
 const float MID_RAG = 1.2;
-// Rolls, by ?midrolls alone (0 at first; 1: rolls, between them a mix of both heights): the field is rolls, not
-// cells: there the cells' height is read from the noise on a second cut (MID_ROLL_X, MID_ROLL_Z: whole numbers over the
-// map's 256 km, as MID_CUT_X), 5.8 times as long one way as the other, so its Worley cells are 0.5 and 1.1 km wide and
-// 3 to 6 km long: long lumps side by side that begin, end, fork and join, bent with the place in the noise (the map
-// moves it by up to 2 km over some 4 km). MID_ROLL: the noise less x, over y (less steep than a cell: a roll's sides
-// are thin; and by MID_ROLL_SOFT its heap is soft-edged from above too, where a cell's is crisp), z times the cells'
-// own noise (lumps along a roll), and w: how much of what widens and narrows the cells of a field counts in a roll.
-// Not in the page's own picture: the long lumps read as smears, not as rolls side by side at an even distance,
-// which stretched noise cannot give (regions of them stood in the fields until #135's last state; they are to be
-// made anew). At 0 the branch costs nothing on Direct3D 11 (0.997 and 1.001 of the frame without it).
-// (Tried before, each a wave: on the threshold as ?midrolls had it, 300 and 420 m straight across the whole map, ruled
-// rows; one that the cells only roughened, bent by the map alone, a corduroy of straight stripes; two added to round
-// cells' heights, in #135's first state, short ranks of dots from above with no cell joined to the next; and one
-// across these rolls, of 0.65 and 1.5 km, bent by the noise, which kept them at an even distance: where it counted
-// 0.85, the rolls of a region were as even as ripples in sand, a peak of 49 in the spectrum from 40 km (34 at 0.4);
-// where it counted 0.3 and less, it changed nothing that could be seen or measured (24 with it and without).)
-const vec3 MID_ROLL_X = vec3(25.0, -17.0, -1.0) / 256.0, MID_ROLL_Z = vec3(-42.0, 21.0, 20.0) / 256.0;
-const vec4 MID_ROLL = vec4(0.42, 0.25, 0.9, 0.3);
-const float MID_ROLL_SOFT = 0.8;
+// Rolls (altocumulus undulatus, cloud streets): in regions of the map the cells stand in rolls side by side, a
+// kilometre apart, that bend, fork and end. Their pattern is a map of its own (uRolls: grown once from noise by the
+// equation of convection rolls, see the shader "rolls"), not the noise: rolls at an even distance that are no
+// lattice need a pattern that has settled into them. The map gives the height across a roll, and the cells ride
+// along it: a roll is a row of lumps run together, with a seam to the next. Cover stays with the weather map.
+//  - MID_ROLL_IN: where. The map's regions (its R less its G elsewhere, over some 10 km, times z) against the
+//    layer's rolls (uMidRolls, ?midrolls: 0 none, 0.5 about half the regions, 1 all; w): rolls from x to y. And
+//    MID_ROLL_AMP: only where the pattern is strong (its envelope from x to y; it is nought at a fork's middle
+//    and where a roll ends), so a region of rolls fades into cells over a few kilometres, with no edge.
+//  - The height across a roll: the pattern over its envelope (no less than MID_ROLL_AMP.z: faint rolls stay low),
+//    as pow(0.5 + 0.5 u, MID_ROLL_SEAM): rounded tops and seams, wide valleys where the cells of a region stand
+//    wide apart (x) to narrow seams where they stand close (y). MID_ROLL: x the height in a seam, y a
+//    crest's over it (in the units of a cell's height over the field's threshold, see MID_CELL), z how much of a
+//    crest the lumps along it take (the noise's cells of 540 m, 270 m and 1.1 km: a roll is lumpy, and broken
+//    where they are low), w how much of what widens and narrows the cells of a field counts in a roll.
+//    MID_ROLL_LUMP: x, the cells of 540 m lead no less than this in a roll (a lump is about as long as the roll
+//    is wide); y, the height the finest cells add, crumbs on the crest and in the seam.
+//  - MID_ROLL_BEND: the place in the pattern moves with the map (x of the cells' own move, up to 0.8 km over some
+//    4 km: wider and narrower rolls) and with the noise (y km over a kilometre: seams that waver).
+//  - MID_ROLL_SLIT: a region's rolls stand in groups some 5 km across (the map's gusts over 4 km and z of the
+//    noise, from x to y), with the field's cells between the groups. So from far above a region is groups of
+//    rolls among cells, not lines ruled across it from end to end: with rolls all over it, a region from 40 km
+//    read as a fingerprint. (Between the groups the rolls first ran together into one deck, a crest's height
+//    everywhere: seen from just over it, a white plain without relief where the cells of #135 had stood.)
+//  - MID_ROLL_FAR: where the map no longer tells the rolls apart (the level of detail from x to y: a texel of
+//    the map of 250 to 700 m), the cells take over again. The rolls' mean height is not the cells', and far off
+//    the groups were bands of lighter and darker deck at the gusts' own distance, 32 px apart in the view of
+//    mid-lattice-40km (a peak of 39 to 55 in its spectrum; 28 to 29 with this, 27 without rolls).
+//  - MID_ROLL_OPEN: where the cells of a region stand wide apart (pack under y to z) and the amount is under
+//    MID_ROLL_SHUT (x to y), the seams are x lower and there is no floor under them (see MID_FLOOR): streets of
+//    cloud with clear air between them, blue gaps from below. Elsewhere the seams are thin low cloud: grey
+//    troughs from above, bright slits between grey rolls from below.
+// At ?midrolls=0 the branch costs nothing and the layer is cells alone.
+// (Tried before: waves on the threshold or the height, ruled rows, a corduroy, or as even as ripples in sand, a peak
+// of 49 in the spectrum from 40 km; and until #135 the noise read 5.8 times as long one way as the other, long lumps
+// that began and ended anywhere: smears, not rolls at a distance of their own.)
+const vec4 MID_ROLL = vec4(-0.6, 3.0, 0.5, 0.3);
+const vec4 MID_ROLL_IN = vec4(-0.15, 0.15, 1.6, 1.4);
+const vec3 MID_ROLL_AMP = vec3(0.15, 0.7, 0.45);
+const vec2 MID_ROLL_SEAM = vec2(0.6, 0.35), MID_ROLL_BEND = vec2(0.4, 0.5), MID_ROLL_LUMP = vec2(0.7, 0.6), MID_ROLL_SHUT = vec2(0.55, 0.75);
+const vec2 MID_ROLL_FAR = vec2(1.0, 2.5);
+const vec3 MID_ROLL_SLIT = vec3(0.38, 0.52, 0.3), MID_ROLL_OPEN = vec3(0.8, 0.3, 0.6);
 // How much greyer the pass shades a cell than its optical depth alone would (x, see midClouds), and how much the map's
 // detail (what makes the fields' bodies and margins) deepens or thins the cells' columns for that (y): the body of a
 // field is grey from below over kilometres, its margins white.
@@ -3291,11 +3448,19 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   // (By degrees: where the one size gave way to the other within a kilometre or two, a line crossed the field.)
   float coarse = smoothstep(0.3, 0.7, wq.g), lead = clamp(coarse + 1.2 * (wm.b - 0.5), 0.0, 1.0);
   float e = mix((n.a - MID_CELL.x) / MID_CELL.y + MID_CELL.z * (n.b - 0.5), (n.b - MID_CELL.x) / MID_CELL.y + 0.5 * MID_CELL.z * (n.a - 0.5), lead);
-  // Rolls (MID_ROLL_X).
-  float rk = clamp(uMidRolls, 0.0, 1.0);
-  if (rk > 0.0) {
-    vec4 m = textureLod(uNoise, xs.x * MID_ROLL_X + xs.y * MID_ROLL_Z + cut * MID_CUT_UP + vec3(0.58, 0.17, 0.94), max(lod + 0.58, 0.0));
-    float er = (mix(m.b, m.g, lead) - MID_ROLL.x) / MID_ROLL.y + MID_ROLL.z * (n.a - 0.5);
+  // Rolls (uRolls, MID_ROLL and the others). rk: how far the place is in a roll; open: streets with clear air
+  // between them.
+  float rk = 0.0, open = (1.0 - smoothstep(MID_ROLL_OPEN.y, MID_ROLL_OPEN.z, pack)) * (1.0 - smoothstep(MID_ROLL_SHUT.x, MID_ROLL_SHUT.y, uMid.x));
+  if (uMidRolls > 0.0) {
+    // (Its texels are twice those the level of detail is counted in, and it is read a level smoother than that: seen
+    // aslant from afar, a pixel is several times as long as wide, and rolls across the view, a pixel or two apart,
+    // were ruled lines towards the horizon.)
+    vec2 rf = textureLod(uRolls, (x + MID_ROLL_BEND.x * (xs - x) + MID_ROLL_BEND.y * (n.rg - vec2(0.66, 0.5))) / ROLL_KM, max(lod, 0.0)).rg;
+    rk = smoothstep(MID_ROLL_IN.x, MID_ROLL_IN.y, MID_ROLL_IN.z * (wq.r - wq.g) + MID_ROLL_IN.w * (uMidRolls - 0.5)) * smoothstep(MID_ROLL_AMP.x, MID_ROLL_AMP.y, rf.g)
+       * smoothstep(MID_ROLL_SLIT.x, MID_ROLL_SLIT.y, wm.b + MID_ROLL_SLIT.z * (n.r - 0.66)) * (1.0 - smoothstep(MID_ROLL_FAR.x, MID_ROLL_FAR.y, lod));
+    float pr = pow(0.5 + 0.5 * clamp(rf.r / max(rf.g, MID_ROLL_AMP.z), -1.0, 1.0), mix(MID_ROLL_SEAM.x, MID_ROLL_SEAM.y, pack));
+    float lumps = 0.7 * smoothstep(0.3, 0.75, mix(n.a, n.b, max(lead, MID_ROLL_LUMP.x))) + 0.3 * n.g;
+    float er = MID_ROLL.x - MID_ROLL_OPEN.x * open + MID_ROLL.y * pr * (1.0 - MID_ROLL.z * (1.0 - lumps)) + MID_ROLL_LUMP.y * (n.a - 0.5);
     e = mix(e, er, rk);
     wide *= 1.0 - (1.0 - MID_ROLL.w) * rk;
   }
@@ -3306,9 +3471,9 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   // was a ruled line at the eye's height. And how far down its base reaches under that level, bowl, from cell to cell:
   // all down to one floor, packed cells seen on edge had a ruled line for a base.)
   t0 = 0.1 + 0.35 * n.g;
-  float ew = e + wide, bowl = 0.4 + 0.55 * n.b;
+  float ew = e + wide, bowl = 0.4 + 0.55 * n.b, ew0 = ew;
   // (The floor of a field's body, MID_FLOOR: the higher of it and the cell's own height, rounded where they meet.)
-  float fl = mix(-2.0, (1.0 - MID_FLOOR_MORE.y * rk) * mix(MID_FLOOR.x, MID_FLOOR.y, pack) + MID_FLOOR_MORE.z * full, smoothstep(MID_FLOOR.z, MID_FLOOR.w, grow));
+  float fl = mix(-2.0, (1.0 - MID_FLOOR_MORE.y * rk) * mix(MID_FLOOR.x, MID_FLOOR.y, pack) + MID_FLOOR_MORE.z * full, smoothstep(MID_FLOOR.z, MID_FLOOR.w, grow) * (1.0 - rk * open));
   ew = 0.5 * (ew + fl + sqrt((ew - fl) * (ew - fl) + 0.05));
   float tall = 1.0 + MID_CELL.w * max(ew, 0.0);
   d = 0.65 * (t < t0 ? bowl * min(ew, 1.0) - (t0 - t) / t0 : ew - tall * (t - t0) / (1.0 - t0));
@@ -3402,8 +3567,8 @@ float midCells(vec3 p, float h, float t, vec2 x, vec2 xw, vec4 wm, vec4 wf, vec4
   // depth, a low dome was all base, some 3 deep whatever its size; and the noise took 0.6 of a heap, now 0.3.)
   float rise = max(0.5 * (1.0 - t0) * max(ew, 0.0) / tall, 0.06);
   float top = max(near2, smoothstep(t0 - 0.1 * over, t0 + rise * (1.0 - 0.6 * over), t));
-  float heap = (1.0 + 1.2 * near2) * mix(0.25, 1.0, smoothstep(0.1, 0.6, length(p))) * smoothstep(-0.05, 0.1, d) * (d + mix(1.0, MID_FLOOR_MORE.x, smoothstep(0.0, 0.5, fl)) * (0.5 * (er - 0.5) - 0.3 * (1.0 - er))) / (1.0 - 0.3 * (1.0 - er));
-  heap *= mix(smoothstep(0.0, 0.6, d), 1.0, max(max(near2, over * (1.0 - MID_ROLL_SOFT * rk)), (1.0 - MID_ROLL_SOFT * rk) * smoothstep(t0 + 0.4 * rise, t0 + 1.6 * rise, t)));
+  float heap = (1.0 + 1.2 * near2) * mix(0.25, 1.0, smoothstep(0.1, 0.6, length(p))) * smoothstep(-0.05, 0.1, d) * (d + mix(1.0, MID_FLOOR_MORE.x, smoothstep(0.0, 0.5, fl) * (1.0 - rk * smoothstep(0.2, 1.0, ew0 - fl))) * (0.5 * (er - 0.5) - 0.3 * (1.0 - er))) / (1.0 - 0.3 * (1.0 - er));
+  heap *= mix(smoothstep(0.0, 0.6, d), 1.0, max(max(near2, over), smoothstep(t0 + 0.4 * rise, t0 + 1.6 * rise, t)));
   float rim = smoothstep(0.05, 0.65, dB), thin = 1.0 - smoothstep(0.05, 0.6, dB), fb = 0.5;
   // (The base's floor: at the cell's own depth under its widest level in its body, bowl; higher towards its rim.)
   float tb = t0 * (1.0 - bowl * rim), base = MID_FULL * rim * rim * rim * smoothstep(tb, tb + 0.2, t);
@@ -8618,13 +8783,13 @@ const SkySound = (() => {
   // elevation) and distances along each (see Q_AIR_LUT in fs); none: the
   // scene marches the air in each pixel.
   const QUALITY = {
-    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: [64, 48, 16], meterMs: 200, stale: 1, pass: 1, ciPass: 2, ice: 1024, shadow: 256, column: 128, cost: 1,
+    low: { pixels: 0.3e6, dpr: 1, frame: 0.5, airLut: [64, 48, 16], meterMs: 200, stale: 1, pass: 1, ciPass: 2, ice: 1024, rolls: 512, shadow: 256, column: 128, cost: 1,
       fs: { Q_NV: 6, Q_NSHADE: 3, Q_NFAR: 6, Q_MARCH: '4.0', Q_SHAFTS: 1, Q_SHADOW_TAPS: 2, Q_CI_STEPS: 0, Q_SKY_NS: 3, Q_MIRROR: 1, Q_LITE: 1, Q_MICRO: 0, Q_HAIRS: 0, Q_SPARKLE: 0, Q_CI_SHADE: 0, Q_GOLD: 1, Q_GAP: 1, Q_LUT_SHADE: 4 } },
-    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, ice: 2048, shadow: 512, column: 256, cost: 1.4,
+    mid: { pixels: 0.9e6, dpr: 1.5, frame: 0.5, pass: 1, ice: 2048, rolls: 512, shadow: 512, column: 256, cost: 1.4,
       fs: { Q_NV: 12, Q_NSHADE: 5, Q_NFAR: 10, Q_MARCH: '3.0', Q_SHAFTS: 6, Q_SHADOW_TAPS: 4, Q_CI_STEPS: 6, Q_SKY_NS: 5, Q_MIRROR: 1, Q_GOLD: 1 } },
-    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, ice: 4096, shadow: 1024, column: 512, cost: 7,
+    high: { pixels: HERO_PIXELS.fhd, dpr: 2, frame: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, ice: 4096, rolls: 1024, shadow: 1024, column: 512, cost: 7,
       fs: { Q_MARCH: '1.2', Q_SHAFTS: 12, Q_SHADOW_TAPS: 6, Q_CI_STEPS: 10 } },
-    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, ice: 4096, shadow: 1024, column: 512, cost: 7.3, fs: {} },
+    max: { pixels: Infinity, dpr: 2, frame: 1, minScale: 1, keys: true, enlarge: true, airLut: [128, 128, 64], pass: 1, ice: 4096, rolls: 1024, shadow: 1024, column: 512, cost: 7.3, fs: {} },
   };
   const LEVELS = Object.keys(QUALITY);
   // The size in pixels the picture is drawn at, for a place of cw by ch CSS
@@ -8744,6 +8909,17 @@ const SkySound = (() => {
   // The cirrus's ice: texels a side (on a GPU, and on a software renderer),
   // and per draw; the way of its fibres is a quarter as wide.
   const ICE = 4096, ICE_SOFT = 1024, ICE_PIECE = 512;
+  // The map of the middle clouds' rolls (see rollParts in makeSky): its size at the levels `high` and `max`, on a
+  // renderer without a GPU, and its texel in km (an eighth of a roll of 1 km; fs has the size in km, ROLL_KM, from
+  // these).
+  const ROLLS = 1024, ROLLS_SOFT = 256, ROLL_TEXEL = 0.125;
+  // The pattern's numbers (uRoll in the shader "rolls": how much the direction counts, eps on the mean, how far it
+  // and the wavenumber swing), and its steps: ROLL_STEPS super-steps of ROLL_STAGES stages each (a model time of
+  // 130, where 50 was not yet packed and 80 to 150 were alike; 240 times the right-hand side, where plain explicit
+  // steps need 4900).
+  const ROLL = [0.3, 0.25, 0.3, 0.3], ROLL_STAGES = 40, ROLL_STEPS = 6;
+  // (The draws of the shader "rolls", a program each: see there.)
+  const ROLL_DRAWS = ['FIELDS', 'SEED', 'LAP', 'STAGE', 'MAP'];
   const CI_MAP = 256;   // the cirrus's map: texels a side, over WEATHER_KM
   const WEATHER_KM = 256;  // the weather map repeats after this many km (as in the shader)
   // The view from the aircraft is a mean over frames: of about IN_MOTION
@@ -9142,8 +9318,8 @@ const SkySound = (() => {
     // The middle clouds: their amount (the panel's slider; 0: none, and nothing of them is built until it is raised),
     // and the layer's record beside it, what midDensity in fs makes the layer of (uMid, uMidRolls). form: 0 a sheet
     // (altostratus) to 1 cells (altocumulus); base, km; depth, km (null: by the form, see midUniform); rolls: how
-    // far the cells stand in ranks of small elements.
-    mid: 0, midLayer: { form: 1, base: 5.2, depth: null, rolls: 0 },
+    // many of the map's regions stand in rolls (0 none, 0.5 about half, 1 all; see MID_ROLL_IN in fs).
+    mid: 0, midLayer: { form: 1, base: 5.2, depth: null, rolls: 0.5 },
     // Days the sun has moved on beyond state.day while the time ran (see
     // tick): playing past midnight then turns the sky on smoothly. 0 once the
     // date or the time is set.
@@ -9978,6 +10154,36 @@ const SkySound = (() => {
     // The targets one draw of the air's table writes (see Q_LUT_MRT in fs):
     // all seven parts where the GPU draws into seven at once, else four and three.
     const LUT_MRT = Math.min(gl.getParameter(gl.MAX_DRAW_BUFFERS), gl.getParameter(gl.MAX_COLOR_ATTACHMENTS)) >= 7 ? 7 : 4;
+    // The map of the middle clouds' rolls (uRolls in fs, see midCells there; the shader "rolls" draws it): rollSize
+    // texels square, eight to a roll, 125 m each. Without a GPU a quarter as wide, as the cirrus's ice. (Every
+    // WebGL2 has textures of 2048 texels: the GPU's limit is not asked, and a page without middle clouds asks the
+    // GPU nothing for them.)
+    const rollSize = software ? ROLLS_SOFT : Q.rolls;
+    // Whether the GPU draws into the half floats the map is grown in and kept as (asked once, when middle clouds
+    // are first wanted: see midLink). Where it does not, there are no rolls: the layer is cells alone.
+    let rollable = null;
+    const canRoll = () => {
+      if (rollable !== null) return rollable;
+      rollable = fine;
+      if (!rollable) return false;
+      const frame = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+      gl.activeTexture(gl.TEXTURE25);
+      for (const format of [gl.R16F, gl.RG16F, gl.RGBA16F]) {
+        const t = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, format, 1, 1);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+        rollable = rollable && gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        gl.deleteTexture(t);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(frame);
+      return rollable;
+    };
+    // (Asked before the programs are given to the compilers: later the GPU process is busy with them.)
+    if (state.mid > 0) canRoll();
 
     // Every program is compiled and linked at once, and nothing asks how
     // one went until the GPU says it is done: with
@@ -9999,7 +10205,7 @@ const SkySound = (() => {
       // (A last newline: the last line, an #endif, is a directive.)
       let fsrc = document.getElementById(id).textContent.trim() + '\n';
       if (id === 'fs') fsrc = midLines(fsrc, mid);
-      if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
+      if (id === 'fs') defs = Object.entries({ ...Q.fs, ...(Q.pass > 1 ? { Q_PASS: Q.pass.toFixed(1) } : {}), ...(Q.ciPass > Q.pass ? { Q_CI_PASS: Q.ciPass.toFixed(1) } : {}), ...(Q.ciPass > 1 ? { Q_CI_JITTER: 1 } : {}), ...(Q.frame < 1 ? { Q_FRAME: Q.frame.toFixed(2) } : {}), ...(Q.airLut && fine ? { Q_AIR_LUT: 1, Q_LUT_AZ: Q.airLut[0], Q_LUT_EL: Q.airLut[1], Q_LUT_S: Q.airLut[2], Q_LUT_MRT: LUT_MRT } : {}), ...(mid && rollSize !== ROLLS ? { Q_ROLL_KM: (rollSize * ROLL_TEXEL).toFixed(1) } : {}) }).map(([k, v]) => `#define ${k} ${v}\n`).join('') + (defs || '');
       if (defs) fsrc = fsrc.replace('#version 300 es', '#version 300 es\n' + defs);
       return fsrc;
     };
@@ -10053,7 +10259,13 @@ const SkySound = (() => {
     let mid = null;
     // (air: the table of the air's light under them, in place of airProg while there are any; see midUnder in fs.)
     const midLink = () => ({ scene: midFirst ? prog : link('fs', '', true), pass: link('fs', '#define MID_PASS', true), map: link('fs', '#define MID_MAP', true),
-      air: !airProg ? null : midFirst ? airProg : link('fs', '#define AIR_LUT', true), ready: false, failed: false, U: {}, for: '', at: [0, 0] });
+      air: !airProg ? null : midFirst ? airProg : link('fs', '#define AIR_LUT', true), ready: false, U: {}, for: '', at: [0, 0] });
+    // The map of their rolls is made with them, by programs of its own (see rollParts). progs: those programs (null
+    // where the GPU cannot draw the map: no rolls); more: the batches of its draws still to run (see midWanted),
+    // null until they start.
+    // (midFailed: a program of theirs or of the rolls did not compile, see midWanted.)
+    let roll = null, midFailed = false;
+    const rollLink = () => ({ progs: canRoll() ? Object.fromEntries(ROLL_DRAWS.map(k => [k, link('rolls', '#define ROLL_' + k)])) : null, more: null });
     const iceProgram = state.cirrus > 0 ? link('ice') : null;
     const noiseProgram = link('noise'), wavesProgram = link('waves');
     const mean = link('mean', [Q.frame < 1 ? '#define UPSCALE' : '', Q.keys ? '#define KEYS' : ''].filter(Boolean).join('\n')), show = link('show'), meter = link('meter');
@@ -10065,7 +10277,10 @@ const SkySound = (() => {
     // And as the table of the air's light (see Q_AIR_LUT), where the level
     // reads it (`airLut`) and the GPU can draw half floats.
     const airProg = Q.airLut && fine ? link('fs', '#define AIR_LUT', midFirst) : null;
-    if (midFirst) mid = midLink();
+    if (midFirst) {
+      mid = midLink();
+      roll = rollLink();
+    }
     // The two passes of the enlargement, where the level has it (see the
     // shader "enlarge" and shownSize).
     const enlarge = Q.enlarge && !NO_ENLARGE ? [link('enlarge'), link('enlarge', '#define SHARPEN')] : null;
@@ -10162,6 +10377,7 @@ const SkySound = (() => {
       worker.onmessage = e => (e.data === 'done' ? end() : mark(`${e.data} programs of the middle clouds compiled ahead`));
       worker.onerror = end;
       worker.postMessage({ vs: VS, list: [[fragment('fs', '#define MID_PASS', true), 1], [fragment('fs', '#define MID_MAP', true), 1],
+        ...(fine ? ROLL_DRAWS.map(k => [fragment('rolls', '#define ROLL_' + k), 1]) : []),
         ...(airProg ? [[fragment('fs', '#define AIR_LUT', true), LUT_MRT]] : [])] });
       // The scene, once the first picture is shown (see drawFrame).
       ahead.scene = () => {
@@ -10188,18 +10404,39 @@ const SkySound = (() => {
     // under 100 ms, and halves when it takes over 250 ms. So a slow GPU is
     // never given seconds of work at once (the GPU process, which draws the
     // whole browser, would stand still that long).
-    const batches = async (parts, report) => {
-      for (let i = 0, batch = 4; i < parts.length;) {
-        const start = performance.now();
+    // (batcher: a call a frame. Each runs the next batch once the GPU is through the last, and says whether any is
+    // left, or still with the GPU.)
+    // (drawing: between frames that draw the picture (see midWanted), where the time from a batch to its fence is
+    // the frames' own. There a batch is 8 to 64: it doubles while its fence has passed by the second frame after it
+    // (it is seen a frame late), and halves when it takes more than six.)
+    const batcher = (parts, report, drawing = false) => {
+      let i = 0, batch = drawing ? 8 : 4, sync = null, start = 0, calls = 0;
+      return () => {
+        alive();
+        if (sync) {
+          calls++;
+          if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) return true;
+          gl.deleteSync(sync);
+          sync = null;
+          const ms = performance.now() - start;
+          if (drawing) batch = calls <= 2 ? Math.min(batch * 2, 64) : calls > 6 ? Math.max(8, batch / 2) : batch;
+          else batch = ms < 100 ? Math.min(batch * 2, 1024) : ms > 250 ? Math.max(1, batch / 2) : batch;
+          report(i / parts.length);
+        }
+        if (i >= parts.length) return false;
+        start = performance.now();
+        calls = 0;
         for (let w = 0; i < parts.length && w < batch; i++) {
           w += parts[i][0];
           parts[i][1]();
         }
-        await settle();
-        const ms = performance.now() - start;
-        batch = ms < 100 ? Math.min(batch * 2, 1024) : ms > 250 ? Math.max(1, batch / 2) : batch;
-        report(i / parts.length);
-      }
+        sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+        return true;
+      };
+    };
+    const batches = async (parts, report) => {
+      for (const more = batcher(parts, report); more();) await nextFrame();
     };
 
     // Meanwhile the tables of the CPU, in slices. The table of depthToTop
@@ -10523,6 +10760,105 @@ const SkySound = (() => {
       gl.activeTexture(gl.TEXTURE30);
       smooth(gl.TEXTURE_3D);
       gl.activeTexture(gl.TEXTURE0);
+    }
+
+    // The map of the rolls, on unit 25 (RG16F with its mipmaps, repeating; see the shader "rolls" for what it holds
+    // and how it is grown): the fields and the noise, then ROLL_STEPS * ROLL_STAGES stages of two draws each, then
+    // the map itself. Three textures take turns as the last stage, the one before and the next (R16F: with half
+    // floats the pattern is the one of full floats, their correlation 0.99985), each on a unit of its own (19, 21,
+    // 26), the Laplacian on 28 and the fields on 5 (RGBA16F), while the map is grown: a stage only says which unit is
+    // which. All of it takes the GPU some 15 ms at 1024 texels square (482 draws; measured on an RTX 3090, on GL and
+    // on Direct3D 11, with the prototype of #144).
+    // P: its programs (roll.progs). The parts are for batches or a batcher: a part leaves unit 0 active, and sets
+    // the viewport and the program it needs itself, so the frames may draw between two of them (see midWanted).
+    const rollParts = P => {
+      const n = rollSize, h2 = (Math.PI / 4) ** 2, s = ROLL_STAGES;
+      // The longest explicit step: 2 over the largest factor of the right-hand side's linear part, that of the
+      // wave of two texels along both axes where rolls are narrowest and eps lowest (9-point Laplacian -16 / 3 h^2,
+      // the direction's term 4 / h^2); 0.9 of it for safety. A super-step is (s^2 + s) / 2 of those.
+      const top = (16 / (3 * h2) - (1 - ROLL[3]) ** 2) ** 2 - ROLL[1] * (1 - ROLL[2]) + ROLL[0] * 4 / h2;
+      const dt = 0.9 * 2 / top * (s * s + s) / 2, w1 = 2 / (s * s + s);
+      const U = {}, made = [];
+      let cur = 0, prev = 0;
+      // (A texture on its unit, and the framebuffer that draws into it.)
+      const target = (unit, format, levels = 1) => {
+        const t = { unit, texture: gl.createTexture(), target: gl.createFramebuffer() };
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, t.texture);
+        gl.texStorage2D(gl.TEXTURE_2D, levels, format, n, n);
+        for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, t.target);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.texture, 0);
+        made.push(t);
+        return t;
+      };
+      const draw = (name, into, uniforms) => {
+        gl.useProgram(P[name]);
+        for (const [u, ...v] of uniforms) gl['uniform' + (v.length === 1 ? '1i' : v.length + 'f')](U[name][u], ...v);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, into.target);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      let fields, lap, par, map;
+      const parts = [[0, () => {
+        for (const name in P) {
+          U[name] = Object.fromEntries(['uMask', 'uRoll', 'uY', 'uY2', 'uL', 'uP', 'uStage'].map(u => [u, gl.getUniformLocation(P[name], u)]));
+          gl.useProgram(P[name]);
+          gl.uniform1i(U[name].uMask, n - 1);
+          gl.uniform4fv(U[name].uRoll, ROLL);
+        }
+        fields = [19, 21, 26].map(unit => target(unit, gl.R16F));
+        lap = target(28, gl.R16F);
+        par = target(5, gl.RGBA16F);
+        map = target(25, gl.RG16F, Math.log2(n) + 1);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.viewport(0, 0, n, n);
+        draw('FIELDS', par, []);
+        draw('SEED', fields[0], []);
+      }]];
+      for (let k = 0; k < ROLL_STEPS; k++) {
+        for (let st = 1; st <= s; st++) {
+          // (The first stage of a step reads the step's start alone; a later one the last two.)
+          const mu = st === 1 ? 1 : (2 * st - 1) / st, nu = st === 1 ? 0 : -(st - 1) / st;
+          parts.push([1, () => {
+            const before = st === 1 ? cur : prev, next = [0, 1, 2].find(i => i !== cur && i !== before);
+            gl.viewport(0, 0, n, n);
+            draw('LAP', lap, [['uY', fields[cur].unit]]);
+            draw('STAGE', fields[next], [['uY', fields[cur].unit], ['uY2', fields[before].unit], ['uL', lap.unit], ['uP', par.unit], ['uStage', mu, nu, mu * w1 * dt]]);
+            prev = cur;
+            cur = next;
+          }]);
+        }
+      }
+      parts.push([0, () => {
+        gl.viewport(0, 0, n, n);
+        draw('MAP', map, [['uY', fields[cur].unit], ['uP', par.unit]]);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.useProgram(null);
+        for (const t of made) {
+          gl.deleteFramebuffer(t.target);
+          if (t !== map) gl.deleteTexture(t.texture);
+        }
+        for (const name in P) gl.deleteProgram(P[name]);
+        gl.activeTexture(gl.TEXTURE25);
+        smooth(gl.TEXTURE_2D);
+        gl.activeTexture(gl.TEXTURE0);
+      }]);
+      return parts;
+    };
+    // (Without them: a texel of nought, which fs reads as no rolls.)
+    const noRolls = () => {
+      gl.activeTexture(gl.TEXTURE25);
+      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG8, 1, 1);
+      gl.activeTexture(gl.TEXTURE0);
+    };
+    if (roll) {
+      if (roll.progs) {
+        doing = 'growing the rolls';
+        await batches(rollParts(roll.progs), () => {});
+        mark('rolls grown');
+      } else noRolls();
+      roll.more = () => false;
     }
 
     if (iceParts) {
@@ -11156,7 +11492,10 @@ const SkySound = (() => {
       for (const p of [mid.scene, mid.pass, mid.air]) if (p && p !== prog && p !== airProg) fixedFor(p);
       gl.useProgram(mid.map);
       for (const n of ['uRes', 'uAlt', 'uDrift', 'uMid', 'uMidRolls']) mid.U[n] = gl.getUniformLocation(mid.map, n);
-      for (const [n, unit] of [['uNoise', 2], ['uHeads', 22], ['uWeather', 3]]) gl.uniform1i(gl.getUniformLocation(mid.map, n), unit);
+      for (const [n, unit] of [['uNoise', 2], ['uHeads', 22], ['uWeather', 3], ['uRolls', 25]]) gl.uniform1i(gl.getUniformLocation(mid.map, n), unit);
+      // (The pass reads the rolls too; the scene and the air's table do not.)
+      gl.useProgram(mid.pass);
+      gl.uniform1i(gl.getUniformLocation(mid.pass, 'uRolls'), 25);
       gl.useProgram(prog);
       gl.deleteTexture(shadowMap.texture);
       layered(shadowMap, 5);
@@ -11172,22 +11511,43 @@ const SkySound = (() => {
     // cirrus). If one fails, the page stays without middle clouds.
     // Returns true while they are waited for.
     const midWanted = () => {
-      if (!mid) {
-        // (While the worker compiles them, this context waits for it; for a
-        // minute at most.)
-        if (ahead && !ahead.done && (!ahead.at || performance.now() - ahead.at < 60000)) return true;
-        mid = midLink();
-        gl.flush();
-      }
-      if (mid.ready || mid.failed) return false;
-      const progs = [mid.scene, mid.pass, mid.map, mid.air].filter(Boolean);
-      if (parallel && progs.some(p => !gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR))) return true;
+      if (midFailed || (mid && mid.ready)) return false;
+      const through = list => !parallel || list.every(p => gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR));
+      const checked = list => {
+        for (const entry of programs) if (list.includes(entry[0])) check(entry);
+      };
       try {
-        for (const entry of programs) if (progs.includes(entry[0])) check(entry);
+        // The map of the rolls first, from the frame the slider is raised in: its small programs (on Direct3D 11
+        // from the store, see `ahead`), then a batch of its draws a frame (see rollParts), while the worker and
+        // the compilers are at the layer's long programs. (Started with those programs' links, once the worker was
+        // done, its frames came after the wait: the layer some half a second later on Direct3D 11.)
+        // (canRoll, in rollLink: asked in this frame, not with the links below. Its answer waits for the GPU to be
+        // through the last frame, and that made the links' frame, the longest of the wait, a fifth longer.)
+        if (!roll) {
+          roll = rollLink();
+          gl.flush();
+        }
+        if (!roll.more && (!roll.progs || through(Object.values(roll.progs)))) {
+          if (roll.progs) checked(Object.values(roll.progs));
+          else noRolls();
+          roll.more = roll.progs ? batcher(rollParts(roll.progs), () => {}, true) : () => false;
+        }
+        const growing = !roll.more || roll.more();
+        gl.useProgram(prog);
+        if (!mid) {
+          // (While the worker compiles them, this context waits for it; for a
+          // minute at most.)
+          if (ahead && !ahead.done && (!ahead.at || performance.now() - ahead.at < 60000)) return true;
+          mid = midLink();
+          gl.flush();
+        }
+        const progs = [mid.scene, mid.pass, mid.map, mid.air].filter(Boolean);
+        if (growing || !through(progs)) return true;
+        checked(progs);
         midSetup();
         mark('middle clouds built');
       } catch (err) {
-        mid.failed = true;
+        midFailed = true;
         console.error(err);
       }
       return false;

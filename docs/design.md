@@ -7,7 +7,7 @@ in the [issues](https://github.com/sf624/sky/issues), not here.
 
 ## The page
 
-`index.html` holds everything: the markup, the CSS and eleven `<script>`
+`index.html` holds everything: the markup, the CSS and twelve `<script>`
 blocks. It loads no other file.
 
 | Block | Kind | What it is |
@@ -15,6 +15,7 @@ blocks. It loads no other file.
 | (no id) | JS | `TEXT`, the strings in Japanese and English, `WEATHERS` (the weathers of the panel's list, see [Weathers](#weathers)) and `applyLanguage`. It runs right after the panel. |
 | `stars` | data | The star catalogue, base64 (see [Stars](#sun-moon-stars)). One very long line: never print it. |
 | `noise` | fragment shader | Draws the cloud noise and the weather map once, at start. |
+| `rolls` | fragment shader | Grows the map of the middle clouds' rolls once, when middle clouds are first shown (see [Middle clouds](#middle-clouds)). Five programs, one for each of its draws. |
 | `ice` | fragment shader | Draws the cirrus's map, ice and way once, at start or when cirrus is first shown (see [Cirrus](#cirrus)). |
 | `waves` | fragment shader | Draws the map of the waves on the sea once, at start. |
 | `fs` | fragment shader | The scene: air, clouds, sea, cirrus, sun, moon, stars. Compiled five more times, each `main` a program of its own: with `CLOUD_PASS` defined, the low clouds along each ray and the first stage of their light, drawn before the scene (see [Low clouds](#low-clouds)); with `CIRRUS_PASS`, the cirrus along each ray, drawn before the scene (see [Cirrus](#cirrus)); with `SHADOW_MAP`, the clouds' depth maps; with `TOPS_MAP`, the map of the tops and the warped weather map; with `SKY_LIGHT`, the sky's light on the clouds. On a page with middle clouds, more programs with their lines in the text (see [Middle clouds](#middle-clouds)). |
@@ -171,14 +172,16 @@ The JS then runs once, at load, and does little:
    - The textures (see [Textures made at start](#textures-made-at-start)).
      The noise and the weather map are drawn in batches (`batches`), the
      weather map in strips of 64 rows (the scissor; each pixel is the
-     same as from one draw), and so is the cirrus's ice in
+     same as from one draw); then, on a page that starts with middle
+     clouds, the map of their rolls (its 483 draws, see
+     [Middle clouds](#middle-clouds)); and so is the cirrus's ice in
      pieces of 512 x 512, after the noise, if the page starts with cirrus
      (else `render` draws them all at once when cirrus is first shown; see
      [Cirrus](#cirrus)). The cirrus's map is drawn before the noise, as soon
      as the programs are linked: some drivers finish a program only at its
      first draw (see `prime`), and the ice program is large; its driver
      works on it while the noise is built. After each batch the page waits for a fence
-     (`settle`); a batch doubles while the GPU gets through it in under
+     (`batcher`, which `batches` calls a frame at a time); a batch doubles while the GPU gets through it in under
      100 ms (up to 64 pieces of the ice) and halves over 250 ms. The GPU process draws the whole
      browser, and a slow GPU given seconds of work at once would freeze it.
    - `prime`: the first frame is drawn as the first frame will draw it
@@ -1886,7 +1889,9 @@ cells and 1.2 km as a sheet. The panel's slider "Middle clouds" (`mid`)
 sets its amount, 0 at first. Its form, base and depth have no control of
 their own: a weather of the list sets them (see [Weathers](#weathers)),
 and `midform`, `midbase`, `middepth` and `midrolls` in the address win
-over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
+over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`). `midrolls`
+says how many of the map's regions stand in rolls: 0.5 at first, about
+half; 0 none; 1 all.
 
 - **Only where there are any.** A page that never shows middle clouds
   compiles and draws what it did before they existed, call for call. In
@@ -1896,14 +1901,23 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
   the other, so the text without them is the old one, byte for byte. Their
   programs are `fs` with their lines: the scene (which joins the layer
   in), `MID_PASS` (the layer along each ray), `MID_MAP` (its depth
-  straight up) and, where the level has the air's table, `AIR_LUT`.
+  straight up) and, where the level has the air's table, `AIR_LUT`; and
+  the five small programs of the shader `rolls`, which grow the map of
+  the rolls (below) and are deleted once it is made.
   - A page that starts with `mid` over 0 compiles them with the others,
-    and its scene and its air's table are theirs (`midFirst`).
+    and its scene and its air's table are theirs (`midFirst`); the map
+    of the rolls is grown behind the loading screen, after the noise.
   - On any other page they are compiled when the slider is first raised
     (`midWanted`, called by each frame while the amount is over 0): linked
     at once, then asked a frame at a time whether they are done
     (`KHR_parallel_shader_compile`), while the frames go on without the
     layer; a picture that has settled stays, and the frames go on undrawn.
+    The map of the rolls is grown meanwhile, from the frame the slider is
+    raised in (`roll`, `rollLink`): its five small programs are linked at
+    once, and from the frame they are done in, a batch of its draws a
+    frame (`batcher`: 8 stages at first, up to 64 while the GPU is through
+    a batch by the second frame after it, never a batch before the last
+    one's fence has passed), so it is ready before the long programs are.
   - On ANGLE's Direct3D 11 in Chromium (Chrome and Edge on Windows), the
     same programs are compiled ahead in a WebGL context of a worker of the
     page's own (`ahead`): there the scene takes some 11 s, and the first
@@ -1912,7 +1926,7 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     compiled, and such variants, for every context of the page, so the
     page's own link when the slider is first raised takes some 0.1 s, and
     its first draw of the table no time. The worker links `MID_PASS`,
-    `MID_MAP` and `AIR_LUT` while the page loads, and draws the table's
+    `MID_MAP`, the five programs of the rolls and `AIR_LUT` while the page loads, and draws the table's
     program into a pixel of seven targets (the GPU process waits for it
     while the long programs of the page still compile); the scene once the
     first picture is shown (with the others it held the first picture back
@@ -1924,6 +1938,13 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     two, or into no store that the contexts share.
     Then `midSetup` sets their uniforms, makes the light's map anew with a
     fifth layer, and the next frame draws the layer (a change of `look`).
+    On Direct3D 11 the wait for a weather with middle clouds, chosen 5 s
+    after the first picture, is what it was without the rolls (8.6 to 9.4
+    s against 8.4 to 10.2 s, the scene's compile ahead, and the longest
+    gap between frames 81 to 82 ms against 78 to 84; `d3d switch`, three
+    runs each, 2026-11-27). The map is started before the worker is done:
+    started with the long programs' links, after it, its frames came on
+    top of the wait (9.0 to 9.5 s against 8.6 to 9.2 s).
     Without the extension the first frame after waits for the compilers,
     once, as for the cirrus. If a program fails, the page stays without
     middle clouds (the error goes to the console).
@@ -1982,20 +2003,60 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
       the map is read over 1.1 km, so its streets of 5 km and their
       finer ones show, and its detail widens and narrows the cells
       inside a field too: bands and lanes.
-    - *Rolls* (`MID_ROLL_X`, `MID_ROLL`), by `midrolls` alone (0 at
-      first): the height is read from the noise on a second cut, 5.8
-      times as long one way as the other: its Worley cells are 0.5 and
-      1.1 km wide and 3 to 6 km long, long lumps side by side that begin,
-      end, fork and join. They are not in the page's own picture: they
-      read as smears, not as rolls at an even distance (regions of them
-      stood in the fields in a state of #135; a wave across them made
-      them as even as ripples in sand where it counted much, and changed
-      nothing where it counted little). At 0 the branch costs nothing on
-      Direct3D 11.
+    - *Rolls* (`uRolls`, `MID_ROLL` and the others; altocumulus
+      undulatus, cloud streets): in regions of the map the cells stand in
+      rolls side by side, a kilometre apart (0.75 to 1.4 km), that bend,
+      fork and end. Their pattern is a map of its own, not the noise (see
+      *The map of the rolls* below): it gives the height across a roll,
+      rounded tops and narrow seams (`pow(0.5 + 0.5 u, 0.35)` where the
+      cells of a region stand close, to the power of 0.6, wider valleys,
+      where they stand wide), and the cells ride along it: a roll is a
+      row of lumps run together (the noise's cells of 540 m lead, a lump
+      about as long as the roll is wide), with a seam to the next. Cover
+      stays with the weather map.
+      - *Where* (`MID_ROLL_IN`): the map's regions (its R less its G
+        elsewhere, over some 10 km) against `midrolls`, and only where the
+        pattern is strong (its envelope, nought at a fork and where a roll
+        ends): a region of rolls fades into cells over a few kilometres.
+      - *Groups* (`MID_ROLL_SLIT`): a region's rolls stand in groups some
+        5 km across (the map's gusts over 4 km), with the field's cells
+        between the groups. From far above a region is groups of rolls
+        among cells. (With rolls all over it, a region from 40 km read as
+        a fingerprint: lines at one distance from end to end. And with the
+        rolls run together into one deck between the groups, the deck
+        seen from just over it was a white plain without relief.)
+      - *Far off* (`MID_ROLL_FAR`): where the map no longer tells the
+        rolls apart (a texel of it of 250 to 700 m at the sample's level
+        of detail), the cells take over again. The rolls' mean height is
+        not the cells', and far off the groups were bands of lighter and
+        darker deck at the gusts' own distance (a peak of 39 to 55 in the
+        spectrum of `mid-lattice-40km`'s view; 28 to 29 with this).
+      - *Streets* (`MID_ROLL_OPEN`): where the cells of a region stand
+        wide apart and the amount is under 0.55 to 0.75, the seams are
+        lower and there is no floor under them: rows of cloud with clear
+        air between them, blue gaps from below. Elsewhere the seams are
+        thin low cloud: grey troughs from above, bright slits between
+        grey rolls from below.
+      - *Bends* (`MID_ROLL_BEND`): the place in the pattern moves with
+        the map (up to 0.8 km over some 4 km: wider and narrower rolls)
+        and with the noise (seams that waver).
+      - The map is read a level of detail smoother than its texels ask:
+        seen aslant from afar a pixel is several times as long as wide,
+        and rolls across the view, a pixel or two apart, were ruled lines
+        towards the horizon.
+      - The lumps and the fine noise count whole on a roll's crest (a
+        third on a floor): a roll has no outline in the noise as a cell
+        has, and without them it was a smooth bar, a ripple in sand.
+      At `midrolls` 0 the branch costs nothing, and the layer is cells
+      alone, the picture of #135. (Tried before: waves on the threshold
+      or on the height, ruled rows or a corduroy, a peak of 49 in the
+      spectrum from 40 km; and until #135 the noise read 5.8 times as long
+      one way as the other: long lumps that began and ended anywhere,
+      smears with no distance of their own.)
     - *The floor of a field's body* (`MID_FLOOR`): where the field is whole
       (not in its fringe), no place is lower than a floor a little over
       the threshold, higher where the cells stand closest, lower among
-      rolls, higher at the top of the slider. With it a field's body is
+      rolls (0.6 of it; none under streets), higher at the top of the slider. With it a field's body is
       whole, so the fields' edge takes the amount as 0.18 less up to 0.6,
       and the whole of it from 0.9 (`MID_LESS`): the same amount covers
       about what it did (0.37 of the view straight down from 40 km at
@@ -2039,6 +2100,55 @@ over it (`state.midLayer`, `uMid` and `uMidRolls` in `fs`).
     thin places, 45 for cells): a sheet
     that thins as cells grow in it, with no step at any form. A depth not
     given goes with the form too (1.2 - 0.8 `midform` km).
+- **The map of the rolls** (`uRolls`; the shader `rolls`, `rollParts`):
+  1024 texels square over 128 km (half the weather map; 125 m a texel,
+  eight to a roll), two half floats a texel with mipmaps (5.6 MB). It is
+  grown once, on the GPU, from white noise, by the Swift-Hohenberg
+  equation, the standard model of convection rolls:
+  `du/dt = eps u - (q^2 + lap)^2 u + a div(w w^T grad u) - u^3`.
+  Its rolls are packed side by side at an even distance, bend, fork and
+  end, and it has no period but the map's own: the spectrum is an arc,
+  not a spike. (A sum of waves is a lattice; noise drawn out one way has
+  no distance from roll to roll.)
+  - *What steers it*, a texture of its own while it grows (`ROLL_FIELDS`):
+    the rolls' direction `w` (it swings by some 45 degrees each way over
+    the map, 20 more over some 30 km and 11 over some 15 km: rolls bend,
+    and where they cannot follow they fork and end; with the slow swing
+    alone the map was a fingerprint, with twice the faster ones whorls);
+    `eps`, stronger and fainter rolls over some 15 km (0.25 times 0.7 to
+    1.3, over 0 everywhere: fields of rolls in the pattern itself, with
+    `eps` under 0 between them, were ringed by their rolls, since rolls
+    lie along an edge of `eps`: from 40 km each field was a whorl; where
+    there are rolls in the layer, `fs` says); and the wavenumber `q`, 0.7
+    to 1.3 over some 4 km (all of one width, the map was as even as a
+    fingerprint; rolls of unlike widths stay packed).
+  - *The steps*: in real space, the nine-point Laplacian on texels that
+    wrap, and RKL1 super-time-stepping (Meyer, Balsara and Aslam 2012):
+    6 super-steps of 40 stages, a model time of 130 (at 50 the pattern
+    is not yet packed; 80 to 150 are alike). A stage is two draws, the
+    Laplacian and then the right-hand side with the stage's sum: 483
+    draws in all with the fields, the noise and the map, into R16F
+    targets that take turns (with half floats the pattern is that of
+    full floats: a correlation of 0.99985). Some 15 ms of the GPU (RTX
+    3090, on GL and on Direct3D 11, measured with the prototype of
+    #144); in batches, as the other textures: behind the loading screen
+    0.10 to 0.24 s on Direct3D 11, six batches each a frame or two, with
+    the first picture of the altocumulus weather at 22.2 to 23.9 s against
+    21.7 to 23.1 s without the rolls (`d3d page`, three runs each,
+    2026-11-27, with other work on the machine: the runs of one page
+    differ by more than the two pages do).
+  - *The map* (`ROLL_MAP`): r, the pattern over the amplitude of a full
+    field, about -1 in a trough to 1 on a crest; g, its envelope (how
+    strong the rolls are at the place; nought where a roll ends). `fs`
+    lays the height's profile over r, so the map's filter and mipmaps
+    smooth the pattern, not the profile's narrow seams.
+  - *Sizes*: the levels `low` and `mid` grow it 512 texels square (64
+    km: a quarter of the draws' work), a renderer without a GPU 256 (32
+    km); `fs` gets the size in km (`Q_ROLL_KM`). The steering is counted
+    in turns across the map, so a smaller map's rolls turn sooner.
+  - *Without half-float targets* (`canRoll`: R16F, RG16F and RGBA16F
+    asked for once) there are no rolls: the map is one texel of nought,
+    and the layer is cells alone.
 - **The pass** (`MID_PASS`, `midClouds`): up to 128 steps along the ray
   through the shell, 20 m at the shortest (40 m from within), growing with
   the distance, but ten at least through the layer where the ray crosses
@@ -4319,6 +4429,7 @@ asks which level it is.
 | `pass`, `ciPass` | 1, 2 | 1, 1 | 1, 1 | 1, 1 |
 | `body` | 128 | 128 | 256 | 256 |
 | `ice` | 1024 | 2048 | 4096 | 4096 |
+| `rolls` | 512 | 512 | 1024 | 1024 |
 | `shadow`, `column` | 256, 128 | 512, 256 | 1024, 512 | 1024, 512 |
 | `warped` | 1024 | 1024 | 2048 | 2048 |
 | `Q_NV`, `Q_NSHADE`, `Q_NFAR` | 6, 3, 6 | 12, 5, 10 | 20, 8, 16 | 20, 8, 16 |
@@ -4388,6 +4499,8 @@ asks which level it is.
   (`uShadow`, `uColumn`) (see [Textures made at start](#textures-made-at-start)).
   A renderer without a GPU still takes the smaller ice whatever
   the level, and no texture is larger than `MAX_TEXTURE_SIZE`.
+- `rolls`: the side of the map of the middle clouds' rolls (see
+  [Middle clouds](#middle-clouds)); 256 on a renderer without a GPU.
 - `pass`: the passes before the scene (the low clouds' and the cirrus's)
   draw one pixel for `pass` by `pass` of the frame's, and the scene reads
   the nearest (`Q_PASS` in `fs`, set from it). The first stage of the
@@ -4620,6 +4733,7 @@ later if the page starts without cirrus: when cirrus is first shown):
 | `uIceWay` | 11 | a quarter of the ice's size, RGBA8, mipmapped, repeating | `ice` shader, from the ice and its age | R, G: the way the ice runs; B, A: the mean age of the ice, with its weight |
 | `uIcePhase` | 12 | as the ice, RG8, mipmapped, anisotropic, repeating | `ice` shader, with the ice | the phasor of the place across the ice's strands, over its weight (the hairs) |
 | `uCiMap` | 13 | 256^2 over 256 km, RGBA8, mipmapped, repeating | `ice` shader | The cirrus's map: how much for each deck, and of what kinds |
+| `uRolls` | 25 | the level's `rolls`: 1024^2 over 128 km (`low`, `mid` 512^2 over 64 km; 256^2 without a GPU), RG16F, mipmapped, repeating; one texel of RG8 where the GPU draws into no half floats | `rolls` shader, 483 draws in batches, only on a page with middle clouds (at start, or when they are first shown) | The middle clouds' rolls (see [Middle clouds](#middle-clouds)). R: the pattern, -1 in a trough to 1 on a crest; G: its envelope |
 
 Made with the clouds' amount (at the first frame, and again when `cloud`
 changes), by `fs` itself compiled with `TOPS_MAP` (`topsProg`):
@@ -4640,7 +4754,9 @@ slider pays on each frame, as it pays the shadow map.
 
 Units 6 to 9 hold the frame and the picture so far for `mean`; `show`,
 `enlarge` and `meter` read unit 6. Unit 15 holds the ice's age while the cirrus's
-textures are built. Units 16 and 17 hold the passes before the scene
+textures are built. Units 19, 21 and 26 hold the stages of the rolls' map
+while it is grown (R16F), unit 28 their Laplacian and unit 5 what steers
+it (RGBA16F): 17 MB at 1024 texels square, freed when the map is made. Units 16 and 17 hold the passes before the scene
 (the cirrus's and the low clouds', and their depths), unit 18 the first
 stage of the clouds' light (see Low clouds). Units 14 and 20 hold the clouds' depth
 maps (`uShadow`, `SHADOW` texels square, and `uColumn`, `COLUMN`; arrays
@@ -4667,7 +4783,7 @@ as the cirrus reads it.
 Their random numbers come from one integer hash, `ihash`: Wellons'
 lowbias32 (two rounds of xor-shift and multiply, from hash-prospector, in
 the public domain). The `noise` and `ice` shaders hash a lattice cell's
-coordinates, packed into one word, plus the seed; the `waves` shader the
+coordinates, packed into one word, plus the seed; the `rolls` shader a texel's number (its noise); the `waves` shader the
 number of the wave; `fs` the lattices of its noise and its hairs. The word, and its low 21 and 10 bits moved up, are
 three random numbers, with 11, 11 and 10 bits of their own. The cirrus's
 ice uses the same hash (`iceWord`: a lattice point's coordinates and the
