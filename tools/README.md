@@ -30,7 +30,7 @@ Output goes to a folder of its own for each run, under `tools/out/` (ignored by 
 | `look [--only a,b] [--page DIR\|REV] [--size WxH] [--from DIR] [--sheet [--base DIR\|REV]]` | The look invariants: a still of each view of `look.json`, measured against its limits. See [Look invariants](#look-invariants). |
 | `check [NAME...] [--base DIR\|REV] [--size WxH] [--ignore CLASSES]` | Runs `look` on the GPU (unless names are given without `look`; on SwiftShader it is skipped, with a line saying so), then the checks below, or those named. One line each, `PASS`, `FAIL` or `SKIP`, then a last line `PASS` or `FAIL` for the whole set. Exit status 0 only if none fails. |
 | `drive SCRIPT.json` | A scripted capture, for anything else. See below. |
-| `d3d [page\|programs\|switch] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX] [--weather W] [--at S]` | On WSL only: the start on Windows Chrome's Direct3D 11, or the wait for a weather chosen after it (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
+| `d3d [page\|programs\|switch\|fxc] [--base DIR\|REV] [--runs N] [--q QUERY] [--size WxH] [--frames N] [--limit S] [--shot S --out PREFIX] [--weather W] [--at S]` | On WSL only: the start on Windows Chrome's Direct3D 11, the wait for a weather chosen after it, or each program's compile alone (see [Direct3D 11 on Windows](#direct3d-11-on-windows)). Not one of the checks. |
 | `d3dperf [--base DIR\|REV] [--rounds N] [--views a,b] [--frames N] [--size WxH] [--speed KMH] [--fail RATIO] [--limit S]` | On WSL only: the frame time on Direct3D 11 of six views, the page against the base (default `origin/main`) in turns, a verdict for each and one line for the pull request (see [Frame time on Direct3D 11](#frame-time-on-direct3d-11-d3dperf)). Not one of the checks. |
 | `perf [--q QUERY] [--size WxH] [--dpr R] [--mobile] [--cpu N] [--no-gpu] [--seconds S]` | Real time, without the fake clock: the time from navigation to the first draw of each canvas and to its first picture (the first draw to the canvas itself), the tasks of the main thread over 50 ms until then (the longest, and the time blocked: the sum of their time over 50 ms), the quality level and the canvas's size, the frame rate, the GPU time per kind of draw (median and p90), and the mean GPU time of all draws per frame shown. `--dpr` sets the device pixel ratio (a phone's, 2.6 for example), `--mobile` the mobile viewport and touch (a coarse pointer), `--cpu N` the main thread N times slower (DevTools' CPU throttling, as a phone's). With `stats` in the query it prints the page's overlay at the end. `--no-gpu` leaves out its own GPU timing of each draw (a query round each), for pages that time themselves (`stats=bench3`). It waits for the end of the page's loading (`data-sky`) and a first picture before it measures the frames. With `timing` in the query (`--q 'quality=low&timing'`), it also prints the page's console lines of its loading (`console: Sky: …`), the parts of the start. Use it on the GPU, before and after a change; other runs that share the GPU make it vary by 10 to 20 %. |
 
@@ -252,10 +252,37 @@ Chrome (default `/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`).
   and the longest gap. The control is a weather without middle clouds
   (`--weather fair`, whose haze is the page's own: another haze rebuilds
   a table, some 0.4 s of script in slices between the frames).
-- `d3d programs`: each program `makeSky` links (its `link(...)` calls,
-  with their defines), alone: the time to compile and link it, and of its
-  first draw into one target and into all its outputs (ANGLE compiles a
-  program again for a draw into more than one target).
+- `d3d programs`: each program the page links at its start (with `--q`),
+  alone: the time to compile and link it, and of its first draw into one
+  target and into all its outputs (ANGLE compiles a program again for a
+  draw into more than one target). The programs and the text of their
+  fragment shaders come from a first run of the page itself, which posts
+  `window.__programs()` (makeSky's names, and each fragment shader as
+  given to `shaderSource`: the middle clouds' lines chosen, the quality's
+  defines in), so the tool does not make the sources a second way. A page
+  from before `window.__programs` (an older `--base`) gives the
+  fragment shaders of its `linkProgram` calls instead, named by their
+  script and the defines without a value after `#version`. The middle
+  clouds' programs that a worker compiles ahead are not among them.
+- `d3d fxc`: the same programs, each compiled alone by Microsoft's HLSL
+  compiler, as ANGLE does on Direct3D 11: one run of the page for its
+  programs, one of a harness that links each and keeps the HLSL ANGLE
+  handed the compiler (the part `COMPILER INPUT HLSL` of
+  `WEBGL_debug_shaders`; this Chrome alone gets
+  `--enable-privileged-webgl-extensions`), then `D3DCompile` of Windows'
+  own `d3dcompiler_47.dll` from PowerShell (`ps_5_0`, optimization level
+  2, ANGLE's macro `ANGLE_ENABLE_LOOP_FLATTEN`), `--runs` times, the
+  pages' programs in turns. It prints, for each program and page, the
+  compiler's CPU time in s (median and range of the runs) and the number
+  of instructions, the page's time against the base's, and their sum.
+  The files live in a folder of the Windows temporary directory of the
+  run's own (`sky-fxc-<pid>`), deleted at its end. The compile runs on
+  one CPU core and takes seconds, not a whole start (a minute or so for
+  two pages and three runs, after the two Chromes): measure a change of a
+  shader here first, then its start with `d3d page`. Other work on the
+  machine moves a time by some 0.5 s of 8: compare medians of several
+  runs. A link of `d3d programs` takes longer, as it also holds the
+  driver's work (2026-11-27: the scene 7.1 s here, its link 8.9 s).
 
 With `--base`, the base and the page take turns, `--runs` times each. Every
 line names the renderer: it must say `Direct3D11`. Headless Chrome did

@@ -10008,6 +10008,10 @@ const SkySound = (() => {
       programs.push([prog, shaders]);
       return prog;
     };
+    // For the tools: each program linked so far, by its name, with the
+    // text of its fragment shader as compiled (`node tools/sky.mjs d3d
+    // programs` compiles them alone).
+    window.__programs = () => programs.map(([prog, shaders]) => ({ name: names.get(prog), source: gl.getShaderSource(shaders[1]) }));
     // Throws the compiler's message, or the linker's, if a program failed.
     const check = ([prog, shaders]) => {
       alive();

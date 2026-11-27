@@ -20,12 +20,15 @@ const winTemp = () => {
 // frame once the first picture shows (EXT_disjoint_timer_query_webgl2 around the frame's callback), then `done`,
 // then goes on to the next view of a chain, if any.
 // With d3dShot=S, it posts instead the canvas as a PNG S s after the first picture, then `done`.
+// With d3dSources, it posts instead, once the first picture shows, the programs the page has linked
+// (window.__programs(): each one's name and the text of its fragment shader as compiled), then `done`; for a page
+// from before window.__programs, the fragment shaders its linkProgram calls were given.
 // With d3dSwitch=W, it chooses the weather W in the panel d3dAt s (default 5) after the first picture, and posts
 // instead the wait until the console line "middle clouds built" (none within 60 s: null; a weather without middle
 // clouds waits 8 s) and the gaps between animation frames from the choice to 1 s after.
 const INJECT = `<script>(() => {
   const q = new URLSearchParams(location.search), run = q.get('d3d'), FRAMES = +(q.get('d3dFrames') || 60), SHOT = +(q.get('d3dShot') || 0);
-  const SWITCH = q.get('d3dSwitch'), AT = +(q.get('d3dAt') || 5);
+  const SWITCH = q.get('d3dSwitch'), AT = +(q.get('d3dAt') || 5), SOURCES = q.has('d3dSources');
   let built = 0;
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(Object.assign({ at: performance.now() / 1000 }, o)) }).catch(() => {});
   for (const k of ['info', 'log', 'warn', 'error']) {
@@ -38,6 +41,15 @@ const INJECT = `<script>(() => {
     };
   }
   let gl = null, ext = null, started = false, done = false;
+  const linked = [];
+  if (SOURCES) {
+    const link = WebGL2RenderingContext.prototype.linkProgram;
+    WebGL2RenderingContext.prototype.linkProgram = function (p) {
+      const f = (this.getAttachedShaders(p) || []).find(s => this.getShaderParameter(s, this.SHADER_TYPE) === this.FRAGMENT_SHADER);
+      if (f) linked.push(this.getShaderSource(f));
+      return link.call(this, p);
+    };
+  }
   const times = [], pending = [], frames = [];
   const get = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (t, o) {
@@ -70,7 +82,7 @@ const INJECT = `<script>(() => {
         if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) times.push(gl.getQueryParameter(p, gl.QUERY_RESULT) / 1e6);
         gl.deleteQuery(p);
       }
-      if (!done && !SHOT && !SWITCH && times.length >= FRAMES + 10) {
+      if (!done && !SHOT && !SWITCH && !SOURCES && times.length >= FRAMES + 10) {
         const t = times.slice(10, FRAMES + 10), s = [...t].sort((a, b) => a - b);
         finish({ ev: 'frames', median: s[s.length >> 1], p90: s[Math.floor(s.length * 0.9)], mean: t.reduce((a, b) => a + b, 0) / t.length,
           times: t.map(x => +x.toFixed(3)), w: gl.drawingBufferWidth, h: gl.drawingBufferHeight });
@@ -84,7 +96,8 @@ const INJECT = `<script>(() => {
       started = true;
       clearInterval(watch);
       post({ ev: 'shown', failed: hero.classList.contains('failed') });
-      if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
+      if (SOURCES) finish({ ev: 'sources', list: window.__programs ? window.__programs() : null, linked });
+      else if (SHOT) setTimeout(() => finish({ ev: 'shot', png: document.getElementById('sky').toDataURL('image/png') }), SHOT * 1000);
       else if (SWITCH && !hero.classList.contains('failed')) setTimeout(async () => {
         const list = document.getElementById('weather'), at = performance.now();
         list.value = SWITCH;
@@ -109,8 +122,11 @@ const INJECT = `<script>(() => {
 // KHR_parallel_shader_compile, then draws it into a 4 x 4 framebuffer once with one target and once with all its
 // outputs (ANGLE on Direct3D 11 compiles a program again for a draw into more than one target, while the GPU
 // process waits). Each draw is timed by a read of a pixel after it.
+// With hlsl (fxc), instead of the draws: the HLSL that ANGLE gave Microsoft's compiler for the fragment shader
+// (the part COMPILER INPUT HLSL of WEBGL_debug_shaders, which needs --enable-privileged-webgl-extensions).
 const PROGRAMS = `<!doctype html><meta charset="utf-8"><canvas width="4" height="4"></canvas><script>(async () => {
-  const run = new URLSearchParams(location.search).get('d3d');
+  const run = new URLSearchParams(location.search).get('d3d'), HLSL = new URLSearchParams(location.search).has('hlsl');
+  const dbg = HLSL ? document.querySelector('canvas').getContext('webgl2').getExtension('WEBGL_debug_shaders') : null;
   const post = o => fetch('/d3d/report/' + run, { method: 'POST', body: JSON.stringify(o) });
   const gl = document.querySelector('canvas').getContext('webgl2');
   const info = gl.getExtension('WEBGL_debug_renderer_info'), par = gl.getExtension('KHR_parallel_shader_compile');
@@ -136,17 +152,24 @@ const PROGRAMS = `<!doctype html><meta charset="utf-8"><canvas width="4" height=
   const FORMATS = { vec4: gl.RGBA8, uvec4: gl.RGBA32UI, ivec4: gl.RGBA32I };
   for (const { name, source, outputs } of programs) {
     const t0 = performance.now(), prog = gl.createProgram();
+    let frag = null;
     for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, source]]) {
       const s = gl.createShader(type);
       gl.shaderSource(s, src);
       gl.compileShader(s);
       gl.attachShader(prog, s);
+      frag = s;
     }
     gl.linkProgram(prog);
     gl.flush();
     while (par && !gl.getProgramParameter(prog, par.COMPLETION_STATUS_KHR)) await new Promise(r => setTimeout(r, 10));
     const r = { ev: 'program', name, link: Math.round(performance.now() - t0) };
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { await post({ ...r, error: gl.getProgramInfoLog(prog) }); continue; }
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { await post({ ...r, error: gl.getProgramInfoLog(prog) || gl.getShaderInfoLog(frag) }); continue; }
+    if (HLSL) {
+      const m = /\\/\\/ COMPILER INPUT HLSL BEGIN\\n([\\s\\S]*?)\\/\\/ COMPILER INPUT HLSL END/.exec(dbg ? dbg.getTranslatedShaderSource(frag) : '');
+      await post({ ...r, hlsl: m ? m[1] : null });
+      continue;
+    }
     gl.useProgram(prog);
     for (let i = 0, unit = 0, n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS); i < n; i++) {
       const u = gl.getActiveUniform(prog, i);
@@ -180,22 +203,11 @@ const PROGRAMS = `<!doctype html><meta charset="utf-8"><canvas width="4" height=
   await post({ ev: 'done' });
 })().catch(e => fetch('/d3d/report/' + new URLSearchParams(location.search).get('d3d'), { method: 'POST', body: JSON.stringify({ ev: 'done', error: String(e) }) }));</script>`;
 
-// The programs makeSky links (its link('id'[, '#define X']) calls), with the outputs each declares.
-function programsOf(html) {
-  const shaders = {};
-  for (const m of html.matchAll(/<script id="(\w+)" type="x-shader\/x-fragment">([\s\S]*?)<\/script>/g)) shaders[m[1]] = m[2].trim();
-  const seen = new Set(), list = [];
-  for (const m of html.matchAll(/link\('(\w+)'(?:, '#define (\w+)')?\)/g)) {
-    const key = m[1] + (m[2] ? ' (' + m[2] + ')' : '');
-    if (seen.has(key) || !shaders[m[1]]) continue;
-    seen.add(key);
-    const source = m[2] ? shaders[m[1]].replace('#version 300 es', '#version 300 es\n#define ' + m[2]) : shaders[m[1]];
-    const outputs = [...source.matchAll(/^\s*(?:layout\(location = (\d+)\)\s*)?out\s+(\w+)\s+(\w+);/gm)]
-      .map(o => ({ location: +(o[1] || 0), type: o[2], name: o[3] }));
-    list.push({ name: key, source, outputs });
-  }
-  return list;
-}
+// The programs the page linked (window.__programs(), posted by a run with d3dSources), with the outputs each
+// fragment shader declares.
+const withOutputs = (list) => list.map(({ name, source }) => ({ name, source,
+  outputs: [...source.matchAll(/^\s*(?:layout\(location = (\d+)\)\s*)?out\s+(\w+)\s+(\w+);/gm)]
+    .map((o) => ({ location: +(o[1] || 0), type: o[2], name: o[3] })) }));
 
 // The Chrome processes started with a profile (by its path on their command line).
 const processesOf = (prof) => win('powershell.exe', ['-NoProfile', '-Command',
@@ -205,21 +217,22 @@ const kill = (pids) => {
   for (const pid of pids) { try { win('taskkill.exe', ['/PID', pid, '/T', '/F']); } catch {} }
 };
 // The run going on, for the exit handler: an interrupted run kills its Chrome too.
-let current = null;
+let current = null, fxcDir = null;
 process.on('exit', () => {
+  if (fxcDir) try { fs.rmSync(fxcDir, { recursive: true, force: true }); } catch {}
   if (!current) return;
   try { kill(processesOf(current.prof)); fs.rmSync(current.dir, { recursive: true, force: true }); } catch {}
 });
 
 // One headless Windows Chrome on Direct3D 11 at url, until finished() (the page reported `done`) or `limit` s
 // pass. Returns true when it was stopped by the limit.
-export async function runChrome(url, finished, id, { limit, size }) {
+export async function runChrome(url, finished, id, { limit, size, flags = [] }) {
   const temp = winTemp(), prof = `sky-d3d-${process.pid}-${id}`;
   fs.mkdirSync(path.join(temp.wsl, prof));
   current = { prof, dir: path.join(temp.wsl, prof) };
   const child = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', `--user-data-dir=${temp.win}\\${prof}`,
     '--disable-gpu-shader-disk-cache', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
-    `--window-size=${size.w},${size.h}`, url], { cwd: '/mnt/c', stdio: 'ignore' });
+    `--window-size=${size.w},${size.h}`, ...flags, url], { cwd: '/mnt/c', stdio: 'ignore' });
   let failed = null;
   child.on('error', (e) => (failed = String(e)));
   const t0 = Date.now();
@@ -288,19 +301,154 @@ export const servePage = (srv, key, html) => srv.files.set(`/d3d/page/${key}/ind
 export const pageUrl = (srv, key, id, q, frames) =>
   `http://localhost:${srv.port}/d3d/page/${key}/index.html?timing&res=1&${withQuality(q)}&d3d=${id}&d3dFrames=${frames}`;
 
-// `node tools/sky.mjs d3d [page|programs] ...`: see tools/README.md.
+// The programs a page links at its start (with --q), from one run of the page itself (d3dSources): their names
+// and fragment shaders as makeSky makes them.
+async function sourcesOf(srv, page, key, { q, limit, size }) {
+  const id = `src${key}`;
+  servePage(srv, id, fs.readFileSync(path.join(page.dir, 'index.html'), 'utf8'));
+  srv.reports.set(id, []);
+  await runChrome(pageUrl(srv, id, id, q, 0) + '&d3dSources', () => srv.reports.get(id).some((g) => g.ev === 'done'), id, { limit, size });
+  const got = srv.reports.get(id).find((g) => g.ev === 'sources');
+  const list = got?.list || (got?.linked?.length ? named(got.linked, fs.readFileSync(path.join(page.dir, 'index.html'), 'utf8')) : null);
+  if (!list?.length) throw new Error(`d3d: ${page.name} posted no programs`);
+  return withOutputs(list);
+}
+
+// The names of a page's programs from before window.__programs, as makeSky gives them: the shader's script (the one
+// whose last lines the source ends with), and the defines without a value after its #version line (the link's).
+function named(linked, html) {
+  const scripts = [...html.matchAll(/<script id="(\w+)" type="x-shader\/x-fragment">([\s\S]*?)<\/script>/g)].map((m) => [m[1], m[2].trim().slice(-300)]);
+  const seen = new Set();
+  return linked.map((source, i) => {
+    const id = scripts.find(([, tail]) => source.trim().endsWith(tail))?.[0] || `program ${i + 1}`;
+    const head = source.split('\n').slice(1, 100);
+    const defs = [];
+    for (const l of head) { const m = /^#define (\w+)\s*$/.exec(l); if (m) defs.push(m[1]); else if (!/^#define /.test(l)) break; }
+    return { name: id + (defs.length ? ` (${defs.join('\n')})` : ''), source };
+  }).filter(({ name }) => !seen.has(name) && seen.add(name));
+}
+
+// D3DCompile of d3dcompiler_47.dll (Windows' own), from PowerShell: each file of the list (one Windows path a
+// line) compiled for ps_5_0 with ANGLE's macro ANGLE_ENABLE_LOOP_FLATTEN and D3DCOMPILE_OPTIMIZATION_LEVEL2; one
+// line each: the file, the CPU time and the wall time of the compile (ms), the size of the code and its number
+// of instructions.
+const FXC_PS1 = String.raw`param([string]$list)
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Fxc {
+  [StructLayout(LayoutKind.Sequential)] public struct Macro { public IntPtr Name; public IntPtr Def; }
+  [DllImport("D3DCompiler_47.dll")] public static extern int D3DCompile(byte[] src, UIntPtr size, string name, Macro[] defines, IntPtr include, string entry, string target, uint flags1, uint flags2, out IntPtr code, out IntPtr errors);
+  [DllImport("D3DCompiler_47.dll")] public static extern int D3DDisassemble(IntPtr src, UIntPtr size, uint flags, string comments, out IntPtr dis);
+  [ComImport, Guid("8BA5FB08-5195-40e2-AC58-0D989C3A0102"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IBlob { [PreserveSig] IntPtr GetBufferPointer(); [PreserveSig] UIntPtr GetBufferSize(); }
+  public static string Run(string path) {
+    byte[] src = System.IO.File.ReadAllBytes(path);
+    Macro[] m = new Macro[] { new Macro { Name = Marshal.StringToHGlobalAnsi("ANGLE_ENABLE_LOOP_FLATTEN"), Def = Marshal.StringToHGlobalAnsi("1") }, new Macro() };
+    IntPtr code, err;
+    var p = System.Diagnostics.Process.GetCurrentProcess();
+    double cpu0 = p.TotalProcessorTime.TotalMilliseconds;
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    int hr = D3DCompile(src, (UIntPtr)src.Length, "fs", m, IntPtr.Zero, "main", "ps_5_0", 0xC000, 0, out code, out err);
+    double wall = sw.Elapsed.TotalMilliseconds;
+    p.Refresh();
+    double cpu = p.TotalProcessorTime.TotalMilliseconds - cpu0;
+    long size = 0; int ins = 0;
+    if (code != IntPtr.Zero) {
+      var b = (IBlob)Marshal.GetObjectForIUnknown(code); size = (long)b.GetBufferSize();
+      IntPtr dis;
+      if (D3DDisassemble(b.GetBufferPointer(), b.GetBufferSize(), 0, null, out dis) == 0) {
+        var db = (IBlob)Marshal.GetObjectForIUnknown(dis);
+        foreach (var l in Marshal.PtrToStringAnsi(db.GetBufferPointer()).Split('\n')) { var t = l.TrimStart(); if (l.Length > t.Length && t.Length > 0 && char.IsLower(t[0]) && !t.StartsWith("dcl_")) ins++; }
+      }
+    }
+    return String.Format("{0}\t{1:F0}\t{2:F0}\t{3}\t{4}\t{5}", System.IO.Path.GetFileName(path), cpu, wall, size, ins, hr == 0 ? "ok" : "hr=0x" + hr.ToString("x8"));
+  }
+}
+"@
+foreach ($f in Get-Content $list) { if ($f) { Write-Output ([Fxc]::Run($f)) } }
+`;
+
+// `d3d fxc`: each program's HLSL compiled alone by Microsoft's compiler, `runs` times, the pages' files in turns.
+async function fxc(srv, pages, { q, runs, limit, size }) {
+  const temp = winTemp(), dirName = `sky-fxc-${process.pid}`;
+  fxcDir = path.join(temp.wsl, dirName);
+  fs.mkdirSync(fxcDir);
+  try {
+    const files = [];
+    for (const [p, page] of pages.entries()) {
+      const list = await sourcesOf(srv, page, `f${p}`, { q, limit, size });
+      const id = `h${p}`;
+      srv.files.set(`/d3d/programs/${id}.html`, PROGRAMS.replace("fetch('/d3d/programs.json')", `fetch('/d3d/programs/${id}.json')`));
+      srv.files.set(`/d3d/programs/${id}.json`, JSON.stringify(list));
+      srv.reports.set(id, []);
+      await runChrome(`http://localhost:${srv.port}/d3d/programs/${id}.html?d3d=${id}&hlsl`, () => srv.reports.get(id).some((g) => g.ev === 'done'),
+        id, { limit, size, flags: ['--enable-privileged-webgl-extensions'] });
+      for (const [k, g] of srv.reports.get(id).filter((g) => g.ev === 'program').entries()) {
+        if (!g.hlsl) { console.log(`  ${page.name}: ${g.name}: no HLSL${g.error ? ` (${g.error.slice(0, 200)})` : ''}`); continue; }
+        const file = `p${p}-${k}.hlsl`;
+        fs.writeFileSync(path.join(fxcDir, file), g.hlsl);
+        files.push({ page: page.name, name: g.name, file, link: g.link });
+      }
+    }
+    // In turns: each program of each page, then the next run.
+    const names = [...new Set(files.map((f) => f.name))], order = [];
+    for (let r = 0; r < runs; r++) for (const n of names) for (const f of files.filter((f) => f.name === n)) order.push(f);
+    fs.writeFileSync(path.join(fxcDir, 'list.txt'), order.map((f) => `${temp.win}\\${dirName}\\${f.file}`).join('\r\n'));
+    fs.writeFileSync(path.join(fxcDir, 'fxc.ps1'), FXC_PS1);
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', `${temp.win}\\${dirName}\\fxc.ps1`,
+      '-list', `${temp.win}\\${dirName}\\list.txt`], { encoding: 'utf8', cwd: '/mnt/c', timeout: limit * 1000 * runs * pages.length, stdio: ['ignore', 'pipe', 'pipe'] }).replace(/\r/g, '');
+    const got = new Map();
+    for (const line of out.split('\n')) {
+      const [file, cpu, wall, bytes, ins, status] = line.split('\t');
+      if (!status) continue;
+      const g = got.get(file) || { cpu: [], wall: [], bytes: +bytes, ins: +ins, status };
+      g.cpu.push(cpu / 1000);
+      g.wall.push(wall / 1000);
+      got.set(file, g);
+    }
+    printFxc(pages, names, files, got);
+    return { files, got: Object.fromEntries(got) };
+  } finally {
+    fs.rmSync(fxcDir, { recursive: true, force: true });
+    fxcDir = null;
+  }
+}
+
+const median = (v) => { const s = [...v].sort((a, b) => a - b); return s.length ? (s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : NaN; };
+const span = (v) => v.length ? `${median(v).toFixed(2)} (${Math.min(...v).toFixed(2)}-${Math.max(...v).toFixed(2)})` : '-';
+
+// One line a program: each page's CPU time (median and range of the runs), and the page's against the first.
+function printFxc(pages, names, files, got) {
+  console.log(`fxc: CPU time of Microsoft's compiler, s, median (range) of ${got.size ? got.values().next().value.cpu.length : 0} runs; instructions`);
+  console.log('  ' + 'program'.padEnd(28) + pages.map((p) => p.name.padEnd(30)).join('') + (pages.length > 1 ? 'ratio' : ''));
+  const sums = pages.map(() => []);
+  for (const n of names) {
+    const cells = pages.map((p) => { const f = files.find((f) => f.page === p.name && f.name === n); return f && got.get(f.file); });
+    cells.forEach((c, i) => { if (c) c.cpu.forEach((v, r) => (sums[i][r] = (sums[i][r] || 0) + v)); });
+    const ratio = cells.length > 1 && cells[0] && cells[cells.length - 1] && median(cells[0].cpu) >= 0.05 ? (median(cells[cells.length - 1].cpu) / median(cells[0].cpu)).toFixed(3) + 'x' : '';
+    console.log('  ' + n.slice(0, 27).padEnd(28) + cells.map((c) => (c ? `${span(c.cpu)} ${c.ins}${c.status === 'ok' ? '' : ' ' + c.status}` : '-').padEnd(30)).join('') + ratio);
+  }
+  const ratio = sums.length > 1 ? (median(sums[sums.length - 1]) / median(sums[0])).toFixed(3) + 'x' : '';
+  console.log('  ' + 'sum'.padEnd(28) + sums.map((v) => span(v).padEnd(30)).join('') + ratio);
+}
+
+// `node tools/sky.mjs d3d [page|programs|switch|fxc] ...`: see tools/README.md.
 export async function d3d(pages, { mode = 'page', q = '', runs = 1, limit = 300, frames = 60, size = { w: 1920, h: 1080 }, shot = 0, out = null, weather = 'altocumulus', at = 5 }) {
   if (!windowsChrome()) throw new Error(`d3d: no Windows Chrome at ${CHROME} (SKY_WIN_CHROME)`);
   const srv = await d3dServer(), { reports, files, port } = srv;
   const results = [];
   try {
+    if (mode === 'fxc') return await fxc(srv, pages, { q, runs, limit, size });
+    // (programs: each page's own programs, taken once from a run of the page.)
+    const lists = [];
+    if (mode === 'programs') for (const [p, page] of pages.entries()) lists.push(await sourcesOf(srv, page, `s${p}`, { q, limit, size }));
     for (let r = 0; r < runs; r++) {
       for (const [p, page] of pages.entries()) {
         const id = `${r}x${p}`, html = fs.readFileSync(path.join(page.dir, 'index.html'), 'utf8');
         let url;
         if (mode === 'programs') {
           files.set(`/d3d/programs/${id}.html`, PROGRAMS.replace("fetch('/d3d/programs.json')", `fetch('/d3d/programs/${id}.json')`));
-          files.set(`/d3d/programs/${id}.json`, JSON.stringify(programsOf(html)));
+          files.set(`/d3d/programs/${id}.json`, JSON.stringify(lists[p]));
           url = `http://localhost:${port}/d3d/programs/${id}.html?d3d=${id}`;
         } else {
           servePage(srv, id, html);
