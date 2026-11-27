@@ -128,7 +128,9 @@ climb in degrees, altitude and place in km, the sun's direction and the
 camera), for the tools; `window.__hud()` the HUD's anchor and horizon line as drawn, whether its
 glass is in view and where its readouts are
 (see [design.md](design.md#the-hud)). `window.__debug()` returns what the debug overlay shows
-(below), on or off.
+(below), on or off. `window.__programs()` returns each program linked so
+far, by the name `?timing` prints, with its fragment shader's text as
+compiled (`d3d programs` and `d3d fxc` read it).
 
 ## Reporting a flaw with the debug overlay
 
@@ -720,7 +722,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   makes the whole shader heavier for the GPU even where a branch skips it:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
-  cannot see (November 2026).
+  cannot see (November 2026). A long loop of constant bounds also costs
+  Microsoft's compiler time where it ends as a loop anyway: the 64
+  directions of `SKY_LIGHT` took it 2.2 s of CPU for a program of 241
+  instructions, 0.2 s with `LONG_N(64)`; the eight taps of `seaShadow`,
+  unrolled, made the scene some 570 instructions longer and the first
+  picture some 1 s later on Direct3D 11, with no faster frame (`d3dperf`,
+  2026-11-27).
 - **A branch that changes nothing at its bound gets a bound the compiler
   cannot know (`UNSEEN`).** Microsoft's compiler (below) knows that a share
   made by `smoothstep` lies from 0 to 1. Where a branch's terms mix to
@@ -796,13 +804,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   for both goes before the loop: the halo's angle of least deviation in
   `cirrusLight` (an `asin` by wavelength) took the scene some 0.3 to 0.5 s
   of the compiler's CPU time more in the loop (2026-11-27), as much as
-  the moon's whole light there. (Timed alone: the HLSL that ANGLE hands
-  the compiler, the part `COMPILER INPUT HLSL` of
-  `WEBGL_debug_shaders.getTranslatedShaderSource` in a Windows Chrome
-  started with `--enable-privileged-webgl-extensions`, given to
-  `D3DCompile` of `d3dcompiler_47.dll` from PowerShell; the machine's
-  other work moves a time by some 0.5 s, so take the median of several
-  runs in turns.) No loop whose bound the compiler cannot know
+  the moon's whole light there (`d3d fxc`, below). No loop whose bound the compiler cannot know
   writes an array at its index: FXC must unroll a loop that writes an
   array at an index it cannot know (its warning X3550), and cannot unroll
   one whose bound it cannot know (error X3511). Write a vector instead
@@ -837,8 +839,12 @@ The shaders must run on any WebGL2. The code keeps these rules:
   they are a loop of their own again; the first picture comes 0.5 to
   1.7 s later (`d3d page`, three runs each: 13.9 to 16.6 s against 13.4
   to 14.9 s). Weigh such a merge with `d3dperf` as well as `d3d programs`. Measure
-  a change of `fs` there: `node tools/sky.mjs d3d programs --base
-  origin/main` (see [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
+  a change of `fs` first with `node tools/sky.mjs d3d fxc --base
+  origin/main --runs 3`: each program alone in Microsoft's compiler, its
+  CPU time, in a minute or two, where a start (`d3d page`) moves by a
+  second from run to run on a busy machine; then `d3d programs` (each
+  link, with the driver's work) and `d3d page` (see
+  [tools/README.md](../tools/README.md#direct3d-11-on-windows)).
 - **A cost of `fs` that a quality level changes is a `Q_` define** at its
   top, whose default is `max`'s value; `QUALITY` in the JS gives the lower
   levels' values (see [design.md](design.md#quality-levels)). So `max` compiles to

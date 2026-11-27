@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="c4cbd42 PR #152">
+<meta name="build" content="a5e8293 PR #152">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3790,13 +3790,16 @@ float columnDepth(vec3 p) {
 // The light is averaged across the light instead, SHADOW_TAPS reads at new
 // places each frame (jitter), spaced evenly out from the middle (denser
 // there: a uniform disc left round blots), and only then made a depth.
+// (The taps run to a bound the compiler cannot know: unrolled, they made
+// the scene some 570 instructions longer in Microsoft's compiler and the
+// first picture on Direct3D 11 some 1 s later, and the frame no faster.)
 const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
 const int SHADOW_TAPS = Q_SHADOW_TAPS;
 float seaShadow(vec3 p, float jitter) {
   if (uCloud <= 0.0) return 0.0;
   float r = min(SHADOW_PEN * SHADOW_OCC / max(uLight.y, 0.05), 0.75);
   float lit = 0.0;
-  for (int i = 0; i < SHADOW_TAPS; i++) {
+  for (int i = 0; i < LONG_N(SHADOW_TAPS); i++) {
     float a = 6.2832 * jitter + 2.39996 * float(i);   // the golden angle
     float ri = r * (float(i) + jitter) / float(SHADOW_TAPS);
     lit += exp(-cloudShadow(p + ri * (cos(a) * shX + sin(a) * shY)));
@@ -6585,6 +6588,9 @@ void main() {
 // One texel of uSkyLight: the sky's light (the sun's part) on a white
 // matt surface facing up (its irradiance over pi), from 64 directions over
 // the sky by the cosine, against 2 cloudSky.
+// (The directions' loop has a bound the compiler cannot know: with 64,
+// Microsoft's compiler tried to unroll it and kept it as a loop anyway,
+// after 2.2 s; now 0.2 s.)
 vec4 skyLightTexel(ivec2 ij) {
   float h = CB + (CT - CB) * float(ij.x) / 15.0;
   vec3 pc = vec3(0.0, RG + h, 0.0);
@@ -6592,7 +6598,7 @@ vec4 skyLightTexel(ivec2 ij) {
   cloudSky(h, uSun.y, ms);
   vec4 E = vec4(0.0);
   skyMoon = false;
-  for (int j = 0; j < 64; j++) {
+  for (int j = 0; j < LONG_N(64); j++) {
     float u1 = (float(j / 8) + 0.5) / 8.0, a = 2.0 * PI * (float(j % 8) + 0.5 * float(j / 8 % 2)) / 8.0;
     skyAt(pc, vec3(sqrt(u1) * vec2(cos(a), sin(a)), sqrt(1.0 - u1)).xzy, BETA_M * uHaze, BETA_M * uHaze * MIE_EXT, S);
     E += (ij.y == 0 ? S[0] : ij.y == 1 ? S[1] : S[2]) / 64.0;
@@ -10214,6 +10220,10 @@ const SkySound = (() => {
       programs.push([prog, shaders]);
       return prog;
     };
+    // For the tools: each program linked so far, by its name, with the
+    // text of its fragment shader as compiled (`node tools/sky.mjs d3d
+    // programs` compiles them alone).
+    window.__programs = () => programs.map(([prog, shaders]) => ({ name: names.get(prog), source: gl.getShaderSource(shaders[1]) }));
     // Throws the compiler's message, or the linker's, if a program failed.
     const check = ([prog, shaders]) => {
       alive();
