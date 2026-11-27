@@ -3338,8 +3338,10 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   surface facing the sun, in the sun's light at the eye, at `WHITE`
   (`dayEye`; `sunlitLevel`: the bare sun's light through the air to the
   eye, `sunThrough`, with the ozone, times `ISUN` / pi). It hangs on the
-  light where the eye is, not on the view: turning the view does not
-  move it, so a turn from the Earth to the sky has no step in it. And it
+  light where the eye is, not on what the view shows: by day turning the
+  view does not move it, so a turn from the Earth to the sky has no step
+  in it (in twilight from above the cruise heights it moves with how far
+  the view looks down, smoothly: the world's light, below). And it
   hangs on the sun as the eye sees it, not on the sun's height over the
   ground's horizon, which sets the twilight's exposure (`DUSK`): from 40
   km the sun sets some 6.4 degrees below the horizontal, from 20 km 4.5,
@@ -3362,22 +3364,90 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   sun, the exposure jumped by 2.4 stops between stills a quarter of a
   degree of the sun apart (3.9, 4.7, 5.5, 7.9, 8.8 from 5 to 6 degrees
   down), and the Earth from near black (luma 16) to a bright blue (38,
-  then 47). Now it rises 0.75 stops a quarter of a degree (3.9, 4.6, 5.4,
-  6.1, 6.9 over the same steps), and meets the view's own exposure at
-  about 7 degrees down (9.9; luma 16, 18, 20, 23, 29, 36, 45 from 5.5
-  to 7 down). The largest step over the sun from 3 to 8 degrees down is
-  now 0.75 stops at 40 km, in every view, at dusk and at dawn (2.4
-  before); from 20 and 11 km, where the limit no longer holds the views
-  once the sun is 3 degrees down, nothing changes (0.65 and 0.52 at
-  most, as before), nor through sunset from 0.3, 11 and 20 km (the sun
-  from 3 degrees up to 3 down, looking up, down and towards it: the
-  same exposures). The same holds the moon's limit (`moonEye`), which
+  then 47). With the lag it rose 0.75 stops a quarter of a degree (3.9,
+  4.6, 5.4, 6.1, 6.9 over the same steps), and met the view's own
+  exposure at about 7 degrees down (9.9; luma 16, 18, 20, 23, 29, 36, 45
+  from 5.5 to 7 down): no step, but still a picture that brightened while
+  the sun went down. The world's light (below) has since taken those
+  views out of this limit's reach, and from 20 km up the lag has little
+  left to hold; it holds the light at the eye where that is the lesser
+  (up to the cruise heights, and the moon's). The same holds the moon's limit (`moonEye`), which
   rises half a stop for each stop of the moon's light, as the moon sets
   at the eye: from 40 km under a moon of 10 days, looking down, it rose
   2.9 stops between stills 1.1 degrees of the moon apart (17.5 to 20.4),
   now 1.6 (17.5, 19.1, 20.4). Where the light at the eye falls slower than
   that, by day and through most of a sunset, the level is that light
   itself.
+  And where the view holds the world below, the eye is adapted to no more
+  light than that world gets (`worldLevel`): the limit is then taken from
+  the lesser of the sun's light at the eye and the light of the world
+  below, a white surface in which stands `WORLD` = 9.25 stops above the
+  air's mean light at the ground (`airLevel` at 0 km, with the sun's height
+  over the ground; the envelope of the sun higher, above, takes the same
+  light for the sky's darkening). From the stratosphere the two part: the
+  sun shines on the eye long after it has set on the ground below, until
+  6.4 degrees down from 40 km, and the Earth is in twilight by then. The
+  limit from the sun's light at the eye alone held a view of that Earth
+  far below what it asked for: from 40 km looking down or away from the
+  sun, 1.7 stops below with the sun at 0 degrees and 3 at 3 and at 5
+  down. The Earth went near black while the ground under it was in civil
+  twilight (looking down, a mean luma of 54 of 255 at 0 degrees, 21 at 3
+  down, 14 at 5 down), and then grew brighter as the sun set at the eye
+  (43 at 7 down): the picture brightened while the sun went down, by 31
+  levels looking down and 18 looking away, and from 20 km by up to 17 and
+  11 (the sun 2.5 to 3.75 degrees down). Now a view with the Earth in it
+  is not held: looking down from 40 km it darkens steadily, 123 with the
+  sun 6 degrees up, 104 at 0, 74 at 3 down, 44 at 5 down, and then as
+  from the cruise heights (43 to 45 down to 8 degrees, 25 at 12), where
+  the view down from 11 km gives 92, 70 and 53 at 0, 3 and 5 down (these
+  at the adaptation; the twilight's key above the cruise heights, below,
+  shows them dimmer). By day the
+  world's light lies above the sun's at the eye (by 1.1 stops with the sun
+  60 degrees up, 0.1 at 10) and nothing changes; from the sun about 9
+  degrees up it lies below at 20 km and above: 2.5 stops below the bare
+  sun's at 0 degrees, 9 at 6 down, 17 at 12 down. `WORLD` keeps the limit
+  a little over where a view with the Earth in it stands, as `DAY_OPEN[1]`
+  does by day (from 40 km: 0 to 0.4 stops over with the sun 8 to 3 degrees
+  up, 0.9 at 0, 1.6 to 2.6 from 3 to 6 down). Up to 11 km the sun sets at
+  the eye soon after it sets on the ground, its light at the eye stays the
+  lesser, and nothing changes (the sun from 5 degrees up to 14 down at
+  0.3, 4 and 11 km, four views, three weathers: the same exposures).
+  The world's light counts by how far the view looks down: the mean over
+  the meter's blocks of `below` (0 for a block that looks `TOPS_SPAN`
+  degrees above the horizontal or more, 1 from as far below; the sunlit
+  tops' share, above, weighs the same by the light). None of it where that
+  mean is under `WORLD_SHARE[0]` = 0.1, all of it at `WORLD_SHARE[1]` = 1,
+  along a smoothstep: from 40 km that is from a view raised 25 degrees or
+  more, where the Earth is out of the frame and the limit is the sun's
+  light at the eye as before, down to one lowered 30 degrees, where the
+  Earth all but fills it. So this limit now hangs on where the view
+  points, though still not on what it shows: a view of the sky alone from
+  above the cruise heights stays near black while the sun shines on the
+  eye (from 40 km with the sun 4 degrees down, a median luma under 15, as
+  by day), and a turn from the Earth up to that sky closes the exposure
+  over the whole of the turn in which the Earth leaves the frame. The
+  exposure shown moves by at most 0.12 stops for each degree the view
+  turns: from 40 km, 0.03 with the sun 2 degrees up, 0.05 at 0, 0.09 at 2
+  down, 0.12 at 4 down (4.6 with the view lowered 10 degrees, 3.8 level,
+  2.7 raised 10, 2.1 raised 20, 2.0 from 25), 0.08 at 6 down; from 20 km
+  0.04 or less. With the world's light coming in over 15 degrees only
+  (`WORLD_SHARE[1]` = 0.35, the first form), the exposure fell by 2.8
+  stops between a view raised 15 degrees and one raised 25 with the sun 4
+  degrees down, 0.31 stops a degree, and read as a switch. A view level or
+  a little raised is now held between the two: looking level from 40 km
+  with the sun 4 degrees down, 0.8 stops under a view lowered 10 degrees.
+  A limit that does not hang on the view cannot keep both that sky black
+  and that Earth seen: the high air is still in sunlight while the Earth
+  is in twilight, and with the world's light for every view the sky alone
+  opened up as the Earth darkened (from 40 km looking up, a mean luma of
+  10 by day, 34 with the sun at 0 degrees, 57 from 2 down). Nor does an
+  envelope that lifts the limit no faster than the air at the eye
+  darkens: under it the sky stayed black and the Earth with it, to the
+  night (luma 3 to 5 from 6 degrees down, the night 4 stops under its
+  exposure). The sky alone still opens up as the sun sets at the eye
+  (from 40 km looking up: 12 at 3 down, 30 at 6.5 down, 14 at 8 down;
+  the twilight's key above the cruise heights, below, took a quarter off
+  that rise).
   Up to the cruise heights no view comes near it, by day or at dusk: the
   darkest, the deep blue zenith from 11 km, stays 0.26 to 0.74 stops
   below by day (least with the sun 15 to 28 degrees up) and 0.3 at
@@ -3399,11 +3469,10 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   to 1.6 stops (26, 50, 103, now 14, 27, 57), from 15 km 0.7, from 13 km
   0.4. Through sunset from 40 km the sky alone stays near black (median
   luma 5 from 8 degrees up to 2 down, 8 at 4 down) and turns the dark
-  blue of before only as the sun sets at the eye (40 at 6 down); the
-  Earth below goes dark first (luma 51 at 0 degrees, 19 at 4 down, where
-  it was 109 and 64). From 20 km the sky alone stays dark navy down to 2
-  degrees below (luma 26 to 35) and takes twilight's exposure from 4
-  down, as before. Every view up to 11 km, by day, at dusk and at night,
+  blue of before only as the sun sets at the eye (40 at 6 down); a view
+  with the Earth in it follows the world's light (above). From 20 km the
+  sky alone stays dark navy down to 2 degrees below (luma 26 to 35) and
+  takes twilight's exposure from 4 down, as before. Every view up to 11 km, by day, at dusk and at night,
   is as before (216 views at 0.3, 3 and 11 km, the sun from 78 degrees up
   to the night), and so is the night at every height.
   The limit bounds the exposure of the sun as it is, not the envelope of
@@ -3451,7 +3520,8 @@ adaptation less `nightDimFor`, up to `NIGHT_DIM` = 1 stop at
 `NIGHT_KEY[1]` = 14.5 (a full moon's clouds from cruise), along a
 smoothstep in from 12 (the end of nautical twilight) and out again by 17.5
 (a moonless night from cruise). By day and through most of twilight it is
-0. It changes by at most 0.6 stops for each stop of the adaptation, which
+0. (Above the cruise heights the twilight has a key of its own,
+`highDimFor`: below.) It changes by at most 0.6 stops for each stop of the adaptation, which
 itself opens half a stop for each stop the night darkens (`NIGHT_RATE`):
 a darker night is still shown darker, and nothing switches.
 
@@ -3477,6 +3547,72 @@ night's 17.6), the Milky Way in a view up from cruise went from 15 to 12
 of luma at its median. For the eye the dimming would grow on into the
 dark; the stars are why it does not. Under a full moon the stars are
 thinned by the moon's limit above, not by the key.
+
+**The twilight's key above the cruise heights.** From 20 km up the screen
+also shows the twilight darker than the adaptation holds it: the exposure
+drawn is the adaptation less `highDimFor`, `HIGH_DIM` = 0.75 stops from
+`DAY_KM[1]` = 20 km up and none up to `DAY_KM[0]` = 12 km (the smoothstep
+of the day's eye), coming in as the adaptation goes from `HIGH_KEY[0]` =
+0.5 (where the day's views stand there) to `HIGH_KEY[1]` = 3.5 (a view
+of the Earth with the sun about 2 degrees down), and going again as the
+night's key comes in (`NIGHT_KEY[0]` to `NIGHT_KEY[1]`, 12 to 14.5). It
+follows the light, not the hour, changes by at most 0.4 stops for each
+stop of the adaptation, and by day, at night and up to the cruise heights
+it is 0.
+
+At the adaptation alone the meter shows the twilit Earth from the
+stratosphere as it shows it from the cruise heights, nearly as light as
+by day until the sun is 3 degrees down: from 40 km looking away from the
+sun, a mean luma of 94 of 255 at 0 degrees, 90 at 2 down, 83 at 3 down;
+looking down 103, 85, 74. But that Earth is seen by an eye that still has
+the sun on it (until 6.4 degrees down from 40 km), or by a camera beside
+the sunlit limb: a photograph of the terminator from orbit (NASA,
+ISS027-E-012224) has its twilit side at about 40, grey-brown and plainly
+seen, beside lit ground at 80 and more. The owner found the render too
+bright against it. Now, from 40 km looking away from the sun: 77 at 0
+degrees, 61 at 2 down, 56 at 3 down, 50 at 4 down, 33 at 5 down, 25 at 8
+down; looking down 88, 62, 53, 40, 31, and 31 to 32 down to 8 degrees
+(43 to 45 before), 25 at 12 down as before. From 20 km looking down: 88
+at 0 degrees, 56 at 3 down, 37 at 5 down, 32 at 8 down.
+
+Why a key, and not a lower limit of the day's eye: that limit, however it
+is taken (the world's light set lower, or a mean of the world's light and
+the sun's at the eye), has to let go before the night, and the meter
+holds a view of the Earth at the same level from the sun 5 degrees down
+to 9 (the darker quarter's key), so letting go there brightens the
+picture. With the limit a mean of the two, a view down from 40 km dipped
+to 31 at 5 degrees down and came back to 44 at 6.5; with the world's
+light a stop lower for all the twilight, the view away from the sun
+brightened again by 7 to 18 levels on the way (both worked out from the
+stills' exposures, not drawn). The key leaves the adaptation where the
+meter puts it and lowers the whole of the twilight, so the picture still
+never brightens as the sun goes down: the largest rise of the mean luma
+from 9 degrees up to 14 down is 1.4 levels looking down from 40 km and
+2.2 looking away (the meter's own, at 5 to 5.5 down), 0 and 0.5 from 20
+km, and the same at dawn (0.8 and 2.1) and in the weathers `clear` and
+`fair` (2 or less). It lowers every view there: towards the sun from 40
+km the band of glow is drawn 0.5 to 0.75 stops lower from 4 degrees down
+(its brighter twentieth 161 at 4 down, 148 at 5, 119 at 8, where it was
+186, 184, 156), and a view of the sky alone, which opens up as the sun
+sets at the eye, rises to 30 instead of 40 from 40 km, and to 60 instead
+of 80 from 20 km.
+
+What stays unlike the photograph: the twilit Earth is a saturated blue
+(the blue over the green of its light, linear, 2.7 to 2.9 from 40 km with
+the sun 2 to 4 degrees down, 1.85 by day; the photograph's twilit ground
+1.2 to 1.3, grey-brown). The blue is the scene's, not the exposure's: at
+the limit of the sun's light at the eye, three stops lower, the same view
+measured 2.2 to 2.5, and the rods' grey has not come in yet (the
+adaptation there is 3.5 to 5.3, under `NIGHT_EYE[0]`). It is the light of
+the twilight sky on the ground and the lit air in the line of sight
+(looking down, 2.4 to 2.65; along the slant of the view away from the
+sun, more), and the white balance of twilight goes out with height
+(`BALANCE_HIGH`, none from 11 km). The band of light over the limb in the
+view away from the sun is the scene's too: the air above the planet's
+shadow is in sunlight while the Earth under it is in twilight, and with
+the sun 3 degrees down the sky two bands of 3.4 degrees over the limb is
+as light as the Earth below it (0.8 to 1 of its luma, at the day's eye's
+limit as at the meter's exposure), where by day it is a seventh.
 
 The dimming follows the adaptation, not the moon: late twilight with the
 same light is dimmed the same. From 11 km away from the sun on a moonless
