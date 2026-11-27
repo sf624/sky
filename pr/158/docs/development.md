@@ -234,6 +234,23 @@ towards the sun and away from it, at rest and in flight. The rule and what
 to report are in [`CLAUDE.md`](https://github.com/sf624/sky/blob/main/CLAUDE.md).
 The picture comes before the processing load.
 
+Pair a photograph from the air with the page by the sun's height at the
+eye's level, not over the horizon seen: from 11 km the horizon lies 3.4
+degrees under the eye's level (the square root of twice the height over
+the Earth's radius), and the air bends the light by about a degree more.
+A sun that touches the horizon in a photograph from cruise is 3.4 degrees
+down by the page's clock, where the Earth below is already in its shadow;
+the page's sun at 0 stands 3.4 degrees over the horizon, with the air
+under the eye still in its light. A wing that is not lit says little: at
+sunset the fuselage shades the far wing. (The dusk audit of issue #40 set
+photographs of the band opposite the sun beside the page with the sun at
+0, and read the lit air under the horizon there as a flaw.)
+
+Where a photograph and the page still differ in the air's light, check
+the page against the reference first (`tools/ref`, see
+[tools/README.md](../tools/README.md#the-reference)): if the two agree,
+the difference is the camera's, or the weather's.
+
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
@@ -791,7 +808,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   nothing measurable (1.007). Taken out again in a copy of 9de3e45, the `UNSEEN` of
   `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
   the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
-  2026-11-24).
+  2026-11-24). A little more arithmetic in `cloudLayer` is the same trap:
+  the bodies' weight worked out beside the cluster's `core` (#158), or a
+  cap of it, took the frame over a deck, with no heap in it, 11 to 19 %
+  longer for 77 more instructions of 4162; in `core`'s place, nothing
+  (see [design.md](design.md#low-clouds), the bodies). Seven variants
+  were timed to find it: `d3dperf --views overcast --rounds 3`, three
+  minutes each.
 - **A factor of 0 does not keep the picture.** A term that a uniform
   switches off at the page's defaults (`x += even * jitter`) still changes
   what the compiler makes of the code round it. Three cases, on this

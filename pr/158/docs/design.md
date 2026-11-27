@@ -718,10 +718,56 @@ seen from cruise, the reference's light (scattered many times by the
 boundary layer, coming from the glow) was twice the table's and
 brown-orange where the table's was blue. The lean's first moment would
 weigh it by 3 times the asymmetry (2.1 in the boundary layer); with the forward peak sharper
-than that, 4 fits the reference best, and taking it only where it is
+than that, 6 fits the reference best (`MIE_LEAN`; 4 until the table was
+read over `msFall`, below: between its columns it held up to 1.4 times too
+much light, and the lean with it), and taking it only where it is
 positive keeps the views away from the light as they were (the first
 moment taken there too left the sky away from the sun 0.65 of the
-reference's).
+reference's). What is left: under the glow towards a sun 3 to 5 degrees
+down, seen from cruise, the air is 0.85 to 0.93 of the reference's (the
+forward peak is sharper still close to the glow: the reference asks for 7
+to 9 there and 4.5 ten degrees under it), and away from it 1.1 to 1.3
+times too red (the aerosol sends little of the glow's light back, where
+the table's light is taken as even).
+
+A sixth holds the mean light's shape (`msShape`): its second moments
+(the light gathered times the direction twice: along the sun's side, up,
+and the two together), less those of an even light (a third of the light
+along each axis), over the mean light. The air scatters by its own phase
+function, 3 / 4 (1 + the cosine squared): as much again along the line
+the light comes along as across it. So it takes the mean light plus 3 / 4
+of the shape along the view (`addLight`): exact for the air, with no
+factor to fit. In twilight most of the light comes level, from the glow:
+the air then sends more of it on towards the glow and back from it (the
+sky opposite the sun) and less across and down. With the table's light
+taken as even, the sky opposite a sun 4 to 5 degrees down, seen from
+cruise, was 0.73 to 0.88 of the reference's once the table itself was
+right, and the air seen from above too red. The shape changes little from
+one wavelength to the next, so the table keeps it at four of the twelve
+(405, 505, 580 and 680 nm, one texel for each of its three parts) and the
+shader reads between them. Against the reference's own second moments
+(`tools/ref/shape.mjs`) it is within 0.04 of them from 0.05 to 11 km, the
+sun from 30 degrees up to 6 down (they run from -0.3 to 0.44).
+
+**Between the table's columns** (`msFall`). In twilight the mean light
+falls e-fold with each degree of the sun's (57 per unit of its cosine),
+and the columns stand 2 degrees apart. Read straight between two of them,
+it came out 1.1 to 1.4 times too bright with the sun 1 to 5 degrees down
+and up to 1.8 times further down, most half way between columns (against
+a table eight times as fine); the second gathering, which reads the first
+the same way, carried that into the columns themselves. So the light of
+the air in twilight rose and fell against the light scattered once with
+every 2 degrees of the sun's: this was the "1.6 to 1.8 times the
+reference" of side views in deep twilight. Now the table holds its light
+over `msFall`, a fixed curve that falls as twilight does (57 per unit of
+the cosine well under the horizon, level well above it, going over within
+0.04 on either side), and every reader takes what it reads between two
+columns times the curve at the sun's own height: the shader (`msTable`),
+the second gathering (`readPrev`) and the exposure's `airLevel`. Read so,
+the table is within 5 % of the fine one from 12 degrees up to 10 down
+(13 % at most to 12 down; a unit test holds it: `tools/test/air.test.mjs`),
+and by day it is as it was (the curve is level there). The light from
+above for the white balance (`upData`, `lightOn`) is still read straight.
 
 A fifth holds the sky's light on the cirrus (`ciSky`): the mean light
 while the sun is over the sheet's horizon; as it goes from 1.5 to 4.5
@@ -739,9 +785,11 @@ than the glow. At 12.5 km with the sun 9 degrees down, the mean light is
 4.2e-6, the light from above 7.8e-7 and from below 6.2e-7 (the table's
 units): five times as much comes level as from either face.
 
-One value per wavelength. The texture is `NMU` by `15 * NH`: the three
+One value per wavelength. The texture is `NMU` by `MS_GROUPS * NH` (18
+groups of `NH` rows): the three
 groups of four wavelengths of the air stacked in y, then those of the
-clouds, then the lean towards the sun's side and up, then the cirrus's. It depends on the haze, so `frame` rebuilds it when the haze
+clouds, then the lean towards the sun's side and up, then the cirrus's,
+then the shape's three parts. It depends on the haze, so `frame` rebuilds it when the haze
 changes, and the renderer uploads it again. `fs` reads it through the
 GPU's filter (`textureLod`; RGBA16F when full floats cannot be filtered).
 
@@ -788,6 +836,78 @@ default haze, 4096 paths a ray). Medians over each set of rays:
 So the light of the sky is the page's atmosphere's; what still differs
 from photographs is mostly how much aerosol there is, and the exposure
 and tone curve (see [Exposure](#exposure-and-the-tone-curve)).
+
+**Against a reference, again** (November 2026, issue #40: the air below
+and opposite a low sun seen from cruise). Round 10's solver was not kept,
+so this one is in the repository: `tools/ref` (see
+[tools/README.md](../tools/README.md#the-reference)), written anew: paths
+from the eye through spherical shells, free paths by delta tracking, the
+sun's light taken at every collision, one wavelength at a time, the
+twelve of the page; the light scattered once by quadrature. It was
+checked on cases with a known answer before use: its depths against a
+direct sum (2.7e-4 at most), its first order by paths against the
+quadrature (within 0.3 %, 18 cases), its second order against a direct
+triple sum without aerosol (within 0.7 %, the paths' noise), and its
+closure: in air that absorbs nothing over a white ground, under a sky
+equally bright from all sides, every ray must see that brightness (0.98
+to 1.02 over 36 cases, their noise). The zenith from sea level comes out
+at 153 cd/m2 with the sun on the horizon and 0.92 with it 6 degrees down
+(measured 216 and 0.63, as above).
+
+The page's linear light (before the exposure, the balance and the tone
+curve, read from a copy of the page that shows it) against it, from
+11 km, along rays from 10 degrees over the horizon to 15 under it,
+towards the sun, 20 degrees beside it, across and away, medians of the
+three channels over groups of rays (sea off below the horizon: the
+reference's ground is grey):
+
+- The sun 30 degrees up to 2 down: 0.93 to 1.05, before and after the
+  changes above. The light scattered once: 0.97 to 1.05.
+- So the flat warm haze under the horizon with the sun between 2 degrees
+  up and 2 down is the light of this atmosphere, not an error of the
+  page: 64 to 76 % of its red and green is sunlight scattered once by the
+  air between 2 and 11 km under the eye. The sun stands 3.4 degrees over
+  the horizon of an eye at 11 km when it is level with the eye; the air
+  at 5 km still has its light, reddened to a sixth of the red (655 nm) and
+  a twentieth of the green (555 nm), and scatters it as a dull tan (r/g
+  1.4, b/g 0.45),
+  under the blue of the light scattered many times. The ground under it
+  gives 2 to 3 % of what is seen 15 degrees down. A layer of cloud far off
+  that takes the sun's beam below 2 to 3.8 km changes this by 10 % of the
+  red or less (tried in the reference: the air above the clouds keeps the
+  beam).
+- The sun 3 to 5 degrees down, the Earth's shadow: before, 1.0 to 1.5 in
+  the green and up to 1.8 in the red, across and away from the sun (the
+  table between its columns, and its light taken as even); now 0.89 to
+  1.16 in the green; the red is still 1.1 to 1.3 away from the sun and
+  0.85 to 0.89 under the glow (the aerosol, above).
+- The sun 6 to 10 degrees down, to the side: 1.1 to 2.1 before, 0.9 to
+  1.5 now (the reference is noisy there).
+- From 0.3 and 3 km the sky is as it was by day and with the sun on the
+  horizon (0.85 to 1.0), and nearer the reference with the sun 4 degrees
+  down (to the side 1.05 to 1.11 before, 0.89 to 0.98 now).
+- The table itself (`tools/ref/table.mjs`): 0.80 to 0.92 of the
+  reference's mean light at sea level and 0.90 to 0.98 at 11 km, the same
+  at every height of the sun (before: 0.9 at its columns, 1.3 between
+  them). A third of what is missing at sea level is the sky's light off
+  the ground (the table bounces the sun's alone), the rest the orders
+  taken as a series.
+- Over a flat mirror of a sea in place of the grey ground, the
+  reference's light under the horizon is 1.0 to 1.3 times as much with the
+  sun on the horizon (the sea then gives up to 17 % of it) and 1.1 to 3
+  times under the glow of a sun 3 to 5 degrees down: the ground matters
+  there, which is why the air was compared with the sea off.
+
+Photographs of the band opposite the sun from airliners were set against
+these numbers too (their profiles from the sky down, in linear light).
+They fit the reference with the sun 1 to 2.5 degrees down by the page's
+clock, not with the sun on the eye's horizon: there the band is as orange
+and as bright against the sky (r/g 1.5 to 2.1, 0.7 to 0.85 of the sky
+over it) and the ground under it half to a fifth of the band. What still
+sets them apart from the page is the camera: they are exposed about a
+stop lower, so that the ground under the band reads dark where the page
+shows it mid grey, and their sky is bluer (see
+[issue #40](https://github.com/sf624/sky/issues/40)).
 
 **The air as a table** (`low`, `high` and `max`: the level's `airLut`,
 `Q_AIR_LUT` in `fs`; `mid` marches). A phone spent most of the scene's
@@ -1142,7 +1262,7 @@ seen from far above.)
 
 - **Where**: the slider says how many heaps there are (`fair`, 0.63 +
   0.44 `uCloud`), and the weather map where. A mask of clusters
-  (`cloudLayer`: `lane`, `core`) is the map's amount read over 3 km and
+  (`cloudLayer`: `lane`) is the map's amount read over 3 km and
   more (mip 3.5), less 0.6 of its largest systems (mip 6.5), elsewhere on
   the map (so that the place where the page opens has heaps about it): where
   it is under a mark (`CF_MESO`: 0.54 with few clouds, 0.52 from half on,
@@ -1207,15 +1327,26 @@ seen from far above.)
     clouds the mark is higher by half of what the slider lacks to 0.5
     (fair-weather heaps stay small).
   - *The march* strides by the field, and the swell makes the field
-    steeper outside the heaps: there it is divided by `heapSteep`, 1 plus
-    the swell's and the height's share times how fast `inB` may change
-    (`CF_BODY`.z = 0.2 of the gusts per km). With the bare field the
+    steeper outside the heaps: there it is divided by 1 plus the swell's
+    and the height's share times how fast `inB` may change (`CF_BODY`.z =
+    0.2 of the gusts per km), kept in `heapMix`. With the bare field the
     strides went through a body's flank: upright pale bars in the cloud
     from 1.5 km.
-  - *The top*: the heaps' bound for the early way out is the place's own
-    (the domes with their swell and height there), so the field costs no
-    more away from a body; and a body is no more than fits under `CT`
-    (with a lifted base, the layer's record).
+  - *The top*: wherever there are heaps, the bound for the early way out
+    is as high as a body's heaps may stand, not the place's own body's.
+  - *Sinking*: as a sheet forms, a body's heaps sink by their whole height,
+    as the others do.
+  - *For Direct3D 11*: the body's weight is the one thing the layer works
+    out for it, in the place of the `core` of #113 (which lowered the
+    largest discs' threshold by 0.03 deep in a cluster, a rest of the
+    merged cores: heaps there are a little smaller without it). With the
+    weight beside `core`, or `core`'s share added to `gather`, or a cap
+    of the body under `CT` worked out in `cloudLayer` or in the heaps'
+    branch, the frame over a deck, which has no heap in it, took 11 to
+    19 % longer on Direct3D 11 with the same picture, for 77 more
+    instructions of 4162 (`d3dperf`, `overcast`; 1.01 as it is). So a
+    body is not capped under `CT`: with a base lifted by more than 1.1 km
+    (the layer's record) the deepest are cut off there.
   - *Tried before*: a low wide dome of its own under a body's heaps (a
     smooth lens wherever no heap stood on it); lower thresholds for the
     discs on a body (thin blades at its rim; and the earlier core, see
