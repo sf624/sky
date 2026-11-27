@@ -9328,6 +9328,12 @@ const SkySound = (() => {
   // cruise the view is the high sky and the deck far below, which
   // photographs keep as blue as by day, and this correction, warm for the
   // light of the low air, turned that sky lavender-grey and the deck pink.
+  // But as far as the Earth gives the frame's light (the meter's share of it
+  // from rays that meet the planet), it holds at any height: the light on the
+  // ground lights what the camera sees there. Faded
+  // out with height alone, the twilit Earth from 20 to 40 km, nearly all of
+  // it Rayleigh light of the air, came out navy blue where photographs from
+  // orbit show it blue-grey.
   // Unchanged by day and by night.
   const DAY_BALANCE = [0.932, 1.013, 1.074];
   const BALANCE_ADAPT = 0.5, BALANCE_IN = [2.5, -0.5], BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
@@ -9355,9 +9361,11 @@ const SkySound = (() => {
     const y0 = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     return c.map(v => Math.max(v, 1e-6 * y0) / y0);
   };
-  function balanceFor() {
+  // earth: the share of the metered light that comes from the planet (the
+  // sea, the clouds and the air before them), from the meter (earthLight).
+  function balanceFor(earth) {
     const y = Math.min(1, Math.max(0, (state.elev - BALANCE_OUT[1]) / (BALANCE_OUT[0] - BALANCE_OUT[1])));
-    const z = Math.min(1, Math.max(0, (BALANCE_HIGH[1] - state.alt) / (BALANCE_HIGH[1] - BALANCE_HIGH[0])));
+    const z = Math.max(earth, Math.min(1, Math.max(0, (BALANCE_HIGH[1] - state.alt) / (BALANCE_HIGH[1] - BALANCE_HIGH[0]))));
     const k = BALANCE_ADAPT * smooth01((BALANCE_IN[0] - state.elev) / (BALANCE_IN[0] - BALANCE_IN[1])) * y * y * (3 - 2 * y) * z * z * (3 - 2 * z);
     if (k === 0) return DAY_BALANCE;
     const spec = new Float64Array(NW), now = lightOn(0, state.sun[1], spec), ref = lightOn(0, 0.5, spec);
@@ -10604,6 +10612,9 @@ const SkySound = (() => {
     // The exposure, log2 (null until the first picture has been metered),
     // and what the first picture is drawn at to meter it (see prime).
     let logE = null, firstE = 0;
+    // The share of the metered light that comes from rays that meet the
+    // planet (for the white balance: balanceFor), 0 until metered.
+    let earthLight = 0;
     // ?expo=L in the address pins it at L (log2, for tests: the tools compare
     // a flight with a still at the exposure the flight ended with). Without
     // it, expo is null and the meter sets the exposure. window.__exposure
@@ -10646,7 +10657,7 @@ const SkySound = (() => {
         ['uniform1f', 'uHaze', state.haze],
         ['uniform1f', 'uExposure', 2 ** shownFor(logE ?? firstE)],
         ['uniform1f', 'uLook', v.look],
-        ['uniform3fv', 'uBalance', balanceFor()],
+        ['uniform3fv', 'uBalance', balanceFor(earthLight)],
         ['uniform1f', 'uSaturation', saturationFor()],
         ['uniform1f', 'uNightEye', nightEyeFor(logE ?? firstE)],
         ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? firstE)],
@@ -10840,6 +10851,13 @@ const SkySound = (() => {
         levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
       }
       target = exposureFor(levels, near, below);
+      let all = 0, earth = 0;
+      for (let i = 0; i < levels.length; i++) {
+        const l = 2 ** levels[i];
+        all += l;
+        earth += ground[i] * l;
+      }
+      earthLight = all > 0 ? earth / all : 0;
     };
     // How much less each block counts for being near the sun (log2, for
     // the highlights by day: see exposureFor), from the view it was metered
@@ -10853,8 +10871,11 @@ const SkySound = (() => {
     // How far each block looks down: 0 from TOPS_SPAN degrees above the
     // horizontal, 1 from TOPS_SPAN below (sunlit tops: see exposureFor).
     const below = new Float64Array(METER[0] * METER[1]);
+    // Whether each block's ray meets the planet (1) or not (0).
+    const ground = new Float64Array(METER[0] * METER[1]);
     const weigh = p => {
       const v = view(), c = cameraOf(v), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
+      const dip = -Math.sqrt(1 - (RG / (RG + state.alt)) ** 2);
       for (let j = 0, i = 0; j < METER[1]; j++) {
         for (let k = 0; k < METER[0]; k++, i++) {
           const x = ((k + 0.5) / METER[0] * 2 - 1) * a * t, y = ((j + 0.5) / METER[1] * 2 - 1) * t;
@@ -10862,6 +10883,7 @@ const SkySound = (() => {
           const deg = Math.acos(Math.min(1, (dx * s[0] + dy * s[1] + dz * s[2]) / Math.hypot(dx, dy, dz))) / RAD;
           near[i] = Math.log2(SUN_SHARE + (1 - SUN_SHARE) * smooth01((deg - SUN_NEAR[0]) / (SUN_NEAR[1] - SUN_NEAR[0])));
           below[i] = smooth01((TOPS_SPAN - Math.asin(dy / Math.hypot(dx, dy, dz)) / RAD) / (2 * TOPS_SPAN));
+          ground[i] = dy / Math.hypot(dx, dy, dz) < dip ? 1 : 0;
         }
       }
     };

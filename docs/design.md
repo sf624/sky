@@ -3329,7 +3329,9 @@ that the read does not wait for the GPU's work. Counting frames, not
 polling a fence, keeps the page's frames the same from run to run on a
 stepped clock (the tools' fake clock). A read still costs a round trip to
 the GPU process (about 2 ms on the test machine), so the meter is read at
-most every `METER_MS` = 100 ms of the page's time. The first frame of
+most every `METER_MS` = 100 ms of the page's time. Each reading also
+gives the white balance the share of the light from blocks whose ray
+meets the planet (`earthLight`, see the end of `main`). The first frame of
 the page is metered at once, not shown, and drawn again at its exposure:
 the page starts adapted. The loading has drawn that frame before and read
 its meter without waiting (`prime`, see
@@ -3912,6 +3914,26 @@ At the end of `main`:
    `BALANCE_HIGH` (round 10): towards the sun from cruise at -4 degrees
    the sky came out grey-lavender as in A1d, but away from it grey where
    r3, A3f and A3a are pale blue; kept.
+   But the fade with height goes only as far as the Earth gives the
+   frame's light: the balance takes the larger of the two, the height's
+   and `earthLight`, the share of the metered light (the meter's blocks,
+   below) that comes from rays that meet the planet (the sea, the clouds
+   and the air before them; `ground` in `weigh`). The light on the ground
+   lights what the camera sees there, at any height. From 20 to 40 km the
+   twilit Earth is nearly all the air's light (96 % of it from 40 km with
+   the sun 3 degrees down: Rayleigh light of sunlight that crossed the
+   ozone low, and the twilight's light scattered again), as blue in the
+   scene as by day (blue over green 2.2 in linear light), and without the
+   balance it came out navy (2.82 as shown) where photographs from orbit
+   show it blue-grey to pale blue (1.2 to 2.0; issue #145); now 1.84.
+   Looking down from cruise at -4 degrees, the deck is blue-grey (1.95,
+   3.04 before); the sky away from the sun there, where the Earth gives
+   about a third of the light, stays pale blue (2.34 in its upper part,
+   2.70 before). With the sun from 0 to 2 degrees down, what the low sun
+   still lights below (cloud tops, cirrus) comes out warmer than before
+   (a deck from cruise at -2 degrees: red over green 1.26, 1.09 before),
+   as the balance is set for the sky's light on the ground. By day, at
+   night, from below 2 km and looking up, nothing changes.
 3. A camera's saturation by day, `uSaturation` (`saturationFor`):
    `DAY_SATURATION` = 1.3 about the luminance, in linear light, falling to
    none as the sun goes from 8 to 1 degrees (`DUSK`) and none at night.

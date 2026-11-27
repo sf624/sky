@@ -83,6 +83,18 @@ test('lumaPct and brightColour: levels and the colour of the brightest pixels', 
   assert.ok(M.brightColour(beige, { of: 'sat' }) > 0.1);
 });
 
+test('meanColour: the colour of a region in linear light, undone with the power 2.2 of the page', () => {
+  // (Levels 40, 50, 80: dim navy. In linear light, b/g = (80 / 50)^2.2 = 2.81; undone with the sRGB curve, 2.66.)
+  const navy = pic(64, 64, () => [40, 50, 80]);
+  assert.ok(Math.abs(M.meanColour(navy) - (80 / 50) ** 2.2) < 1e-6);
+  assert.ok(Math.abs(M.meanColour(navy, { of: 'rg' }) - (40 / 50) ** 2.2) < 1e-6);
+  const grey = pic(64, 64, () => 90);
+  assert.ok(Math.abs(M.meanColour(grey) - 1) < 1e-9);
+  // The mean is of the light, not of the levels: half black, half (0, 100, 200).
+  const half = pic(64, 64, (x) => (x < 32 ? 0 : [0, 100, 200]));
+  assert.ok(Math.abs(M.meanColour(half) - 2 ** 2.2) < 1e-6);
+});
+
 test('patchStops: patches of light and dark in stops; a gradient alone does not count when flat', () => {
   const even = pic(W, H, () => 170);
   // (Two halves, 188 and 137 in sRGB levels: a stop apart in linear light.)

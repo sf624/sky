@@ -54,7 +54,7 @@ export function judge(entry, img, still = null) {
       if (!still) throw new Error(`look: ${entry.name}: against ${m.against} needs the stills of the run`);
       value /= f(still(m.against), { ...m, region: m.againstRegion || m.region });
     }
-    const name = m.label || m.measure + (m.measure === 'lumaPct' ? ` p${m.p ?? 50}` : m.measure === 'brightColour' ? ` ${m.of || 'sat'}` : '')
+    const name = m.label || m.measure + (m.measure === 'lumaPct' ? ` p${m.p ?? 50}` : m.measure === 'brightColour' ? ` ${m.of || 'sat'}` : m.measure === 'meanColour' ? ` ${m.of || 'bg'}` : '')
       + (m.against ? ` / ${m.against}` : '');
     const ok = (m.min === undefined || value >= m.min) && (m.max === undefined || value <= m.max);
     const lim = [m.min !== undefined ? `>= ${m.min}` : '', m.max !== undefined ? `<= ${m.max}` : ''].filter(Boolean).join(', ');
