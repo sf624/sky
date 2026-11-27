@@ -2518,6 +2518,16 @@
    "bad": "393b81c",
    "fixed": "269629c",
    "note": "The sun from 3.5 to 6.5 degrees down in steps of a quarter degree. The table of multiple scattering held up to 1.4 times too much light half way between its columns (2 degrees of the sun apart), so the air's light fell unevenly: the frame's mean rose by 1.3 levels at 4.25 degrees and 1.4 at 6.25 on 393b81c; it falls at every step with the fix."
+  },
+  {
+   "name": "sea-shadow-11km-down25",
+   "q": "date=172&time=12&alt=11&pitch=-25&cloud=0.5",
+   "reported": "2026-11-27",
+   "wrong": "from 11 km nothing ties the heaps to the sea: no shadow shows on the water outside the sun's glitter (#156)",
+   "measures": [],
+   "bad": "393b81c",
+   "fixed": null,
+   "note": "No measure of a still separates the two: the shadow is a few percent of the sea's light, less than the glitter's mottle and the gradients across the frame (patchStops less the best plane 0.455 and 0.454; a block's dip under the blocks around it 0.116 and 0.123). Measured with the shadow's own picture from a patched copy of the page (the sea where the light let through is under 0.1, against the lit sea within 25 px, linear luminance as shown): 0.932 on main 393b81c, 0.916 with the light that the clouds let down diffusely (seaThrough); photographs from aircraft and from orbit outside the glitter under a high sun: 0.85 to 0.94, and none seen from 11 km over small heaps. Kept for the contact sheet."
   }
  ]
 }
