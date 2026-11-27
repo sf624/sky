@@ -6092,6 +6092,12 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H
   }
   // Each light (uCiLights): the sun's, where it reaches the sheet past the
   // planet, through the air above (reddened low), and the moon's.
+  // The halo's angle of least deviation, by wavelength (ice's index n, in
+  // 0.55 um units), is the same for both: found once, before the loop.
+  // (Found in the loop, it took Microsoft's compiler some 0.3 to 0.5 s
+  // longer over the scene: as long as the moon's whole light there.)
+  vec4 dev[3];
+  for (int k = 0; k < 3; k++) dev[k] = 2.0 * asin(0.5 * (1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]))) - PI / 3.0;
   for (int l = 0; l < CI_N(2); l++) {
     float I = l == 0 ? 1.0 : uCiLights.y;
     if ((l == 0 ? uCiLights.x : uCiLights.y) <= 0.0) continue;
@@ -6138,8 +6144,7 @@ void cirrusLight(vec3 o, vec3 d, float extM, float tHigh, uvec3 bits, out vec4 H
     // it to an eye below the sheet.
     float below = 0.35 * clamp(1.4 * uCloud - 0.1, 0.0, 1.0) * max(mus, 0.0) / PI;
     for (int k = 0; k < 3; k++) {
-      vec4 n = 1.2998 + 0.00316 / (0.3025 * uWL[k] * uWL[k]);   // ice, by wavelength (0.55 um units)
-      vec4 x = th - (2.0 * asin(0.5 * n) - PI / 3.0);
+      vec4 x = th - dev[k];
       vec4 halo = mix(exp(-x * x / 1.2e-3), exp(-max(x, 0.0) / 0.05), step(0.0, x));
       vec4 sun = exp(-(uBR[k] * ol.x + extM * uMA[k] * ol.y + uBO[k] * ol.z));
       B[k] += I * sun * wBelow * below;
