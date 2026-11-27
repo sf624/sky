@@ -717,7 +717,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   makes the whole shader heavier for the GPU even where a branch skips it:
   the moon's sparkles (`sparkle`, drawn only at night) cost 4.5 ms of 17 by
   day at 2560 x 1440 until their loops ran to `one`, a 1 the compiler
-  cannot see (November 2026).
+  cannot see (November 2026). A long loop of constant bounds also costs
+  Microsoft's compiler time where it ends as a loop anyway: the 64
+  directions of `SKY_LIGHT` took it 2.2 s of CPU for a program of 241
+  instructions, 0.2 s with `LONG_N(64)`; the eight taps of `seaShadow`,
+  unrolled, made the scene some 570 instructions longer and the first
+  picture some 1 s later on Direct3D 11, with no faster frame (`d3dperf`,
+  2026-11-27).
 - **A branch that changes nothing at its bound gets a bound the compiler
   cannot know (`UNSEEN`).** Microsoft's compiler (below) knows that a share
   made by `smoothstep` lies from 0 to 1. Where a branch's terms mix to

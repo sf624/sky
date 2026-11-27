@@ -3625,9 +3625,9 @@ float columnDepth(vec3 p) {
 // The light is averaged across the light instead, SHADOW_TAPS reads at new
 // places each frame (jitter), spaced evenly out from the middle (denser
 // there: a uniform disc left round blots), and only then made a depth.
-// (The taps run to a bound the compiler cannot know: unrolled, they took
-// Microsoft's compiler some 0.6 s longer over the scene, and the frame was
-// no faster on Direct3D 11.)
+// (The taps run to a bound the compiler cannot know: unrolled, they made
+// the scene some 570 instructions longer in Microsoft's compiler and the
+// first picture on Direct3D 11 some 1 s later, and the frame no faster.)
 const float SHADOW_PEN = 0.035, SHADOW_OCC = 1.5;
 const int SHADOW_TAPS = Q_SHADOW_TAPS;
 float seaShadow(vec3 p, float jitter) {
