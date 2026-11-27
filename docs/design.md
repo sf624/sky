@@ -2207,21 +2207,44 @@ half; 0 none; 1 all.
   dusk, lit by the sky alone, were darker than the low cumulus under them
   and the sea between them).
   - *A sheet from below* is lit through itself alone, as a slab: the sun's
-    light by the cosine of its height (no less than `MID_SHEET_SUN`; 0.35
-    for cells, whose sides a low sun lights), the sky's light on its top
-    once (not `SKYV.x` times), and of both what the sea and the low
-    clouds send back up and the sheet down again, each in its own colour;
-    the same whichever way the eye looks. So it is grey at every height
-    of the sun by day (a saturation of 0.02 to 0.09 looking up from 0.3
-    and 4 km, from noon down to a sun 4 degrees up; photographs 0.02 to
-    0.11), a little warm with the sun at 4 degrees, salmon at sunset and
-    slate blue after. Before, the sky's share was 2.5 times the slab's,
-    and under a sun lower than 20 degrees an even sheet shaded itself
-    (the depth towards the light, upright, by another cosine than the
-    column aslant): with the sun at 19 degrees the sheet was blue (0.21
-    to 0.24), and bluer below that. Cells keep the wider share: the sky
-    lights their bases through the gaps between them. A thick place
-    shades its neighbour a third as much as a cell shades a cell.
+    light by the cosine of its height (0.35 at the least for cells, whose
+    sides a low sun lights; for what goes through a sheet to its base none,
+    since however it swells a sheet takes no more of a beam than a level
+    plane over it; what comes back out of its top, seen from above, keeps
+    `MID_SHEET_SUN` = 0.2: it leaves near where it went in, the swells'
+    faces towards the sun), the sky's light
+    on its top once (not `SKYV.x` times), and of both what the sea and the
+    low clouds send back up and the sheet down again, each in its own
+    colour. What comes through leaves the base brighter straight down
+    than aslant (`limb`: 1 + 1.5 times the view's cosine to the vertical,
+    over 2, Eddington's, as the two streams), for every view of the base
+    from under the layer (`slab`). The camera's balance under the sheet
+    (see [Exposure and the tone curve](#exposure-and-the-tone-curve)) takes the blue of the sky's share
+    out by half. So it is grey to blue-grey by day (a saturation of 0.04
+    to 0.12 looking up from 0.3 and 4 km, from noon down to a sun 8
+    degrees up; photographs 0.05 to 0.14), slate blue-grey at sunset with
+    a warm glow low towards the sun only (the air under it, lit from the
+    sun's side), and darker and grey to blue-grey towards the horizon.
+    - Until #146 the sun's cosine for a sheet's base was no less than 0.2:
+      with the sun 0 to 3 degrees up the base took 4 to 8 times the light the
+      beam brings a level plane, of its red light, and from below was an
+      even salmon wall. Light from under the level (a sun just under it at
+      the place) lit the base through no cloud at all; it went down
+      through the layer further towards the sun on its way, and now it
+      lights the base only as the column there lets it through
+      (`midSlant`): at the far edge of a sheet, or through a gap. And the
+      base was as bright aslant as overhead: the haze before the far base
+      took the blue of its light away and gave back less than it took,
+      and the sheet at noon from 0.3 km turned cream towards the horizon
+      (blue over green 0.92, red over green 1.10 in linear light over the
+      band above it; now 0.99 and 1.06).
+    - Before #141 the sky's share was 2.5 times the slab's, and under a
+      sun lower than 20 degrees an even sheet shaded itself (the depth
+      towards the light, upright, by another cosine than the column
+      aslant): with the sun at 19 degrees the sheet was blue (0.21 to
+      0.24), and bluer below that. Cells keep the wider share: the sky
+      lights their bases through the gaps between them. A thick place
+      shades its neighbour a third as much as a cell shades a cell.
 
   In the scene
   the layer takes the colours of the light at its place as the low clouds
@@ -2243,7 +2266,16 @@ half; 0 none; 1 all.
   light's cosine. The way is 4.6 km long through an altocumulus 0.4 km deep
   with the sun 5 degrees up. (Read where the line crosses the layer's middle
   alone, a tower under the cells with the sun low wore their shadows as
-  hard horizontal bands, 11 to 34 times smaller in height.) The sea reads
+  hard horizontal bands, 11 to 34 times smaller in height.) Of what the
+  layer scatters on, the share that still comes from the light's side
+  (`midLight`) is what a slab lets through less what comes straight
+  through, of a sheet times the light's cosine there: the flux a level
+  plane over it takes of the beam (among cells the light comes forwards
+  through the gaps and thin rims, more than the mean column lets through,
+  and keeps the share whole). (Without the cosine, as until #146, the low cumulus
+  under an altostratus with the sun 1.5 degrees up were lit pink, as if
+  by the sun through a veil, where under a whole sheet at sunset they are
+  dark grey.) The sea reads
   it the same way; the air under the layer reads the middle of the way
   alone, at each of its samples. The air under it: its shade on the light
   scattered once (`midLight`), and the sky's light there by its amount (`midUnder`, as
@@ -4067,6 +4099,19 @@ At the end of `main`:
    (a deck from cruise at -2 degrees: red over green 1.26, 1.09 before),
    as the balance is set for the sky's light on the ground. By day, at
    night, from below 2 km and looking up, nothing changes.
+   Under a middle sheet (altostratus) the balance goes `BALANCE_ADAPT`
+   of the way towards the light that comes through it, by day too: the
+   sun's beam by 0.5 + 0.75 times its cosine and the sky's light whole,
+   as the slab lets them through (`lightOn`'s `slab`, on the level
+   ground), by the sheet's cover over the eye (the form, the amount, whole
+   from 0.7, and from the layer's top down to its base), and gone as the
+   twilight's goes in the deeper twilight (`BALANCE_OUT`); the larger of
+   the two adaptations counts. With daylight's balance the sheet with the
+   sun 8 degrees up was blue (saturation 0.19, blue over green 1.17 as
+   shown): the sky's light on its top, blue over green 2.9 in linear
+   light, is two fifths of the light through it. Photographs of an
+   altostratus by day: 0.05 to 0.14, 1.04 to 1.12; the page now 0.12,
+   1.11 at 8 degrees and 0.04, 1.0 at noon.
 3. A camera's saturation by day, `uSaturation` (`saturationFor`):
    `DAY_SATURATION` = 1.3 about the luminance, in linear light, falling to
    none as the sun goes from 8 to 1 degrees (`DUSK`) and none at night.
