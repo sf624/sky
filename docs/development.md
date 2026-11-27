@@ -787,7 +787,17 @@ The shaders must run on any WebGL2. The code keeps these rules:
   against 165 s). In the cirrus's pass alone, the march and the veil's
   octaves with constant bounds (as in round 19) took 15.3 s against 10.1:
   the cirrus's loops keep `CI_N`. `LONG_N` changed nothing (the scene 8.1
-  s with it and without). No loop whose bound the compiler cannot know
+  s with it and without). What a loop over the two lights computes alike
+  for both goes before the loop: the halo's angle of least deviation in
+  `cirrusLight` (an `asin` by wavelength) took the scene some 0.3 to 0.5 s
+  of the compiler's CPU time more in the loop (2026-11-27), as much as
+  the moon's whole light there. (Timed alone: the HLSL that ANGLE hands
+  the compiler, the part `COMPILER INPUT HLSL` of
+  `WEBGL_debug_shaders.getTranslatedShaderSource` in a Windows Chrome
+  started with `--enable-privileged-webgl-extensions`, given to
+  `D3DCompile` of `d3dcompiler_47.dll` from PowerShell; the machine's
+  other work moves a time by some 0.5 s, so take the median of several
+  runs in turns.) No loop whose bound the compiler cannot know
   writes an array at its index: FXC must unroll a loop that writes an
   array at an index it cannot know (its warning X3550), and cannot unroll
   one whose bound it cannot know (error X3511). Write a vector instead
