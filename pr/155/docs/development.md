@@ -283,7 +283,7 @@ these rules, and new work at start should too:
   scene writes its distance as the depth, the cirrus's pass its numbers
   as the bits of one target and the depth (see
   [design.md](design.md#from-the-address-bar-to-the-first-frame)). The
-  ice program needs three targets, the air's table (`airProg`) seven
+  ice program needs two targets, the air's table (`airProg`) seven
   (four where the GPU has fewer): each is drawn once into a pixel of as
   many as soon as it links (`warm`), and its second compile runs while the
   scene's programs still compile. Every draw of the air's table binds the
@@ -562,18 +562,53 @@ from run to run and with other work on the GPU. The cirrus's loops are
 kept from being unrolled (`CI_N`; unrolled, the driver took some 0.6 s
 more to finish the scene's program). Each call of `ciDensity` is a copy,
 so the march, the second read of a long crossing and the depth the sun's
-light feels (`cirrusDepth`) read it `lite`; the mean age and the strands'
-phase are drawn as further targets of the ice's own pass. The scene takes
+light feels (`cirrusDepth`) read it `lite`; the mean age is drawn as a
+second target of the ice's own pass. The scene takes
 8.8 ms a frame at 1920 x 1080 with `cirrus=0.5` at the default view
 (round 12: 9.1; `main` 7.7), and 9.0 ms just under the shell looking up
 (`alt=11.9&pitch=28&cirrus=0.6`; round 12: 14.3, round 11: 7.6): the
-hairs are three reads of a texture (`uIcePhase`) where round 12 drew
-explicit strands on two ways in three octaves. Most of the rest is not the building
+hairs drawn then were three reads of a texture where round 12 drew
+explicit strands on two ways in three octaves (the fibres that took
+their place, `ciFibre`, are ten reads of the clouds' noise at each of
+three sheets a deck: see the cost below). Most of the rest is not the building
 (some 0.25 s of GPU time for the ice) but the driver finishing the large
 ice program at its first draw (about 0.3 s); it was 1.7 s while the ice
 was part of the `noise` program, which every page draws. A renderer
 without a GPU builds the textures a quarter as wide (see
 [design.md](design.md#cirrus)). Views with `cirrus=0` build nothing.
+
+The cirrus's fibres (`ciFibre`, issue #9), measured on the same GPU at
+2560 x 1440 (`perf`, `res=1`, flying, the median of the cirrus's pass, two
+runs each in turns with main a2ba547, 2026-11-27):
+
+| View | Pass before | Pass after |
+|---|---|---|
+| Just under the sheet (`alt=11.5&pitch=40&cirrus=0.7&yaw=270`) | 14.5 ms | 16.0 ms (+1.5) |
+| 11.2 km, up 25 degrees (`date=172&time=11&cloud=0&alt=11.2&cirrus=0.5&yaw=127.5&pitch=25`) | 10.2 ms | 11.4 ms (+1.2) |
+| Inside the shell (`alt=12.5&pitch=10`) | 12.4 ms | 13.6 ms (+1.2) |
+| From the ground (`date=172&time=11&cloud=0&alt=0.3&cirrus=0.6&yaw=127.5&pitch=65`) | 3.7 ms | 4.0 ms (+0.25) |
+| Cruise (the defaults) | 2.3 ms | 2.6 ms (+0.3) |
+
+A read of the fibres is ten reads of textures: the way at the place, and
+for each of three patches its anchor's way and the noise twice; and once
+a deck, how fibrous the cirrus is there. Far off there is one read a
+deck; near the eye, one at each of
+three sheets a deck (with four sheets, as the hairs had, the first view
+took 0.5 ms more), and the read far off is left out where the march
+covers the deck. (The first view was measured again after the second
+round of issue #9's fibres, 14.4 and 16.0 ms; the other rows are the
+first round's, which read one texture more a read.) The hairs they replace cost 1.55 ms in the first view
+(mostly their loop over the sheets, which is still there). Tried and
+left: the same noise drawn by `ciNoise` in the shader, seven sizes in
+four patches (the first view took 10.5 ms more: some 0.04 ms for each
+call a pixel at this size); the three patches in a loop kept as a loop
+(`CI_N`: 0.45 ms more). In Microsoft's compiler (`d3d fxc`, three sets
+of three runs in turns with main) the cirrus's pass takes no longer than
+it did with the hairs: 6.9, 7.3 and 7.4 s where main took 8.2, 8.3 and
+7.5 s (4607 instructions for 5247), and the sum of all programs 0.92,
+1.00 and 0.99 times main's. On Direct3D 11 the first picture came 0.7 s
+sooner (`d3dperf`: 14.5 s for 15.2 s): the ice's program no longer draws
+the strands' phase into a third target.
 
 On a slower GPU, when frames take longer than 40 ms (25 frames a second),
 the dynamic resolution draws a smaller picture while the view moves, down
@@ -779,7 +814,7 @@ The shaders must run on any WebGL2. The code keeps these rules:
   cirrus of round 19 162 s, of 7d1a635 165 s; that scene without the
   cirrus 11.8 s, the cirrus alone (its pass, as below) 27.3 s. So the
   cirrus is a program of its own (`CIRRUS_PASS`), compiled beside the
-  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciHair`,
+  scene's at once: with the changes below, 11.0 and 8.4 s. A new call of a large function (`ciDensity`, `ciFibre`,
   `cirrusDepth`) in either program shows as seconds there: make it in a
   loop that already makes it (as the scene reads the clouds' and the
   sea's shadows and the glare's depth in one loop: 13.7 s with three
