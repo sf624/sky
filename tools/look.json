@@ -2678,6 +2678,123 @@
    "bad": "7b0ad70",
    "fixed": null,
    "note": "The whole frame looking up, linear (the page's power 2.2). Photographs: stratocumulus deck at sunset 1.28, altostratus near sunset 1.03 to 1.10, stratus by day 1.01. 1.644 on 7b0ad70 (round 1 of #159), 1.487 on main 3ebb691 (bluer than the photographs too); 1.195 now."
+  },
+  {
+   "name": "haze-not-white-few-clouds-11km",
+   "q": "date=80&lat=35&moon=0&alt=11&cloud=0.2&cirrus=0.05&yaw=65&pitch=-8&time=12",
+   "reported": "2026-11-28",
+   "wrong": "over a sea with few clouds from cruise at noon the horizon's haze stood near white and the sea and the sky pale: the brightest 3 % of the picture, brought to white, were haze, not cloud (issue #56: every class 0.4 to 0.7 stops over photographs)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "sky over the horizon, median luma",
+     "region": [
+      0.05,
+      0.374,
+      0.9,
+      0.044
+     ],
+     "p": 50,
+     "max": 195
+    },
+    {
+     "measure": "lumaPct",
+     "label": "the sea (the darker quarter under the horizon)",
+     "region": [
+      0,
+      0.55,
+      1,
+      0.45
+     ],
+     "p": 25,
+     "max": 118
+    },
+    {
+     "measure": "lumaPct",
+     "label": "sky high in the frame, median luma",
+     "region": [
+      0.05,
+      0.02,
+      0.9,
+      0.08
+     ],
+     "p": 50,
+     "max": 74
+    },
+    {
+     "measure": "lumaPct",
+     "label": "lit cloud stays light (p99 under the horizon)",
+     "region": [
+      0,
+      0.55,
+      1,
+      0.45
+     ],
+     "p": 99,
+     "min": 205
+    }
+   ],
+   "bad": "8096248",
+   "fixed": "8793f4a",
+   "reference": "8096248: 202, 123, 77.5, 229; 8793f4a: 190, 113, 69.9, 222. 49 photographs (issue #56), the median and the range of each one's median: lit cloud 176 (129 to 220) and its 95th percentile 214 (176 to 245), the sea 105 (80 to 128), the sky high in the frame 58 (44 to 193), the sky over the horizon 161 (135 to 181)"
+  },
+  {
+   "name": "sea-not-pale-down-11km",
+   "q": "date=80&lat=35&moon=0&alt=11&cloud=0.2&cirrus=0.05&yaw=90&pitch=-45&time=12",
+   "reported": "2026-11-28",
+   "wrong": "looking down from cruise at noon on a sea with few clouds, the sea a pale light blue (issue #56)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "the sea (the darker quarter)",
+     "p": 25,
+     "max": 103
+    },
+    {
+     "measure": "lumaPct",
+     "label": "lit cloud stays light (p99)",
+     "p": 99,
+     "min": 210
+    }
+   ],
+   "bad": "8096248",
+   "fixed": "8793f4a",
+   "reference": "8096248: 109, 236; 8793f4a: 96.4, 228. 49 photographs (issue #56), the median and the range of each one's median: lit cloud 176 (129 to 220) and its 95th percentile 214 (176 to 245), the sea 105 (80 to 128), the sky high in the frame 58 (44 to 193), the sky over the horizon 161 (135 to 181)"
+  },
+  {
+   "name": "sea-not-pale-side-40km",
+   "q": "date=80&lat=35&moon=0&alt=40&cloud=0.2&cirrus=0.05&yaw=65&pitch=-8&time=12",
+   "reported": "2026-11-28",
+   "wrong": "from 40 km at noon over a sea with few clouds, the sea a pale light blue (issue #56)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "the sea (the darker quarter under the horizon)",
+     "region": [
+      0,
+      0.6,
+      1,
+      0.4
+     ],
+     "p": 25,
+     "max": 128
+    },
+    {
+     "measure": "lumaPct",
+     "label": "lit cloud stays light (p99 under the horizon)",
+     "region": [
+      0,
+      0.6,
+      1,
+      0.4
+     ],
+     "p": 99,
+     "min": 205
+    }
+   ],
+   "bad": "8096248",
+   "fixed": "8793f4a",
+   "reference": "8096248: 134, 230; 8793f4a: 121, 221. Photographs from orbit and balloons (three): the sea 102 (62 and 142), lit cloud 180 (162 to 231)"
   }
  ]
 }
