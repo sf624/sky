@@ -650,6 +650,8 @@ uniform float uSize;
 // box's side), how many of them, and where its part of the slice starts, in texels.
 uniform vec4 uLobes[128];
 uniform vec2 uTower;
+// EXPERIMENT (#109, E2): the weather map, made before the macro map of the heaps, which reads it (uZ -2).
+uniform sampler2D uWeatherIn;
 out vec4 outColor;
 
 // An integer hash: xor-shifts and multiplies, Wellons' lowbias32
@@ -759,8 +761,149 @@ float heads(vec3 p, float cells, float seed) {
   return m;
 }
 
+// EXPERIMENT (#109, E2): the macro map of the heaps (uMacro in fs), unique over the weather map's 256 km. One number a
+// texel, P in km: outside every cloud, minus the distance to the nearest rim (no farther than MACRO_FAR); inside one,
+// (R^2 - d^2) / 2R of its disc (as steep as the distance at the rim, round at the middle, R / 2 there): under a
+// threshold t the disc's radius is sqrt(R^2 - 2 R t), and a power of P - t is a dome over it. And a second number, H:
+// half the radius of the disc the place belongs to (blended where two meet). P - q H is then the same disc with its
+// radius sqrt(1 - q) times as large, whatever its size: so an amount shrinks every cloud in proportion (fs). And the
+// weather at the middle of the place's cloud (a disc with its lobes; macroWeather), blended likewise.
+// The discs come in three sizes, each with MACRO_N places in every cell of its lattice (bodies: cells of 6.4 km, middle
+// ones: 3.2 km, small ones: 1.6 km; z: the chance that a place holds a disc); within a size, the number per radius falls
+// as R^-MACRO_B. A disc over MACRO_LOBED km has four smaller discs about its rim (lobes), and each lobe over
+// MACRO_LOBED2 km three of its own: a large cloud is a mass of lobes with clefts, not a circle. One over MACRO_TURRET
+// km has five bumps on its inner part (turrets). Where discs meet, a fillet. A disc whose middle lies too near a
+// larger size's disc is left out (clear air round a body; some still touch its lobes).
+const float MACRO_FAR = 1.2;
+const int MACRO_N = 3;
+// The three sizes: the radii, km, and the chance of each place.
+const vec3 MACRO_L = vec3(0.7, 1.3, 0.7), MACRO_M = vec3(0.35, 0.7, 1.0), MACRO_S = vec3(0.15, 0.35, 1.0);
+// The cells of their lattices, km (256 km holds a whole number of each).
+const vec3 MACRO_CELL = vec3(6.4, 3.2, 1.6);
+const float MACRO_B = 2.4, MACRO_LOBED = 0.45, MACRO_LOBED2 = 0.3, MACRO_FILLET = 0.15, MACRO_TURRET = 0.6, MACRO_TUR = 1.6;
+float macroDisc(vec2 d, float R) {
+  float d2 = dot(d, d);
+  return d2 < R * R ? (R * R - d2) / (2.0 * R) : R - sqrt(d2);
+}
+// (The larger of two, rounded where they are within k of each other. y: half the radius of the disc that the place
+// belongs to, taken over with it, and blended where they are within k.)
+vec2 macroJoin(vec2 a, vec2 b, float k) {
+  float h = max(1.0 - abs(a.x - b.x) / k, 0.0);
+  return vec2(max(a.x, b.x) + 0.25 * k * h * h, mix(a.y, b.y, smoothstep(-k, k, b.x - a.x)));
+}
+// (The same for whole clouds; zw: the weather at the middle of the cloud the place belongs to, see macroWeather.)
+vec4 macroJoin(vec4 a, vec4 b, float k) {
+  float h = max(1.0 - abs(a.x - b.x) / k, 0.0);
+  return vec4(max(a.x, b.x) + 0.25 * k * h * h, mix(a.yzw, b.yzw, smoothstep(-k, k, b.x - a.x)));
+}
+// The k-th place of the cell c of a size's lattice: whether it holds a disc, its middle (km), its radius, a turn (0 to
+// 1) and a word for what stands on it.
+bool macroOne(vec2 c, int k, float cell, vec3 spec, uint seed, out vec2 at, out float R, out float turn, out uint word) {
+  float cells = round(256.0 / cell);
+  vec2 cw = c - cells * floor(c / cells);
+  uint h = ihash(ihash(uint(cw.x) + 256u * uint(cw.y) + seed) + uint(k) * 0x9e3779b9u);
+  word = ihash(h ^ 0x2545f491u);
+  vec4 r = vec4(h & 0xffffu, h >> 16u, word & 0xffffu, word >> 16u) / 65535.0;
+  R = spec.x * pow(1.0 - r.z * (1.0 - pow(spec.x / spec.y, MACRO_B - 1.0)), -1.0 / (MACRO_B - 1.0));
+  at = (c + r.xy) * cell;
+  turn = r.w;
+  return float(ihash(word + 0x3c6ef372u) & 0xffffu) / 65536.0 < spec.z;
+}
+// How far p is from the nearest disc of a size, each taken `reach` times as wide (its lobes), km.
+float macroClear(vec2 p, float cell, vec3 spec, uint seed, float reach) {
+  vec2 id = floor(p / cell), at;
+  float m = 9.0, R, turn;
+  uint word;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      for (int k = 0; k < MACRO_N; k++) {
+        if (macroOne(id + vec2(i, j), k, cell, spec, seed, at, R, turn, word)) m = min(m, length(p - at) - reach * R);
+      }
+    }
+  }
+  return m;
+}
+// The weather at a cloud's middle (km on the map), which every place of the cloud takes: so a cloud is shrunk as a
+// whole, and no edge of a cluster cuts through a body. x: how far the map's amount there (over 1 km) is over a half
+// (gather); y: the map's amount over some 3 km, less most of its largest systems, read elsewhere on the map (the
+// clusters: fs makes the lanes and the cores of it with the slider's mark).
+// Heaps stand in clusters, streets and the walls of open cells, with clear lanes between.
+// (Less most of the map's largest systems: no place is all cluster or all lane for a hundred km.)
+// (Read elsewhere on the map: the clusters lie apart from the sheets' systems, and the place where the page opens has
+// heaps about it.)
+vec2 macroWeather(vec2 at) {
+  vec2 x = at / 256.0, xm = x + vec2(-0.3125, 0.469);
+  return vec2(textureLod(uWeatherIn, x, 2.0).r - 0.5, textureLod(uWeatherIn, xm, 3.5).r - 0.6 * (textureLod(uWeatherIn, xm, 6.5).r - 0.5));
+}
+const uint MACRO_SEED_L = 0x51ed270bu, MACRO_SEED_M = 0x1b873593u, MACRO_SEED_S = 0x68e31da4u;
+// One size (level 0: bodies, 1: middle, 2: small).
+vec4 macroSize(vec2 x, float cell, vec3 spec, uint seed, int level) {
+  vec2 id = floor(x / cell), at;
+  vec4 P = vec4(-MACRO_FAR, 0.5 * spec.x, 0.0, 1.0);
+  float R, turn;
+  uint word;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      for (int k = 0; k < MACRO_N; k++) {
+        if (!macroOne(id + vec2(i, j), k, cell, spec, seed, at, R, turn, word)) continue;
+        vec2 o = x - at;
+        if (dot(o, o) > (2.1 * R + MACRO_FAR) * (2.1 * R + MACRO_FAR)) continue;
+        if (level >= 1 && macroClear(at, MACRO_CELL.x, MACRO_L, MACRO_SEED_L, 1.5) < 0.8 * R) continue;
+        if (level == 2 && macroClear(at, MACRO_CELL.y, MACRO_M, MACRO_SEED_M, 1.2) < 0.2 + 0.5 * R) continue;
+        vec2 p = vec2(macroDisc(o, R), 0.5 * R);
+        if (R > MACRO_LOBED) {
+          uint h3 = word;
+          for (int l = 0; l < 4; l++) {
+            h3 = ihash(h3 + 0x7f4a7c15u);
+            vec3 q = vec3(h3 & 1023u, (h3 >> 10u) & 1023u, (h3 >> 20u) & 1023u) / 1023.0;
+            float ang = 6.2832 * (turn + (float(l) + 0.8 * q.x) / 4.0), rl = R * mix(0.4, 0.7, q.y);
+            vec2 ol = o - R * mix(0.55, 0.95, q.z) * vec2(cos(ang), sin(ang));
+            vec2 pl = vec2(macroDisc(ol, rl), 0.5 * rl);
+            if (rl > MACRO_LOBED2) {
+              uint h4 = h3;
+              for (int m = 0; m < 3; m++) {
+                h4 = ihash(h4 + 0x165667b1u);
+                vec3 v = vec3(h4 & 1023u, (h4 >> 10u) & 1023u, (h4 >> 20u) & 1023u) / 1023.0;
+                float a2 = ang + 1.3 * (float(m) - 1.0 + 0.8 * (v.x - 0.5));
+                float rm = rl * mix(0.35, 0.6, v.y);
+                pl = macroJoin(pl, vec2(macroDisc(ol - rl * mix(0.6, 0.95, v.z) * vec2(cos(a2), sin(a2)), rm), 0.5 * rm), 0.2 * rl);
+              }
+            }
+            p = macroJoin(p, pl, 0.25 * R);
+          }
+          if (R > MACRO_TURRET && p.x > 0.0) {
+            float tur = 0.0;
+            for (int t = 0; t < 5; t++) {
+              h3 = ihash(h3 + 0x27d4eb2fu);
+              vec3 q = vec3(h3 & 1023u, (h3 >> 10u) & 1023u, (h3 >> 20u) & 1023u) / 1023.0;
+              float ang = 6.2832 * q.x, rt = R * mix(0.28, 0.5, q.z);
+              vec2 ot = o - 0.65 * R * sqrt(q.y) * vec2(cos(ang), sin(ang));
+              float u = max(1.0 - dot(ot, ot) / (rt * rt), 0.0);
+              tur = max(tur, MACRO_TUR * rt * u * u);
+            }
+            p.x += tur * smoothstep(0.0, 0.3, p.x);
+          }
+        }
+        P = macroJoin(P, vec4(p, macroWeather(at)), MACRO_FILLET);
+      }
+    }
+  }
+  return P;
+}
+vec4 macro(vec2 x) {
+  vec4 L = macroSize(x, MACRO_CELL.x, MACRO_L, MACRO_SEED_L, 0);
+  vec4 M = macroSize(x, MACRO_CELL.y, MACRO_M, MACRO_SEED_M, 1);
+  vec4 S = macroSize(x, MACRO_CELL.z, MACRO_S, MACRO_SEED_S, 2);
+  vec4 P = macroJoin(macroJoin(L, M, MACRO_FILLET), S, MACRO_FILLET);
+  return vec4(max(P.x, -MACRO_FAR), P.yzw);
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
+  if (uZ < -1.5) {
+    outColor = macro(uv * 256.0);
+    return;
+  }
   if (uZ >= 3.0) {
     // A tower (uTower in fs): how far inside the nearest of its lobes the place is, of the box's side (-0.25 to 0.07 as
     // 0 to 1); where two lobes meet, a sharp cleft.
@@ -1877,6 +2020,9 @@ uniform sampler3D uTower;
 // its depth, B: gusts on the sea (and the level of the bases), A: where
 // the air rises (towers).
 uniform sampler2D uWeather;
+// EXPERIMENT (#109, E2): the macro map of the heaps (see macro in the noise shader): km inside a cloud's rim, and half
+// the radius of the place's disc; and the weather at the middle of its cloud; RGBA16F.
+uniform highp sampler2D uMacro;
 // The tops (see clouds): for each texel of the weather map, how high the
 // march may meet cloud within 1, 2, 4 and 8 texels of it (R, G, B, A: 250
 // m to 2 km), as a share of CB to CT. Made with the clouds' amount.
@@ -2655,6 +2801,13 @@ const float CF_HEAD0 = 0.36;         // the heads' height that moves nothing (ab
 const float CF_GATE = 0.6;          // how much a head carves in the seams of the size above it
 
 const float CF_OUT = 0.28;           // how far heads may stand out of a dome at most, km
+// EXPERIMENT (#109, E2): the macro map (uMacro). What the lanes take off it, km.
+const float MC_LANE = 1.5;
+// The dome over the map: MC_TALL of the layer's depth where the map holds MC_REF km, as its power 2/3 elsewhere, up to
+// MC_CAP times MC_REF (the layer's bound for heaps: MC_BOUND = MC_TALL MC_CAP^(2/3) of its depth).
+const float MC_REF = 1.0, MC_TALL = 1.2, MC_CAP = 1.9, MC_BOUND = 1.841;
+const float MC_UNDER = 0.1, MC_WIDE = 0.15; // the undercut at the base, km, and the height over the base at which it ends
+const float MC_LOD = 1.5;            // the map is read no smoother than this level of it
 const float CF_EDGE = 0.25;         // a heap's density per km inside its surface is 1 over this (times CF_SHARP)
 const float CF_SWIRL = 0.3;         // how far the base shape's noise moves the fine noise's place, in its tiles (low in a cloud)
 // Towers (towering cumulus): one may stand in each cell of TW_CELL km of the weather map (a whole share of it), a model
@@ -2679,7 +2832,7 @@ const vec3 TW_FOOT = vec3(1.4, 3.1, 0.14);
 // stratocumulus; 1: heaps, cumulus; tower: how much of a heap is a tower). From the weather map (R: amount, G: depth, B: the gusts' map,
 // which also moves the bases, A: where the air rises, towers) and the Clouds
 // slider. (One record per layer: a stack of layers is this, once each.)
-struct Layer { float level, depth, amount, form, tower, fair, gather, lane, core; vec4 far; };
+struct Layer { float level, depth, amount, form, tower, fair; vec4 far; };
 Layer cloudLayer(vec2 x, float lod) {
   Layer a;
   vec4 wide = textureLod(uWeather, x / WEATHER_KM, 6.5);
@@ -2701,17 +2854,6 @@ Layer cloudLayer(vec2 x, float lod) {
   a.amount = clamp(a.amount, 0.0, mix(1.0, 0.72, a.form)) * smoothstep(0.0, 0.05, uCloud);
   // (Heaps: the slider says how many there are, and the map where they gather, at every amount alike.)
   a.fair = (0.63 + 0.44 * uCloud) * smoothstep(0.0, 0.05, uCloud);
-  a.gather = w.r - 0.5;
-  // Heaps stand in clusters, streets and the walls of open cells, with clear lanes between: where the map's amount
-  // over some 10 km and more is under a mark, which falls as the slider rises, there are none (lane); deep in a
-  // cluster the heaps are larger (core).
-  // (Less most of the map's largest systems: no place is all cluster or all lane for a hundred km.)
-  // (Read elsewhere on the map, as far: the clusters lie apart from the sheets' systems, and the place where the
-  // page opens has heaps about it.)
-  vec2 xm = x / WEATHER_KM + vec2(-0.3125, 0.469);
-  float meso = textureLod(uWeather, xm, 3.5).r - 0.6 * (textureLod(uWeather, xm, 6.5).r - 0.5), mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
-  a.lane = 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, meso);
-  a.core = smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, meso);
   // Towers: how far the layer lets them grow where the air rises (see cloudShape), with the slider and among heaps.
   // (Among heaps only, a form over 0.6: in a sheet that forms, the heaps gathered round a tower's foot, sunk into
   // the layer, were a flat pale plate in a gap of the deck.)
@@ -2800,9 +2942,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   // follows the region, and from 40 km some places at 0.5 have a form of 0.8.) (heapMix: 1 where there are heaps at
   // all; all: nothing but heaps.)
   float turn = smoothstep(0.5, 0.575, uCloud) * (1.0 - smoothstep(0.75, 0.8, uCloud));
-  float hmax = CF_DOME * a.depth;
-  float sink = (hmax + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)), 1.0);
-  float tHeap = (hmax + CF_OUT - sink) / a.depth;
+  float hmax = CF_DOME * a.depth, hbound = MC_BOUND * hmax;
+  float sink = (hbound + CF_OUT) * min((1.0 - a.form) * (1.0 - a.form) * (1.0 - turn * smoothstep(0.15, 0.92, a.form)), 1.0);
+  float tHeap = (hbound + CF_OUT - sink) / a.depth;
   // (UNSEEN: Direct3D's compiler knows that the form is at most 1, and with the bare test it read the sheet's noise
   // below at every read of the field, a fifth of the frame in the default view. Until the towers were models, a
   // term from the weather map stood in this test and hid it.)
@@ -2971,28 +3113,33 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     // smoothed (their smaller cells would stand as columns); rho: how far inside a disc's rim a place is, km. The amount
     // sets how much of a cell is disc: the weather map gathers the heaps and clears lanes between them.
     // (Never smoother than that by much: read from afar or for the depth maps, the discs would melt away.)
-    vec4 c = textureLod(uNoise, vec3(q.x, off.y + 0.11, q.z), clamp(lod, 1.5, 2.5));
-    vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - vec3(CF_CORE * a.core, 0.0, 0.0) - TW_FOOT.z * towerFoot * vec3(1.0, 1.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane * (1.0 - towerFoot);
-    const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
-    // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
-    // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
-    // overlap keep their own domes, with a cleft between. In km, to first order; the nearest of the three sizes counts.
-    vec3 rmax = max(1.0 - thr, 0.02) / SLOPE, hm = hmax * CF_SIZES;
-    vec3 U = max(1.0 - (c.gba - thr) / (SLOPE * rmax), 0.0), W = vec3(max(overBase, 0.0)) / hm;
-    vec3 E = sqrt(U * U + W * W);
-    vec3 km = mix(hm, (1.0 - E) * E / max(sqrt(U * U / (rmax * rmax) + W * W / (hm * hm)), 1e-4), step(1e-3, E));
-    // (The seams between heads go in by a share of the dome's height here at most: its core is whole, no pit goes
-    // through it.)
-    vec3 top = hm * sqrt(max(1.0 - U * U, 0.0));
+    // EXPERIMENT (#109, E2): the macro map in place of the discs. P: km inside a cloud's rim (see macro in the noise
+    // shader), read at the leaning place; e: what the threshold leaves of it. The threshold, km: what the slider takes
+    // off, what the weather map's amount does, the lanes, a tower's foot.
+    float msize = float(textureSize(uMacro, 0).x);
+    vec4 PH = textureLod(uMacro, xs / WEATHER_KM, clamp(lod + log2(msize / 4096.0), 0.0, MC_LOD));
+    // (The clusters, from the weather at the middle of the place's cloud, which the map holds: under a mark, which falls
+    // as the slider rises, there are no heaps (lane, y); deep in a cluster they are larger (core, z).)
+    float mark = mix(CF_MESO.x, CF_MESO.y, min(2.0 * uCloud, 1.0));
+    vec3 gat = vec3(PH.b, 1.0 - smoothstep(mark - CF_MESO.z, mark + CF_MESO.z, PH.a), smoothstep(mark + CF_MESO.z, mark + 4.0 * CF_MESO.z, PH.a));
+    // (The amount as on main: the threshold of the discs of its 2 km cells, and the radius that left them, of their
+    // largest: here every disc of the map keeps that share of its radius, rel. The lanes take km off all alike.)
+    float tn = max(CF_DISC.x - CF_DISC_AM.x * a.fair - CF_GATHER.x * gat.x - CF_CORE * gat.z - TW_FOOT.z * towerFoot, CF_DISC_MIN);
+    float rel = clamp((1.0 - tn) / (1.0 - CF_DISC_MIN), 0.0, 1.0);
+    float e = PH.r - (1.0 - rel * rel) * PH.g - MC_LANE * gat.y * (1.0 - towerFoot);
+    // The dome over it: as high as the layer lets it where e is MC_REF, and sqrt(e) elsewhere (half an ellipsoid over a
+    // disc, see macro). F: positive inside it, about km near the rim; lower than MC_WIDE over the base the rim stands
+    // in by up to MC_UNDER (an undercut: the cloud is widest a little over its base).
+    float hm = MC_TALL * hmax, w = max(overBase, 0.0) / hm, low = max(1.0 - max(overBase, 0.0) / MC_WIDE, 0.0), sw = sqrt(w);
+    float F = e - MC_REF * w * sw - MC_UNDER * low * low;
+    float gh = 1.5 * MC_REF * sw / hm, gu = 2.0 * MC_UNDER * low / MC_WIDE;
+    float topHere = hm * pow(clamp(e / MC_REF, 0.0, MC_CAP), 2.0 / 3.0);
 #ifdef TOPS_MAP
     // (The map of the tops: as high as the domes within the heads' reach of the place, and the heads on them.)
-    vec3 Uo = max(U - CF_OUT / rmax, 0.0), to = hm * sqrt(max(1.0 - Uo * Uo, 0.0));
-    float tall = max(to.x, max(to.y, to.z));
+    float tall = hm * pow(clamp((e + CF_OUT) / MC_REF, 0.0, MC_CAP), 2.0 / 3.0);
     return max(topsOld, tall > 0.0 ? a.level + tall + CF_OUT - sink + 0.03 + 0.06 * a.depth - h : -9.0);
 #endif
-    // (The nearest dome and its height here, picked without indexing: Direct3D compiles an index into a vector as a
-    // loop.)
-    vec2 near = km.x >= km.y && km.x >= km.z ? vec2(km.x, top.x) : km.y >= km.z ? vec2(km.y, top.y) : vec2(km.z, top.z);
+    vec2 near = vec2(F / sqrt(1.0 + (gh - gu) * (gh - gu)), topHere);
     // (A tower is a heap of its own shape: its heads are the heaps', at their full size.)
     // (Its heads go over into the heaps' where a heap's dome stands out of it, within 150 m either way: switched at
     // the line where the two meet, the heads' sizes jumped there, and the dome ended in a flat face.)
@@ -10681,6 +10828,15 @@ const SkySound = (() => {
     // text of its fragment shader as compiled (`node tools/sky.mjs d3d
     // programs` compiles them alone).
     window.__programs = () => programs.map(([prog, shaders]) => ({ name: names.get(prog), source: gl.getShaderSource(shaders[1]) }));
+    // EXPERIMENT (#109, E3): the textures each program reads (Direct3D 11 gives a program 16).
+    window.__samplers = () => programs.map(([prog]) => {
+      const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS) || 0, list = [];
+      for (let i = 0; i < n; i++) {
+        const u = gl.getActiveUniform(prog, i);
+        if (u && ((u.type >= 0x8B5E && u.type <= 0x8B62) || (u.type >= 0x8DC1 && u.type <= 0x8DD7))) list.push(u.name);
+      }
+      return names.get(prog) + ': ' + list.length + ' (' + list.join(' ') + ')';
+    }).join('\n');
     // Throws the compiler's message, or the linker's, if a program failed.
     const check = ([prog, shaders]) => {
       alive();
@@ -11142,6 +11298,13 @@ const SkySound = (() => {
       const weather = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, weather);
       gl.texStorage2D(gl.TEXTURE_2D, Math.log2(m) + 1, gl.RGBA8, m, m);
+      // EXPERIMENT (#109, E2): the macro map of the heaps on unit 12 (RGBA16F, MACRO texels over 256 km; ?macro=N).
+      const MACRO = [1024, 2048, 4096, 8192].includes(+new URLSearchParams(location.search).get('macro')) ? +new URLSearchParams(location.search).get('macro') : 2048;
+      gl.activeTexture(gl.TEXTURE12);
+      const macroMap = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, macroMap);
+      gl.texStorage2D(gl.TEXTURE_2D, Math.log2(MACRO) + 1, gl.RGBA16F, MACRO, MACRO);
+      gl.activeTexture(gl.TEXTURE3);
       {
         const draw = noiseProgram;
         gl.useProgram(draw);
@@ -11191,7 +11354,31 @@ const SkySound = (() => {
           }]);
         }
         parts.push([0, () => {
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, macroMap, 0);
+          // (The weather map with its mipmaps, on its unit 3: the macro map reads it.)
+          gl.activeTexture(gl.TEXTURE3);
+          smooth(gl.TEXTURE_2D);
+          gl.uniform1i(gl.getUniformLocation(draw, 'uWeatherIn'), 3);
+          gl.viewport(0, 0, MACRO, MACRO);
+          gl.uniform1f(uSize, MACRO);
+          gl.uniform1f(uZ, -2);
+          window.__macro = { size: MACRO, status: gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE, t0: performance.now() };
+        }]);
+        const MSTRIP = MACRO * 64 / 1024;
+        for (let y = 0; y < MACRO; y += MSTRIP) {
+          parts.push([4 * MSTRIP * MACRO / (n * n), () => {
+            gl.scissor(0, y, MACRO, MSTRIP);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }]);
+        }
+        parts.push([0, () => {
           gl.disable(gl.SCISSOR_TEST);
+          if (new URLSearchParams(location.search).has('macrotime')) {
+            // (The bake's time: until the GPU has drawn it, read back from one texel.)
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, new Float32Array(4));
+            window.__macro.ms = performance.now() - window.__macro.t0;
+            console.info(`macro map: ${MACRO} texels a side, RGBA16F, baked in ${window.__macro.ms.toFixed(0)} ms (with the frames between its strips)`);
+          }
         }]);
         doing = 'building the noise and the weather map';
         await batches(parts, share => done(0.6 + 0.15 * share));
@@ -11200,6 +11387,8 @@ const SkySound = (() => {
         gl.deleteFramebuffer(target);
         gl.deleteProgram(draw);
       }
+      smooth(gl.TEXTURE_2D);
+      gl.activeTexture(gl.TEXTURE12);
       smooth(gl.TEXTURE_2D);
       gl.activeTexture(gl.TEXTURE2);
       smooth(gl.TEXTURE_3D);
@@ -11366,6 +11555,7 @@ const SkySound = (() => {
     C('uniform1i', 'uHeads', 22);
     C('uniform1i', 'uTower', 30);
     C('uniform1i', 'uWeather', 3);
+    C('uniform1i', 'uMacro', 12);
     C('uniform1i', 'uWaves', 4);
     C('uniform1i', 'uIce', 10);
     C('uniform1i', 'uIceWay', 11);
@@ -11805,6 +11995,7 @@ const SkySound = (() => {
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uHeads'), 22);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uTower'), 30);
     gl.uniform1i(gl.getUniformLocation(shadowProg, 'uWeather'), 3);
+    gl.uniform1i(gl.getUniformLocation(shadowProg, 'uMacro'), 12);
     // (layered: a map's texture, of n layers, on its unit.)
     const layered = (m, n) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, m.target);
@@ -11980,7 +12171,7 @@ const SkySound = (() => {
       for (const p of [mid.scene, mid.pass, mid.air]) if (p && p !== prog && p !== airProg) fixedFor(p);
       gl.useProgram(mid.map);
       for (const n of ['uRes', 'uAlt', 'uDrift', 'uMid', 'uMidRolls']) mid.U[n] = gl.getUniformLocation(mid.map, n);
-      for (const [n, unit] of [['uNoise', 2], ['uHeads', 22], ['uWeather', 3], ['uRolls', 25]]) gl.uniform1i(gl.getUniformLocation(mid.map, n), unit);
+      for (const [n, unit] of [['uNoise', 2], ['uHeads', 22], ['uWeather', 3], ['uMacro', 12], ['uRolls', 25]]) gl.uniform1i(gl.getUniformLocation(mid.map, n), unit);
       // (The pass reads the rolls too; the scene and the air's table do not.)
       gl.useProgram(mid.pass);
       gl.uniform1i(gl.getUniformLocation(mid.pass, 'uRolls'), 25);
