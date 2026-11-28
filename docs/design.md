@@ -3812,8 +3812,11 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   with none), 0.12 to 0.27 from 40 km, 0.09 to 0.15 over cumulus and
   0.18 over a clear sea from 4 km, 0.08 to 0.09 from 0.3 km level under
   cumulus, and the same within 0.03 where cloud or cirrus is the
-  highlight (the default view, decks, a thin stratus, altostratus) and
-  from below (a clear sky, a deck, a sheet). From 11 km over few clouds the lit cloud stands at 177 and
+  highlight (the default view on 15 November, decks, a thin stratus,
+  altostratus) and from below (a clear sky, a deck, a sheet). Under
+  June's sun the default view's highlights, small cumulus and cirrus
+  seen from 11 km, stand 1.55 stops under the surface, and it comes out
+  0.07 (15 h) to 0.10 stops (noon) lower; a view from 20 km 0.23. From 11 km over few clouds the lit cloud stands at 177 and
   219, the sea at 108, the sky high in the frame at 66 and over the
   horizon at 189. That last stays above the photographs': against the
   cumulus the horizon's haze is some 0.65 stops brighter than in them
