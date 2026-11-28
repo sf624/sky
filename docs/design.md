@@ -2394,10 +2394,11 @@ half; 0 none; 1 all.
     than aslant (`limb`: 1 + 1.5 times the view's cosine to the vertical,
     over 2, Eddington's, as the two streams), for every view of the base
     from under the layer (`slab`). The camera's balance under the sheet
-    (see [Exposure and the tone curve](#exposure-and-the-tone-curve)) takes the blue of the sky's share
-    out by half. So it is grey to blue-grey by day (a saturation of 0.04
-    to 0.12 looking up from 0.3 and 4 km, from noon down to a sun 8
-    degrees up; photographs 0.05 to 0.14), slate blue-grey at sunset with
+    (see [Exposure and the tone curve](#exposure-and-the-tone-curve)) follows the light that comes
+    through it, and takes most of the blue of the sky's share out. So it
+    is grey to blue-grey by day (a saturation of 0.04 to 0.15 looking up
+    from 0.3 and 4 km, from noon down to a sun 8 degrees up; photographs
+    0.05 to 0.14), slate blue-grey at sunset with
     a warm glow low towards the sun only (the air under it, lit from the
     sun's side), and darker and grey to blue-grey towards the horizon.
     - Until #146 the sun's cosine for a sheet's base was no less than 0.2:
@@ -3670,8 +3671,8 @@ polling a fence, keeps the page's frames the same from run to run on a
 stepped clock (the tools' fake clock). A read still costs a round trip to
 the GPU process (about 2 ms on the test machine), so the meter is read at
 most every `METER_MS` = 100 ms of the page's time. Each reading also
-gives the white balance the share of the light from blocks whose ray
-meets the planet (`earthLight`, see the end of `main`). The first frame of
+gives the white balance its estimate of the light the frame is lit by
+(`litBy` over the blocks, see the end of `main`). The first frame of
 the page is metered at once, not shown, and drawn again at its exposure:
 the page starts adapted. The loading has drawn that frame before and read
 its meter without waiting (`prime`, see
@@ -4149,8 +4150,8 @@ measured 2.2 to 2.5, and the rods' grey has not come in yet (the
 adaptation there is 3.5 to 5.3, under `NIGHT_EYE[0]`). It is the light of
 the twilight sky on the ground and the lit air in the line of sight
 (looking down, 2.4 to 2.65; along the slant of the view away from the
-sun, more), and the white balance of twilight goes out with height
-(`BALANCE_HIGH`, none from 11 km). The band of light over the limb in the
+sun, more); the white balance (step 2 of the end of `main`, below) takes
+out part of it. The band of light over the limb in the
 view away from the sun is the scene's too: the air above the planet's
 shadow is in sunlight while the Earth under it is in twilight, and with
 the sun 3 degrees down the sky two bands of 3.4 degrees over the limb is
@@ -4235,58 +4236,139 @@ At the end of `main`:
    key, above).
    No shoulder keeps the hue: each channel meets the curve of steps 4 to
    6 on its own, as on a camera's sensor.
-2. The white balance `uBalance` (`balanceFor`). By day a camera's for
-   daylight, `DAY_BALANCE` = (0.932, 1.013, 1.074). In twilight it goes
-   `BALANCE_ADAPT` = 0.5 of the way (in log) towards the colour of the
-   light on the level ground (the sky's from above, `upData`, kept by
-   `buildMultiScatter`, and the sun's while it is up), relative to that
-   light with the sun at 30 degrees, as an automatic white balance does
-   and as the eye adapts. Blended in as the sun goes from 2.5 to -0.5
-   degrees (`BALANCE_IN`), and out again as the sun goes from 4 to 9 degrees down
-   (`BALANCE_OUT`), and with height, from 2 to 11 km (`BALANCE_HIGH`):
-   from cruise the view is the high sky and the deck far below, which
-   photographs keep as blue as by day; this correction, warm for the
-   light of the low air, turned that sky lavender-grey and the deck pink.
-   Without it the sky away from the sun came out
-   lavender and the Belt of Venus magenta, where photographs show a pale
-   blue sky and a pink belt; held into the deeper twilight, it turned the
-   blue sky grey and the clouds brown. Tried again without
-   `BALANCE_HIGH` (round 10): towards the sun from cruise at -4 degrees
-   the sky came out grey-lavender as in A1d, but away from it grey where
-   r3, A3f and A3a are pale blue; kept.
-   But the fade with height goes only as far as the Earth gives the
-   frame's light: the balance takes the larger of the two, the height's
-   and `earthLight`, the share of the metered light (the meter's blocks,
-   below) that comes from rays that meet the planet (the sea, the clouds
-   and the air before them; `ground` in `weigh`). The light on the ground
-   lights what the camera sees there, at any height. From 20 to 40 km the
-   twilit Earth is nearly all the air's light (96 % of it from 40 km with
-   the sun 3 degrees down: Rayleigh light of sunlight that crossed the
-   ozone low, and the twilight's light scattered again), as blue in the
-   scene as by day (blue over green 2.2 in linear light), and without the
-   balance it came out navy (2.82 as shown) where photographs from orbit
-   show it blue-grey to pale blue (1.2 to 2.0; issue #145); now 1.84.
-   Looking down from cruise at -4 degrees, the deck is blue-grey (1.95,
-   3.04 before); the sky away from the sun there, where the Earth gives
-   about a third of the light, stays pale blue (2.34 in its upper part,
-   2.70 before). With the sun from 0 to 2 degrees down, what the low sun
-   still lights below (cloud tops, cirrus) comes out warmer than before
-   (a deck from cruise at -2 degrees: red over green 1.26, 1.09 before),
-   as the balance is set for the sky's light on the ground. By day, at
-   night, from below 2 km and looking up, nothing changes.
-   Under a middle sheet (altostratus) the balance goes `BALANCE_ADAPT`
-   of the way towards the light that comes through it, by day too: the
-   sun's beam by 0.5 + 0.75 times its cosine and the sky's light whole,
-   as the slab lets them through (`lightOn`'s `slab`, on the level
-   ground), by the sheet's cover over the eye (the form, the amount, whole
-   from 0.7, and from the layer's top down to its base), and gone as the
-   twilight's goes in the deeper twilight (`BALANCE_OUT`); the larger of
-   the two adaptations counts. With daylight's balance the sheet with the
-   sun 8 degrees up was blue (saturation 0.19, blue over green 1.17 as
-   shown): the sky's light on its top, blue over green 2.9 in linear
-   light, is two fifths of the light through it. Photographs of an
-   altostratus by day: 0.05 to 0.14, 1.04 to 1.12; the page now 0.12,
-   1.11 at 8 degrees and 0.04, 1.0 at noon.
+2. The white balance `uBalance` (`balanceFor`): a camera's for daylight,
+   `DAY_BALANCE` = (0.932, 1.013, 1.074), moved towards the colour of the
+   light that falls on what the frame shows, relative to daylight's, as an
+   automatic white balance does and as the eye adapts. One rule by day, in
+   twilight and at night, at every height, with no window on the sun's
+   height or the eye's.
+   - **The light.** At each reading of the meter, `litBy` follows the ray
+     of each of its 64 by 36 blocks. The air along it, at
+     `BALANCE_STEPS` = 6 points closer together near the eye, each by how
+     much it sends towards the eye (its air and aerosol by their phase
+     functions, less what the air before it takes), is lit by the sun's
+     beam through the air to that point (none in the planet's shadow, its
+     disc going under over its width) and by the mean light of the sky
+     there (`msData`, as `fs` lights the air); the moon's the same way.
+     Where the ray meets the planet, what the air before it does not give
+     (the block's metered light less the air's, `ISUN` times) is the sea's
+     and the clouds', lit from above at that place (`upData` and the
+     beam). The night's own light (the airglow, the stars) lights nothing:
+     it counts at daylight's colour, at the airglow's radiance; and so does
+     the rods' share of each block (as `main` takes it, from the block's
+     luminance and the night eye), which sees no colour. The estimate is
+     the mean over the blocks, each by its metered light, as a camera's
+     mean of the picture. It is made from the model's lights, not from the
+     picture's colours: a mean of the picture ("grey world") takes the
+     blue of a clear sky for the colour of its light, and greyed the day's
+     sky from cruise. The clouds are known to it by their mean only. The
+     air under the low clouds' tops (from `CB` to `CT`) has what their
+     deck leaves it of the beam and of the sky's light, as the table of
+     the air's light takes it in `fs` (0.15 and `UNDER` = 0.3 under a whole
+     deck, by `smoothstep(0.4, 1, cloud)`). What is seen from under a layer,
+     the middle sheet or the low deck, is lit through it (below). Else a
+     cloud counts as the air about it. Before, the rays from under a low
+     deck were followed into the air above it, lit by the reddened beam
+     the deck hides: the deck with the sun 5 to 0 degrees up came out steel
+     blue (blue over green 1.7 to 2.1 as shown, linear), where a photograph
+     of a stratocumulus deck at sunset gives 1.3 and of altostratus 1.0 to
+     1.1, while the middle sheet beside it stayed grey. The light is followed for one block
+     of each two by two (and for each block where the horizon runs between
+     them), and not again while the view, the lights and the eye's height
+     stay as they were (at rest, in straight flight): some 4 ms of script
+     a reading on the test machine when they change, 8 for every block.
+   - **Under a layer.** What the camera sees from under a cloud layer is
+     lit by the light through it: the sun's beam by 0.5 + 0.75 times its
+     cosine and the sky's light whole, as a slab lets them through
+     (`addLevel`'s `slab`, on the level sea). The estimate goes that far
+     towards it (in log) as the layers cover the eye: the middle sheet by
+     its form, its amount (whole from 0.7) and from its top down to its
+     base; the low deck by its mean cover (`lowCover`,
+     `smoothstep(0.4, 1, cloud)`) and from its tops down to its base
+     (`lowOver`: the base `LOW_LAYER[0]` = 0.75 km over the level and
+     `low.base`, the deck `LOW_LAYER[1]` = 1.2 km deep at `low.depth` 1).
+     It goes over smoothly with the amount (the balance's blue over red,
+     in log, under a sun 2 degrees up: +0.34 clear, +0.33 at 0.4, +0.19 at
+     0.6, -0.15 overcast) and with the eye's height (-0.15 at 0.3 km under
+     the overcast, -0.02 at 1.2, +0.15 from 1.8 km over it).
+   - **Daylight's light** (`dayLights`, made again with the table of
+     multiple scattering): the clear sky's air seen all round from sea
+     level with the sun at `DAY_SUN` = 40 degrees, and the level sea's
+     light then. Each light is taken against daylight's of its kind: the
+     air's is bluer than the sea's (blue over green 1.25 times), and taken
+     against the sea's, the day's sky from 11 km came out greyer (4.4 to
+     3.6 as shown, linear).
+   - **How far.** In log, along the black body's line (`BALANCE_LINE`,
+     4500 to 9000 K: blue against amber) and across it (green against
+     magenta). Along it, but for `BALANCE_DAY` = 0.1 about daylight's,
+     taken off smoothly (x - d tanh(x / d)): a light warmer than
+     daylight's (a low sun's) 0.6 of the way, a bluer one (twilight's, the
+     light under a sheet) the whole way (`BALANCE_ADAPT`), but no further
+     than `BALANCE_BLUE` = 0.35 (about the light of a black body at 7500 K
+     against daylight's; smoothly, d tanh(x / d)). Across it,
+     `BALANCE_TINT` = 0.7 of the way. Of luminance 1: it leaves the
+     exposure as the meter set it.
+     - The margin: a clear day's light moves along the line by 0.05 to
+       0.15 with the sun's height and the view; followed whole, the day's
+       sky from 11 km came out greyer (4.4 to 4.0).
+     - The low sun's 0.6: photographs of a low sun keep much of its warmth
+       (the sky over the sea towards the sun 2 degrees up: red over green
+       0.87, blue over green 1.15, linear); followed the whole way, the sky
+       there came out 0.68 and 1.66; now 0.79 and 1.33 (0.3 km, 15 to 25
+       degrees up; main 1.05 and 0.98).
+     - The blue's whole way: under an altostratus with the sun 8 degrees
+       up, less left the sheet blue (1.14 as shown, the look entry's
+       limit 1.13). The end of the range: under the same sheet in deep
+       twilight the light through it (the twilight sky's) asked for 0.86
+       at 9 degrees down; followed, the sheet came out brown (red over
+       green 1.5, blue over green 0.77), and with the range ending at 0.55
+       grey (1.02, 1.11), where main kept it blue (0.79, 1.91); now 0.96
+       and 1.25.
+     - Across the line: twilight's light from high up is purple (the
+       sun's light through the ozone). Followed only along the line, the
+       twilit Earth from 40 km stayed navy (2.8 against the photographs'
+       1.2 to 1.5); followed whole, the ground's sky in deep twilight turned
+       teal and the sky away from the sun from cruise lost its blue.
+   - **In time.** The estimate takes the meter's levels, which are taken
+     before the balance: it does not hang on the balance shown, and the
+     first frame does not hang on itself. The first metered frame takes
+     it at once; then the balance follows it exponentially in log, with
+     `BALANCE_TIME` = 0.5 s, and the frames go on while it is more than
+     `BALANCE_STILL` = 0.002 from it. `window.__balance` reads it.
+   - **What it does** (against the balance before, over 42 views from
+     0.3, 3, 11 and 30 km in five weathers, the whole frame as shown,
+     linear). By day (the sun at 55 degrees) red over green within 1.4 %
+     and blue over green within 4 % (most -1 %). With the sun from 5 to 0
+     degrees up the frame is cooled as the low sun reddens (red over green
+     down by a median of 4 % at 5 degrees, 22 % at 0): the clear sky
+     beside the sun 15 to 25 degrees up from 0.3 km is red over green 0.63
+     at 0 degrees (0.89 before; photographs of a low sun's sky 0.34 to
+     0.46). In twilight the ground's sky is blue-grey to blue (towards the
+     sun at -2 degrees 0.74 and 1.47, before 1.10 and 1.05). From 30 km
+     looking down, blue over green 1.5 to 2.7 from 2 to 9 degrees down and
+     red over green 1.1 to 1.2 at 2 to 4 down (before 1.2 to 3.5, and 1.6 to
+     1.7: mauve-brown, then navy); photographs from orbit 1.2 to 1.5 and 0.86 to
+     1.02. Deeper in twilight it is greyer than before (blue over green of
+     the frame down by about 30 % at 9 degrees down, where the old balance had
+     let go), and under an altostratus at 9 down grey-blue (0.96, 1.25)
+     where it was blue (0.79, 1.91). At night under a full moon, within 0.3 %. As the
+     sun steps by half degrees from 10 up to 9 down, the balance moves by
+     at most 0.12 in log a step (looking down from 30 km as the sunlit
+     cirrus go into the shadow), most by 0.01 to 0.02; in a flight of 20 s
+     at 11 km at dusk it moves by 0.4 % in all.
+   - Before (until #159), the balance went half way to the light on the
+     level sea, blended in as the sun went from 2.5 to -0.5 degrees
+     (`BALANCE_IN`), out again from 4 to 9 degrees down (`BALANCE_OUT`),
+     and out with height from 2 to 11 km (`BALANCE_HIGH`) but for the share
+     of the metered light from rays that met the planet (`earthLight`).
+     The ground's twilight sky came out grey-mauve (red over green 1.10, blue
+     over green 1.05 at 2 degrees down, towards the sun, 15 to 25 degrees
+     up), the clear sky with the sun from 5 to 0 degrees up lost its blue
+     at the side (red over green 0.50 to 0.89), and from 30 km the twilit
+     Earth went from mauve-brown (red over green 1.6 to 1.7 at 2 to 4
+     degrees down) to navy (blue over green 2.9 at 6 down, 3.5 at 9) as
+     `BALANCE_OUT` let go. Before that, without any balance in twilight,
+     the sky away from the sun was lavender and the Belt of Venus magenta.
 3. A camera's saturation by day, `uSaturation` (`saturationFor`):
    `DAY_SATURATION` = 1.3 about the luminance, in linear light, falling to
    none as the sun goes from 8 to 1 degrees (`DUSK`) and none at night.
