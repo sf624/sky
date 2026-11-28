@@ -251,6 +251,26 @@ the page against the reference first (`tools/ref`, see
 [tools/README.md](../tools/README.md#the-reference)): if the two agree,
 the difference is the camera's, or the weather's.
 
+Where the page places things (how light the cloud, the sky and the sea
+come out) is judged class by class, not by the whole frame: in each
+picture, a rectangle on each class of thing (lit cloud, the sky high in
+the frame and over the horizon, the sea, the ground), the percentiles of
+its luma in display levels, and the same for some photographs of that
+kind of scene. A photograph's levels are its camera's choice of exposure
+and curve, and photographs of one scene differ by a stop among
+themselves: aim at their middle, with their range beside it, and do not
+fit one. The ratios between the classes in linear light (the page's
+curve undone, the photograph decoded as sRGB) tell the scene from the
+camera: an exposure moves every class alike and no ratio, a curve moves
+the ratios of all pictures alike, and a ratio that is off in the page
+alone is in its light (issue #56: from cruise by day the page's ratios
+of cloud, sea and sky matched those of 49 photographs, so the tone curve
+stayed as it was; the levels over a sea with few clouds stood 0.4 to 0.7
+stops over theirs, which was the meter's; and the horizon's haze stood
+some 0.65 stops too bright against the cumulus, which is neither). A
+copy of the page that stores the terms of `exposureAt` in a global shows
+which rule set the exposure of a view.
+
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds
 (the reprojection), flicker of fine patterns, and jumps when the dynamic
