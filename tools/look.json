@@ -2815,7 +2815,7 @@
    ],
    "bad": "8096248",
    "fixed": null,
-   "note": "The middle of the glitter from 11 km, the sun 45 degrees up, 6 m/s: grain 0.578 on main 8096248 and 0.687 on d8feccb (the mean of the waves alone), 4.190 with the few waves of each footprint drawn as its tilt (footprintTilt). The same measure on crops of the glitter in photographs: 2.4 and 6.5 from orbit, 6.1 from an aircraft, 14.8 through a long lens."
+   "note": "The middle of the glitter from 11 km, the sun 45 degrees up, 6 m/s: grain 0.578 on main 8096248 and 0.687 on d8feccb (the mean of the waves alone), 4.421 with the few waves of each footprint drawn as its tilt for the glitter (footprintTilt). The same measure on crops of the glitter in photographs: 2.4 and 6.5 from orbit, 6.1 from an aircraft, 14.8 through a long lens."
   }
  ]
 }

@@ -4766,7 +4766,7 @@ const vec4 SWELL[SWELLS] = vec4[SWELLS](
 // they are counted (sparkleCount). The facets stay put on the sea: a still
 // holds still; in flight zh moves and they twinkle.
 const float FACET = 0.0005;
-const float GRAIN_FEW = 0.5, GRAIN_CELL = 1.5;       // see footprintTilt
+const float GRAIN_FEW = 0.5, GRAIN_CELL = 1.0;       // see footprintTilt
 const float FACET_TOL = 0.02;
 const float SPOT = 0.1;
 float sparkleAt(float size, float tol, vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc, int one) {
@@ -4859,16 +4859,17 @@ float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
 // holds a few, and shows those few: one pixel of a photograph is brighter,
 // the next darker, down to its finest detail (in the glitter from aircraft
 // and from orbit 6 to 20 % of contrast per octave at 1 to 4 px, where the
-// mean alone gave the page 1 to 4 %: a blur). The light of n waves, each
+// mean alone gave the page 1 to 4 %: a blur). The glitter of n waves, each
 // tilted by its own slope, differs from the mean of all as that of one
 // tilt of a variance n times smaller (to first order). So of the variance
 // that a footprint averages away, addSea draws the share of one wave among
-// those it holds as a tilt of the whole footprint, a random one for each
-// place on the sea: two numbers of mean 0 and variance 1 for each cell of
-// a grid GRAIN_CELL times as wide as the footprint (FACET km times a power
-// of 2; read between the cells, and between that grid and the next for the
-// widths between), from a hash of the cell. They stay put on the sea: a
-// still holds still, and in flight the grain moves with the water.
+// those it holds as a tilt of the whole footprint for the glitter, a
+// random one for each place on the sea: two numbers of mean 0 and variance
+// 1 for each cell of a grid GRAIN_CELL times as wide as the footprint is
+// long (FACET km times a power of 2; read between the cells, and between
+// that grid and the next for the widths between), from a hash of the cell.
+// They stay put on the sea: a still holds still, and in flight the grain
+// moves with the water.
 vec2 tiltCell(vec2 c, float n, float k) {
   c -= n * floor((c + 0.5) / n);                     // the map repeats (by hand: see the GLSL rules on mod)
   uint h = ihash(uint(c.x) + ihash(uint(c.y) + ihash(uint(k) + 0x51ed27u)));
@@ -4957,11 +4958,13 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   vec2 slope = vec2(0.0);
   float hidden = 0.0, crest = 0.0;
   // few: of what the footprint averages away, the share of one wave among
-  // those it holds (footprintTilt): GRAIN_FEW of it while the footprint (of
-  // area area) is no wider than the longest waves of a band (the waves just
-  // under its width are few, the shorter ones many), then less, as their
-  // length squared over its area.
-  float area = across * along, few = 0.0;
+  // those it holds (footprintTilt): GRAIN_FEW of it while the footprint is
+  // no longer and no wider than the longest waves of a band (the waves just
+  // under its size are few, the shorter ones many), then less: as their
+  // length over the footprint's, along the view and across it, each on its
+  // own (a footprint seen aslant is long: it holds many waves one behind
+  // the other, though it is narrower than one).
+  float few = 0.0;
   // A footprint as wide as the waves averages them all (R, G 0.5, B 0.125).
   // The read still has some of the longest in it at 0.12 of the map: it
   // fades into that mean over the factor of three before, so that no edge
@@ -4975,7 +4978,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     float h = max(8.0 * w.b - dot(s, s), 0.0);
     slope += s;
     hidden += h;
-    few += h * GRAIN_FEW * min(0.01 / (rep * rep * area), 1.0);   // the longest: a tenth of the tile
+    few += h * GRAIN_FEW * min(0.1 / (rep * along), 1.0) * min(0.1 / (rep * across), 1.0);   // the longest: a tenth of the tile
     if (i > 0) crest += dot(s, WIND);                // the short waves, down the wind
     rep *= 6.0;
   }
@@ -4992,21 +4995,30 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     float var = 0.5 * dot(SWELL[i].zw, SWELL[i].zw);
     slope += SWELL[i].zw * (keep * cos(2.0 * PI * fract(dot(SWELL[i].xy, xs))));
     hidden += var * (1.0 - keep * keep);
-    few += var * (1.0 - keep * keep) * GRAIN_FEW * min(4.0 * PI * PI / (dot(k, k) * area), 1.0);
+    float wave = 2.0 * PI * inversesqrt(dot(k, k));
+    few += var * (1.0 - keep * keep) * GRAIN_FEW * min(wave / along, 1.0) * min(wave / across, 1.0);
     micro -= var;
   }
-  // The few waves in the footprint tilt it; the others spread its light.
-  // Seen aslant, the eye sees the faces turned towards it and none turned
-  // away: the tilt stays small against the slope of the view (an rms of a
-  // third of cv along each axis: one footprint in some 700 would face
-  // away), and what is over stays in the variance. Without this the far
-  // sea from 0.3 km, 1 to 4 degrees under the horizon, had bright dashes
-  // (footprints turned from the eye mirror the whole sky).
-  few = min(few, 0.22 * cv * cv);
-  slope += sqrt(0.5 * few) * footprintTilt(x, GRAIN_CELL * sqrt(area));
-  hidden -= few;
   // What is left for the ripples no picture shows.
   float s2r = max(micro, 0.1 * s2) + hidden;
+  // The few waves in the footprint tilt it for the glitter (tilt, and s2g:
+  // what is left to spread the glitter's light). The glitter is the light
+  // of the rare faces that mirror the sun: a small tilt changes their
+  // number much, most at its edges. The mirrored sky is the light of all
+  // the faces, whose slopes are spread far wider than the tilt: it keeps
+  // its mean (slope and s2r, as before). With the tilt on the mirror too
+  // (the first state of #163), the far sea from 0.3 km away from the sun
+  // was a grain of bright dots that drowned the forms of the waves, twice
+  // the contrast of photographs from low level (11, 9, 6 % per octave at 1
+  // to 4 px against 5, 3, 2 %, which is what the waves drawn give), and up
+  // to 2 levels lighter. Seen aslant, the tilt stays small against the
+  // slope of the view (an rms of a third of cv along each axis: the eye
+  // sees the faces turned towards it). The cells are as wide as the
+  // footprint is long: seen aslant they are streaks along the horizon, a
+  // pixel high, as the crests one behind the other are.
+  few = min(few, 0.22 * cv * cv);
+  vec2 tilt = sqrt(0.5 * few) * footprintTilt(x, GRAIN_CELL * along);
+  float s2g = s2r - few;
 
   // Whitecaps cover 2.95e-6 U^3.52 of the sea (Monahan and O'Muircheartaigh,
   // 1980); two fifths of that is thick, white foam. It lies in separate
@@ -5114,13 +5126,13 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     // of the footprint.
     vec3 hv = normalize(uLight - d);
     float ch = max(dot(hv, n), 1e-3);
-    vec2 zh = -vec2(dot(hv, ex), dot(hv, ez)) / ch - slope;
+    vec2 zh = -vec2(dot(hv, ex), dot(hv, ez)) / ch - slope - tilt;
     float F = 0.02 + 0.98 * pow(1.0 - clamp(dot(hv, -d), 0.0, 1.0), 5.0);
-    float glint = F * exp(-dot(zh, zh) / s2r)
-                / (4.0 * PI * s2r * max(cv, 1e-3) * ch * ch * ch * ch)
+    float glint = F * exp(-dot(zh, zh) / s2g)
+                / (4.0 * PI * s2g * max(cv, 1e-3) * ch * ch * ch * ch)
                 / (1.0 + waveShade(max(cv, 1e-3), s2) + waveShade(c, s2));
 #if Q_SPARKLE
-    if (uNightEye > 0.0) glint *= mix(1.0, sparkle(x, zh, s2r, fa, fc), uNightEye);
+    if (uNightEye > 0.0) glint *= mix(1.0, sparkle(x, zh, s2g, fa, fc), uNightEye);
 #endif
     float direct = exp(-tau);
     for (int k = 0; k < 3; k++) {
