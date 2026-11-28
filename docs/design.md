@@ -1262,7 +1262,7 @@ seen from far above.)
 
 - **Where**: the slider says how many heaps there are (`fair`, 0.63 +
   0.44 `uCloud`), and the weather map where. A mask of clusters
-  (`cloudLayer`: `lane`, `core`) is the map's amount read over 3 km and
+  (`cloudLayer`: `lane`) is the map's amount read over 3 km and
   more (mip 3.5), less 0.6 of its largest systems (mip 6.5), elsewhere on
   the map (so that the place where the page opens has heaps about it): where
   it is under a mark (`CF_MESO`: 0.54 with few clouds, 0.52 from half on,
@@ -1292,7 +1292,14 @@ seen from far above.)
   with the field without the fine noise (the light sees them), of 285 to
   36 m with it (within mip 1.5), and of 38 to 5 m near the eye. Each moves
   the dome's surface out by `CF_HEAD` km per unit of its height over
-  `CF_HEAD0` = 0.36 (about the mean). Each size carves the crowns of the
+  `CF_HEAD0` = 0.36 (about the mean): 0.15, 0.4, 0.24 and 0.12 km for the
+  heads of 2 km to 250 m, so that a head of 1 km, 500 m or 250 m stands
+  about as high as it is wide. (Until #158 the heads of 500 m and 250 m
+  moved it by 0.3 and 0.2 km, higher than wide: they cut the heads of
+  1 km into knobs of one size and left crumbs beside them, and from 11 km
+  every heap was a tight cluster of such knobs, "popcorn". A shorter
+  reach, `CF_OUT` near the towers' 0.13 km, took few of the crumbs and
+  shrank the small heaps seen from 0.3 km to fragments: it stays.) Each size carves the crowns of the
   size above it fully and its seams `CF_GATE` = 0.6 as much. A seam goes no
   deeper than `CF_SEAM` = 0.3: it has a floor, which bears the smaller
   heads. The two largest sizes' seams go in by half the dome's height here
@@ -1303,6 +1310,69 @@ seen from far above.)
   beside it). (As cones, the Worley cells of the noise, heads were soft
   lobes. Clamped all together, the seams' floor was the dome itself, smooth
   wherever two large seams met.)
+- **Bodies**: in a cluster, where the weather map's gusts (B, read over
+  1 km at least) are calm, the heaps are swollen: their surface stands up
+  to `CF_SWELL` = 0.27 km farther out all round (added to the domes'
+  distance), and their domes are up to `CF_TALL` = 0.3 higher. There the
+  heaps merge into one mass a few km wide with one flat base, and their
+  domes and heads are its bulges, small against it; between the bodies
+  the heaps are as elsewhere. So one frame holds masses of several km,
+  heaps of 1 to 3 km and small ones. (Until #158 every heap in a
+  cluster stood alone.)
+  - *Its top*: the heads of a body sit `CF_DEEP` = 0.2 km lower in it,
+    and it is swollen by as much more, so that its mean surface is where
+    the swell alone put it and every head stands out of it whole. (Under
+    the heads' reach alone, `CF_OUT`, all the heads of a body's top were
+    cut off at that reach: a flat table, plain beside a tower's foot from
+    2.4 to 3 km.) The domes' extra height goes by the swell's weight.
+    (Eased in over more of the body, so that a body was highest in its
+    middle, it cost the default view 1.5 ms of 16 on Direct3D 11, or the
+    frame over a deck a tenth, by how it was written. So did a way out
+    over the place's own heaps inside the heaps' branch, and a cap of the
+    body by the layer's record alone.)
+  - *Where*: 1 less the gusts over `CF_BODY`.x = 0.6, whole 0.07 over it,
+    eased in from the rim (`inB`: a step in it or in its slope was a step
+    in the heads' reach, flat faces on the cloud); none in a lane. The
+    gusts' map is a pattern of its own, calms some 7 km by 14 km with
+    finer ones inside, and costs no read: the layer has it. With few
+    clouds the mark is higher by half of what the slider lacks to 0.5
+    (fair-weather heaps stay small).
+  - *The march* strides by the field, and the swell makes the field
+    steeper outside the heaps: there it is divided by 1 plus the swell's
+    and the height's share times how fast `inB` may change (`CF_BODY`.z =
+    0.2 of the gusts per km), kept in `heapMix`. With the bare field the
+    strides went through a body's flank: upright pale bars in the cloud
+    from 1.5 km.
+  - *The top*: wherever there are heaps, the bound for the early way out
+    is as high as a body's heaps may stand, not the place's own body's.
+  - *Sinking*: as a sheet forms, a body's heaps sink by their whole height,
+    as the others do.
+  - *For Direct3D 11*: the body's weight is the one thing the layer works
+    out for it, in the place of the `core` of #113 (which lowered the
+    largest discs' threshold by 0.03 deep in a cluster, a rest of the
+    merged cores); `CF_DISC`.x is 0.025 lower for it everywhere (with
+    neither, few heaps seen from 0.3 km lost a tenth of their relief).
+    With the weight beside `core`, or `core`'s share added to `gather`,
+    or a cap of the body under `CT` worked out in `cloudLayer` or in the
+    heaps' branch, or the place's own bound for the early way out, or
+    `CF_TALL` at 0.2, the frame over a deck, which has no heap in it,
+    took 11 to 19 % longer on Direct3D 11 with the same picture, for 77
+    more instructions of 4162 (`d3dperf`, `overcast`; 1.01 as it is). So
+    a body is not capped under `CT`: with a base lifted by more than
+    1.1 km (the layer's record) the deepest are cut off there.
+  - *From below*: a body overhead is one or two large clouds with grey
+    bases. At a swell of 0.35 km (and heads 0.25 km lower) it was heavy:
+    from 0.3 km, at one place of sixteen tried, the darkest quarter of
+    the sky stood at 112 of 255 (the limit of `cumulus-not-heavy-0.3km`
+    is 121; main 160 there). At 0.27 and 0.2 km: 132, and the bodies seen
+    from 11 km are nearly as large.
+  - *Tried before*: a low wide dome of its own under a body's heaps (a
+    smooth lens wherever no heap stood on it); lower thresholds for the
+    discs on a body (thin blades at its rim; and the earlier core, see
+    the discs above, dark masses); a body over a disc of the noise's
+    cells of 4 km (as good to look at; its read at every read of the
+    field took 9 % of the clouds' pass); a body by the clusters' own mask
+    (one mass 10 km wide in the middle of every cluster).
 - **The base** is level, at the layer's `level`, and not smooth: the seams
   reach up into it by up to `CF_RAG` = 80 m, eased in and out (cut off at
   that, the hollows had flat roofs with hard edges: angular patches from
@@ -1328,7 +1398,10 @@ seen from far above.)
   heap kept a smooth dome 90 m under its surface, which showed wherever a
   seam between heads went deeper.
 - **The map of the tops** takes the heaps' own domes within the heads'
-  reach of each place, not the layer's bound.
+  reach of each place, and a body's swell, not the layer's bound. (Read
+  upright and widened by the domes' lean as well, it stood higher round
+  every heap, and the frame among heaps at 3 km took 13 % longer on
+  Direct3D 11, bodies or none.)
 - **Towers** (towering cumulus) are models, not noise: noise gives lumps,
   and a taller dome is a bullet, where a tower is a broad foot, shoulders
   and stacked turrets (after the modelled clouds of Guerrilla's Nubis
@@ -1362,8 +1435,9 @@ seen from far above.)
   - *In the field*: the tower leans as the heaps do, and its distance
     (`towerKm`) is joined to the nearest dome's by a `max`: so it has the
     heaps' flat base, their density at the surface and their light. Its
-    heads are the heaps' but smaller (`TW_HEAD`: none of 2 km, 0.35, 0.6
-    and 0.8 of the next three; `TW_SMALL` = 0.4 of the finer ones), stand
+    heads are the heaps' but for their size (`TW_HEAD`: none of 2 km, 0.35,
+    0.75 and 1.33 of the next three, which is 0.14, 0.18 and 0.16 km;
+    `TW_SMALL` = 0.4 of the finer ones), stand
     out 0.13 km at most (`TW_OUT`; at the heaps' 0.28 km they were cut
     loose, crumbs beside the outline), and their seams go in 80 m at most
     (`TW_SEAM`): the model holds the forms of a km and of half a km.

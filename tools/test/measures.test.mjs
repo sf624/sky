@@ -263,3 +263,18 @@ test('fray: a patch with a smooth outline scores about 1, one frayed into filame
   // No bright form at all: no outline, 0.
   assert.equal(M.fray(pic(W, H, () => 100)), 0);
 });
+
+test('crumbs: small detached parts per 1000 px of cloud, many beside knobs and none beside whole bodies', () => {
+  // Four bodies of 40 x 40 px on dark sea; then the same with crumbs of 3 x 3 px beside them (7 by 7 of them).
+  const body = (x, y) => x % 96 >= 20 && x % 96 < 60 && y % 128 >= 30 && y % 128 < 70 && x < 192;
+  const crumb = (x, y) => x >= 200 && (x - 200) % 30 < 3 && y % 40 >= 10 && y % 40 < 13;
+  const whole = pic(W, H, (x, y) => (body(x, y) ? 230 : 30)), loose = pic(W, H, (x, y) => (body(x, y) || crumb(x, y) ? 230 : 30));
+  assert.equal(M.crumbs(whole), 0);
+  const area = 4 * 1600, n = Math.ceil((W - 200) / 30) * Math.ceil(H / 40);
+  assert.ok(Math.abs(M.crumbs(loose) - 1000 * n / (area + 9 * n)) < 1e-6, `loose ${M.crumbs(loose)}`);
+  // Parts under opt.minPx and over opt.maxPx do not count; an entry's limits (min, max) are not the sizes.
+  assert.equal(M.crumbs(loose, { minPx: 10 }), 0);
+  assert.ok(M.crumbs(whole, { maxPx: 2000 }) > 0);
+  assert.equal(M.crumbs(loose, { max: 3.7 }), M.crumbs(loose));
+  assert.equal(M.crumbs(pic(W, H, () => 30)), 0);
+});

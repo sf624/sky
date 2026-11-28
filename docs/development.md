@@ -830,7 +830,13 @@ The shaders must run on any WebGL2. The code keeps these rules:
   nothing measurable (1.007). Taken out again in a copy of 9de3e45, the `UNSEEN` of
   `all` cost 1.30 times main's frame among the heaps at 3 km, 1.18 inside
   the cirrus at 12.5 km and 1.08 in the default view (1898 x 982,
-  2026-11-24).
+  2026-11-24). A little more arithmetic in `cloudLayer` is the same trap:
+  the bodies' weight worked out beside the cluster's `core` (#158), or a
+  cap of it, took the frame over a deck, with no heap in it, 11 to 19 %
+  longer for 77 more instructions of 4162; in `core`'s place, nothing
+  (see [design.md](design.md#low-clouds), the bodies). Seven variants
+  were timed to find it: `d3dperf --views overcast --rounds 3`, three
+  minutes each.
 - **A factor of 0 does not keep the picture.** A term that a uniform
   switches off at the page's defaults (`x += even * jitter`) still changes
   what the compiler makes of the code round it. Three cases, on this

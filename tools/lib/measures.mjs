@@ -387,6 +387,16 @@ export function blobSize(img, opt = {}) {
   return s ? a.reduce((x, v) => x + v * v, 0) / s / (R.w * R.h) : 0;
 }
 
+// crumbs: the small detached parts of the cloud mask (opt.cloudLuma, opt.cloudSat): its connected parts of opt.minPx
+// (default 4) to opt.maxPx (default 60) px, per 1000 px of the mask. (Not min and max: those are an entry's limits.) Heaps that are clusters of knobs with loose
+// crumbs beside them: many; whole bodies with a few small clouds between them: few. Like blobSize, for views down
+// onto clouds over the sea; the count depends on the picture's size (keep the registry's).
+export function crumbs(img, opt = {}) {
+  const R = region(img, opt.region), a = blobs(cloudMask(R, opt), R.w, R.h), { minPx = 4, maxPx = 60 } = opt;
+  const s = a.reduce((x, v) => x + v, 0);
+  return s ? 1000 * a.filter((v) => v >= minPx && v <= maxPx).length / s : 0;
+}
+
 // The luma's local contrast: luma minus its box mean over (2k+1)^2 px, divided by the region's median luma.
 function highPass(R, k) {
   const { w, h, l } = R, I = new Float64Array((w + 1) * (h + 1));
@@ -726,4 +736,4 @@ export function fray(img, { region: box, k = 6, t } = {}) {
   return smooth ? outline(R.l) / smooth : 0;
 }
 
-export const MEASURES = { fray, lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe, rollEven, rollLong };
+export const MEASURES = { fray, crumbs, lumaPct, brightColour, meanColour, cover, coverRise, coverFall, exposureStep, lumaRise, flatPlate, clumping, regularity, spectrumPeak, detailScale, specksCv, speckDensity, grain, verticalWalls, edgeRatio, relief, blobSize, lineDip, columnJump, patchStops, stars, starShape, texture, fringe, rollEven, rollLong };
