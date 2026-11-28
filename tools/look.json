@@ -2795,6 +2795,27 @@
    "bad": "8096248",
    "fixed": "8793f4a",
    "reference": "8096248: 134, 230; 8793f4a: 121, 221. Photographs from orbit and balloons (three): the sea 102 (62 and 142), lit cloud 180 (162 to 231)"
+  },
+  {
+   "name": "sea-glitter-blur-11km",
+   "q": "date=172&lat=35&cloud=0&cirrus=0&mid=0&time=15.361&alt=11&wind=6&yaw=89.2&pitch=-40",
+   "reported": "2026-11-15, 2026-11-27 (#11)",
+   "wrong": "from 4 km up the sun's glitter was a soft blur whose bright patches read as wisps of thin cloud on the water; in photographs from aircraft and from orbit it is grainy down to the pixel",
+   "measures": [
+    {
+     "measure": "grain",
+     "region": [
+      0.32,
+      0.3,
+      0.28,
+      0.5
+     ],
+     "min": 1.8
+    }
+   ],
+   "bad": "8096248",
+   "fixed": null,
+   "note": "The middle of the glitter from 11 km, the sun 45 degrees up, 6 m/s: grain 0.578 on main 8096248 and 0.687 on d8feccb (the mean of the waves alone), 4.421 with the few waves of each footprint drawn as its tilt for the glitter (footprintTilt). The same measure on crops of the glitter in photographs: 2.4 and 6.5 from orbit, 6.1 from an aircraft, 14.8 through a long lens."
   }
  ]
 }

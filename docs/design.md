@@ -1915,6 +1915,64 @@ their shade from it (see [Middle clouds](#middle-clouds)).
   holds some of the longest waves at that size, so it fades into the mean
   over the factor of three before (R, G and B together, and `hidden` after
   the fade): no edge shows where the read stops.
+- **The few waves in a footprint** (`footprintTilt`). A footprint far
+  wider than the waves holds many of them and shows their mean. A
+  footprint about as wide as the waves holds a few, and a photograph
+  shows those few: one pixel brighter, the next darker. Inside the
+  glitter, photographs from aircraft and from orbit have 6 to 20 % of
+  contrast per octave at 1 to 4 px (the rms of the luminance in a band,
+  over its mean); the mean alone gave the page 1 to 4 % from 4 km up, a
+  blur whose patches read as thin cloud. The glitter of n waves, each
+  tilted by its own slope, differs from the mean of all as that of one
+  tilt of a variance n times smaller (to first order: it is the light
+  that is averaged, not the slope, whose own mean over a footprint falls
+  off much faster). So of the variance that the footprint averages away
+  (`hidden`), a share (`few`) becomes a tilt of the whole footprint for
+  the glitter, and only the rest spreads its light (`s2g`):
+  - **How much.** `GRAIN_FEW` = 0.5 of a band's lost variance while the
+    footprint is no longer and no wider than the band's longest wave
+    (the waves just under the footprint's size are few; the shorter ones
+    are many), and less beyond: as that wave's length over the
+    footprint's, along the view and across it, each on its own. A
+    footprint seen aslant is long and narrow: it holds many waves one
+    behind the other, though it is narrower than one. The same for each
+    swell. Seen aslant, the eye sees the faces turned towards it and
+    none turned away, so the tilt also stays small against the slope of
+    the view (an rms of a third of the view's cosine to the vertical
+    along each axis).
+  - **Where.** Two numbers of variance 1 for each cell of a grid on the
+    sea as wide as the footprint is long (`GRAIN_CELL` = 1; cells of
+    0.5 m times a power of 2, read between the cells and between that
+    grid and the next one, as the moon's grain is), from an integer hash
+    of the cell, in one loop over the eight cells. Seen aslant, the
+    cells are streaks along the horizon a pixel high, as the crests one
+    behind the other are. The cells stay put on the sea: a still holds
+    still, and in flight the grain moves with the water (the change from
+    one flown frame to the next stays a fifth of the difference between
+    neighbouring pixels from 11 km).
+  - **On the glitter only.** The glitter is the light of the rare faces
+    that mirror the sun: a small tilt changes their number much, most at
+    the glitter's edges, where the grain is strongest, as in
+    photographs. The mirrored sky is the light of all the faces, whose
+    slopes are spread far wider than the tilt: it keeps its mean (the
+    slope and the variance of before), and outside the glitter the
+    picture is as it was. With the tilt on the mirror too (the first
+    state of #163), the far sea from 0.3 km away from the sun was a
+    grain of bright dots that drowned the forms of the waves: 11, 9 and
+    6 % of contrast per octave at 1 to 4 px, where photographs from low
+    level under a low sun have 5, 3 and 2 %, as the waves drawn give (6,
+    4.5, 2.4); and it was up to 2 levels lighter (the Fresnel curve
+    bends upwards towards grazing, so tilts to both sides do not
+    cancel).
+  - **The light is the same.** The mean over many pixels is the glitter
+    as before (variances add): the meter's exposure moves by 0.015 stops
+    at most. As shown, the middle of the glitter is darker where its
+    sparkles clip at white (by 10 levels from 0.3 km at noon, 6 from
+    3 km, 1.5 from 11 km).
+  - Measured after (2026-11-28; the bands of sigma 0.5 to 1, 1 to 2 and
+    2 to 4 px, main in brackets): from 4 km 10.9, 8.3, 5.6 % (4.0, 2.2, 2.4); from 11 km 6.0, 4.9, 3.6 (1.2, 1.6, 2.0), at a low sun 4.4, 3.9, 2.7 (1.1, 1.3, 0.8); from 40 km 2.6, 2.3, 2.1 (1.2, 1.5, 1.8). In light airs (2 m/s) the
+    waves are a few metres long and every footprint from 11 km holds
+    hundreds: there the glitter stays the soft patches it was.
 - **Glitter.** The share of slopes that mirror the light to the eye, with
   Fresnel and Smith's shadowing term (`waveShade`, in the rational form of
   Walter et al., 2007).
