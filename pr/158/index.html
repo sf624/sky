@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="a7163c4 PR #158">
+<meta name="build" content="56e9eb4 PR #158">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2646,9 +2646,10 @@ const float CF_LANE = 0.4;
 // Bodies: in a cluster, where the weather map's gusts (B, over 1 km and more) are calm, the heaps are swollen and merge
 // into one mass a few km wide (see cloudShape). CF_BODY: the mark of 1 - B over which a body begins; how far over it
 // the body is whole; and how fast 1 - B changes at most, per km (the march's strides go by it). CF_SWELL: how far out
-// a heap's surface stands on a body, km, all round; CF_TALL: how much higher its dome is.
+// a heap's surface stands on a body, km, all round; CF_TALL: how much higher its dome is; CF_DEEP: how much lower the
+// heads of a body sit in it, km, and how much more it is swollen for that.
 const vec3 CF_BODY = vec3(0.6, 0.07, 0.2);
-const float CF_TALL = 0.3, CF_SWELL = 0.35;
+const float CF_TALL = 0.3, CF_SWELL = 0.35, CF_DEEP = 0.25;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
@@ -2827,7 +2828,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
   heapMix = tHeap > 0.0 ? 1.0 : 0.0;
   float tOld = tTop;
   // (No higher than a body's heaps may stand, below, wherever there are heaps: the bound is not the place's own body's.)
-  float tBody = tHeap * (hmax * (1.0 + CF_TALL) + CF_SWELL + CF_OUT) / (hmax + CF_OUT);
+  float tBody = tHeap * (hmax * (1.0 + CF_TALL) + CF_SWELL + CF_DEEP + CF_OUT) / (hmax + CF_OUT);
   if (heapMix > 0.0) tTop = all ? tBody : max(tTop, tBody);
   // A tower: the model of this cell of the map, turned and sized by the cell's hash, standing on the layer's base
   // and leaning as the heaps do. towerKm: how far inside its surface the place is, km; outside the model's bounds
@@ -3006,18 +3007,23 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
 #else
     float tB = clamp(a.body, 0.0, 1.0);
 #endif
-    float inB = tB * tB * (3.0 - 2.0 * tB), swell = CF_SWELL * inB;
+    // (The heads of a body sit CF_DEEP lower and its swell is as much more: its mean surface is where the swell alone
+    // put it, and the heads stand out of it whole. Under the heads' reach alone, CF_OUT, every head of a body's top was
+    // cut off at that reach: a table. up: the domes' extra height. Eased in over more of the body than the swell, so
+    // that a body was highest in its middle, it cost the default view 1.5 ms of 16 on Direct3D 11, or the frame over
+    // a deck a tenth, by how it was written: it is the swell's weight.)
+    float inB = tB * tB * (3.0 - 2.0 * tB), deep = CF_DEEP * inB, swell = CF_SWELL * inB + deep, up = inB;
     // (Kept in heapMix, which is 1 here: one global fewer for the march to carry.)
-    heapMix = 1.0 + 6.0 * tB * (1.0 - tB) * CF_BODY.z / CF_BODY.y * (CF_SWELL + CF_TALL * hmax);
+    heapMix = 1.0 + 6.0 * tB * (1.0 - tB) * CF_BODY.z / CF_BODY.y * (CF_SWELL + CF_DEEP + CF_TALL * hmax);
     // (A body's heaps sink into a sheet that forms as the others do: by their whole height where the form is 0.
     // By sink's own share: the terms it is made of are not kept for this.)
-    float sinkB = sink * (1.0 + (CF_TALL * hmax * inB + swell) / (hmax + CF_OUT));
+    float sinkB = sink * (1.0 + (CF_TALL * hmax * up + swell) / (hmax + CF_OUT));
     vec3 thr = max(CF_DISC - CF_DISC_AM * a.fair - CF_GATHER * a.gather - TW_FOOT.z * towerFoot * vec3(1.0, 1.0, 0.0), CF_DISC_MIN) + CF_LANE * a.lane * (1.0 - towerFoot);
     const vec3 SLOPE = vec3(0.3125, 0.625, 1.25);
     // A dome over each disc, half an ellipsoid: as wide as the disc, and as high as the layer lets a whole cell's be
     // (the smaller cells' lower, CF_SIZES): so a small disc is a low dome and a large one a high one, and discs that
     // overlap keep their own domes, with a cleft between. In km, to first order; the nearest of the three sizes counts.
-    vec3 rmax = max(1.0 - thr, 0.02) / SLOPE, hm = hmax * CF_SIZES * (1.0 + CF_TALL * inB);
+    vec3 rmax = max(1.0 - thr, 0.02) / SLOPE, hm = hmax * CF_SIZES * (1.0 + CF_TALL * up);
     vec3 U = max(1.0 - (c.gba - thr) / (SLOPE * rmax), 0.0), W = vec3(max(overBase, 0.0)) / hm;
     vec3 E = sqrt(U * U + W * W);
     vec3 km = mix(hm, (1.0 - E) * E / max(sqrt(U * U / (rmax * rmax) + W * W / (hm * hm)), 1e-4), step(1e-3, E));
@@ -3048,7 +3054,9 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
     heapKm = near.x - sinkB;
     heapIn = min(CF_OUT, 0.5 * near.y);
     // The heads of 1 km to 125 m, in 3D, where they may reach the surface.
-    heapHeads = 0.0;
+    // (Not on a tower: its model is not swollen.)
+    deep *= 1.0 - tw;
+    heapHeads = -deep;
     heapGate = 1.0;
     // (The seams of the large heads go in by a share of the dome's height at most, and the smaller heads stand on
     // their floor: clamped all together, that floor was the dome itself, smooth, wherever two large seams met.)
@@ -3057,7 +3065,7 @@ float cloudShape(vec3 p, float lod, bool fine, out float y, out vec4 q, out floa
       vec2 hk = (1.0 - smoothstep(2.5, 3.5, lod)) * headsKm2(textureLod(uHeads, q.xyz + shake * (shaken / 128.0), max(lod, 0.0)), hd * vec4(vec2(smoothstep(0.0, 0.4, heapUp)), vec2(smoothstep(0.0, 0.2, heapUp))), heapGate);
       // (On a low dome the heads are smaller too, by heapSmall: at their full size they cut it to crumbs.)
       heapSmall = mix(clamp(near.y / 0.4, 0.25, 1.0), TW_SMALL, tw);
-      heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y;
+      heapHeads = max(hk.x, -heapIn) + heapSmall * hk.y - deep;
     }
     sheetF = f;
     // (Outside the heads' reach the march may stride farther: the field falls faster there.)

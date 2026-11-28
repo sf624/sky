@@ -1319,6 +1319,17 @@ seen from far above.)
   the heaps are as elsewhere. So one frame holds masses of several km,
   heaps of 1 to 3 km and small ones. (Until #158 every heap in a
   cluster stood alone.)
+  - *Its top*: the heads of a body sit `CF_DEEP` = 0.25 km lower in it,
+    and it is swollen by as much more, so that its mean surface is where
+    the swell alone put it and every head stands out of it whole. (Under
+    the heads' reach alone, `CF_OUT`, all the heads of a body's top were
+    cut off at that reach: a flat table, plain beside a tower's foot from
+    2.4 to 3 km.) The domes' extra height goes by the swell's weight.
+    (Eased in over more of the body, so that a body was highest in its
+    middle, it cost the default view 1.5 ms of 16 on Direct3D 11, or the
+    frame over a deck a tenth, by how it was written. So did a way out
+    over the place's own heaps inside the heaps' branch, and a cap of the
+    body by the layer's record alone.)
   - *Where*: 1 less the gusts over `CF_BODY`.x = 0.6, whole 0.07 over it,
     eased in from the rim (`inB`: a step in it or in its slope was a step
     in the heads' reach, flat faces on the cloud); none in a lane. The
