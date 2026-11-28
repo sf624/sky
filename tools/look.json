@@ -2655,6 +2655,29 @@
    "bad": "5d3f581",
    "fixed": null,
    "note": "3.305 on main 5d3f581 (3.885 on 393b81c); 2.082 now. The whole frame, linear."
+  },
+  {
+   "name": "low-deck-grey-low-sun-0.3km",
+   "q": "weather=overcast&date=80&clock=solar&lat=35&alt=0.3&yaw=0&pitch=60&time=17.8372",
+   "reported": "2026-11-28",
+   "wrong": "under a low overcast from 0.3 km with the sun 2 degrees up, the deck came out steel blue (the white balance took the reddened beam over the deck for the light that lit it), where photographs of a low deck or altostratus at sunset are grey to grey-blue",
+   "measures": [
+    {
+     "measure": "meanColour",
+     "label": "b/g",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "of": "bg",
+     "max": 1.4
+    }
+   ],
+   "bad": "7b0ad70",
+   "fixed": null,
+   "note": "The whole frame looking up, linear (the page's power 2.2). Photographs: stratocumulus deck at sunset 1.28, altostratus near sunset 1.03 to 1.10, stratus by day 1.01."
   }
  ]
 }
