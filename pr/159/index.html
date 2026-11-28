@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="7b0ad70 PR #159">
+<meta name="build" content="9cc6466 PR #159">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -3821,6 +3821,37 @@ float seaShadow(vec3 p, float jitter) {
   return -log(max(lit / float(SHADOW_TAPS), 1e-6));
 }
 
+// The light's own that the low clouds let down onto the sea at p diffusely,
+// of what open water gets. It leaves their bases over a wide patch: a place
+// on the sea takes half of it from within the bases' height around (a matt
+// base lights a level sea as h^2 / (h^2 + r^2)^2). So under a deck the water
+// gets what a slab lets through (two streams, as throughDeck), and under
+// one heap among open sky only that heap's small share of it: the heap's
+// shadow is dark, where a slab's light at every shaded place left it half
+// lit. LIGHT_TAPS places on the bases' level, drawn by that weight, new each
+// frame; each reads the light's map there, the depth of the cloud above it
+// towards the light (the scene's program has no texture to spare for the
+// column's).
+const int LIGHT_TAPS = (SHADOW_TAPS + 1) / 2;
+const float LIGHT_MU = 0.03;
+float seaThrough(vec3 p, float jitter) {
+  if (uCloud <= 0.0) return 0.0;
+  vec3 n = normalize(p), ex = normalize(vec3(1.0, 0.0, 0.0) - n * n.x), ez = cross(ex, n);
+  float mu0 = max(dot(n, uLight), 0.0), h = CB + 0.2 + uLow.x, sum = 0.0;
+  for (int i = 0; i < LONG_N(LIGHT_TAPS); i++) {
+    float u = (float(i) + jitter) / float(LIGHT_TAPS), r = h * sqrt(u / (1.0 - min(u, 0.95)));
+    float a = 6.2832 * fract(jitter + 0.5) + 2.39996 * float(i);
+    float t = uLightShare * cloudShadow(p + CB * n + r * (cos(a) * ex + sin(a) * ez));
+    // (About the depth straight up: mu0 t. A light on the horizon has lines
+    // some 37 times as long through the shell as it is deep: no less than
+    // LIGHT_MU of t. It is rough under a low light, whose lines pass many
+    // clouds; the water then takes little of the light's own, by its cosine.)
+    float slab = 1.0 / (1.0 + COLUMN * max(mu0, LIGHT_MU) * t);
+    sum += max(min((0.5 + 0.75 * mu0) * slab, 1.0) - exp(-t), 0.0);
+  }
+  return sum / float(LIGHT_TAPS);
+}
+
 #ifdef SHADOW_MAP
 // One texel of a map's layer: the line through it along dir (plane axes
 // ax, ay), from where it rises through the base (or its lowest point, if
@@ -4633,7 +4664,9 @@ void clouds(vec3 o, vec3 d, float ta, float tb, float jitter,
 // ---------- Sea ----------
 // Light scattered back out of clear ocean water, per unit of light going
 // in (as a matt surface would), for the twelve wavelengths: blue, and hardly
-// any red.
+// any red. (Within what open-ocean water with 0.03 to 0.1 mg of chlorophyll
+// per m3 sends back: the reflectance just below the surface of Morel and
+// Maritorena, 2001, times 0.529 pi / Q above it, Q 3.5 to 4.5.)
 const vec4 SEA[3] = vec4[3](
   vec4(0.026, 0.028, 0.026, 0.019), vec4(0.012, 0.0070, 0.0038, 0.0017), vec4(0.0006, 0.0004, 0.0003, 0.0002));
 
@@ -4828,7 +4861,7 @@ float sparkle(vec2 x, vec2 zh, float s2r, vec2 fa, vec2 fc) {
 // averages away stays in the variance, so that the light of the glitter
 // is the same from near and far.
 // G: the glitter alone (for the meter).
-void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vis, float tau, inout vec4 L[3], inout vec4 G[3]) {
+void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vis, float tau, vec2 down, inout vec4 L[3], inout vec4 G[3]) {
   vec3 n = normalize(pg);
   vec3 ps = pg + n * 0.001;
   float cv = max(dot(n, -d), 0.0);
@@ -5009,8 +5042,9 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     T[k] = vis * exp(-(uBR[k] * od.x + extM * uMA[k] * od.y + uBO[k] * od.z));
     lit[k] = vec4(0.0);
   }
-  // A cloud blocks the direct light, but lets diffuse light through.
-  float soft = 1.0 / (1.0 + 0.1 * tau);
+  // A cloud blocks the direct light, but lets diffuse light through (down:
+  // the light's and the sky's, see main).
+  float soft = down.x;
   float c = dot(n, uLight);
   if (uLightI > 0.0 && c > 0.0) {
     vec3 ol = depthToTop(ps, uLight);
@@ -5144,7 +5178,7 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
   // Under a cloud less light comes down to the water, of any kind.
   for (int k = 0; k < 3; k++) {
     vec4 sky = uSunI * msS[k] + uMoonI * msM[k];
-    L[k] += T[k] * (Fm * mix(mir[k], S[k], seen) + soft * 1.6 * (SEA[k] + foam) * sky);
+    L[k] += T[k] * (Fm * mix(mir[k], S[k], seen) + down.y * 1.6 * (SEA[k] + foam) * sky);
   }
 }
 
@@ -7583,12 +7617,20 @@ void main() {
   } else if (ground) {
     // The shadow on the sea: the clouds' (the map, softened) and the thin cloud's.
     vec3 pg = o + d * tmax;
+    float seaJit = ign(gl_FragCoord.xy + 7.31 * uPass + 3.0);
+    float low = uLightI > 0.0 ? uLightShare * seaShadow(pg, seaJit) : 0.0;
 //[ middle clouds
-    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + midShadow(pg, 4, fract(ign2(gl_FragCoord.xy + 41.0) + 0.618034 * mod(uPass, 4096.0))) + ciSea) : 0.0;
+    float over = uLightI > 0.0 ? uLightShare * (midShadow(pg, 4, fract(ign2(gl_FragCoord.xy + 41.0) + 0.618034 * mod(uPass, 4096.0))) + ciSea) : 0.0;
 //| without
-    float shadow = uLightI > 0.0 ? uLightShare * (seaShadow(pg, ign(gl_FragCoord.xy + 7.31 * uPass + 3.0)) + ciSea) : 0.0;
+    float over = uLightI > 0.0 ? uLightShare * ciSea : 0.0;
 //]
-    addSea(pg, d, tmax, od, betaM, extM, visX, shadow, L, G);
+    // The light that comes down onto the water there, of what open water
+    // gets: the light's own (straight through the low clouds, and what they
+    // let down diffusely) and the sky's, dimmed under the clouds as in the
+    // air below them (under); both through the sheets above, the middle
+    // clouds and the thin cloud, as slabs where the ray meets the sea.
+    vec2 down = vec2(uLightI > 0.0 ? exp(-low) + seaThrough(pg, seaJit) : 1.0, under) / (1.0 + 0.1 * over);
+    addSea(pg, d, tmax, od, betaM, extM, visX, low + over, down, L, G);
   } else {
     // Beyond the atmosphere: the sun, the moon, airglow, the Milky Way,
     // the zodiacal light and stars, all dimmed and reddened by the air.
@@ -9736,9 +9778,16 @@ const SkySound = (() => {
   // it does not give as the sea's and the clouds' (see levelsOf). The
   // night's own light (the airglow, the stars) lights nothing: it counts
   // at daylight's colour of each kind (day), at the airglow's radiance, so
-  // that the night keeps daylight's balance. The clouds above the eye are
-  // not known here: each counts as the air about it, lit by the same light.
-  // So by day the air counts as sunlight, whatever its own blue; with a low
+  // that the night keeps daylight's balance. The clouds are known here by
+  // their mean only: the air under the low clouds' tops has the beam and
+  // the sky's light the deck leaves it (as fs takes them for the air),
+  // and what is seen from under a layer is lit through it (balanceFor);
+  // else a cloud counts as the air about it, lit by the same light. Before,
+  // the rays from under a low deck were followed into the air above it,
+  // lit by the reddened beam the deck in fact hides: the deck with the
+  // sun 5 to 0 degrees up came out steel blue (blue over green 1.7 to
+  // 2.1 as shown, linear), where photographs of a low deck at sunset give
+  // 1.0 to 1.3 (and the middle sheet beside it stayed grey). So by day the air counts as sunlight, whatever its own blue; with a low
   // sun, as the reddened beam; in twilight, as the beam high up and the
   // twilight's light below it.
   const SUN_DISC = 0.0093;   // radians
@@ -9808,10 +9857,27 @@ const SkySound = (() => {
   // sea where it meets it (of any brightness).
   // (lights: the sun's and the moon's directions and strengths, on the air
   // and on the sea; the page's own by default.)
+  // The low clouds, by their mean, as fs takes them for the air (`direct`
+  // and `under` in the table of the air's light): their cover (lowCover,
+  // from the amount), how far a height lies under their tops (lowAbove:
+  // from CB to CT, the shell that holds them), and what a whole deck leaves
+  // the air below of the sun's beam (LOW_BEAM) and of the sky's light
+  // (LOW_SKY, under LOW_SKY_H km).
+  const LOW_SHELL = [0.6, 5], LOW_BEAM = 0.15, LOW_SKY = 0.3, LOW_SKY_H = [0.6, 2];   // CB, CT, 0.15, UNDER in fs
+  const lowCover = () => smooth01((state.cloud - 0.4) / 0.6);
+  const lowAbove = h => 1 - smooth01((h - LOW_SHELL[0]) / (LOW_SHELL[1] - LOW_SHELL[0]));
+  // How far the eye at alt is under the low layer: from its tops down to its
+  // base (the base LOW_LAYER[0] km over the level and low.base, the deck
+  // LOW_LAYER[1] km deep at low.depth 1, as fs makes a sheet on the mean).
+  const LOW_LAYER = [0.75, 1.2];
+  const lowOver = alt => {
+    const base = LOW_LAYER[0] + state.low.base, top = base + LOW_LAYER[1] * state.low.depth;
+    return smooth01((top - alt) / (top - base));
+  };
   // Whether a ray from radius r0 that rises by dy (its unit vector's up)
   // meets the planet.
   const meets = (r0, dy) => dy < 0 && (r0 * dy) ** 2 - r0 * r0 + RG * RG >= 0;
-  const lightsNow = () => ({ sun: state.sun, sunOn: state.sunOn, moon: state.moon, moonAir: state.moonI * moonAirFor(), moonI: state.moonI });
+  const lightsNow = () => ({ sun: state.sun, sunOn: state.sunOn, moon: state.moon, moonAir: state.moonI * moonAirFor(), moonI: state.moonI, low: lowCover() });
   function litBy(alt, dx, dy, dz, day, out, level, lights = lightsNow()) {
     const r0 = RG + alt, b = r0 * dy, s = lights.sun, m = lights.moon;
     const sun = lights.sunOn, moon = lights.moonAir;
@@ -9827,15 +9893,18 @@ const SkySound = (() => {
       const ray = BR[6] * Math.exp(-h / HR), low = BETA_M * state.haze * MA[6] * boundaryLayer(h), up = BETA_M * state.haze * MA[6] * mieUp(h);
       const ext = (ray + MIE_EXT * (low + up)) * dt, g = dt * Math.exp(-(depth + ext / 2)), all = (ray + low + up) * g;
       depth += ext;
+      // Under the low clouds' tops their deck takes the beam and the sky's
+      // light, by their mean, as fs takes them for the air.
+      const beam = 1 - (1 - LOW_BEAM) * lights.low * lowAbove(h), skyLeft = 1 - (1 - LOW_SKY) * lights.low * (1 - smooth01((h - LOW_SKY_H[0]) / (LOW_SKY_H[1] - LOW_SKY_H[0])));
       if (sun > 0) {
         const mu = (px * s[0] + py * s[1] + pz * s[2]) / r;
-        addBeam(h, mu, 4 * Math.PI * (ray * pS[0] + low * pS[1] + up * pS[2]) * g * sun, litSpec);
-        addTable(msData, msIndex, h, mu, all * sun, litSpec, true);
+        addBeam(h, mu, 4 * Math.PI * (ray * pS[0] + low * pS[1] + up * pS[2]) * g * sun * beam, litSpec);
+        addTable(msData, msIndex, h, mu, all * sun * skyLeft, litSpec, true);
       }
       if (moon > 0) {
         const mu = (px * m[0] + py * m[1] + pz * m[2]) / r;
-        addBeam(h, mu, 4 * Math.PI * (ray * pM[0] + low * pM[1] + up * pM[2]) * g * moon, litSpec);
-        addTable(msData, msIndex, h, mu, all * moon, litSpec, true);
+        addBeam(h, mu, 4 * Math.PI * (ray * pM[0] + low * pM[1] + up * pM[2]) * g * moon * beam, litSpec);
+        addTable(msData, msIndex, h, mu, all * moon * skyLeft, litSpec, true);
       }
     }
     toRgb(litSpec, out);
@@ -9857,7 +9926,7 @@ const SkySound = (() => {
     };
     const none = { air: [0, 0, 0], level: [0, 0, 0] }, out = [0, 0, 0], level = [0, 0, 0], sum = [0, 0, 0];
     const sun = [0, Math.sin(DAY_SUN * RAD), Math.cos(DAY_SUN * RAD)];
-    const lights = { sun, sunOn: 1, moon: sun, moonAir: 0, moonI: 0 };
+    const lights = { sun, sunOn: 1, moon: sun, moonAir: 0, moonI: 0, low: 0 };
     for (let e = 1; e < 90; e += 4) {
       for (let a = 5; a < 360; a += 10) {
         const ce = Math.cos(e * RAD), dir = [ce * Math.sin(a * RAD), Math.sin(e * RAD), ce * Math.cos(a * RAD)];
@@ -9875,12 +9944,14 @@ const SkySound = (() => {
   // part of the way towards est along BALANCE_LINE and across it (see
   // BALANCE_ADAPT), of luminance 1, so that it leaves the exposure as the
   // meter set it.
-  // Under a middle sheet (altostratus) what the camera sees is lit by the
-  // light through the sheet, by day too: the sun's beam and the sky's
-  // light mixed as the slab lets them through (addLevel's slab), by the
-  // sheet's cover over the eye (sheet: by the form, by the amount (whole
-  // from 0.7: from 0.6 on, the altostratus weather's, the sheet hides the
-  // sky), and from the layer's top down to its base). With daylight's
+  // Under a cloud layer what the camera sees is lit by the light through
+  // it, by day too: the sun's beam and the sky's light mixed as a slab lets
+  // them through (addLevel's slab), by the layers' cover over the eye
+  // (sheet: the middle sheet's, by the form, by the amount (whole from 0.7:
+  // from 0.6 on, the altostratus weather's, the sheet hides the sky), and
+  // from the layer's top down to its base; and the low clouds', by their
+  // mean cover (lowCover) and from their tops down to their base
+  // (lowOver)). With daylight's
   // balance, the sheet with the sun 8 degrees up was blue (saturation 0.19,
   // blue over green 1.17 as shown): the sky's light on its top, blue over
   // green 2.9 in linear light, is two fifths of the light through it.
@@ -9889,7 +9960,8 @@ const SkySound = (() => {
   // cosine of no less than 0.2 instead, which at sunset made it salmon.
   function balanceFor(est, day) {
     const [mid, form, base, depth] = midUniform();
-    const sheet = mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) * smooth01((base + depth - state.alt) / depth) : 0;
+    const midOver = mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) * smooth01((base + depth - state.alt) / depth) : 0;
+    const sheet = 1 - (1 - midOver) * (1 - lowCover() * lowOver(state.alt));
     const y = lumOf(est);
     let now = est.map(v => Math.max(v, 1e-6 * y) / y);
     if (sheet > 0) {
@@ -11589,7 +11661,7 @@ const SkySound = (() => {
       }
       // All of it hangs on the view, the lights and the eye's height only:
       // the same in straight flight and at rest, where it is not done again.
-      const key = [...c, t, a, ...s, state.sunOn, ...state.moon, state.moonI, state.alt, state.haze, builtHaze].join();
+      const key = [...c, t, a, ...s, state.sunOn, ...state.moon, state.moonI, state.alt, state.cloud, state.haze, builtHaze].join();
       if (key === weighed) return;
       weighed = key;
       const r0 = RG + state.alt;

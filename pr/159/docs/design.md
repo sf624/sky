@@ -1858,7 +1858,9 @@ What reads the light's map:
   glitter, which shows white down to a hundredth of its light: the glitter
   was cut out along it, hard, and with a low sun into blocks (one texel is
   drawn out along the light on the sea). Points spaced evenly over a disc
-  left round blots; spaced evenly out from the middle, they weigh it more;
+  left round blots; spaced evenly out from the middle, they weigh it more.
+  And `seaThrough` reads it for the light that the clouds let down onto
+  the water diffusely (see [The sea](#the-sea));
 - the glare: the clouds towards the sun dim it (`cloudShadow(o)`);
 - the clouds' own light: past its own steps towards the light (`tauCM`), and
   `tauB` past its first three steps, as the depth between two places on a
@@ -1969,7 +1971,17 @@ their shade from it (see [Middle clouds](#middle-clouds)).
   now a dull grey, darker than the sky and lighter towards the horizon, as
   in photographs. Without clouds the old blend stays, so that `cloud=0`
   draws as before, bit for bit.
-- **Light from below.** `SEA`: blue light scattered back out of clear water.
+- **Light from below.** `SEA`: blue light scattered back out of clear
+  water, per unit of the light that falls on it. The twelve values lie
+  within what Morel and Maritorena (2001) give for open-ocean water with
+  0.03 to 0.1 mg of chlorophyll per m3 (their reflectance just below the
+  surface, times 0.529 pi / Q above it, Q 3.5 to 4.5: 0.017 to 0.022 at
+  430 nm and 0.0033 to 0.0042 at 555 nm for 0.1 mg, against the page's
+  0.028 and 0.0038). From 11 km it is 1 to 6 % of the sea's luminance at
+  the eye; the mirrored sky is 5 to 7 %, and the air in front of the sea
+  nearly all the rest (72 to 94 %; measured 2026-11-28, #156), so a
+  cloud's shadow outside the glitter is faint: mostly the shaded air
+  under the cloud.
 - **Foam.** Whitecaps cover `2.95e-6 U^3.52` of the sea (Monahan and
   O'Muircheartaigh, 1980), as separate breakers in a grid of cells: counted
   sharp from near, averaged from far. Behind each breaker, up the wind,
@@ -1980,11 +1992,54 @@ their shade from it (see [Middle clouds](#middle-clouds)).
   From far, the mean counts the trails too. Before, a breaker was a white
   blob on dark water.
 
-The shadow on the sea is the `tau` passed in: `shadow` in `main`, the
-depth of the clouds (`seaShadow`: the map, with soft edges) and of the cirrus
-(`ciSea`) towards the light. It hides the glitter and the direct
-light on the water; the light that a cloud lets through diffusely
-(`soft`) falls more slowly.
+The shadow on the sea is the `tau` passed in: in `main`, the depth of the
+low clouds (`low`, from `seaShadow`: the map, with soft edges) and of the
+sheets above (`over`: the cirrus's `ciSea`) towards the light. It hides
+the glitter. The water's own light and the foam take `down`, the light
+that comes down onto the sea there as a share of what open water gets,
+the light's own (x) and the sky's (y):
+
+- **The light's own under the low clouds**: what comes straight through,
+  `exp(-low)`, and what the clouds let down diffusely (`seaThrough`).
+  That light leaves their bases over a wide patch: a place on the sea
+  takes half of it from within the bases' height around (a matt base
+  lights a level sea as `h^2 / (h^2 + r^2)^2`). So `LIGHT_TAPS` places on
+  the bases' level (half of `SHADOW_TAPS`: 4), drawn by that weight and
+  new each frame, each read the light's map: the depth of the cloud above
+  that place towards the light, times the sine of the light's height (no
+  less than `LIGHT_MU` = 0.03: a light on the horizon has lines some 37
+  times as long through the shell as it is deep), is about the depth
+  straight up; a slab of that depth lets `(0.5 + 0.75 mu0) / (1 + COLUMN
+  tau)` of the light through (two streams, as `throughDeck`), of which
+  `exp(-t)` came straight. Their mean is the diffuse light. Under a deck
+  that is a slab's light. Under one heap among open sky it is that heap's
+  small share: its shadow takes the sun's light off the water. (The
+  estimate is rough under a low light, whose lines pass many clouds; the
+  water then takes little of the light's own, by its cosine. The column's
+  map would give the depth straight up, but the scene's program reads 16
+  textures already, all Direct3D 11 gives it.)
+- **The sky's under the low clouds**: `under`, the share that the air
+  below the clouds keeps of the sky's light (1 to `UNDER` = 0.3 as the
+  amount of cloud goes from 0.4 to 1; see [The clouds'
+  shadow](#the-clouds-shadow)): the same under a heap as beside it,
+  whatever the light's height.
+- Before, the water under any cloud kept `1 / (1 + 0.1 tau)` of both, a
+  slab's share at every shaded place: half the sun's light under a heap
+  of depth 10, with no slab there; and never less than 0.42 of them,
+  since `seaShadow` gives no more than a depth of 13.8, so the water
+  under a thick deck was too light.
+- **Under the sheets above**: `1 / (1 + 0.1 over)`, a slab where the ray
+  meets the sea.
+
+Measured on photographs from aircraft and from orbit (2026-11-28, #156):
+outside the glitter a cumulus's shadow on open sea is 8 to 15 % darker
+than the sea beside it under a high sun (from "none seen" from 11 km over
+small heaps to 25 % looking steeply down under a lower sun), with soft
+edges; in the glitter it is 0.1 to 0.45 of the lit sea. The page from
+11 km, 25 degrees down, sun 78 degrees up: 0.93 before, 0.92 now (as
+shown; the shaded air under the cloud is 4 of those points, whether the
+air is read from the table or marched); from 3 km 0.89 before, 0.84
+now.
 
 With middle clouds, the mirror shows them too (`midMirror`), in the same
 four directions (with or without low clouds): each reads the layer's
@@ -1999,7 +2054,7 @@ before, the low bases in the mirror had only the clear sky's blue light,
 and stood as dark blue streaks on a pale grey sea; they stay darker than
 the layer's base there, as the low bases are). So the sea
 under an altostratus is grey, not the blue of a clear sky. Their shadow
-(`midShadow`) joins `tau`.
+(`midShadow`) joins `over`.
 
 ## Middle clouds
 
@@ -4206,12 +4261,36 @@ At the end of `main`:
      mean of the picture. It is made from the model's lights, not from the
      picture's colours: a mean of the picture ("grey world") takes the
      blue of a clear sky for the colour of its light, and greyed the day's
-     sky from cruise. The clouds above the eye are not known to the JS:
-     each counts as the air about it. The light is followed for one block
+     sky from cruise. The clouds are known to it by their mean only. The
+     air under the low clouds' tops (from `CB` to `CT`) has what their
+     deck leaves it of the beam and of the sky's light, as the table of
+     the air's light takes it in `fs` (0.15 and `UNDER` = 0.3 under a whole
+     deck, by `smoothstep(0.4, 1, cloud)`). What is seen from under a layer,
+     the middle sheet or the low deck, is lit through it (below). Else a
+     cloud counts as the air about it. Before, the rays from under a low
+     deck were followed into the air above it, lit by the reddened beam
+     the deck hides: the deck with the sun 5 to 0 degrees up came out steel
+     blue (blue over green 1.7 to 2.1 as shown, linear), where a photograph
+     of a stratocumulus deck at sunset gives 1.3 and of altostratus 1.0 to
+     1.1, while the middle sheet beside it stayed grey. The light is followed for one block
      of each two by two (and for each block where the horizon runs between
      them), and not again while the view, the lights and the eye's height
      stay as they were (at rest, in straight flight): some 4 ms of script
      a reading on the test machine when they change, 8 for every block.
+   - **Under a layer.** What the camera sees from under a cloud layer is
+     lit by the light through it: the sun's beam by 0.5 + 0.75 times its
+     cosine and the sky's light whole, as a slab lets them through
+     (`addLevel`'s `slab`, on the level sea). The estimate goes that far
+     towards it (in log) as the layers cover the eye: the middle sheet by
+     its form, its amount (whole from 0.7) and from its top down to its
+     base; the low deck by its mean cover (`lowCover`,
+     `smoothstep(0.4, 1, cloud)`) and from its tops down to its base
+     (`lowOver`: the base `LOW_LAYER[0]` = 0.75 km over the level and
+     `low.base`, the deck `LOW_LAYER[1]` = 1.2 km deep at `low.depth` 1).
+     It goes over smoothly with the amount (the balance's blue over red,
+     in log, under a sun 2 degrees up: +0.34 clear, +0.33 at 0.4, +0.19 at
+     0.6, -0.15 overcast) and with the eye's height (-0.15 at 0.3 km under
+     the overcast, -0.02 at 1.2, +0.15 from 1.8 km over it).
    - **Daylight's light** (`dayLights`, made again with the table of
      multiple scattering): the clear sky's air seen all round from sea
      level with the sun at `DAY_SUN` = 40 degrees, and the level sea's
@@ -4765,7 +4844,8 @@ asks which level it is.
   (the low clouds' steps, times their length: `DS_MIN`, `DS_NEAR`,
   `DS_REL`, and `CLOUD_STEPS` divided by it), `Q_SHAFTS` (the clouds'
   shadow in the air), `Q_SHADOW_TAPS` (the soft edge of the shadow on the
-  sea), `Q_CI_STEPS` (the cirrus's march near the eye; 0: no march, every
+  sea; half as many reads, `LIGHT_TAPS`, for the light that comes down
+  around it), `Q_CI_STEPS` (the cirrus's march near the eye; 0: no march, every
   ray reads each deck flat, as rays farther off do), `Q_WARP_MIP`
   (the level of the moved map's texels, 2 for 1024), `Q_SKY_NS` (the
   air's samples of the sky that the sea mirrors, `skyAt`), `Q_MIRROR`
