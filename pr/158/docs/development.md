@@ -67,7 +67,7 @@ These are read directly.
 | `sound` | stored choice, else `off` | Background sound: `off`, `airliner`, `airliner-whine` (the panel's "Near engines") or `wind`. Another value counts as none given. It starts at the first click or key press. Not stored |
 | `volume` | stored choice, else 0.5 | Volume of the sound, 0 to 1 (clamped). Not stored |
 | `res` | none: dynamic | 0 to 1: fixes the hero's drawing scale while it moves, relative to the canvas (0: dynamic). At rest it is drawn in full |
-| `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame |
+| `expo` | none: the meter | The exposure, log2, held fixed (for tests: the tools compare a flight with a still at the exposure the flight ended with). `window.__exposure` reads the exposure of the last frame, and `window.__balance` its white balance (the factors on linear red, green and blue; null until the first picture is metered), which `expo` does not hold |
 | `rate` | `960` | The speed of time while playing, a factor of real time: `1` (real time), `60`, `600`, `960` or `3600`. Other values are ignored |
 | `play` | none | `1` starts playing at load |
 | `debug` | stored choice, else off | `1`: shows the debug overlay, `0`: hides it (see [Reporting a flaw](#reporting-a-flaw-with-the-debug-overlay)). Not stored; the `I` key stores its choice |
@@ -250,6 +250,26 @@ Where a photograph and the page still differ in the air's light, check
 the page against the reference first (`tools/ref`, see
 [tools/README.md](../tools/README.md#the-reference)): if the two agree,
 the difference is the camera's, or the weather's.
+
+Where the page places things (how light the cloud, the sky and the sea
+come out) is judged class by class, not by the whole frame: in each
+picture, a rectangle on each class of thing (lit cloud, the sky high in
+the frame and over the horizon, the sea, the ground), the percentiles of
+its luma in display levels, and the same for some photographs of that
+kind of scene. A photograph's levels are its camera's choice of exposure
+and curve, and photographs of one scene differ by a stop among
+themselves: aim at their middle, with their range beside it, and do not
+fit one. The ratios between the classes in linear light (the page's
+curve undone, the photograph decoded as sRGB) tell the scene from the
+camera: an exposure moves every class alike and no ratio, a curve moves
+the ratios of all pictures alike, and a ratio that is off in the page
+alone is in its light (issue #56: from cruise by day the page's ratios
+of cloud, sea and sky matched those of 49 photographs, so the tone curve
+stayed as it was; the levels over a sea with few clouds stood 0.4 to 0.7
+stops over theirs, which was the meter's; and the horizon's haze stood
+some 0.65 stops too bright against the cumulus, which is neither). A
+copy of the page that stores the terms of `exposureAt` in a global shows
+which rule set the exposure of a view.
 
 **In flight as well as at rest.** Fly over the change (the default speed
 is 900 km/h). Look for smears, ghosts and trails at the edges of clouds

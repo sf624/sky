@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="56e9eb4 PR #158">
+<meta name="build" content="52943c6 PR #158">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -2647,9 +2647,11 @@ const float CF_LANE = 0.4;
 // into one mass a few km wide (see cloudShape). CF_BODY: the mark of 1 - B over which a body begins; how far over it
 // the body is whole; and how fast 1 - B changes at most, per km (the march's strides go by it). CF_SWELL: how far out
 // a heap's surface stands on a body, km, all round; CF_TALL: how much higher its dome is; CF_DEEP: how much lower the
-// heads of a body sit in it, km, and how much more it is swollen for that.
+// heads of a body sit in it, km, and how much more it is swollen for that. (At a swell of 0.35 and 0.25 km a body
+// overhead was heavy from 0.3 km: the darkest quarter of the sky 112 of 255 at one place of sixteen, where the limit
+// of cumulus-not-heavy-0.3km is 121 and main had 160; now 132.)
 const vec3 CF_BODY = vec3(0.6, 0.07, 0.2);
-const float CF_TALL = 0.3, CF_SWELL = 0.35, CF_DEEP = 0.25;
+const float CF_TALL = 0.3, CF_SWELL = 0.27, CF_DEEP = 0.2;
 const float CF_DOME = 1.0;         // a dome's height at most, of the layer's depth
 const vec3 CF_SIZES = vec3(1.0, 0.65, 0.4); // and that of the domes of the 1 km and the 500 m cells, of the largest's
 // How far the heads stand out of what bears them, km: those of 2 km, 1 km, 500 and 250 m; of 285, 143, 71 and 36 m; and
@@ -9148,6 +9150,9 @@ const SkySound = (() => {
   const TOPS_SPAN = 5;           // ...in full for the share of the light seen from above (blocks from TOPS_SPAN degrees
                                  // above the horizontal, none of it, to TOPS_SPAN below, all of it),
   const TOPS_BELOW = 0.2;        // ...and TOPS_BELOW of its lift for the light seen from below (a sheet overhead)
+  const TOPS_LIT = 1.3, TOPS_KM = 2;   // ...and sunlit cloud seen from above stands at most TOPS_LIT stops below such a surface in
+                                 // the sun's light where the low clouds are (TOPS_KM): highlights dimmer than that are not
+  const TOPS_DIM = 0.5;          // cloud (haze over the sea), and stand TOPS_DIM stops lower for each stop dimmer (white in exposureAt)
   const BAND = 0.1;              // each share is read as a mean over shares this far on either side (HIGH_BAND for HIGH_SHARE)
   const HIGH_BAND = 0.025;
   const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
@@ -9324,7 +9329,7 @@ const SkySound = (() => {
   const msData = new Float32Array(NMU * NH * MS_GROUPS * 4);  // RGBA texels, NMU x (MS_GROUPS * NH): the air, the clouds, the lean, the cirrus, the shape
   // The light of the sky from above on a level surface (all orders, over 4
   // pi, as the table's), by height, sun angle and wavelength: for the white
-  // balance in twilight (balanceFor).
+  // balance (addLevel, litBy).
   const upData = new Float64Array(NMU * NH * NW);
   const msIndex = (j, i, w) => (((w >> 2) * NH + j) * NMU + i) * 4 + (w & 3);
   const cloudIndex = (j, i, w) => msIndex(j, i, w) + 3 * NH * NMU * 4;
@@ -9746,31 +9751,69 @@ const SkySound = (() => {
   const ciLightsFor = alt => [state.elev > -(2 * CI_DIP + Math.acos(RG / (RG + alt)) / RAD + CI_REFR / RAD) ? 1 : 0,
                               state.moonI * smooth01(-state.elev / 2)];
 
-  // The white balance (uBalance). By day a camera's for daylight. In
-  // twilight, as an automatic white balance does and as the eye adapts, it
-  // goes BALANCE_ADAPT of the way (in log) towards the colour of the light
-  // then falling on the level ground (the sea, the low air and the clouds),
-  // from the sky alone once the sun is down, relative to that of the light
-  // (sun and sky) with the sun at 30 degrees.
-  // That light is blue and a little violet: without it the sky away from the
-  // sun came out lavender and the Belt of Venus magenta near the sea, where
-  // photographs show a pale blue sky and a pink belt. Blended in as the
-  // sun goes from 2.5 to -0.5 degrees (BALANCE_IN), and out again as the sun goes from 4 to 9
-  // degrees down (BALANCE_OUT): photographs of the deeper twilight are blue,
-  // and a balance held there turned the sky grey and the clouds brown. And
-  // out again with height, from BALANCE_HIGH[0] to BALANCE_HIGH[1] km: from
-  // cruise the view is the high sky and the deck far below, which
-  // photographs keep as blue as by day, and this correction, warm for the
-  // light of the low air, turned that sky lavender-grey and the deck pink.
-  // But as far as the Earth gives the frame's light (the meter's share of it
-  // from rays that meet the planet), it holds at any height: the light on the
-  // ground lights what the camera sees there. Faded
-  // out with height alone, the twilit Earth from 20 to 40 km, nearly all of
-  // it Rayleigh light of the air, came out navy blue where photographs from
-  // orbit show it blue-grey.
-  // Unchanged by day and by night.
+  // The white balance (uBalance): a camera's for daylight (DAY_BALANCE),
+  // moved from there towards the colour of the light that falls on what
+  // the frame shows, relative to daylight's, as an automatic white balance
+  // does and as the eye adapts. One rule by day, in twilight and at night,
+  // at every height, under a middle sheet too (balanceFor), with no
+  // window on the sun's height or the eye's: a frame lit by a low reddened
+  // sun is cooled, one lit by the blue or purple light of twilight is
+  // warmed, and as the light dims into what the rods see, the balance goes
+  // back to daylight's. The light is estimated from the model's lights
+  // (litBy, gathered by the meter), not from the colours of the picture: a
+  // mean of the picture ("grey world") takes the blue of a clear sky for
+  // the colour of its light, and greyed the day's sky from cruise. The air
+  // is lit by the sun, whatever its own colour.
+  // Before, it adapted half way to the light on the level sea, blended in
+  // as the sun went from 2.5 to -0.5 degrees, out again from 4 to 9 down,
+  // and out with height from 2 to 11 km but for the share of the light from
+  // the Earth: the ground's twilight sky came out grey-mauve (red over green
+  // 1.19 at -2 degrees, as shown in linear light, where photographs are
+  // cooler), the clear sky with the sun from 5 to 0 degrees up lost its
+  // blue (red over green 0.84 to 1.04 at the side, photographs 0.37 to
+  // 0.46), and from 30 km the twilit Earth went from mauve-brown to navy
+  // (blue over green 3.9) as the window let go.
   const DAY_BALANCE = [0.932, 1.013, 1.074];
-  const BALANCE_ADAPT = 0.5, BALANCE_IN = [2.5, -0.5], BALANCE_OUT = [-4, -9], BALANCE_HIGH = [2, 11];
+  // Along the black body's line (BALANCE_LINE: the log of linear sRGB from
+  // 4500 to 9000 K, its mean taken out, of length 1; blue against amber)
+  // the balance goes BALANCE_ADAPT of the way: for a light warmer than
+  // daylight's (a low sun's) the first, for a bluer one (twilight's, the
+  // light under a sheet) the second; but for BALANCE_DAY about
+  // daylight's, taken off smoothly (x - d tanh(x / d), so that the two
+  // meet without a kink): as a camera keeps its daylight balance for lights
+  // near daylight's. Across that line (green against magenta) it goes
+  // BALANCE_TINT of the way. Photographs of a low sun keep much of its
+  // warmth (the sky over the sea 2 degrees up, towards the sun: red over
+  // green 0.87, blue over green 1.15, linear): followed the whole way, the
+  // sky there came out 0.68 and 1.66, bluer than the photograph; 0.6 of the
+  // way gives 0.71 and 1.39. Overcast and twilight's blue are taken out
+  // further: under a sheet with the sun 8 degrees up, less than the whole
+  // way left it blue (blue over green 1.14 as shown). A clear day's light
+  // varies along the line by 0.05 to 0.15 with the sun's height and the
+  // view (noon against 30 degrees, towards the sun or away); followed
+  // whole, the day's sky from 11 km came out greyer (blue over green 4.4
+  // to 4.0 as shown, linear). The light of twilight from high up is purple
+  // (the sun's light through the ozone): followed only along the line, the
+  // twilit Earth from 40 km stayed navy (2.8 against the photographs' 1.2
+  // to 1.5); followed whole across it, the ground's sky in deep twilight
+  // turned teal and the sky away from the sun from cruise lost its blue.
+  const BALANCE_LINE = [-0.643, -0.115, 0.757];
+  // Towards the blue it goes no further than BALANCE_BLUE along the line,
+  // smoothly (d tanh(x / d)): about the light of a black body at 7500 K
+  // against daylight's. Under an altostratus in deep twilight, the light
+  // through the sheet (the twilight sky's) asked for 0.86 at -9 degrees:
+  // followed, the sheet came out brown (red over green 1.5, blue over
+  // green 0.77, as shown, linear), and with 0.55 grey (1.02, 1.11) where
+  // main keeps it blue (0.79, 1.91); now 0.96 and 1.25.
+  const BALANCE_ADAPT = [0.6, 1], BALANCE_DAY = 0.1, BALANCE_TINT = 0.7, BALANCE_BLUE = 0.35;
+  // The light the meter gathers is followed in time as the exposure is
+  // (BALANCE_TIME, s, exponentially in log), from the first reading on.
+  const BALANCE_TIME = 0.5;
+  // (While it is more than BALANCE_STILL from the meter's, in log, the
+  // frames go on.)
+  const BALANCE_STILL = 0.002;
+  // Points along each ray of the meter (litBy).
+  const BALANCE_STEPS = 6;
   // The sun's light at height alt, with the sine of its elevation mus,
   // through the air, by wavelength (relative to the bare sun's), into out:
   // none where the planet hides it.
@@ -9779,54 +9822,230 @@ const SkySound = (() => {
     for (let w = 0; w < NW; w++) out[w] = sun ? Math.exp(-(BR[w] * ds[0] + bMe * MA[w] * ds[1] + BO[w] * ds[2])) : 0;
     return out;
   };
-  const sunScratch = new Float64Array(NW);
-  // (slab: the light as a thick sheet lets it through, the sun's beam by
-  // 0.5 + 0.75 times its cosine, as two streams do, the sky's whole; see
-  // midThrough in the shader. The share they both lose is the same.)
-  const lightOn = (alt, mus, out, slab = false) => {
-    const x = Math.min(1, Math.max(0, (mus - MS_MU_MIN) / (1 - MS_MU_MIN))) * (NMU - 1);
+  // The light that falls on what a ray from the eye at height alt, along
+  // the unit vector d, sees (litBy). Into out, the light of the air along
+  // the ray (linear sRGB, a radiance as fs draws it before ISUN, but for
+  // the colour of the air's own scattering): at BALANCE_STEPS points,
+  // closer together near the eye, each by how much it sends towards the
+  // eye (its air and aerosol, by their phase functions, less what the air
+  // before it takes), lit by the sun's beam (through the air to that
+  // point, none in the planet's shadow; its disc goes under over its
+  // width) and by the sky's light there (the mean light, msData's, as fs
+  // lights the air), and by the moon's the same way. And, where the ray
+  // meets the planet, into level the light on the level sea there, lit
+  // from above (upData and the beam): the meter takes what the air before
+  // it does not give as the sea's and the clouds' (see levelsOf). The
+  // night's own light (the airglow, the stars) lights nothing: it counts
+  // at daylight's colour of each kind (day), at the airglow's radiance, so
+  // that the night keeps daylight's balance. The clouds are known here by
+  // their mean only: the air under the low clouds' tops has the beam and
+  // the sky's light the deck leaves it (as fs takes them for the air),
+  // and what is seen from under a layer is lit through it (balanceFor);
+  // else a cloud counts as the air about it, lit by the same light. Before,
+  // the rays from under a low deck were followed into the air above it,
+  // lit by the reddened beam the deck in fact hides: the deck with the
+  // sun 5 to 0 degrees up came out steel blue (blue over green 1.7 to
+  // 2.1 as shown, linear), where photographs of a low deck at sunset give
+  // 1.0 to 1.3 (and the middle sheet beside it stayed grey). So by day the air counts as sunlight, whatever its own blue; with a low
+  // sun, as the reddened beam; in twilight, as the beam high up and the
+  // twilight's light below it.
+  const SUN_DISC = 0.0093;   // radians
+  const litSpec = new Float64Array(NW), litDepth = [0, 0, 0];
+  const upAt = (j, i, w) => (j * NMU + i) * NW + w;
+  // Adds scale times a table over height and the light's cosine at alt and
+  // mu into out, read between its columns over msFall (as the shader reads
+  // msData): upData, which holds the light itself, or msData's mean light
+  // (over: held over msFall already).
+  const addTable = (data, at, alt, mu, scale, out, over = false) => {
+    const x = msColumn(mu);
     const y = Math.sqrt(Math.min(1, Math.max(0, alt / (RT - RG)))) * (NH - 1);
     const i0 = Math.min(Math.floor(x), NMU - 2), j0 = Math.min(Math.floor(y), NH - 2), fx = x - i0, fy = y - j0;
-    const k00 = (j0 * NMU + i0) * NW, k01 = k00 + NW, k10 = k00 + NMU * NW, k11 = k10 + NW;
-    const sun = sunThrough(alt, mus, sunScratch);
+    const fall = scale * msFall(msMu(x)), f0 = (1 - fx) * fall / (over ? 1 : msFallAt[i0]), f1 = fx * fall / (over ? 1 : msFallAt[i0 + 1]);
+    const w00 = f0 * (1 - fy), w01 = f1 * (1 - fy), w10 = f0 * fy, w11 = f1 * fy;
     for (let w = 0; w < NW; w++) {
-      out[w] = upData[k00 + w] * (1 - fx) * (1 - fy) + upData[k01 + w] * fx * (1 - fy)
-             + upData[k10 + w] * (1 - fx) * fy + upData[k11 + w] * fx * fy
-             + (mus > 0 ? sun[w] * mus * (slab ? 0.5 + 0.75 * mus : 1) / (4 * Math.PI) : 0);
+      out[w] += data[at(j0, i0, w)] * w00 + data[at(j0, i0 + 1, w)] * w01 + data[at(j0 + 1, i0, w)] * w10 + data[at(j0 + 1, i0 + 1, w)] * w11;
     }
-    const c = W.map(row => row.reduce((a, v, w) => a + v * out[w], 0));
-    const y0 = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    return c.map(v => Math.max(v, 1e-6 * y0) / y0);
   };
-  // earth: the share of the metered light that comes from the planet (the
-  // sea, the clouds and the air before them), from the meter (earthLight).
-  // Under a middle sheet (altostratus) the light on everything the camera
-  // sees has come through it, by day too: the sun's beam and the sky's
-  // light mixed as the slab lets them through (lightOn's slab), and the
-  // balance goes BALANCE_ADAPT of the way towards that light, by the
-  // sheet's cover over the eye, as in twilight. (sheet: that cover, by the
-  // form, by the amount (whole from 0.7: from 0.6 on, the altostratus
-  // weather's, the sheet hides the sky), and from the layer's top down to
-  // its base.) With daylight's balance, the sheet with the sun 8 degrees up
-  // was blue (saturation 0.19, blue over green 1.17 as shown): the sky's
-  // light on its top, blue over green 2.9 in linear light, is two fifths of
-  // the light through it. Photographs of an altostratus by day are grey to
-  // blue-grey (0.05 to 0.14, 1.04 to 1.12). Until #146 the sheet took the
-  // sun's light by a cosine of no less than 0.2 instead, which at sunset
-  // made it salmon.
-  function balanceFor(earth) {
-    const y = Math.min(1, Math.max(0, (state.elev - BALANCE_OUT[1]) / (BALANCE_OUT[0] - BALANCE_OUT[1])));
-    const z = Math.max(earth, Math.min(1, Math.max(0, (BALANCE_HIGH[1] - state.alt) / (BALANCE_HIGH[1] - BALANCE_HIGH[0]))));
-    const fade = y * y * (3 - 2 * y);
-    const [mid, form, base, depth] = midUniform();
-    const sheet = mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) * smooth01((base + depth - state.alt) / depth) : 0;
-    const k = Math.max(BALANCE_ADAPT * smooth01((BALANCE_IN[0] - state.elev) / (BALANCE_IN[0] - BALANCE_IN[1])) * fade * z * z * (3 - 2 * z),
-                       BALANCE_ADAPT * sheet * fade);
-    if (k === 0) return DAY_BALANCE;
-    const spec = new Float64Array(NW), on = lightOn(0, state.sun[1], spec);
-    const now = sheet > 0 ? lightOn(0, state.sun[1], spec, true).map((v, c) => on[c] ** (1 - sheet) * v ** sheet) : on;
-    const ref = lightOn(0, 0.5, spec);
-    return DAY_BALANCE.map((b, c) => b * (ref[c] / now[c]) ** k);
+  // Adds scale / (4 pi) times a beam of light (the sun's, the moon's) at
+  // height alt, with the sine of its height mu, into out: through the air,
+  // and going under the planet's horizon there over SUN_DISC.
+  const addBeam = (alt, mu, scale, out) => {
+    const r = RG + alt, hz = -Math.sqrt(Math.max(0, 1 - (RG / r) ** 2));
+    const f = smooth01((Math.asin(Math.max(-1, Math.min(1, mu))) - Math.asin(hz)) / SUN_DISC + 0.5);
+    if (f <= 0 || scale <= 0) return;
+    sunDepth(r, Math.max(mu, hz + 1e-5), litDepth);
+    const bMe = BETA_M * MIE_EXT * state.haze, k = scale * f / (4 * Math.PI);
+    for (let w = 0; w < NW; w++) out[w] += k * Math.exp(-(BR[w] * litDepth[0] + bMe * MA[w] * litDepth[1] + BO[w] * litDepth[2]));
+  };
+  // The light on a level surface at height alt (its irradiance over 4 pi),
+  // from a light of strength scale with the sine of its height mu, into
+  // out. slab: as a thick sheet lets it through, the sun's beam by 0.5 +
+  // 0.75 times its cosine, as two streams do, the sky's whole; see
+  // midThrough in the shader. The share they both lose is the same.
+  const addLevel = (alt, mu, scale, out, slab = false) => {
+    if (scale <= 0) return;
+    addTable(upData, upAt, alt, mu, scale, out);
+    if (mu > 0) addBeam(alt, mu, scale * mu * (slab ? 0.5 + 0.75 * mu : 1), out);
+  };
+  const toRgb = (spec, out) => {
+    for (let c = 0; c < 3; c++) {
+      let v = 0;
+      for (let w = 0; w < NW; w++) v += W[c][w] * spec[w];
+      out[c] = v;
+    }
+    return out;
+  };
+  const lumOf = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  // Daylight's lights, of luminance 1, what DAY_BALANCE is for (dayLights,
+  // after litBy): the light of the clear sky's air seen from sea level with
+  // the sun at DAY_SUN degrees, all round (litBy's over the sky, each ray
+  // by its light), and the light on the level sea then. Each light litBy
+  // finds is taken relative to daylight's of its kind. The air of a clear
+  // day's sky is lit by the sun as it reaches it high up, less reddened,
+  // and by the sky's blue light from all round: against the light on the
+  // sea it is blue (blue over green 1.25 times, linear), and taken
+  // against that, the balance greyed the day's sky (blue over green 4.4
+  // to 3.6 as shown, from 11 km looking up). The sun at 40 degrees: a day's
+  // middle height. Before, the balance's daylight was the light on the
+  // sea with the sun at 30 degrees; at 45, the altostratus with the sun 8
+  // degrees up stayed blue (1.13 as shown).
+  const DAY_SUN = 40;
+  // Returns whether the ray meets the planet; out: the air's light
+  // (linear sRGB, a radiance: as fs draws it before ISUN, but for the
+  // colour of the air's own scattering); level: the light on the level
+  // sea where it meets it (of any brightness).
+  // (lights: the sun's and the moon's directions and strengths, on the air
+  // and on the sea; the page's own by default.)
+  // The low clouds, by their mean, as fs takes them for the air (`direct`
+  // and `under` in the table of the air's light): their cover (lowCover,
+  // from the amount), how far a height lies under their tops (lowAbove:
+  // from CB to CT, the shell that holds them), and what a whole deck leaves
+  // the air below of the sun's beam (LOW_BEAM) and of the sky's light
+  // (LOW_SKY, under LOW_SKY_H km).
+  const LOW_SHELL = [0.6, 5], LOW_BEAM = 0.15, LOW_SKY = 0.3, LOW_SKY_H = [0.6, 2];   // CB, CT, 0.15, UNDER in fs
+  const lowCover = () => smooth01((state.cloud - 0.4) / 0.6);
+  const lowAbove = h => 1 - smooth01((h - LOW_SHELL[0]) / (LOW_SHELL[1] - LOW_SHELL[0]));
+  // How far the eye at alt is under the low layer: from its tops down to its
+  // base (the base LOW_LAYER[0] km over the level and low.base, the deck
+  // LOW_LAYER[1] km deep at low.depth 1, as fs makes a sheet on the mean).
+  const LOW_LAYER = [0.75, 1.2];
+  const lowOver = alt => {
+    const base = LOW_LAYER[0] + state.low.base, top = base + LOW_LAYER[1] * state.low.depth;
+    return smooth01((top - alt) / (top - base));
+  };
+  // Whether a ray from radius r0 that rises by dy (its unit vector's up)
+  // meets the planet.
+  const meets = (r0, dy) => dy < 0 && (r0 * dy) ** 2 - r0 * r0 + RG * RG >= 0;
+  const lightsNow = () => ({ sun: state.sun, sunOn: state.sunOn, moon: state.moon, moonAir: state.moonI * moonAirFor(), moonI: state.moonI, low: lowCover() });
+  function litBy(alt, dx, dy, dz, day, out, level, lights = lightsNow()) {
+    const r0 = RG + alt, b = r0 * dy, s = lights.sun, m = lights.moon;
+    const sun = lights.sunOn, moon = lights.moonAir;
+    const dg = b * b - r0 * r0 + RG * RG, hit = meets(r0, dy);
+    const T = hit ? -b - Math.sqrt(dg) : -b + Math.sqrt(b * b - r0 * r0 + RT * RT);
+    const nuS = dx * s[0] + dy * s[1] + dz * s[2], nuM = dx * m[0] + dy * m[1] + dz * m[2];
+    const pS = [phaseR(nuS), phaseM(nuS), phaseUp(nuS)], pM = [phaseR(nuM), phaseM(nuM), phaseUp(nuM)];
+    litSpec.fill(0);
+    let depth = 0;
+    for (let k = 0; k < BALANCE_STEPS; k++) {
+      const t0 = T * (k / BALANCE_STEPS) ** 2, t1 = T * ((k + 1) / BALANCE_STEPS) ** 2, t = (t0 + t1) / 2, dt = t1 - t0;
+      const px = dx * t, py = r0 + dy * t, pz = dz * t, r = Math.hypot(px, py, pz), h = Math.max(0, r - RG);
+      const ray = BR[6] * Math.exp(-h / HR), low = BETA_M * state.haze * MA[6] * boundaryLayer(h), up = BETA_M * state.haze * MA[6] * mieUp(h);
+      const ext = (ray + MIE_EXT * (low + up)) * dt, g = dt * Math.exp(-(depth + ext / 2)), all = (ray + low + up) * g;
+      depth += ext;
+      // Under the low clouds' tops their deck takes the beam and the sky's
+      // light, by their mean, as fs takes them for the air.
+      const beam = 1 - (1 - LOW_BEAM) * lights.low * lowAbove(h), skyLeft = 1 - (1 - LOW_SKY) * lights.low * (1 - smooth01((h - LOW_SKY_H[0]) / (LOW_SKY_H[1] - LOW_SKY_H[0])));
+      if (sun > 0) {
+        const mu = (px * s[0] + py * s[1] + pz * s[2]) / r;
+        addBeam(h, mu, 4 * Math.PI * (ray * pS[0] + low * pS[1] + up * pS[2]) * g * sun * beam, litSpec);
+        addTable(msData, msIndex, h, mu, all * sun * skyLeft, litSpec, true);
+      }
+      if (moon > 0) {
+        const mu = (px * m[0] + py * m[1] + pz * m[2]) / r;
+        addBeam(h, mu, 4 * Math.PI * (ray * pM[0] + low * pM[1] + up * pM[2]) * g * moon * beam, litSpec);
+        addTable(msData, msIndex, h, mu, all * moon * skyLeft, litSpec, true);
+      }
+    }
+    toRgb(litSpec, out);
+    for (let c = 0; c < 3; c++) out[c] += NIGHT * day.air[c];
+    if (hit) {
+      const px = dx * T, py = r0 + dy * T, pz = dz * T;
+      litSpec.fill(0);
+      addLevel(0, (px * s[0] + py * s[1] + pz * s[2]) / RG, sun, litSpec);
+      addLevel(0, (px * m[0] + py * m[1] + pz * m[2]) / RG, lights.moonI, litSpec);
+      toRgb(litSpec, level);
+      for (let c = 0; c < 3; c++) level[c] += NIGHT * day.level[c] / 4;
+    }
+    return hit;
+  }
+  const dayLights = () => {
+    const unit = c => {
+      const y = lumOf(c);
+      return c.map(v => v / y);
+    };
+    const none = { air: [0, 0, 0], level: [0, 0, 0] }, out = [0, 0, 0], level = [0, 0, 0], sum = [0, 0, 0];
+    const sun = [0, Math.sin(DAY_SUN * RAD), Math.cos(DAY_SUN * RAD)];
+    const lights = { sun, sunOn: 1, moon: sun, moonAir: 0, moonI: 0, low: 0 };
+    for (let e = 1; e < 90; e += 4) {
+      for (let a = 5; a < 360; a += 10) {
+        const ce = Math.cos(e * RAD), dir = [ce * Math.sin(a * RAD), Math.sin(e * RAD), ce * Math.cos(a * RAD)];
+        litBy(0, ...dir, none, out, level, lights);
+        for (let c = 0; c < 3; c++) sum[c] += out[c] * ce;
+      }
+    }
+    litSpec.fill(0);
+    addLevel(0, sun[1], 1, litSpec);
+    return { air: unit(sum), level: unit(toRgb(litSpec, [0, 0, 0])) };
+  };
+  // The white balance for est, the colour of the light the frame is lit
+  // by relative to daylight's (linear sRGB, any brightness: the meter's
+  // mean of litBy over its blocks, each by its light): from DAY_BALANCE,
+  // part of the way towards est along BALANCE_LINE and across it (see
+  // BALANCE_ADAPT), of luminance 1, so that it leaves the exposure as the
+  // meter set it.
+  // Under a cloud layer what the camera sees is lit by the light through
+  // it, by day too: the sun's beam and the sky's light mixed as a slab lets
+  // them through (addLevel's slab), by the layers' cover over the eye
+  // (sheet: the middle sheet's, by the form, by the amount (whole from 0.7:
+  // from 0.6 on, the altostratus weather's, the sheet hides the sky), and
+  // from the layer's top down to its base; and the low clouds', by their
+  // mean cover (lowCover) and from their tops down to their base
+  // (lowOver)). With daylight's
+  // balance, the sheet with the sun 8 degrees up was blue (saturation 0.19,
+  // blue over green 1.17 as shown): the sky's light on its top, blue over
+  // green 2.9 in linear light, is two fifths of the light through it.
+  // Photographs of an altostratus by day are grey to blue-grey (0.05 to
+  // 0.14, 1.04 to 1.12). Until #146 the sheet took the sun's light by a
+  // cosine of no less than 0.2 instead, which at sunset made it salmon.
+  // The middle layer as a sheet, by its mean: by the form, and by the amount
+  // (whole from 0.7: from 0.6 on, the altostratus weather's, the sheet hides
+  // the sky).
+  const midSheet = () => {
+    const [mid, form] = midUniform();
+    return mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) : 0;
+  };
+  // The share of the sun's beam that the layers leave the sea, by their
+  // mean: the low clouds' (LOW_BEAM under a whole deck, as in litBy) and a
+  // middle sheet's (none under a whole one). For the exposure (exposureFor).
+  const beamOnSea = () => (1 - (1 - LOW_BEAM) * lowCover()) * (1 - midSheet());
+  function balanceFor(est, day) {
+    const [, , base, depth] = midUniform();
+    const midOver = midSheet() * smooth01((base + depth - state.alt) / depth);
+    const sheet = 1 - (1 - midOver) * (1 - lowCover() * lowOver(state.alt));
+    const y = lumOf(est);
+    let now = est.map(v => Math.max(v, 1e-6 * y) / y);
+    if (sheet > 0) {
+      litSpec.fill(0);
+      addLevel(0, state.sun[1], state.sunOn, litSpec, true);
+      addLevel(0, state.moon[1], state.moonI, litSpec, true);
+      const slab = toRgb(litSpec, [0, 0, 0]).map((v, c) => (v + NIGHT * day.level[c] / 4) / day.level[c]), ys = lumOf(slab);
+      now = now.map((v, c) => v ** (1 - sheet) * (Math.max(slab[c], 1e-6 * ys) / ys) ** sheet);
+    }
+    const lg = now.map(Math.log), m = (lg[0] + lg[1] + lg[2]) / 3, v = lg.map(x => x - m);
+    const on = v.reduce((sum, x, c) => sum + x * BALANCE_LINE[c], 0), off = on - BALANCE_DAY * Math.tanh(on / BALANCE_DAY);
+    const along = off < 0 ? BALANCE_ADAPT[0] * off : BALANCE_BLUE * Math.tanh(BALANCE_ADAPT[1] * off / BALANCE_BLUE);
+    const bal = DAY_BALANCE.map((d, c) => d * Math.exp(-(BALANCE_TINT * (v[c] - on * BALANCE_LINE[c]) + along * BALANCE_LINE[c]))), yb = lumOf(bal);
+    return bal.map(v => v / yb);
   }
 
   // A camera's saturation (uSaturation): DAY_SATURATION by day, none from
@@ -10104,6 +10323,9 @@ const SkySound = (() => {
   // The moon's illuminance at the eye, lux: pi times the luminance of that
   // white surface (CD cd/m2 a unit, as in the shader).
   const CD = 6650;
+  // The rods' range, as in the shader (ROD_HALF, MESOPIC in fs: see main),
+  // for the white balance.
+  const ROD_HALF = 0.01, MESOPIC = [0.003, 3];
   const moonLux = () => Math.PI * CD * 2 ** moonlitLevel();
   // How far the moon sets what the eye sees of the stars (uStarMoon, see
   // main in fs): from none where its light at the eye is that of the
@@ -10139,7 +10361,23 @@ const SkySound = (() => {
     // as twilight's exposure takes over, in full again.
     const day = 1 - smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1]));
     const lit = high + day * (st.lit - st.high);
-    const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
+    // Seen from above in the sun's light, what is white is sunlit cloud, and
+    // that stands no more than TOPS_LIT stops below a white surface facing
+    // the sun, in the sun's light where the low clouds are (st.cloud, with
+    // the sun as it is now). Highlights dimmer than that are haze over the
+    // sea, or the sea: they stand TOPS_DIM stops lower for each stop dimmer,
+    // by the share of the light seen from above (from, as for the key) and
+    // of the sun's beam that the clouds leave the sea (st.beam: under a deck
+    // the sea is dim for want of the sun, not for being haze), where that
+    // is more than a dim view's own (DIM, from DAY_HIGH down).
+    // Brought to WHITE, the horizon's haze over a sea with few clouds came
+    // out near white, and the sea and the sky pale, 0.4 to 0.7 stops over
+    // photographs from cruise. Where cloud is the highlight, and under a
+    // sheet seen from below, nothing changes; a dark sea seen from near (its
+    // highlights some three stops under the cloud's) keeps the dim view's
+    // level; and as the sun's light on the clouds fades, the dim view's rule
+    // is the stronger again, long before twilight.
+    const white = WHITE - lit - Math.max(DIM * Math.max(0, DAY_HIGH - lit), from * st.beam * TOPS_DIM * Math.max(0, st.cloud - lit));
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const byDay = Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit)));
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
@@ -10219,7 +10457,8 @@ const SkySound = (() => {
       from += w * below[i];
     }
     const st = { low: share(LOW_SHARE), high: bandOf(q, 1 - HIGH_SHARE, HIGH_BAND), mid: share(0.5), sky: share(DUSK_SHARE),
-                 peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND), below: sum > 0 ? from / sum : 1 };
+                 peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND), below: sum > 0 ? from / sum : 1,
+                 cloud: sunlitLevel(TOPS_KM, state.elev) - TOPS_LIT, beam: beamOnSea() };
     let E = exposureAt(st, state.elev, 0);
     if (state.elev < DUSK[0]) {
       const here = airLevel(state.alt, state.elev);
@@ -11222,9 +11461,11 @@ const SkySound = (() => {
     // The exposure, log2 (null until the first picture has been metered),
     // and what the first picture is drawn at to meter it (see prime).
     let logE = null, firstE = 0;
-    // The share of the metered light that comes from rays that meet the
-    // planet (for the white balance: balanceFor), 0 until metered.
-    let earthLight = 0;
+    // The white balance (see balanceFor): the one the meter last asked for,
+    // and the one shown, which follows it (null until the first picture
+    // has been metered). window.__balance reads the one of the last frame.
+    let balTarget = DAY_BALANCE, bal = null;
+    Object.defineProperty(window, '__balance', { configurable: true, get: () => bal });
     // ?expo=L in the address pins it at L (log2, for tests: the tools compare
     // a flight with a still at the exposure the flight ended with). Without
     // it, expo is null and the meter sets the exposure. window.__exposure
@@ -11267,7 +11508,7 @@ const SkySound = (() => {
         ['uniform1f', 'uHaze', state.haze],
         ['uniform1f', 'uExposure', 2 ** shownFor(logE ?? firstE)],
         ['uniform1f', 'uLook', v.look],
-        ['uniform3fv', 'uBalance', balanceFor(earthLight)],
+        ['uniform3fv', 'uBalance', bal ?? DAY_BALANCE],
         ['uniform1f', 'uSaturation', saturationFor()],
         ['uniform1f', 'uNightEye', nightEyeFor(logE ?? firstE)],
         ['uniform1f', 'uNightGrey', nightGreyFor(logE ?? firstE)],
@@ -11461,13 +11702,23 @@ const SkySound = (() => {
         levels[i] = LOG_RANGE[0] + (LOG_RANGE[1] - LOG_RANGE[0]) * (meterBytes[4 * i] * 256 + meterBytes[4 * i + 1]) / 65535;
       }
       target = exposureFor(levels, near, below);
-      let all = 0, earth = 0;
+      // The colour of the light the frame is lit by, relative to
+      // daylight's: the mean of each block's (litBy's), weighed by the
+      // block's light, as a camera's mean of the picture.
+      // Where the ray meets the planet, what the air before it does not
+      // give is the sea's and the clouds', lit from above. What the rods
+      // see has no colour: their share of a block (as main in fs takes it,
+      // from its luminance and the night eye) counts as daylight's colour.
+      const est = [0, 0, 0], eye = nightEyeFor(logE ?? firstE), grey = nightGreyFor(logE ?? firstE);
       for (let i = 0; i < levels.length; i++) {
-        const l = 2 ** levels[i];
-        all += l;
-        earth += ground[i] * l;
+        const l = 2 ** levels[i], y = lumOf(litAir.subarray(3 * i, 3 * i + 3)), cd = CD * l;
+        const rods = eye * (ROD_HALF / (ROD_HALF + cd) * (1 - grey) + grey * (1 - smooth01(Math.log(cd / MESOPIC[0]) / Math.log(MESOPIC[1] / MESOPIC[0]))));
+        const air = litHit[i] ? Math.min(1, ISUN * y / l) : 1, yl = litHit[i] ? lumOf(litLevel.subarray(3 * i, 3 * i + 3)) : 0;
+        for (let c = 0; c < 3; c++) {
+          est[c] += l * ((1 - rods) * (air * litAir[3 * i + c] / (y * litDay.air[c]) + (yl > 0 ? (1 - air) * litLevel[3 * i + c] / (yl * litDay.level[c]) : 0)) + rods);
+        }
       }
-      earthLight = all > 0 ? earth / all : 0;
+      balTarget = lumOf(est) > 0 ? balanceFor(est, litDay) : DAY_BALANCE;
     };
     // How much less each block counts for being near the sun (log2, for
     // the highlights by day: see exposureFor), from the view it was metered
@@ -11481,11 +11732,26 @@ const SkySound = (() => {
     // How far each block looks down: 0 from TOPS_SPAN degrees above the
     // horizontal, 1 from TOPS_SPAN below (sunlit tops: see exposureFor).
     const below = new Float64Array(METER[0] * METER[1]);
-    // Whether each block's ray meets the planet (1) or not (0).
-    const ground = new Float64Array(METER[0] * METER[1]);
+    // For the white balance: the light that falls on what each block
+    // shows (litBy: the air's, and where its ray meets the planet the light
+    // on the sea there), and daylight's lights (dayLights, made again with
+    // the table of multiple scattering).
+    const litAir = new Float64Array(METER[0] * METER[1] * 3), litOut = [0, 0, 0];
+    const litLevel = new Float64Array(METER[0] * METER[1] * 3), levelOut = [0, 0, 0];
+    const litHit = new Uint8Array(METER[0] * METER[1]);
+    let litDay = null, litDayHaze = null, weighed = null;
     const weigh = p => {
       const v = view(), c = cameraOf(v), t = Math.tan(v.fov / 2), a = p.w / p.h, s = state.sun;
-      const dip = -Math.sqrt(1 - (RG / (RG + state.alt)) ** 2);
+      if (litDayHaze !== builtHaze) {
+        litDay = dayLights();
+        litDayHaze = builtHaze;
+      }
+      // All of it hangs on the view, the lights and the eye's height only:
+      // the same in straight flight and at rest, where it is not done again.
+      const key = [...c, t, a, ...s, state.sunOn, ...state.moon, state.moonI, state.alt, state.cloud, state.haze, builtHaze].join();
+      if (key === weighed) return;
+      weighed = key;
+      const r0 = RG + state.alt;
       for (let j = 0, i = 0; j < METER[1]; j++) {
         for (let k = 0; k < METER[0]; k++, i++) {
           const x = ((k + 0.5) / METER[0] * 2 - 1) * a * t, y = ((j + 0.5) / METER[1] * 2 - 1) * t;
@@ -11493,7 +11759,21 @@ const SkySound = (() => {
           const deg = Math.acos(Math.min(1, (dx * s[0] + dy * s[1] + dz * s[2]) / Math.hypot(dx, dy, dz))) / RAD;
           near[i] = Math.log2(SUN_SHARE + (1 - SUN_SHARE) * smooth01((deg - SUN_NEAR[0]) / (SUN_NEAR[1] - SUN_NEAR[0])));
           below[i] = smooth01((TOPS_SPAN - Math.asin(dy / Math.hypot(dx, dy, dz)) / RAD) / (2 * TOPS_SPAN));
-          ground[i] = dy / Math.hypot(dx, dy, dz) < dip ? 1 : 0;
+          // The light is followed for one block of each two by two, and
+          // taken for the other three from it, but where the horizon runs
+          // between them: some 4 ms a reading on the test machine, where
+          // every block took 8.
+          const n = Math.hypot(dx, dy, dz), up = dy / n, from = (j & ~1) * METER[0] + (k & ~1);
+          const hit = meets(r0, up) ? 1 : 0;
+          if (from !== i && litHit[from] === hit) {
+            litHit[i] = hit;
+            litAir.copyWithin(3 * i, 3 * from, 3 * from + 3);
+            litLevel.copyWithin(3 * i, 3 * from, 3 * from + 3);
+            continue;
+          }
+          litHit[i] = litBy(state.alt, dx / n, up, dz / n, litDay, litOut, levelOut) ? 1 : 0;
+          litAir.set(litOut, 3 * i);
+          if (litHit[i]) litLevel.set(levelOut, 3 * i);
         }
       }
     };
@@ -11898,8 +12178,9 @@ const SkySound = (() => {
     // Frames drawn since anything moved or changed, and since the light changed.
     let calm = 0, relit = RELIGHT + 1, lastStir = -1e9, still = 0;
     // The exposure moves towards the meter's target (adapting) in the page's
-    // time (then, ms); restart: the next frame begins the picture again.
-    let adapting = false, then = null, restart = false, meteredAt = -1e9;
+    // time (then, ms), and the white balance (tinting); restart: the next
+    // frame begins the picture again.
+    let adapting = false, tinting = false, then = null, restart = false, meteredAt = -1e9;
     // While the view moves or changes, the picture is drawn smaller than
     // the canvas if frames take long (scale, down to the level's minScale:
     // at max never, the picture comes first); at rest it is drawn in full.
@@ -11952,6 +12233,14 @@ const SkySound = (() => {
         adapting = Math.abs(d) > (state.speed > 0 ? ADAPT_TRACK : adapting ? ADAPT_STOP : ADAPT_START);
         if (adapting) logE += d * (1 - Math.exp(-dt / (d < 0 ? ADAPT_FAST : ADAPT_SLOW)));
       }
+      // The white balance follows the meter's in the same way (in log),
+      // and keeps the frames drawing while it moves.
+      if (bal !== null) {
+        const f = 1 - Math.exp(-dt / BALANCE_TIME);
+        const step = bal.map((b, c) => Math.log(balTarget[c] / b));
+        tinting = step.some(v => Math.abs(v) > BALANCE_STILL);
+        if (tinting) bal = bal.map((b, c) => b * Math.exp(f * step[c]));
+      }
       const way = [wrapped(state.drift[0] - driftPast[0]), v.alt - altPast, wrapped(state.drift[1] - driftPast[1])];
       // Start again without a past: at first, when the canvas has changed,
       // and when the place jumps (a weather chosen in the panel moves it).
@@ -11964,7 +12253,7 @@ const SkySound = (() => {
       const look = [state.time, state.day, state.moonAge, state.lat, state.lon, state.clock, state.haze, builtHaze, state.wind, state.cirrus, altSeen, v.cloud, lowKey(), midOn ? midKey() : ''].join();
       const moved = flying || (!reset && cam.some((c, i) => c !== camPast[i]));
       const lit = !reset && look !== lookPast;
-      if (!reset && !moved && !lit && !adapting && calm >= settleFrames + RELIGHT) return midWait;   // settled (the frames go on, undrawn, while the middle clouds' programs compile)
+      if (!reset && !moved && !lit && !adapting && !tinting && calm >= settleFrames + RELIGHT) return midWait;   // settled (the frames go on, undrawn, while the middle clouds' programs compile)
       if (moved || lit) lastStir = now;
       const small = now - lastStir < 150 ? scale : 1;
       // The picture (pw by ph), and the frame (w by h): smaller by the
@@ -11998,12 +12287,12 @@ const SkySound = (() => {
         relit = Math.min(relit + 1, RELIGHT);
       } else {
         relit++;
-        calm = moved || adapting ? 0 : calm + 1;
+        calm = moved || adapting || tinting ? 0 : calm + 1;
       }
       // How many frames the past may count for (the shader keeps count, up to
       // 64). While the exposure moves, as while the view does: the picture
       // then follows it within a few frames.
-      const trust = reset ? 0 : relit <= RELIGHT ? 1 : moved || adapting ? motionTrust : 63;
+      const trust = reset ? 0 : relit <= RELIGHT ? 1 : moved || adapting || tinting ? motionTrust : 63;
       const steps = fine ? 2048 : 255;                 // every half float up to 1 is a multiple of 1/2048
       const pass = drawn % 64;
 
@@ -12188,6 +12477,7 @@ const SkySound = (() => {
         }
         primed = null;
         logE = pin ?? target;
+        bal = balTarget;
         restart = true;
         turn = 1 - turn;
         return true;
@@ -12263,7 +12553,7 @@ const SkySound = (() => {
         else if (ms < 24) scale = Math.min(1, scale * 1.12);
         span = count = 0;
       }
-      chained = flying || adapting || calm < settleFrames + RELIGHT || midWait;
+      chained = flying || adapting || tinting || calm < settleFrames + RELIGHT || midWait;
       sizes = { shown: [W, H], picture: [pw, ph], frame: [w, h], passes: [Math.ceil(w / Q.pass), Math.ceil(h / Q.pass)], light: [Math.ceil(w / (2 * Q.pass)), Math.ceil(h / (2 * Q.pass))],
         scale: small, level: levelName };
       return chained;
