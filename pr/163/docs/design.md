@@ -1937,7 +1937,12 @@ their shade from it (see [Middle clouds](#middle-clouds)).
   (the root of its area; cells of 0.5 m times a power of 2, read between
   the cells and between that grid and the next one, as the moon's grain
   is), from an integer hash of the cell. The mean over many pixels is
-  the glitter as before (variances add). The grain is strongest at the
+  the glitter as before (variances add). Seen aslant, the eye sees the
+  faces turned towards it and none turned away, so the tilt stays small
+  against the slope of the view (an rms of a third of the view's cosine
+  to the vertical along each axis; what is over stays in the variance):
+  without that, the far sea from 0.3 km had bright dashes 1 to 4 degrees
+  under the horizon. The grain is strongest at the
   glitter's edges, where a small tilt changes the light most, as in
   photographs; it also tilts the mirror, so the water outside the
   glitter gets a little grain too. The cells stay put on the sea: a
