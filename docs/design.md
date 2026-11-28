@@ -1915,6 +1915,41 @@ their shade from it (see [Middle clouds](#middle-clouds)).
   holds some of the longest waves at that size, so it fades into the mean
   over the factor of three before (R, G and B together, and `hidden` after
   the fade): no edge shows where the read stops.
+- **The few waves in a footprint** (`footprintTilt`). A footprint far
+  wider than the waves holds many of them and shows their mean. A
+  footprint about as wide as the waves holds a few, and a photograph
+  shows those few: one pixel brighter, the next darker. Inside the
+  glitter, photographs from aircraft and from orbit have 6 to 20 % of
+  contrast per octave at 1 to 4 px (the rms of the luminance in a band,
+  over its mean); the mean alone gave the page 1 to 4 % from 4 km up, a
+  blur whose patches read as thin cloud. The light of n waves, each
+  tilted by its own slope, differs from the mean of all as that of one
+  tilt of a variance n times smaller (to first order: it is the light
+  that is averaged, not the slope, whose own mean over a footprint falls
+  off much faster). So of the variance that the footprint averages away
+  (`hidden`), a share becomes a tilt of the whole footprint (`few`), and
+  only the rest widens the glitter: `GRAIN_FEW` = 0.5 of a band's lost
+  variance while the footprint's area is under the square of the band's
+  longest wave (the waves just under the footprint are few; the shorter
+  ones are many), and less as that square over the area beyond; the same
+  for each swell. The tilt is two numbers of variance 1 for each cell of
+  a grid on the sea `GRAIN_CELL` = 1.5 times as wide as the footprint
+  (the root of its area; cells of 0.5 m times a power of 2, read between
+  the cells and between that grid and the next one, as the moon's grain
+  is), from an integer hash of the cell. The mean over many pixels is
+  the glitter as before (variances add). The grain is strongest at the
+  glitter's edges, where a small tilt changes the light most, as in
+  photographs; it also tilts the mirror, so the water outside the
+  glitter gets a little grain too. The cells stay put on the sea: a
+  still holds still, and in flight the grain moves with the water (the
+  change from one flown frame to the next stays a fifth of the
+  difference between neighbouring pixels from 11 km, as before).
+  Measured after (2026-11-28; the bands of sigma 0.5 to 1, 1 to 2 and 2
+  to 4 px): from 4 km 10.8, 9.7, 6.8 % (before 4.0, 2.2, 2.4); from 11 km
+  6.0, 5.5, 4.1 (1.2, 1.6, 2.0), at a low sun 4.5, 4.3, 3.0 (1.1, 1.3,
+  0.8); from 40 km 2.6, 2.6, 2.3 (1.2, 1.5, 1.8). In light airs (2 m/s)
+  the waves are a few metres long and every footprint from 11 km holds
+  hundreds: there the glitter stays the soft patches it was.
 - **Glitter.** The share of slopes that mirror the light to the eye, with
   Fresnel and Smith's shadowing term (`waveShade`, in the rational form of
   Walter et al., 2007).
