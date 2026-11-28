@@ -4996,6 +4996,13 @@ void addSea(vec3 pg, vec3 d, float t, vec3 od, float betaM, float extM, float vi
     micro -= var;
   }
   // The few waves in the footprint tilt it; the others spread its light.
+  // Seen aslant, the eye sees the faces turned towards it and none turned
+  // away: the tilt stays small against the slope of the view (an rms of a
+  // third of cv along each axis: one footprint in some 700 would face
+  // away), and what is over stays in the variance. Without this the far
+  // sea from 0.3 km, 1 to 4 degrees under the horizon, had bright dashes
+  // (footprints turned from the eye mirror the whole sky).
+  few = min(few, 0.22 * cv * cv);
   slope += sqrt(0.5 * few) * footprintTilt(x, GRAIN_CELL * sqrt(area));
   hidden -= few;
   // What is left for the ripples no picture shows.

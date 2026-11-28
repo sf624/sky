@@ -77,8 +77,20 @@ const detailOf = (img, [x0, y0, bw, bh], cam = null) => {
 };
 // The horizon in a picture, from the row of the strongest step of brightness in each column of the middle half,
 // near the line expected (y = y0 + slope * x): its angle (degrees, counter-clockwise positive) and its row at x.
-const horizonLine = (img, y0, slope, r = 40) => {
-  const L = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
+// The brightness is the mean over 25 pixels along the line expected (half px to each side, every second one):
+// the sea's grain (the few waves of a footprint, a pixel or two high) steps more from row to row in a single
+// column than the horizon does in haze, and took the per-column step 5 to 24 px below a horizon that had not
+// moved; along the line the grain averages out and the horizon stays.
+export const horizonLine = (img, y0, slope, r = 40, half = 24) => {
+  const L1 = (x, y) => { const i = 3 * (y * img.w + x); return img.rgb[i] + img.rgb[i + 1] + img.rgb[i + 2]; };
+  const L = (x, y) => {
+    let s = 0, n = 0;
+    for (let d = -half; d <= half; d += 2) {
+      const u = x + d, v = y + Math.round(slope * d);
+      if (u >= 0 && u < img.w && v >= 0 && v < img.h) { s += L1(u, v); n++; }
+    }
+    return s / n;
+  };
   const xs = [], ys = [];
   for (let x = Math.round(img.w / 4); x < img.w * 3 / 4; x += 4) {
     const c = y0 + slope * x;
