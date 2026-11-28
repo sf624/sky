@@ -427,6 +427,8 @@ The numbers to tune, all in `index.html`:
 | `SHADOW_PEN` (`fs`) | 0.035 rad | the width of a shadow's soft edge on the sea, per km from the cloud |
 | `SHADOW_OCC` (`fs`) | 1.5 km | the height that soft edge is measured from |
 | `SHADOW_TAPS` (`fs`) | 8 | reads of the map per pixel of sea, for that soft edge |
+| `LIGHT_TAPS` (`fs`) | 4 | reads of the map per pixel of sea, on the bases' level around it, for the light the clouds let down onto the water diffusely (`seaThrough`) |
+| `LIGHT_MU` (`fs`) | 0.03 | the least share of a depth towards the light that counts as the depth straight up there (a light on the horizon) |
 
 Those numbers are older than the detail of the low clouds near the eye
 (#33, November 2026), which trades time for the picture. Flying, `res=1`,
