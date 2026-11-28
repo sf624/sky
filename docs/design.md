@@ -3774,7 +3774,67 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   that it is below that: the brightest parts of a dim view are not white
   either (the moonlit clouds of a night). By day `lit` stands for `high`;
   as twilight's exposure takes over (`DUSK`, below), `high` again, so
-  that twilight, its band of glow and the night are metered as before;
+  that twilight, its band of glow and the night are metered as before.
+  Seen from above in the sun's light, what is white is sunlit cloud, and
+  the highlights stand at `WHITE` only when they are as bright as that:
+  `TOPS_LIT` = 1.3 stops below a white surface facing the sun in the
+  sun's light at `TOPS_KM` = 2 km, where the low clouds are (`cloud`,
+  from `sunlitLevel` with the sun as it is now: 1.14 with the sun 55
+  degrees up, 0.99 at 30, 0.82 at 20, 0.33 at 10). Highlights dimmer
+  than that stand `TOPS_DIM` = 0.5 stops lower for each stop, by the
+  share of the light seen from above (`from`, the weight of the key's
+  lift for sunlit tops, above) and by the share of the sun's beam that
+  the clouds leave the sea (`beam`, from `beamOnSea`: the low clouds' by
+  their mean, `LOW_BEAM` under a whole deck as `litBy` takes it, and
+  none under a whole middle sheet), where that is more than the dim
+  view's own lowering: `white = WHITE - lit - max(DIM * max(0, DAY_HIGH
+  - lit), from * beam * TOPS_DIM * max(0, cloud - lit))`. Under a deck
+  the sea is dim for want of the sun, not for being haze: without
+  `beam` the view under an overcast from 0.5 km came out 5.5 levels
+  darker, a deck seen straight down from 11 km 0.13 stops lower and a
+  thin stratus 0.17 (their brightest parts stand 1.55 stops and more
+  under that surface); with it 0.02 to 0.03 stops. The brightest 3 % of a deck
+  seen from 11 km to the side stand 1.35 stops under that surface with
+  the sun 55 degrees up and 1.2 at 20, and keep their white. Over a sea
+  with few clouds the brightest 3 % are the horizon's haze and blocks
+  with a little cumulus in them, 1.9 to 2.7 stops under it. Brought to
+  `WHITE`,
+  the haze came out near white and the sea and the sky pale: from 11 km
+  with the sun 55 degrees up the sky over the horizon stood at 201 of
+  luma where photographs from cruise have it at 161 (135 to 181, seven
+  of them), the sea at 115 to 127 (105; 80 to 128), the sky high in the
+  frame at 78 (58), the lit cloud at 187 and, at its 95th percentile,
+  227 (176 and 214): every class 0.4 to 0.7 stops over the photographs'
+  middle, where the default view (half cover and cirrus, whose cloud is
+  the highlight) stands 0.2 stops under it. An automatic camera exposes
+  for the frame's middle, and haze is not white in its pictures. Now the
+  exposure is 0.24 to 0.31 stops lower over few clouds from 11 km (0.25
+  with none), 0.12 to 0.27 from 40 km, 0.09 to 0.15 over cumulus and
+  0.18 over a clear sea from 4 km, 0.08 to 0.09 from 0.3 km level under
+  cumulus, and the same within 0.03 where cloud or cirrus is the
+  highlight (the default view on 15 November, decks, a thin stratus,
+  altostratus) and from below (a clear sky, a deck, a sheet). Under
+  June's sun the default view's highlights, small cumulus and cirrus
+  seen from 11 km, stand 1.55 stops under the surface, and it comes out
+  0.07 (15 h) to 0.10 stops (noon) lower; a view from 20 km 0.23. From 11 km over few clouds the lit cloud stands at 177 and
+  219, the sea at 108, the sky high in the frame at 66 and over the
+  horizon at 189. That last stays above the photographs': against the
+  cumulus the horizon's haze is some 0.65 stops brighter than in them
+  (the cloud over the horizon's sky, in linear light: 0.75 on the page,
+  1.18 in six photographs decoded as sRGB), which no exposure moves. A
+  dark sea seen from near keeps the dim view's level: its highlights
+  stand three stops and more under the cloud's, where the two lowerings
+  are equal (looking down at a clear sea from 0.3 km, 0.05 stops lower:
+  its median 75 before and 73 now, where photographs of the sea alone
+  from the air have 95 to 138; with `TOPS_DIM` = `DIM` it came out at
+  63). The rule follows
+  the sun's light on the clouds, not the eye's height nor the view: as
+  that light fades through the afternoon the dim view's lowering is the
+  stronger again (the exposure's largest step in a time-lapse from 55
+  degrees to 8 at 3600 times real time is 0.003 to 0.008 stops a frame,
+  no more than before), and the twilight and the night are as they were
+  (18 stills with the sun from 0 to 4 degrees down at 0.3, 11 and 40 km,
+  and the night's views of the checks: the same pictures);
 - `mid`, the median level, but at least `NIGHT_LEVEL`;
 - by day and by night, the exposure is the lesser of `key` and `white`, but not less than a
   floor: the exposure that takes `mid` only `DEEP` = 0.8 of the way from

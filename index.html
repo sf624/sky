@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- The Pages workflow replaces "dev" with the commit (and the pull request) it publishes: shown by ?debug=1. -->
-<meta name="build" content="8096248 main">
+<meta name="build" content="d8feccb main">
 <title>Sky — レイリー散乱の空</title>
 <style>
   :root {
@@ -9095,6 +9095,9 @@ const SkySound = (() => {
   const TOPS_SPAN = 5;           // ...in full for the share of the light seen from above (blocks from TOPS_SPAN degrees
                                  // above the horizontal, none of it, to TOPS_SPAN below, all of it),
   const TOPS_BELOW = 0.2;        // ...and TOPS_BELOW of its lift for the light seen from below (a sheet overhead)
+  const TOPS_LIT = 1.3, TOPS_KM = 2;   // ...and sunlit cloud seen from above stands at most TOPS_LIT stops below such a surface in
+                                 // the sun's light where the low clouds are (TOPS_KM): highlights dimmer than that are not
+  const TOPS_DIM = 0.5;          // cloud (haze over the sea), and stand TOPS_DIM stops lower for each stop dimmer (white in exposureAt)
   const BAND = 0.1;              // each share is read as a mean over shares this far on either side (HIGH_BAND for HIGH_SHARE)
   const HIGH_BAND = 0.025;
   const SUN_NEAR = [10, 45];     // by day, blocks this near the sun (degrees) count for less in the highlights...
@@ -9958,9 +9961,20 @@ const SkySound = (() => {
   // Photographs of an altostratus by day are grey to blue-grey (0.05 to
   // 0.14, 1.04 to 1.12). Until #146 the sheet took the sun's light by a
   // cosine of no less than 0.2 instead, which at sunset made it salmon.
+  // The middle layer as a sheet, by its mean: by the form, and by the amount
+  // (whole from 0.7: from 0.6 on, the altostratus weather's, the sheet hides
+  // the sky).
+  const midSheet = () => {
+    const [mid, form] = midUniform();
+    return mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) : 0;
+  };
+  // The share of the sun's beam that the layers leave the sea, by their
+  // mean: the low clouds' (LOW_BEAM under a whole deck, as in litBy) and a
+  // middle sheet's (none under a whole one). For the exposure (exposureFor).
+  const beamOnSea = () => (1 - (1 - LOW_BEAM) * lowCover()) * (1 - midSheet());
   function balanceFor(est, day) {
-    const [mid, form, base, depth] = midUniform();
-    const midOver = mid > 0 ? (1 - form) * smooth01((mid - 0.3) / 0.4) * smooth01((base + depth - state.alt) / depth) : 0;
+    const [, , base, depth] = midUniform();
+    const midOver = midSheet() * smooth01((base + depth - state.alt) / depth);
     const sheet = 1 - (1 - midOver) * (1 - lowCover() * lowOver(state.alt));
     const y = lumOf(est);
     let now = est.map(v => Math.max(v, 1e-6 * y) / y);
@@ -10291,7 +10305,23 @@ const SkySound = (() => {
     // as twilight's exposure takes over, in full again.
     const day = 1 - smooth01((DUSK[0] - elev) / (DUSK[0] - DUSK[1]));
     const lit = high + day * (st.lit - st.high);
-    const white = WHITE - lit - DIM * Math.max(0, DAY_HIGH - lit);
+    // Seen from above in the sun's light, what is white is sunlit cloud, and
+    // that stands no more than TOPS_LIT stops below a white surface facing
+    // the sun, in the sun's light where the low clouds are (st.cloud, with
+    // the sun as it is now). Highlights dimmer than that are haze over the
+    // sea, or the sea: they stand TOPS_DIM stops lower for each stop dimmer,
+    // by the share of the light seen from above (from, as for the key) and
+    // of the sun's beam that the clouds leave the sea (st.beam: under a deck
+    // the sea is dim for want of the sun, not for being haze), where that
+    // is more than a dim view's own (DIM, from DAY_HIGH down).
+    // Brought to WHITE, the horizon's haze over a sea with few clouds came
+    // out near white, and the sea and the sky pale, 0.4 to 0.7 stops over
+    // photographs from cruise. Where cloud is the highlight, and under a
+    // sheet seen from below, nothing changes; a dark sea seen from near (its
+    // highlights some three stops under the cloud's) keeps the dim view's
+    // level; and as the sun's light on the clouds fades, the dim view's rule
+    // is the stronger again, long before twilight.
+    const white = WHITE - lit - Math.max(DIM * Math.max(0, DAY_HIGH - lit), from * st.beam * TOPS_DIM * Math.max(0, st.cloud - lit));
     const floor = Math.min(key, KEY + MID_GAP - EYE * mid - DEEP * (1 - EYE) * (mid - NIGHT_LEVEL));
     const byDay = Math.max(Math.min(key, white), Math.min(floor, white + FLOOR_OVER * Math.max(0, DAY_HIGH - lit)));
     // The eye's limit (see NIGHT_OPEN), on the sky's level.
@@ -10371,7 +10401,8 @@ const SkySound = (() => {
       from += w * below[i];
     }
     const st = { low: share(LOW_SHARE), high: bandOf(q, 1 - HIGH_SHARE, HIGH_BAND), mid: share(0.5), sky: share(DUSK_SHARE),
-                 peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND), below: sum > 0 ? from / sum : 1 };
+                 peak: bandOf(q, 1 - PEAK_SHARE, 0), lit: bandOf(lit, 1 - HIGH_SHARE, HIGH_BAND), below: sum > 0 ? from / sum : 1,
+                 cloud: sunlitLevel(TOPS_KM, state.elev) - TOPS_LIT, beam: beamOnSea() };
     let E = exposureAt(st, state.elev, 0);
     if (state.elev < DUSK[0]) {
       const here = airLevel(state.alt, state.elev);
