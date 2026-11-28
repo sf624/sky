@@ -2017,11 +2017,11 @@
      ],
      "p": 90,
      "of": "rg",
-     "min": 1.4
+     "min": 1.3
     }
    ],
    "bad": "e18ddb1",
-   "note": "r/g of the brightest tenth: 1.00 on e18ddb1; 1.60 once the cirrus is lit by the sun wherever its refracted rays reach it, dimmed by their spread."
+   "note": "r/g of the brightest tenth: 1.00 on e18ddb1; 1.60 once the cirrus is lit by the sun wherever its refracted rays reach it, dimmed by their spread. The limit was 1.4 until 2026-11-28: main at d8feccb stood at 1.401, on it. With the sky of civil twilight held as the light (issue #56) this view is exposed 0.22 stops more, its brightest tenth stands nearer white, and the same pink reads 1.371; so 1.3, still far from the grey of the flaw (1.00)."
   },
   {
    "name": "sea-swell-lattice-4km",
@@ -2795,6 +2795,176 @@
    "bad": "8096248",
    "fixed": "8793f4a",
    "reference": "8096248: 134, 230; 8793f4a: 121, 221. Photographs from orbit and balloons (three): the sea 102 (62 and 142), lit cloud 180 (162 to 231)"
+  },
+  {
+   "name": "dusk-sky-light-away-0.3km-2deg",
+   "q": "date=80&lat=35&moon=0&alt=0.3&cloud=0&cirrus=0&yaw=270&pitch=-4&time=18.1628",
+   "reported": "2026-11-28",
+   "wrong": "near the sea with the sun 2 degrees down, the clear sky away from the sun stood at 165 of 255, 0.4 stops under photographs of that moment (194): the twilight's rule tied its shown level to its fading light, and the envelope of the sun higher kept the picture from rising after sunset (issue #56)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "sky in the upper quarter, median luma",
+     "region": [
+      0.05,
+      0.02,
+      0.9,
+      0.23
+     ],
+     "p": 50,
+     "min": 182,
+     "max": 210
+    }
+   ],
+   "bad": "d8feccb",
+   "fixed": "d21cf4e",
+   "reference": "d8feccb: 164.7; with the sky held as the light (SKY_LIGHT, DUSK_LIGHT): 195.4. Photographs of dusk from the ground, away from the sun (issue #56; eight, the sun 1.2 to 4.5 degrees down): the sky high in the frame 194 (100 to 210, seven between 184 and 210), the frame mean 135 (73 to 165)."
+  },
+  {
+   "name": "dusk-sky-light-away-0.3km-4deg",
+   "q": "date=80&lat=35&moon=0&alt=0.3&cloud=0&cirrus=0&yaw=270&pitch=-4&time=18.3257",
+   "reported": "2026-11-28",
+   "wrong": "the same with the sun 4 degrees down: 131 of 255, a stop under the three photographs taken there (195 to 210)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "sky in the upper quarter, median luma",
+     "region": [
+      0.05,
+      0.02,
+      0.9,
+      0.23
+     ],
+     "p": 50,
+     "min": 165,
+     "max": 200
+    }
+   ],
+   "bad": "d8feccb",
+   "fixed": "d21cf4e",
+   "reference": "d8feccb: 130.8; now 182.8. Photographs of dusk from the ground, away from the sun (issue #56; eight, the sun 1.2 to 4.5 degrees down): the sky high in the frame 194 (100 to 210, seven between 184 and 210), the frame mean 135 (73 to 165)."
+  },
+  {
+   "name": "dusk-light-under-clouds-0.3km-4deg",
+   "q": "date=80&lat=35&moon=0&alt=0.3&yaw=270&pitch=-4&time=18.3257",
+   "reported": "2026-11-28",
+   "wrong": "the same under the default clouds: the frame's median at 80 of 255 with the sun 4 degrees down (photographs: a frame mean of 135)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "the frame's median luma",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "p": 50,
+     "min": 104,
+     "max": 135
+    }
+   ],
+   "bad": "d8feccb",
+   "fixed": "d21cf4e",
+   "reference": "d8feccb: 79.8; now 120. Photographs of dusk from the ground, away from the sun (issue #56; eight, the sun 1.2 to 4.5 degrees down): the sky high in the frame 194 (100 to 210, seven between 184 and 210), the frame mean 135 (73 to 165)."
+  },
+  {
+   "name": "dusk-cruise-sky-kept-11km-4deg",
+   "q": "date=80&lat=35&moon=0&alt=11&cloud=0.5&cirrus=0.4&yaw=270&pitch=-4&time=18.3257",
+   "reported": "2026-11-28",
+   "wrong": "(a guard: from cruise with the sun 4 degrees down the sky away from the sun stands inside its three photographs, 121 (72 to 131), and the cure for the ground's dusk must leave it there)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "sky in the upper quarter, median luma",
+     "region": [
+      0.05,
+      0.02,
+      0.9,
+      0.23
+     ],
+     "p": 50,
+     "min": 108,
+     "max": 128
+    }
+   ],
+   "bad": null,
+   "reference": "d8feccb: 118.4; now 118.4 (the same picture): from 11 km the sun lights the eye until it is 3.4 degrees down, and the sky is under civil twilight's range (DUSK_HOLD) before the eye's adaptation lets go."
+  },
+  {
+   "name": "dusk-towards-not-lifted-0.3km-2deg",
+   "q": "date=80&lat=35&moon=0&alt=0.3&cloud=0.2&cirrus=0.05&yaw=90&pitch=-4&time=18.1628",
+   "reported": "2026-11-28",
+   "wrong": "(a guard: near the sea towards a sun 2 degrees down the frame is at its photographs already, a frame mean of 100 against 96 (61 to 108), and must not be lifted with the view away from the sun)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "the frame's median luma",
+     "region": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "p": 50,
+     "max": 99
+    }
+   ],
+   "bad": null,
+   "reference": "d8feccb: 89.2; now 93.2 (the glow's highlights stand at white, and the exposure follows them)."
+  },
+  {
+   "name": "dusk-falls-into-night-away-0.3km-9deg",
+   "q": "date=80&lat=35&moon=0&alt=0.3&cloud=0&cirrus=0&yaw=270&pitch=-4&time=18.734",
+   "reported": "2026-11-28",
+   "wrong": "(a guard: the sky held light through civil twilight must still fall into the night; with the sun 9 degrees down the picture is the one of before)",
+   "measures": [
+    {
+     "measure": "lumaPct",
+     "label": "sky in the upper quarter, median luma",
+     "region": [
+      0.05,
+      0.02,
+      0.9,
+      0.23
+     ],
+     "p": 50,
+     "max": 68
+    }
+   ],
+   "bad": null,
+   "reference": "d8feccb: 56.8; with the sky held through civil twilight: 57.0. The hold ends where the sky's level falls under DUSK_HOLD[0] (the sun some 8 degrees down)."
+  },
+  {
+   "name": "dusk-rise-gentle-away-0.3km",
+   "q": "date=80&lat=35&moon=0&alt=0.3&cloud=0&cirrus=0&yaw=270&pitch=-4",
+   "sweep": {
+    "param": "time",
+    "values": [
+     17.5928,
+     17.8372,
+     18.0,
+     18.0814,
+     18.1628,
+     18.2442,
+     18.3257,
+     18.4072,
+     18.4888,
+     18.5704,
+     18.734,
+     18.9802
+    ]
+   },
+   "reported": "2026-11-28",
+   "wrong": "(a guard: near the sea, away from the sun, the picture may grow lighter after sunset as the sky becomes its light, but gently: no leap)",
+   "measures": [
+    {
+     "measure": "lumaRise",
+     "max": 40
+    }
+   ],
+   "bad": null,
+   "note": "The sun at 5, 2, 0, -1, -2, -3, -4, -5, -6, -7, -9 and -12 degrees (date 80, latitude 35: the times), a fresh page each. The largest rise of the mean luma from a still to a later one: 1.0 on d8feccb (103, 102, 103, 103, 101, 97, 85, 66, 53, 49, 38, 15: the picture never grew lighter), 28.5 with the sky held as the light (103, 102, 106, 114, 124, 131, 123, 98, 66, 52, 38, 15). Photographs show that rise: the day's sky from the ground at 99 to 144, the dusk's at 194 (issue #56)."
   }
  ]
 }

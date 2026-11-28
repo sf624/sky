@@ -3895,7 +3895,8 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   sea keep a visible deep blue (they were near black at -10 degrees,
   where photographs show them deep blue). A view away from the glow holds
   no such peak and keeps the exposure of its sky;
-- and as the sun goes down the picture never grows brighter. The
+- and as the sun goes down the picture never grows brighter (but for
+  the sky of civil twilight, the next point). The
   exposure is at most what the same view would get with the sun higher,
   at every `MONO_STEP` = 0.25 degrees up to the start of the blend: the
   same view with all its levels raised by `MONO_RATE` times the
@@ -3922,6 +3923,77 @@ to 0.011 stops over 20 frames from place to place. The band of glow
   now): in a time-lapse the sky away from the sun went from 75 to 148
   (of 255) between sunset and 2 degrees below it, and the view towards
   the sun from near the sea rose by 23 levels as the sun's disc set;
+- but once the sun no longer lights the eye, the sky is the light of the
+  picture, and it is shown light, as a camera shows it. Photographs of
+  dusk from the ground, away from the sun, have their sky near 195 of 255
+  from sunset to 4.5 degrees down (eight photographs, seven of them
+  between 184 and 210, with no fall as the sun goes down): an automatic
+  camera sets each picture anew, and away from the sun nothing in the
+  frame is brighter than the sky. The rules above showed that sky at 167,
+  165 and 131 with the sun 0, 2 and 4 degrees down: the twilight's rule
+  ties the shown level to the sky's fading light (`DUSK_POW`), and under
+  clouds the envelope held the picture at the afternoon's level. How far
+  the sky is the light (`own`, in `exposureOf`): not at all while the
+  sun's light at the eye (a white surface in it, as the eye is adapted to
+  it: `adaptedLevel`, as for the day's eye below) stands less than
+  `SKY_LIGHT[0]` = 1.5 stops under the sky's level (the level that the
+  brighter third passes), and in full from `SKY_LIGHT[1]` = 10 stops under
+  it (a smoothstep). By that share:
+  - the sky's level is shown at `DUSK_LIGHT` = -0.5 (about 178 of 255 for
+    a grey) while it stands at `DUSK_HOLD[1]` = -8 or more, which is
+    through civil twilight (the sun some 3.5 degrees down near the sea);
+    by `DUSK_HOLD[0]` = -15 (some 8 degrees down) the curve of `DUSK_POW`
+    is back (a smoothstep), and from there to the night nothing changes.
+    With -13 the hold ended 6 degrees down, and the frame's mean near the
+    sea fell from 121 to 54 between 4 and 6 degrees down, twice as fast
+    as before; with -15 it is 123, 98, 66 and 52 at 4, 5, 6 and 7 down
+    (before: 85, 66, 53, 49);
+  - the envelope opens `MONO_LIGHT` = 1.3 stops, in place of the first of
+    `MONO_RATE`, for each stop the air darkens, over the same range of the
+    sky's level. The envelope's day rule holds the brightest parts of a
+    dim view under white (`DIM`); with 1.3 they come up to white as the
+    sky comes up to `DUSK_LIGHT`, and no further. Towards the sun the
+    glow's highlights stand at white already, and that view moves by 0.05
+    to 0.12 stops.
+
+  So the picture away from the sun does grow lighter after sunset, and
+  then falls into the night. Near the sea, away from the sun, the clear
+  sky's upper quarter stands at 171, 195 and 183 with the sun 0, 2 and 4
+  degrees down (before: 167, 165, 131), under the default clouds at 175,
+  198 and 184 (172, 167, 132); the exposure is 0.05 to 0.08, 0.55 and 1.0
+  stops more. The frame's mean under a clear sky, with the sun 5 and 2
+  degrees up, at the horizon, and 1, 2, 3, 4, 5, 6, 7, 9 and 12 degrees
+  down: 103, 102, 106, 114, 124, 131, 123, 98, 66, 52, 38 and 15 (before:
+  103, 102, 103, 103, 101, 97, 85, 66, 53, 49, 38, 15). It follows the light, not the height of the eye or of the sun:
+  near the sea the sun's light at the eye is 4 stops under the sky's at
+  sunset and 9 at 2 degrees down (`own` 0.2 and 0.9); from 4 km the sun
+  sets at the eye 2 degrees down, and `own` comes in from 2.5 to 6 down
+  (the exposure 0.1 to 0.2 stops more at 4 degrees down and 0.3 to 0.5 at
+  6 down); from 11 km the sun
+  shines on the eye until it is 3.4 degrees down and the eye's adaptation
+  holds its light for some degrees more, the sky is under `DUSK_HOLD` by
+  then, and the dusk from cruise is the same picture as before (inside
+  its photographs: the sky away from the sun at 118 with the sun 4
+  degrees down, where three photographs have 121, from 72 to 131). A
+  rule on the picture alone could not tell the two: with the sun 4
+  degrees down the meter reads the same from 0.3 km and from 11 km (the
+  sky's level -8.75 and -8.2). In a time-lapse of the sunset (600 times
+  real time) the frame's mean near the sea, away from the sun, stays at
+  61 to 64 from sunset to 4 degrees down, where it fell from 64 to 45
+  before, and meets the earlier curve again at 9 degrees down; it never
+  rises by more than 3 levels (to the side). The exposure's largest step
+  from frame to frame is 0.052 stops there and 0.053 from 4 km (0.047 and
+  0.049 before): the exposure now follows the whole of the sky's
+  darkening, where the picture is held; the picture's own steps are no
+  larger. Towards the sun the exposure is 0.1 to 0.25 stops more with the
+  sun 2 to 4 degrees down and 0.5 to 0.7 more at 6 down, where the
+  envelope's rate of deep twilight held that view under its own glow at
+  white (the frame's mean 100, 94 and 73 before, 103, 99 and 88 now, with
+  the sun 2, 4 and 6 degrees down). In
+  a turn from the view away from the sun to the view towards it, 4
+  degrees down, the exposure now falls by 1.65 stops (0.9 before), at
+  most 0.77 stops in 15 degrees of the turn (0.41 before), as the glow
+  comes into the frame;
 - and at night the eye opens up no further than it can: the exposure is
   at most `NIGHT_OPEN` = 16.75 when the sky's level (the level that the
   brighter third passes, as in twilight) is `NIGHT_SKY` = -22.5, about a
