@@ -2454,7 +2454,7 @@
    ],
    "bad": "393b81c",
    "fixed": "269629c",
-   "note": "The table of multiple scattering read straight between its columns (2 degrees of the sun apart) held 1.3 to 1.4 times too much light here, and its light was taken as even where it comes level from the glow. The reference (tools/ref): the air under the horizon 1.03 to 1.3 times too bright (green) and up to 1.8 times in the red on 393b81c, 0.9 to 1.16 with the fix. As shown: sky over ground 1.73 on 393b81c, 1.92 fixed. It holds a ratio within one still, so that the exposure and most of the balance cancel. From #158 the 20th percentile, not the median (limit 1.85): the ground's region holds heaps, lighter than the sea in the Earth's shadow, and with the bodies of #158 there the ground's median rose by 5 levels with the same air (the ratio of the medians 1.734 on 393b81c, 1.921 on main 3ebb691, 1.793 with #158). The 20th percentile is the sea between them: 1.941, 2.209 and 2.147; the limit lies midway between the first two. After the white balance of #159 (main 8096248): 2.200 on main and 2.137 with #158; the limit stays."
+   "note": "The table of multiple scattering read straight between its columns (2 degrees of the sun apart) held 1.3 to 1.4 times too much light here, and its light was taken as even where it comes level from the glow. The reference (tools/ref): the air under the horizon 1.03 to 1.3 times too bright (green) and up to 1.8 times in the red on 393b81c, 0.9 to 1.16 with the fix. As shown: sky over ground 1.73 on 393b81c, 1.92 fixed. It holds a ratio within one still, so that the exposure and most of the balance cancel. From #158 the 20th percentile, not the median (limit 1.85): the ground's region holds heaps, lighter than the sea in the Earth's shadow, and with the bodies of #158 there the ground's median rose by 5 levels with the same air (the ratio of the medians 1.734 on 393b81c, 1.921 on main 3ebb691, 1.793 with #158). The 20th percentile is the sea between them: 1.941, 2.209 and 2.147; the limit lies midway between the first two. After the white balance of #159 and the exposure of #161 (main d8feccb): 2.200 on main and 2.164 with #158 (its swell smaller since); the limit stays."
   },
   {
    "name": "dusk-earth-shadow-side-11km",
@@ -2832,13 +2832,13 @@
      "crumbs": 4.49,
      "blobSize": 0.0127
     },
-    "main 8096248": {
+    "main d8feccb": {
      "crumbs": 4.39,
      "blobSize": 0.013
     },
     "#158": {
-     "crumbs": 2.97,
-     "blobSize": 0.024
+     "crumbs": 3.14,
+     "blobSize": 0.023
     }
    },
    "note": "The detached parts of 4 to 60 px per 1000 px of cloud in the lower half (crumbs), and the area-weighted mean size of the clouds in the near 40 % of the picture (a body there: larger). The limits lie midway between main and the fix. Neither says that a heap looks real: the view stays on the contact sheet for that."
@@ -2879,13 +2879,13 @@
      "crumbs": 3.0,
      "blobSize": 0.0085
     },
-    "main 8096248": {
+    "main d8feccb": {
      "crumbs": 3.19,
      "blobSize": 0.007
     },
     "#158": {
-     "crumbs": 2.13,
-     "blobSize": 0.027
+     "crumbs": 2.16,
+     "blobSize": 0.019
     }
    }
   }
